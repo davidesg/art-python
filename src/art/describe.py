@@ -223,34 +223,38 @@ def describe_seasonality(ts) -> Description:
         lines += [
             "",
             "**Decisión B1 — estacionalidad determinista (punto de partida recomendado).**",
-            "- d=1, D=0, con armónicos cos/sin para cada frecuencia significativa.",
+            "- D=0, con armónicos cos/sin para cada frecuencia significativa.",
             "- Los armónicos absorben el patrón estacional fijo (igual cada año).",
-            "- MEG (etapa 3, tras estimar) determinará si alguna frecuencia es",
-            "  estocástica y conviene pasar a **Decisión B2** (D=1 para esa frecuencia).",
+            "- MEG (etapa 3, tras estimar) validará si alguna frecuencia es",
+            "  estocástica y conviene pasar a B2.",
             "",
-            "**Decisión B2** (alternativa, si MEG detecta estacionalidad estocástica):",
-            "- d=1, D=1 para la frecuencia confirmada por MEG.",
-            "- Sustituye los armónicos de esa frecuencia por la diferencia estacional.",
-            "- Solo adoptar B2 tras confirmar MEG — no anticipar.",
+            "**Decisión B2 — estacionalidad multiplicativa (tradición Box-Jenkins).**",
+            "- D=1: diferencia estacional ∇_s elimina el patrón estacional.",
+            "- Sin armónicos cos/sin; usar AR_s / MA_s para la estructura seasonal.",
+            "- Modelo: SARIMA(p,d,q)(P,1,Q)_s — elegir P, Q en la identificación.",
+            "- Adoptar si MEG confirma estacionalidad estocástica, o directamente",
+            "  si la tradición B-J original es preferida.",
         ]
 
     if not d_ok:
         lines += [
             "",
-            f"⚠ Los tests de raíz unitaria sugieren que ∇log(y) puede no ser "
+            "⚠ Los tests de raíz unitaria sugieren que ∇log(y) puede no ser "
             "estacionaria. Considera d=2.",
         ]
 
-    rec = (
-        f"Decisión {decision}. "
-        + (
-            "Confirma d=1, D=0 con armónicos. MEG validará si alguna frecuencia "
-            "requiere D=1 más adelante."
-            if decision == "B1"
-            else "Confirma d=1, D=0, sin armónicos."
+    if decision == "B1":
+        rec = (
+            "Decisión B1 por defecto (Treadway). Confirma D=0 con armónicos. "
+            "MEG validará si alguna frecuencia requiere D=1 más adelante. "
+            "Alternativa: pasar a B2 (D=1) directamente si prefieres la "
+            "tradición Box-Jenkins multiplicativa."
         )
-        + " Siguiente paso: listado de identificación (p, q)."
-    )
+    elif decision == "A":
+        rec = "Decisión A. Confirma D=0, sin armónicos."
+    else:
+        rec = f"Decisión {decision}."
+    rec += " Siguiente paso: listado de identificación (p, q)."
 
     return Description(
         summary="\n".join(lines),
@@ -263,6 +267,7 @@ def describe_seasonality(ts) -> Description:
             "p_value": result.p_value,
             "recommended_d": 1,
             "recommended_D": 0,
+            "multiplicative_available": det,
             "d_stationary": d_ok,
             "significant_frequencies": [fr.freq_idx for fr in freqs if fr.p_value < 0.05],
         },
@@ -470,18 +475,35 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0) -> Description
     rec_p = specs[0].p if specs else 0
     rec_q = specs[0].q if specs else 1
 
+    top_sp  = specs[0] if specs else None
+    rec_P   = top_sp.P if top_sp else 0
+    rec_Q   = top_sp.Q if top_sp else 0
+
+    if D == 0:
+        seasonal_note = "Añade armónicos cos/sin (n_harmonics=freq//2) en confirm_and_estimate."
+    else:
+        if rec_P > 0 or rec_Q > 0:
+            seasonal_note = (
+                f"D=1: sin armónicos. Usa P={rec_P}, Q={rec_Q} "
+                f"(AR_s/MA_s) en confirm_and_estimate."
+            )
+        else:
+            seasonal_note = "D=1: sin armónicos. Especifica P, Q en confirm_and_estimate."
+
     if ambiguous:
+        sp0, sp1 = specs[0], specs[1]
         rec = (
-            f"Decisión ambigua entre ARIMA({specs[0].p},{d},{specs[0].q}) y "
-            f"ARIMA({specs[1].p},{d},{specs[1].q}). "
+            f"Decisión ambigua entre SARIMA({sp0.p},{d},{sp0.q})({sp0.P},{D},{sp0.Q}) y "
+            f"SARIMA({sp1.p},{d},{sp1.q})({sp1.P},{D},{sp1.Q}). "
             f"Estima ambos y elige por AIC/BIC y diagnosis de residuos. "
-            f"Recuerda añadir armónicos cos/sin si D=0."
+            + seasonal_note
         )
     else:
         rec = (
-            f"Confirma ARIMA({rec_p},{d},{rec_q}) como punto de partida. "
+            f"Confirma SARIMA({rec_p},{d},{rec_q})({rec_P},{D},{rec_Q})_{specs[0].s if specs else ''}"
+            f" como punto de partida. "
             f"Revisa la figura ACF/PACF antes de estimar. "
-            f"Recuerda añadir armónicos cos/sin si D=0."
+            + seasonal_note
         )
 
     # ACF/PACF figure for the chosen (d, D): show all differentiation levels up to (d, D)

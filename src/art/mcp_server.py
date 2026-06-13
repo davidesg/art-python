@@ -753,30 +753,43 @@ def _write_inp(ts, model, output_path: str) -> None:
 def _build_inp(ts, lam: float, d: int, D: int,
                p: int, q: int,
                n_harmonics: int,
-               output_path: str) -> None:
+               output_path: str,
+               P: int = 0, Q: int = 0) -> None:
     """
-    Build a fresh .inp for a ARIMA(p,d,q) spec + harmonics + alter.
-    Constructs a minimal fue Model object and delegates to _write_inp.
+    Build a fresh .inp for a SARIMA(p,d,q)(P,D,Q)_s spec.
+
+    When D=0: adds deterministic harmonics (cos/sin pairs + alter).
+    When D=1: uses seasonal AR/MA (ar_s, ma_s); no harmonics added.
     """
     import fue
     freq = ts.freq
-    n_harm_pairs = min(n_harmonics, freq // 2)
 
-    # Build deterministic interventions: cos/sin pairs + alter
-    itvs = []
-    for k in range(1, n_harm_pairs + 1):
-        itvs.append(fue.Intervention("cos", at=0,
-                    omega=[0.0], omega_free=[True], harmonic=float(k)))
-        itvs.append(fue.Intervention("sin", at=0,
-                    omega=[0.0], omega_free=[True], harmonic=float(k)))
-    itvs.append(fue.Intervention("alter", at=0,
-                omega=[0.0], omega_free=[True]))
-
-    # AR and MA
+    # Regular AR and MA
     ar   = [[0.0] * p]  if p > 0 else []
     ar_f = [[True] * p] if p > 0 else []
     ma   = [[-0.3] * q] if q > 0 else []
     ma_f = [[True]  * q] if q > 0 else []
+
+    if D == 0:
+        # Deterministic seasonality: cos/sin harmonics + alter (Treadway B1)
+        n_harm_pairs = min(n_harmonics, freq // 2)
+        itvs = []
+        for k in range(1, n_harm_pairs + 1):
+            itvs.append(fue.Intervention("cos", at=0,
+                        omega=[0.0], omega_free=[True], harmonic=float(k)))
+            itvs.append(fue.Intervention("sin", at=0,
+                        omega=[0.0], omega_free=[True], harmonic=float(k)))
+        itvs.append(fue.Intervention("alter", at=0,
+                    omega=[0.0], omega_free=[True]))
+        ar_s_val  = []; ar_sf_val  = []
+        ma_s_val  = []; ma_sf_val  = []
+    else:
+        # Multiplicative seasonality: seasonal AR/MA operators (Box-Jenkins B2)
+        itvs = []
+        ar_s_val  = [[0.0]  * P] if P > 0 else []
+        ar_sf_val = [[True] * P] if P > 0 else []
+        ma_s_val  = [[-0.3] * Q] if Q > 0 else []
+        ma_sf_val = [[True] * Q]  if Q > 0 else []
 
     ifadf = [0] * (freq // 2 + 1)
 
@@ -785,7 +798,8 @@ def _build_inp(ts, lam: float, d: int, D: int,
         d=d, D=D, boxlam=lam,
         ar=ar, ar_free=ar_f,
         ma=ma, ma_free=ma_f,
-        ar_s=[], ma_s=[],
+        ar_s=ar_s_val, ar_s_free=ar_sf_val if ar_sf_val else None,
+        ma_s=ma_s_val, ma_s_free=ma_sf_val if ma_sf_val else None,
         interventions=itvs,
         ifadf=ifadf,
         mu=0.0, estimate_mu=False,
@@ -949,14 +963,29 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             top   = ident.data["suggestions"][0] if ident.data["suggestions"] else {}
             rec_p = top.get("p", 0)
             rec_q = top.get("q", 1)
+            rec_P = top.get("P", 0)
+            rec_Q = top.get("Q", 0)
+
+            if D == 1:
+                next_step = (
+                    f"**Próximo paso:** cuando decidas (p, q, P, Q), llama a "
+                    f"`confirm_and_estimate` con lam={lam}, d={d}, D={D}, "
+                    f"p=<tu elección>, q=<tu elección>, P=<tu elección>, Q=<tu elección>."
+                    f"\n*(D=1: sin armónicos — la diferencia estacional captura la estacionalidad)*"
+                )
+            else:
+                n_harm = ts.freq // 2
+                next_step = (
+                    f"**Próximo paso:** cuando decidas (p, q), llama a "
+                    f"`confirm_and_estimate` con lam={lam}, d={d}, D={D}, "
+                    f"p=<tu elección>, q=<tu elección>, n_harmonics={n_harm}."
+                )
 
             text = (
                 f"**Especificación confirmada:** λ={lam}, d={d}, D={D}\n\n"
                 + ident.summary + "\n\n---\n" + ident.recommendation
                 + "\n\n" + "=" * 60 + "\n\n"
-                + f"**Próximo paso:** cuando decidas (p, q), llama a "
-                f"`confirm_and_estimate` con lam={lam}, d={d}, D={D}, "
-                f"p=<tu elección>, q=<tu elección>."
+                + next_step
             )
             items = [TextContent(type="text", text=text)]
             if ident.figure_b64:
@@ -976,12 +1005,13 @@ def guided_identification(inp_path: str, lam: float = -1.0,
 def confirm_and_estimate(inp_path: str, output_path: str,
                           lam: float = 0.0, d: int = 1, D: int = 0,
                           p: int = 0, q: int = 1,
-                          n_harmonics: int = 5) -> list:
+                          n_harmonics: int = 5,
+                          P: int = 0, Q: int = 0) -> list:
     """
     Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
 
     Constructs the model file from scratch using the series in inp_path and
-    the analyst-confirmed (lam, d, D, p, q) spec. Always returns:
+    the analyst-confirmed (lam, d, D, p, q, P, Q) spec. Always returns:
       - Parameter table with SE and t-stats
       - Diagnosis verdict (Q-test, JB, outliers)
       - Residual plot (standardised residuals + ACF/PACF + QQ)
@@ -992,10 +1022,12 @@ def confirm_and_estimate(inp_path: str, output_path: str,
     output_path  : path to write the new .inp (can be re-used for later tools)
     lam          : Box-Cox lambda (0.0=log, 1.0=identity)
     d            : regular differencing order
-    D            : seasonal differencing order
+    D            : seasonal differencing order (0=deterministic B1, 1=multiplicative B2)
     p            : AR order
     q            : MA order
-    n_harmonics  : number of harmonic pairs cos/sin (0 = no harmonics)
+    n_harmonics  : harmonic pairs cos/sin (used when D=0; ignored when D=1)
+    P            : seasonal AR order (used when D=1)
+    Q            : seasonal MA order (used when D=1)
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -1006,13 +1038,19 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         output_path = os.path.expanduser(output_path)
 
         _build_inp(ts, lam=lam, d=d, D=D, p=p, q=q,
-                   n_harmonics=n_harmonics, output_path=output_path)
+                   n_harmonics=n_harmonics, output_path=output_path,
+                   P=P, Q=Q)
 
         _, m = _load_fitted(output_path)
 
         # Parameter table
-        spec_line = (f"**ARIMA({p},{d},{q})  λ={lam}  D={D}  "
-                     f"armónicos={n_harmonics}**  —  {ts.name or 'series'}")
+        if D == 1 and (P > 0 or Q > 0):
+            spec_str = f"SARIMA({p},{d},{q})({P},{D},{Q})_{ts.freq}"
+        elif D == 1:
+            spec_str = f"ARIMA({p},{d},{q}) D=1"
+        else:
+            spec_str = f"ARIMA({p},{d},{q}) armónicos={n_harmonics}"
+        spec_line = f"**{spec_str}  λ={lam}**  —  {ts.name or 'series'}"
         param_md  = _param_table(m)
 
         # Diagnosis
@@ -1162,37 +1200,50 @@ def suggest_intervention_form(inp_path: str, output_path: str,
 
 def _make_model(ts, lam: float, d: int, D: int,
                 p: int, q: int, n_harmonics: int,
-                extra_itvs: list | None = None):
+                extra_itvs: list | None = None,
+                P: int = 0, Q: int = 0):
     """
-    Build a fue.Model from ARIMA spec + harmonic det-vars + optional interventions.
+    Build a fue.Model from SARIMA(p,d,q)(P,D,Q)_s spec.
 
+    When D=0: harmonic det-vars (cos/sin + alter) + optional extra interventions.
+    When D=1: seasonal AR/MA operators; no harmonics added.
     extra_itvs : list of (at_0based, form_str) tuples for pulse/step/ramp
     """
     import fue
     freq = ts.freq
-    n_harm = min(n_harmonics, freq // 2)
-
-    itvs = []
-    for k in range(1, n_harm + 1):
-        itvs.append(fue.Intervention("cos", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
-        itvs.append(fue.Intervention("sin", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
-    itvs.append(fue.Intervention("alter", at=0, omega=[0.0], omega_free=[True]))
-
-    if extra_itvs:
-        for at_0, form in extra_itvs:
-            itvs.append(fue.Intervention(form, at=int(at_0), omega=[0.0], omega_free=[True]))
 
     ar   = [[0.0] * p]  if p > 0 else []
     ar_f = [[True] * p] if p > 0 else []
     ma   = [[-0.3] * q] if q > 0 else []
     ma_f = [[True]  * q] if q > 0 else []
 
+    if D == 0:
+        n_harm = min(n_harmonics, freq // 2)
+        itvs = []
+        for k in range(1, n_harm + 1):
+            itvs.append(fue.Intervention("cos", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
+            itvs.append(fue.Intervention("sin", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
+        itvs.append(fue.Intervention("alter", at=0, omega=[0.0], omega_free=[True]))
+        ar_s_val = []; ar_sf_val = []
+        ma_s_val = []; ma_sf_val = []
+    else:
+        itvs = []
+        ar_s_val  = [[0.0]  * P] if P > 0 else []
+        ar_sf_val = [[True] * P] if P > 0 else []
+        ma_s_val  = [[-0.3] * Q] if Q > 0 else []
+        ma_sf_val = [[True] * Q]  if Q > 0 else []
+
+    if extra_itvs:
+        for at_0, form in extra_itvs:
+            itvs.append(fue.Intervention(form, at=int(at_0), omega=[0.0], omega_free=[True]))
+
     return fue.Model(
         ts,
         d=d, D=D, boxlam=lam,
         ar=ar, ar_free=ar_f,
         ma=ma, ma_free=ma_f,
-        ar_s=[], ma_s=[],
+        ar_s=ar_s_val, ar_s_free=ar_sf_val if ar_sf_val else None,
+        ma_s=ma_s_val, ma_s_free=ma_sf_val if ma_sf_val else None,
         interventions=itvs,
         ifadf=[0] * (freq // 2 + 1),
         mu=0.0, estimate_mu=False,
