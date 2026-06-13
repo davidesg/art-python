@@ -276,6 +276,7 @@ def formal_tests(inp_path: str, run_meg: bool = True) -> list:
     Run formal hypothesis tests on a fitted model.
 
     Tests run (where applicable to the model structure):
+    - Shin-Fuller (1998): Phi_1u test; H0: rho=1-4/n (near-unit-root); crit 5%≈1.75
     - DCD: non-invertibility of regular MA factors (H0: theta=1)
     - DCD_f: non-invertibility of seasonal MA factors (H0: lambda2=-1)
     - RV: fixed frequency for AR(2) factors

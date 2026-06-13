@@ -33,13 +33,38 @@ def _load_and_fit(inp_path):
 # ---------------------------------------------------------------------------
 
 def test_phi_null_quarterly_68():
-    """phi_null = 1 - s/n = 1 - 4/68 = 64/68 = 16/17 ≈ 0.941176."""
+    """phi_null = 1 - 4/n = 1 - 4/68 ≈ 0.9412.  (Formula is 1-4/n, not 1-s/n.)"""
     m = _load_and_fit(os.path.join(_PCE_MOD, "R.1.inp"))
     result = shin_fuller(m)
     assert result.n == 68
     assert result.s == 4
-    assert abs(result.phi_null - (1 - 4 / 68)) < 1e-10
-    assert abs(result.phi_null - 16 / 17) < 1e-6
+    assert abs(result.phi_null - (1.0 - 4.0 / 68)) < 1e-10
+
+def test_phi_null_independent_of_freq():
+    """phi_null depends only on n, not on s (Shin-Fuller 1998, p. 595)."""
+    m = _load_and_fit(os.path.join(_PCE_MOD, "R.1.inp"))
+    result = shin_fuller(m)
+    # ρₘ = 1 − 4/n; for n=68 this is ≈ 0.9412 regardless of s
+    assert abs(result.phi_null - (1.0 - 4.0 / result.n)) < 1e-10
+
+def test_crit_5pct_approx_1_75():
+    """5% critical value from Table II should be ≈ 1.75 for moderate n."""
+    m = _load_and_fit(os.path.join(_PCE_MOD, "R.1.inp"))
+    result = shin_fuller(m)
+    assert 1.60 < result.crit_5pct < 1.90
+
+def test_phi_1u_equals_half_lr():
+    """phi_1u = L_free − L_constrained; lr property = 2·phi_1u."""
+    m = _load_and_fit(os.path.join(_PCE_MOD, "R.1.inp"))
+    result = shin_fuller(m)
+    assert abs(result.phi_1u - (result.loglik_free - result.loglik_constrained)) < 1e-10
+    assert abs(result.lr - 2.0 * result.phi_1u) < 1e-10
+
+def test_stationary_uses_phi_1u():
+    """stationary ↔ phi_1u > crit_5pct (not pvalue threshold)."""
+    m = _load_and_fit(os.path.join(_PCE_MOD, "R.1.inp"))
+    result = shin_fuller(m)
+    assert result.stationary == (result.phi_1u > result.crit_5pct)
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +80,7 @@ class TestPCE_R1:
         self.result = shin_fuller(self.m)
 
     def test_lr_matches_reference(self):
-        """LR ≈ 19.94 (2 × [−108.234 − (−118.203)])."""
+        """lr property ≈ 19.94 (2 × [−108.234 − (−118.203)])."""
         assert abs(self.result.lr - 19.937) < 0.01
 
     def test_loglik_free(self):
@@ -92,7 +117,7 @@ class TestIPC_Trim_R2:
         self.result = shin_fuller(self.m)
 
     def test_lr_matches_reference(self):
-        """LR ≈ 16.02 (2 × [−72.297 − (−80.309)])."""
+        """lr property ≈ 16.02 (2 × [−72.297 − (−80.309)])."""
         assert abs(self.result.lr - 16.023) < 0.01
 
     def test_loglik_free(self):
@@ -135,7 +160,7 @@ def test_summary_string():
     m = _load_and_fit(os.path.join(_PCE_MOD, "R.1.inp"))
     s = shin_fuller(m).summary()
     assert "Shin-Fuller" in s
-    assert "LR" in s
+    assert "Φ̂₁ᵤ" in s
     assert "ESTACIONARIO" in s or "RAÍZ" in s
 
 

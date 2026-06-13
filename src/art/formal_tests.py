@@ -9,7 +9,8 @@ before any formal test is applied.
 
 Current tests
 -------------
-shin_fuller : Shin-Fuller (1998) LR test for non-stationarity.
+shin_fuller : Shin-Fuller (1998) Φ̂₁ᵤ test for non-stationarity.
+              H₀: ρ=1; ρₘ=1−4/n; critical values from Table II (5%≈1.75).
               Applies after diagnosis.clean == True to confirm d.
 dcd         : DCD non-invertibility test for regular MA(1) factors.
               H₀: θ = 1 (unit root in MA polynomial).
@@ -98,38 +99,85 @@ _DCD_CRIT_MA_F = {'10%': 1.07, '5%': 2.02, '1%': 4.52}
 
 
 # ---------------------------------------------------------------------------
+# Critical values for Shin-Fuller (1998) Φ̂₁ᵤ test — Table II
+# Φ̂₁ᵤ = L_free − L_constrained  (NOT 2·ΔL).
+# Larger values reject H₀ (unit root) → evidence of stationarity.
+# ---------------------------------------------------------------------------
+
+_SF_CRIT = [
+    #  n,   10%,   5%,   1%
+    ( 25, 1.02, 1.68, 3.33),
+    ( 50, 1.06, 1.75, 3.41),
+    (100, 1.07, 1.75, 3.41),
+    (250, 1.07, 1.76, 3.44),
+    (500, 1.08, 1.77, 3.46),
+]
+
+
+def _sf_crit(n: int) -> tuple[float, float, float]:
+    """Linear interpolation of Shin-Fuller (1998) Table II critical values."""
+    if n <= _SF_CRIT[0][0]:
+        return _SF_CRIT[0][1], _SF_CRIT[0][2], _SF_CRIT[0][3]
+    if n >= _SF_CRIT[-1][0]:
+        return _SF_CRIT[-1][1], _SF_CRIT[-1][2], _SF_CRIT[-1][3]
+    for i in range(len(_SF_CRIT) - 1):
+        n0, c10_0, c5_0, c1_0 = _SF_CRIT[i]
+        n1, c10_1, c5_1, c1_1 = _SF_CRIT[i + 1]
+        if n0 <= n <= n1:
+            t = (n - n0) / (n1 - n0)
+            return (
+                c10_0 + t * (c10_1 - c10_0),
+                c5_0  + t * (c5_1  - c5_0),
+                c1_0  + t * (c1_1  - c1_0),
+            )
+    return _SF_CRIT[-1][1], _SF_CRIT[-1][2], _SF_CRIT[-1][3]  # unreachable
+
+
+# ---------------------------------------------------------------------------
 # Shin-Fuller (1998) non-stationarity test
 # ---------------------------------------------------------------------------
 
 @dataclass
 class ShinFullerResult:
-    """Result of the Shin-Fuller LR test."""
-    phi_null: float              # null AR(1) coefficient = 1 − s/n
-    phi_free: list[float]        # estimated AR coefficients from free model
+    """Result of the Shin-Fuller (1998) Φ̂₁ᵤ test."""
+    phi_null: float          # ρₘ = 1 − 4/n  (Table II null point)
+    phi_free: list[float]    # estimated AR coefficients (free model)
     loglik_free: float
     loglik_constrained: float
-    lr: float                    # 2·(L_free − L_constrained)
-    df: int                      # number of constrained AR params
-    pvalue: float                # chi²(df) p-value (approximate; see note)
+    phi_1u: float            # Φ̂₁ᵤ = L_free − L_constrained  (eq. 3.5)
+    crit_10pct: float        # Table II critical value at 10 %
+    crit_5pct: float         # Table II critical value at 5 %
+    crit_1pct: float         # Table II critical value at 1 %
+    df: int                  # number of constrained AR params
+    pvalue: float            # chi²(df) p-value of 2·Φ̂₁ᵤ (conservative approx.)
     n: int
     s: int
 
     @property
+    def lr(self) -> float:
+        """2·Φ̂₁ᵤ — conventional LR scale (for display/chi² reference only)."""
+        return 2.0 * self.phi_1u
+
+    @property
     def stationary(self) -> bool:
-        """True if H₀ (near-unit-root) rejected at 5 %."""
-        return self.pvalue < 0.05
+        """True if Φ̂₁ᵤ > 5% critical value (H₀ unit-root rejected)."""
+        return self.phi_1u > self.crit_5pct
 
     def summary(self) -> str:
         phi_str = ", ".join(f"{v:.4f}" for v in self.phi_free)
+        stars = ("***" if self.phi_1u > self.crit_1pct
+                 else "** " if self.phi_1u > self.crit_5pct
+                 else "*  " if self.phi_1u > self.crit_10pct
+                 else "   ")
         lines = [
             "Shin-Fuller (1998) non-stationarity test",
             f"  n={self.n}, s={self.s}",
-            f"  φ_null = 1 − s/n = {self.phi_null:.6f}",
+            f"  ρₘ = 1 − 4/n = {self.phi_null:.6f}",
             f"  φ_free = [{phi_str}]",
             f"  logL(free) = {self.loglik_free:.4f}",
             f"  logL(constrained) = {self.loglik_constrained:.4f}",
-            f"  LR = {self.lr:.4f}  (df={self.df})",
-            f"  p-value ≈ {self.pvalue:.4f}  [χ²({self.df}) approximation]",
+            f"  Φ̂₁ᵤ = {self.phi_1u:.4f}  {stars}",
+            f"  Crit. vals (Table II): 10%={self.crit_10pct:.2f}  5%={self.crit_5pct:.2f}  1%={self.crit_1pct:.2f}",
             f"  → {'ESTACIONARIO ✓' if self.stationary else 'RAÍZ UNITARIA — considerar d+1 ✗'}",
         ]
         return "\n".join(lines)
@@ -186,18 +234,15 @@ def shin_fuller(model) -> ShinFullerResult:
     """
     Shin-Fuller (1998) likelihood-ratio test for non-stationarity.
 
-    H₀: φ₁ = φ_null = 1 − s/n  (AR polynomial is near-unit-root; d under-specified)
-    H₁: φ₁ < φ_null              (AR polynomial is stationary; d is correct)
+    H₀: ρ = 1 (AR near-unit-root; d is under-specified)
+    H₁: ρ < 1 (AR is stationary; d is correct)
 
-    The constrained model fixes the first coefficient of every regular AR factor
-    to φ_null and all higher-order coefficients to zero; all other parameters
-    (interventions, seasonal AR/MA, mu) are re-estimated freely.
-
-    LR = 2·[logL(free) − logL(constrained)]
-
-    Under H₁, LR ~ χ²(df) where df = number of free AR parameters.
-    Under H₀ the distribution is non-standard (Shin-Fuller 1998, Table 1);
-    the χ² approximation is conservative.
+    Test statistic: Φ̂₁ᵤ = L_free − L_constrained  (eq. 3.5, NOT 2·ΔL).
+    The constrained model fixes ρ = ρₘ = 1 − 4/n (the median of the null
+    distribution of ρ̂μ; see Shin-Fuller 1998, p. 595) and sets all higher-
+    order AR coefficients to zero; all other parameters re-estimated freely.
+    H₀ is rejected if Φ̂₁ᵤ exceeds the 5 % critical value from Table II
+    (≈ 1.75 for n ≥ 50).
 
     Prerequisites
     -------------
@@ -219,7 +264,7 @@ def shin_fuller(model) -> ShinFullerResult:
 
     n = model.series.nobs
     s = model.series.freq
-    phi_null = 1.0 - s / n
+    phi_null = 1.0 - 4.0 / n   # ρₘ = 1 − 4/n  (Shin-Fuller 1998, p. 595)
 
     L_free = float(model._result.loglik)
     phi_free = _extract_ar_params(model)
@@ -241,15 +286,19 @@ def shin_fuller(model) -> ShinFullerResult:
     mc.fit()
     L_constrained = float(mc._result.loglik)
 
-    lr = 2.0 * (L_free - L_constrained)
-    pvalue = float(sp_stats.chi2.sf(lr, df))
+    phi_1u = L_free - L_constrained           # Φ̂₁ᵤ — eq. (3.5)
+    pvalue = float(sp_stats.chi2.sf(2.0 * phi_1u, df))  # conservative chi² approx.
+    c10, c5, c1 = _sf_crit(n)
 
     return ShinFullerResult(
         phi_null=phi_null,
         phi_free=phi_free,
         loglik_free=L_free,
         loglik_constrained=L_constrained,
-        lr=lr,
+        phi_1u=phi_1u,
+        crit_10pct=c10,
+        crit_5pct=c5,
+        crit_1pct=c1,
         df=df,
         pvalue=pvalue,
         n=n,

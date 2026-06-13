@@ -30,7 +30,7 @@ from .identification import (
 from .seasonal_detection import detect_seasonality, plot_seasonality
 from .model_detection import suggest_orders
 from .diagnosis import diagnose, plot_diagnosis
-from .formal_tests import dcd, dcd_f, rv, meg
+from .formal_tests import dcd, dcd_f, rv, meg, shin_fuller
 from .interventions import diagnose_interventions
 from .full_report import _meg_suitable, _try
 
@@ -976,12 +976,29 @@ def describe_diagnosis(model) -> Description:
             )
 
     # Over-parametrization warning (Bloque I)
+    # Known false-positive cases where high correlation is structural (not a flaw):
+    #   • AR(2) with complex roots + MA: AR and MA share signal structure → high corr expected.
+    #     Check RV test (Bloque F) before concluding over-parametrization.
+    #   • FLT transfer function (ω + δ): gain and decay rate are jointly identified from
+    #     the impulse response ω·δ^t → high corr(ω, δ) is inherent, not redundant.
+    def _overpar_note(lbl_i: str, lbl_j: str) -> str:
+        ar_ma = (lbl_i.startswith("AR") and lbl_j.startswith("MA")) or \
+                (lbl_i.startswith("MA") and lbl_j.startswith("AR"))
+        flt   = (lbl_i.startswith("ω(") and lbl_j.startswith("δ")) or \
+                (lbl_i.startswith("δ") and lbl_j.startswith("ω("))
+        if ar_ma:
+            return " ℹ puede ser normal en AR(2) con raíces complejas — verificar con test RV"
+        if flt:
+            return " ℹ normal en FLT (ω y δ se identifican conjuntamente)"
+        return ""
+
     overpar_pairs = result.high_corr_pairs or []
     if overpar_pairs:
         lines.append("")
         lines.append("**⚠ Posible sobreparametrización** (|corr| > 0.7):")
         for _, _, r_val, lbl_i, lbl_j in overpar_pairs:
-            lines.append(f"  - corr({lbl_i}, {lbl_j}) = {r_val:+.3f}")
+            note = _overpar_note(lbl_i, lbl_j)
+            lines.append(f"  - corr({lbl_i}, {lbl_j}) = {r_val:+.3f}{note}")
 
     if result.clean:
         rec = "El modelo pasa la diagnosis. Procede a los contrastes formales (DCD, MEG)."
@@ -1059,10 +1076,11 @@ def describe_diagnosis(model) -> Description:
 # ---------------------------------------------------------------------------
 
 def describe_formal_tests(model, run_meg: bool = True) -> Description:
-    """Run DCD, DCD_f, RV, MEG and summarize for the LLM."""
+    """Run Shin-Fuller, DCD, DCD_f, RV, MEG and summarize for the LLM."""
     if model._result is None:
         raise RuntimeError("Model has not been fitted — call model.fit() first.")
 
+    sf_res    = _try(lambda: shin_fuller(model), None)
     dcd_res   = _try(lambda: dcd(model),   [])
     dcd_f_res = _try(lambda: dcd_f(model), [])
     rv_res    = _try(lambda: rv(model),    [])
@@ -1070,6 +1088,25 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
                  if run_meg and _meg_suitable(model) else [])
 
     lines = ["## Contrastes formales"]
+
+    # Shin-Fuller (non-stationarity of AR component)
+    # Φ̂₁ᵤ = L_free − L_constrained  (eq. 3.5); compare to Table II critical values.
+    if sf_res is not None:
+        sf_verdict = ("Estacionario ✓" if sf_res.stationary
+                      else "Raíz unitaria — considerar d+1 ✗")
+        lines.append(
+            f"\n**Shin-Fuller (no estacionariedad AR)** "
+            f"(H₀: ρ≈1−4/n={sf_res.phi_null:.4f},  n={sf_res.n})"
+        )
+        phi_str = ", ".join(f"{v:.4f}" for v in sf_res.phi_free)
+        lines.append(f"- φ̂ = [{phi_str}]")
+        lines.append(
+            f"- Φ̂₁ᵤ={sf_res.phi_1u:.3f}"
+            f"  (val. crít. 10%={sf_res.crit_10pct:.2f},"
+            f" 5%={sf_res.crit_5pct:.2f},"
+            f" 1%={sf_res.crit_1pct:.2f})"
+            f" → {sf_verdict}"
+        )
 
     # DCD
     if dcd_res:
@@ -1135,6 +1172,11 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
 
     # Build recommendation
     issues = []
+    if sf_res is not None and not sf_res.stationary:
+        issues.append(
+            f"Shin-Fuller no rechaza H₀ (Φ̂₁ᵤ={sf_res.phi_1u:.3f} ≤ {sf_res.crit_5pct:.2f}): "
+            "posible raíz unitaria en el componente AR. Considera aumentar d en 1."
+        )
     non_invertible_ma = [r for r in dcd_res if r.lr < 1.94]
     for r in non_invertible_ma:
         issues.append(
@@ -1158,6 +1200,12 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
         figure_b64=None,
         recommendation=rec,
         data={
+            "shin_fuller": (
+                {"phi_1u": sf_res.phi_1u, "crit_5pct": sf_res.crit_5pct,
+                 "crit_1pct": sf_res.crit_1pct, "stationary": sf_res.stationary,
+                 "phi_null": sf_res.phi_null, "phi_free": list(sf_res.phi_free)}
+                if sf_res is not None else None
+            ),
             "dcd": [{"factor": r.factor_index, "lr": r.lr, "coef": r.coef_free}
                     for r in dcd_res],
             "meg": [{"freq": r.freq, "status": r.status,
