@@ -764,9 +764,19 @@ def _build_inp(ts, lam: float, d: int, D: int,
     import fue
     freq = ts.freq
 
-    # Regular AR and MA
-    ar   = [[0.0] * p]  if p > 0 else []
-    ar_f = [[True] * p] if p > 0 else []
+    # Regular AR and MA.
+    # Workaround for fue C backend crash when nar=0 AND nma=0 with interventions:
+    # add AR(1) with phi=0 fixed (mathematically equivalent to white noise AR
+    # polynomial = 1, but gives the C estimator a non-trivial AR block to process).
+    if p > 0:
+        ar   = [[0.0] * p]
+        ar_f = [[True] * p]
+    elif q == 0:
+        ar   = [[0.0]]
+        ar_f = [[False]]   # phi=0 fixed — not estimated
+    else:
+        ar   = []
+        ar_f = []
     ma   = [[-0.3] * q] if q > 0 else []
     ma_f = [[True]  * q] if q > 0 else []
 
@@ -1649,8 +1659,16 @@ def _make_model(ts, lam: float, d: int, D: int,
     import fue
     freq = ts.freq
 
-    ar   = [[0.0] * p]  if p > 0 else []
-    ar_f = [[True] * p] if p > 0 else []
+    # Same p=0,q=0 workaround as _build_inp: AR(1) phi=0 fixed avoids C crash.
+    if p > 0:
+        ar   = [[0.0] * p]
+        ar_f = [[True] * p]
+    elif q == 0:
+        ar   = [[0.0]]
+        ar_f = [[False]]
+    else:
+        ar   = []
+        ar_f = []
     ma   = [[-0.3] * q] if q > 0 else []
     ma_f = [[True]  * q] if q > 0 else []
 

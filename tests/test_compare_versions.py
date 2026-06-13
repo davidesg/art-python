@@ -221,3 +221,17 @@ def test_compare_non_nested_no_lr(tmp_path):
     result = compare_versions(path_ar, path_ma)
     text = result[0].text
     assert "no anidados" in text.lower() or "no aplicable" in text.lower()
+
+
+def test_build_inp_pq0_with_harmonics_no_crash(tmp_path):
+    """p=0, q=0 with harmonics must not crash (workaround: AR(1) phi=0 fixed)."""
+    _skip_if_missing()
+    from art.mcp_server import _build_inp, _load_fitted
+    import fue
+    ts, _ = fue.inp.load(_PCE_INP)
+    path = str(tmp_path / "pq0.inp")
+    _build_inp(ts, lam=0.0, d=1, D=0, p=0, q=0, n_harmonics=2, output_path=path)
+    _, model = _load_fitted(path)
+    r = model._result
+    assert r.loglik < 0
+    assert r.npar == 5   # 4 harmonic coefs + alter
