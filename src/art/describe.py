@@ -1453,6 +1453,50 @@ def describe_interventions(model, threshold: float = 3.5) -> Description:
 
 
 # ---------------------------------------------------------------------------
+# Pre-identification outlier scan — helpers
+# ---------------------------------------------------------------------------
+
+def _sample_acf_raw(w_std: "np.ndarray", lags: int) -> "np.ndarray":
+    """Sample ACF r(k) for k=1..lags using the biased denominator Σẑ_j²."""
+    import numpy as np
+    n = len(w_std)
+    denom = float(np.sum(w_std ** 2))
+    acf = np.zeros(lags)
+    if denom < 1e-15:
+        return acf
+    for k in range(1, lags + 1):
+        acf[k - 1] = float(np.sum(w_std[: n - k] * w_std[k:])) / denom
+    return acf
+
+
+def _acf_outlier_contributions(
+    w_std: "np.ndarray", outlier_idx: list[int], lags: int
+) -> "np.ndarray":
+    """
+    Contribution of each outlier to the sample ACF at each lag.
+
+    Returns contrib[i, k-1] where i indexes outlier_idx and k=1..lags.
+
+    C_k(p) = [ẑ_p·ẑ_{p+k}  +  ẑ_{p-k}·ẑ_p] / Σ_j ẑ_j²
+    """
+    import numpy as np
+    n = len(w_std)
+    denom = float(np.sum(w_std ** 2))
+    contrib = np.zeros((len(outlier_idx), lags))
+    if denom < 1e-15 or not outlier_idx:
+        return contrib
+    for ii, p in enumerate(outlier_idx):
+        for k in range(1, lags + 1):
+            c = 0.0
+            if p + k < n:
+                c += w_std[p] * w_std[p + k]
+            if p - k >= 0:
+                c += w_std[p - k] * w_std[p]
+            contrib[ii, k - 1] = c / denom
+    return contrib
+
+
+# ---------------------------------------------------------------------------
 # Pre-identification outlier scan
 # ---------------------------------------------------------------------------
 
@@ -1508,34 +1552,78 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
 
     outliers = [(int(i), float(w_std[i]), _idx_to_date(i)) for i in extreme_idx]
 
+    # ── ACF contributions (computed before figure so we can use them in both) ─
+    n_lags = min(len(w_std) // 3, max(12, 2 * freq))
+    acf_full   = _sample_acf_raw(w_std, n_lags)
+    ci_val     = 1.96 / np.sqrt(len(w_std))
+
+    outl_idx = [i for i, _, _ in outliers]
+    contribs = _acf_outlier_contributions(w_std, outl_idx, n_lags)
+    total_contrib = contribs.sum(axis=0)  # (n_lags,) — summed over all outliers
+
+    # Lags whose |contribution| is meaningful (> half CI)
+    affected_lags = [
+        {"lag": k + 1,
+         "acf": float(acf_full[k]),
+         "contribution": float(total_contrib[k]),
+         "pct": float(100.0 * total_contrib[k] / acf_full[k]) if abs(acf_full[k]) > 1e-6 else None}
+        for k in range(n_lags)
+        if abs(total_contrib[k]) > ci_val * 0.4
+    ]
+
     # ── Figure ────────────────────────────────────────────────────────────────
     label = transform_label(lam, d, D, freq)
-    fig, ax = plt.subplots(figsize=(13, 3.5))
-    n_w  = len(w_std)
-    xs   = np.arange(n_w)
+    n_w   = len(w_std)
+    xs    = np.arange(n_w)
 
-    ax.axhline(0,        color="black",  lw=0.7)
-    ax.axhline(+2,       color="#888888", lw=0.8, ls="--")
-    ax.axhline(-2,       color="#888888", lw=0.8, ls="--")
+    if outliers:
+        fig, (ax, ax2) = plt.subplots(
+            2, 1, figsize=(13, 6.5),
+            gridspec_kw={"height_ratios": [2, 1.2]}
+        )
+    else:
+        fig, ax = plt.subplots(figsize=(13, 3.5))
+        ax2 = None
+
+    # Top panel — standardised series
+    ax.axhline(0,          color="black",   lw=0.7)
+    ax.axhline(+2,         color="#888888", lw=0.8, ls="--")
+    ax.axhline(-2,         color="#888888", lw=0.8, ls="--")
     ax.axhline(+threshold, color="#cc3333", lw=0.9, ls=":")
     ax.axhline(-threshold, color="#cc3333", lw=0.9, ls=":")
-
     ax.plot(xs, w_std, color="#1f77b4", lw=1.0)
-
     for i, z_i, date in outliers:
         ax.plot(i, z_i, "o", color="#cc3333", ms=7, zorder=5)
         va = "bottom" if z_i >= 0 else "top"
         ax.annotate(date, (i, z_i), fontsize=7.5, color="#cc3333",
                     xytext=(0, 6 if z_i >= 0 else -6),
                     textcoords="offset points", ha="center", va=va)
-
     ax.fill_between(xs, -2, 2, alpha=0.06, color="#1f77b4")
     ax.set_ylabel("z-score", fontsize=9)
     ax.set_title(f"{name} — {label}  (tipificada, umbral ±{threshold}σ)",
                  fontsize=10, fontweight="bold")
     ax.tick_params(axis="both", labelsize=8)
-    fig.tight_layout()
 
+    # Bottom panel — ACF contributions (only when there are outliers)
+    if ax2 is not None:
+        lags_x = np.arange(1, n_lags + 1)
+        ax2.bar(lags_x, acf_full, color="#9ecae1", alpha=0.85,
+                label="ACF(k)", zorder=2)
+        ax2.bar(lags_x, total_contrib, color="#e74c3c", alpha=0.75,
+                label="Contribución outlier(s)", zorder=3)
+        ax2.axhline(0,       color="black",   lw=0.6)
+        ax2.axhline(+ci_val, color="#888888", lw=0.8, ls="--")
+        ax2.axhline(-ci_val, color="#888888", lw=0.8, ls="--")
+        ax2.set_xlabel("Retardo k", fontsize=9)
+        ax2.set_ylabel("r(k)", fontsize=9)
+        ax2.set_title(
+            "Contribución de outlier(s) a la ACF  (rojo = parte debida al outlier)",
+            fontsize=9, fontweight="bold"
+        )
+        ax2.legend(fontsize=7, loc="upper right", framealpha=0.7)
+        ax2.tick_params(axis="both", labelsize=8)
+
+    fig.tight_layout()
     b64 = _fig_b64(fig)
     plt.close(fig)
 
@@ -1559,13 +1647,27 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
             form_hint = "pulse" if abs(z_i) > 5 else "pulse o step"
             lines.append(f"  - **{date}**: z={z_i:+.2f} ({sign}) → forma tentativa: {form_hint}")
 
-        # Variance fraction from biggest outlier
         var_max = max(z_i**2 for _, z_i, _ in outliers) / np.sum(w_std**2) * 100
         lines += [
             "",
             f"⚠ El outlier mayor explica aprox. **{var_max:.1f}%** de la varianza tipificada.",
             "Esto distorsiona la ACF/PACF: los coeficientes de autocorrelación están",
-            "subestimados y la estructura ARMA real puede quedar enmascarada.",
+            "sesgados y la estructura ARMA real puede quedar enmascarada.",
+        ]
+
+        if affected_lags:
+            top = sorted(affected_lags, key=lambda r: -abs(r["contribution"]))[:6]
+            lag_strs = []
+            for r in top:
+                pct_str = f"{r['pct']:+.0f}%" if r["pct"] is not None else "n.a."
+                lag_strs.append(f"k={r['lag']} ({pct_str})")
+            lines += [
+                "",
+                f"**Retardos ACF más afectados**: {', '.join(lag_strs)}.",
+                "(Porcentaje = contribución del outlier / ACF total en ese retardo.)",
+            ]
+
+        lines += [
             "",
             "**Principio 'lo más obvio primero'**: añade las intervenciones sobre estos",
             "puntos en el fichero .inp ANTES de identificar los órdenes ARMA.",
@@ -1590,6 +1692,7 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
             "outliers": [{"obs_w": i, "z": z_i, "date": date}
                          for i, z_i, date in outliers],
             "has_distortion": len(outliers) > 0,
+            "acf_contributions": affected_lags,
         },
     )
 

@@ -32,6 +32,8 @@ from .describe import (
     describe_boxcox, describe_seasonality, describe_identification,
     describe_unit_root,
     describe_diagnosis, describe_formal_tests, describe_interventions,
+    describe_prelim_scan,
+    _sample_acf_raw, _acf_outlier_contributions,
 )
 
 __version__ = "0.1.0"
@@ -54,4 +56,6 @@ __all__ = [
     "FullReport", "save_full_report",
     "UnitRootResult", "unit_root_tests", "recommended_d",
     "describe_unit_root",
+    "describe_prelim_scan",
+    "_sample_acf_raw", "_acf_outlier_contributions",
 ]
