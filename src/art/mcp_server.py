@@ -998,6 +998,73 @@ def guided_identification(inp_path: str, lam: float = -1.0,
 
 
 # ---------------------------------------------------------------------------
+# Guion helper — called by confirm_and_estimate and record_version
+# ---------------------------------------------------------------------------
+
+def _record_to_guion(
+    model,
+    inp_path: str,
+    lam: float,
+    guion_path: str,
+    name: str = "",
+    decision: str = "",
+    rationale: str = "",
+    problems_found: str = "",
+    next_version: str = "",
+    figure_b64: str | None = None,
+) -> str:
+    """
+    Add a fitted model entry to guion.json (creates file if absent).
+    Returns a one-line confirmation string for the caller.
+    """
+    from datetime import datetime
+    from art.guion import (
+        Guion, GuionEntry, load_guion, save_guion,
+        _extract_spec, _extract_stats, _build_equation,
+    )
+    from art.diagnosis import diagnose
+
+    guion_path = os.path.expanduser(guion_path)
+
+    if os.path.exists(guion_path):
+        guion = load_guion(guion_path)
+    else:
+        ts = model.series
+        guion = Guion(
+            series=ts.name or os.path.basename(inp_path),
+            analyst="",
+            created=datetime.now().strftime("%Y-%m-%d"),
+        )
+
+    version = (max(e.version for e in guion.entries) + 1) if guion.entries else 1
+    if not name:
+        name = f"PC{version}"
+
+    diag_result = diagnose(model)
+    spec  = _extract_spec(model, lam)
+    stats = _extract_stats(model, diag_result)
+    eq    = _build_equation(spec, model.series.freq)
+
+    entry = GuionEntry(
+        version=version,
+        name=name,
+        inp_path=inp_path,
+        timestamp=datetime.now().isoformat(timespec="seconds"),
+        spec=spec,
+        stats=stats,
+        equation=eq,
+        decision=decision,
+        rationale=rationale,
+        problems_found=problems_found,
+        next_version=next_version,
+        figure_b64=figure_b64,
+    )
+    guion.entries.append(entry)
+    save_guion(guion, guion_path)
+    return f"*Registrado en guion como {name} (v{version}) → {guion_path}*"
+
+
+# ---------------------------------------------------------------------------
 # Tool: confirm and estimate (B2)
 # ---------------------------------------------------------------------------
 
@@ -1006,7 +1073,13 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                           lam: float = 0.0, d: int = 1, D: int = 0,
                           p: int = 0, q: int = 1,
                           n_harmonics: int = 5,
-                          P: int = 0, Q: int = 0) -> list:
+                          P: int = 0, Q: int = 0,
+                          guion_path: str = "",
+                          guion_name: str = "",
+                          guion_decision: str = "",
+                          guion_rationale: str = "",
+                          guion_problems: str = "",
+                          guion_next: str = "") -> list:
     """
     Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
 
@@ -1018,16 +1091,22 @@ def confirm_and_estimate(inp_path: str, output_path: str,
 
     Parameters
     ----------
-    inp_path     : source .inp file (series data is used; model spec ignored)
-    output_path  : path to write the new .inp (can be re-used for later tools)
-    lam          : Box-Cox lambda (0.0=log, 1.0=identity)
-    d            : regular differencing order
-    D            : seasonal differencing order (0=deterministic B1, 1=multiplicative B2)
-    p            : AR order
-    q            : MA order
-    n_harmonics  : harmonic pairs cos/sin (used when D=0; ignored when D=1)
-    P            : seasonal AR order (used when D=1)
-    Q            : seasonal MA order (used when D=1)
+    inp_path        : source .inp file (series data is used; model spec ignored)
+    output_path     : path to write the new .inp (can be re-used for later tools)
+    lam             : Box-Cox lambda (0.0=log, 1.0=identity)
+    d               : regular differencing order
+    D               : seasonal differencing order (0=deterministic B1, 1=multiplicative B2)
+    p               : AR order
+    q               : MA order
+    n_harmonics     : harmonic pairs cos/sin (used when D=0; ignored when D=1)
+    P               : seasonal AR order (used when D=1)
+    Q               : seasonal MA order (used when D=1)
+    guion_path      : (optional) path to guion.json — if provided, records this version
+    guion_name      : version name (e.g. "PC3"); auto-assigned if empty
+    guion_decision  : brief description of what this model tests or concludes
+    guion_rationale : justification for the choices made
+    guion_problems  : problems found in the diagnosis of this model
+    guion_next      : description of the next version to try
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -1056,12 +1135,25 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         # Diagnosis
         diag = describe_diagnosis(m)
 
+        # Optional guion recording
+        guion_note = ""
+        if guion_path:
+            guion_note = _record_to_guion(
+                model=m, inp_path=output_path, lam=lam,
+                guion_path=guion_path,
+                name=guion_name, decision=guion_decision,
+                rationale=guion_rationale, problems_found=guion_problems,
+                next_version=guion_next,
+                figure_b64=diag.figure_b64,
+            )
+
         text = (
             spec_line + "\n\n"
             + "### Parámetros estimados\n\n" + param_md
             + "\n\n---\n\n"
             + diag.summary + "\n\n---\n" + diag.recommendation
             + f"\n\n*Modelo guardado en: {output_path}*"
+            + (f"\n\n{guion_note}" if guion_note else "")
         )
 
         items = [TextContent(type="text", text=text)]
@@ -1069,6 +1161,128 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             items.append(ImageContent(type="image",
                                       data=diag.figure_b64, mimeType="image/png"))
         return items
+
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
+# Tool: record_version — add fitted model to guion.json  (Bloque P)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def record_version(inp_path: str,
+                   guion_path: str,
+                   name: str = "",
+                   decision: str = "",
+                   rationale: str = "",
+                   problems_found: str = "",
+                   next_version: str = "") -> list:
+    """
+    Load, fit and record a model version in guion.json.
+
+    Loads the model from inp_path, fits it, extracts stats (loglik, AIC, BIC,
+    Q-test, JB-test, extreme residuals) and appends an entry to guion.json.
+    Creates guion.json if it does not exist.
+
+    Parameters
+    ----------
+    inp_path       : .inp file with the estimated model
+    guion_path     : path to guion.json (created if absent)
+    name           : version name, e.g. "PC3"; auto-assigned ("PC{n}") if empty
+    decision       : brief note on what this model tests or concludes
+    rationale      : justification for the parameter choices
+    problems_found : problems detected in the diagnosis
+    next_version   : description of the next version to try
+    """
+    try:
+        from mcp.types import TextContent, ImageContent
+        from art.describe import _fig_b64
+        from art.diagnosis import diagnose, plot_diagnosis
+        import matplotlib.pyplot as plt
+
+        _, m = _load_fitted(inp_path)
+
+        # Diagnosis figure
+        diag_result = diagnose(m)
+        try:
+            fig = plot_diagnosis(diag_result, m)
+            b64 = _fig_b64(fig)
+            plt.close(fig)
+        except Exception:
+            b64 = None
+
+        # Try to infer lam from ts (fue stores it as None usually)
+        lam = float(getattr(m.series, "lam", 0.0) or 0.0)
+
+        note = _record_to_guion(
+            model=m, inp_path=inp_path, lam=lam,
+            guion_path=guion_path, name=name,
+            decision=decision, rationale=rationale,
+            problems_found=problems_found, next_version=next_version,
+            figure_b64=b64,
+        )
+
+        lines = [
+            f"### Versión registrada en guion",
+            note,
+            "",
+            f"**loglik** = {m._result.loglik:.3f}",
+            f"**AIC** = {m._result.aic:.2f}" if m._result.aic else "",
+            f"**Q-pass** = {diag_result.white_noise} | **JB-pass** = {diag_result.normal}",
+            f"**Anomalías** = {len(diag_result.extreme)}",
+        ]
+        items = [TextContent(type="text", text="\n".join(l for l in lines if l))]
+        if b64:
+            items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
+        return items
+
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
+# Tool: export_guion — render guion.json to HTML  (Bloque P)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def export_guion(guion_path: str, output_html: str) -> list:
+    """
+    Render guion.json to a self-contained, navigable HTML report.
+
+    Generates a single HTML file with:
+    - Summary table of all versions (loglik, AIC, BIC, Q✓, JB✓, anomalías)
+    - One collapsible section per version with equation, spec, stats, figure,
+      decision notes, and link to next version
+
+    Parameters
+    ----------
+    guion_path  : path to guion.json
+    output_html : path to write the .html file
+    """
+    try:
+        from mcp.types import TextContent
+        from art.guion import load_guion, export_guion_html
+
+        guion_path  = os.path.expanduser(guion_path)
+        output_html = os.path.expanduser(output_html)
+
+        guion = load_guion(guion_path)
+        html  = export_guion_html(guion)
+
+        os.makedirs(os.path.dirname(os.path.abspath(output_html)), exist_ok=True)
+        with open(output_html, "w", encoding="utf-8") as f:
+            f.write(html)
+
+        n = len(guion.entries)
+        text = (
+            f"### Guion exportado\n\n"
+            f"- Serie: **{guion.series}**\n"
+            f"- Versiones: **{n}**\n"
+            f"- HTML guardado en: `{output_html}`\n\n"
+            f"Abre el fichero en un navegador para navegar el historial de versiones."
+        )
+        return [TextContent(type="text", text=text)]
 
     except Exception:
         return _err(traceback.format_exc())

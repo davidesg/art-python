@@ -27,6 +27,11 @@ from .interventions import (
     OutlierWarning, InterventionDiagnosis, diagnose_interventions,
 )
 from .full_report import FullReport, save_full_report
+from .guion import (
+    GuionStats, GuionEntry, Guion,
+    load_guion, save_guion,
+    _extract_spec, _extract_stats, _build_equation, export_guion_html,
+)
 from .describe import (
     Description,
     describe_boxcox, describe_seasonality, describe_identification,
@@ -58,4 +63,7 @@ __all__ = [
     "describe_unit_root",
     "describe_prelim_scan",
     "_sample_acf_raw", "_acf_outlier_contributions",
+    "GuionStats", "GuionEntry", "Guion",
+    "load_guion", "save_guion",
+    "_extract_spec", "_extract_stats", "_build_equation", "export_guion_html",
 ]
