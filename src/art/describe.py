@@ -298,7 +298,14 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
     }
 
     # --- markdown summary -----------------------------------------------
-    lines = ["## Tests de raíz unitaria (ADF + KPSS)", ""]
+    lines = [
+        "## Especificación inicial de d — ADF + KPSS",
+        "",
+        "> Herramientas de especificación exploratorias (al nivel de gráficos y ACF).",
+        "> El contraste formal sobre el modelo estimado es Shin-Fuller (1998),",
+        "> que se aplica en la fase de contrastes formales tras la estimación.",
+        "",
+    ]
     lines.append(
         "| d | Serie | n | ADF t | ADF p | ADF | KPSS η | KPSS p | KPSS | Veredicto |"
     )

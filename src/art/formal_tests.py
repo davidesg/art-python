@@ -11,7 +11,9 @@ Current tests
 -------------
 shin_fuller : Shin-Fuller (1998) Φ̂₁ᵤ test for non-stationarity.
               H₀: ρ=1; ρₘ=1−4/n; critical values from Table II (5%≈1.75).
-              Applies after diagnosis.clean == True to confirm d.
+              The appropriate formal test for d in an estimated ARMAX model.
+              Requires a model that is adequate and parsimoniously parametrized.
+              Do NOT use for initial d specification — use ADF/KPSS (Bloque L).
 dcd         : DCD non-invertibility test for regular MA(1) factors.
               H₀: θ = 1 (unit root in MA polynomial).
               Critical values from thesis Table 2.2: 10 % = 1.00, 5 % = 1.94,
@@ -246,9 +248,15 @@ def shin_fuller(model) -> ShinFullerResult:
 
     Prerequisites
     -------------
+    * The model must be adequate (white-noise residuals) and parsimoniously
+      parametrized before applying this test — formal hypothesis testing
+      requires a correctly specified model (thesis 2.4.4).
     * model.fit() has already been called (model._result is not None).
     * model.ar is non-empty and has at least one free coefficient.
     * Applies to REGULAR AR only; seasonal AR (model.ar_s) is untouched.
+
+    Note: for initial d specification (before estimation), use ADF + KPSS
+    via unit_root_tests() in identification.py (Bloque L).
 
     Reference
     ---------

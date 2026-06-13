@@ -233,12 +233,19 @@ class IdentificationListing:
 
 
 # ---------------------------------------------------------------------------
-# Unit root tests (Bloque L)
+# Unit root tests — Bloque L
+#
+# ADF and KPSS are SPECIFICATION TOOLS for choosing initial d.
+# They are exploratory aids (like visual inspection of ACF/residuals),
+# not formal hypothesis tests on an estimated model.
+#
+# The formal test for d in an estimated ARMAX model is Shin-Fuller (1998);
+# see formal_tests.shin_fuller(), which applies after estimation and diagnosis.
 # ---------------------------------------------------------------------------
 
 @dataclass
 class UnitRootResult:
-    """ADF + KPSS result for one differencing level."""
+    """ADF + KPSS result for one differencing level (initial d specification)."""
     d: int
     label: str           # e.g. "∇ln P"
     n: int               # length of differenced series
@@ -255,14 +262,17 @@ def unit_root_tests(ts: "TimeSeries",
                     lam: float = 0.0,
                     max_d: int = 2) -> list[UnitRootResult]:
     """
-    ADF + KPSS unit-root tests for d = 0, 1, …, max_d.
+    Initial d specification via ADF + KPSS for d = 0, 1, …, max_d.
 
-    For each d, applies d regular differences to boxcox(y) (no seasonal
-    differencing) and runs:
-      - ADF (H₀: unit root, autolag='AIC');  reject → stationary
-      - KPSS (H₀: stationary, nlags='auto'); reject → non-stationary
+    This is an exploratory tool for choosing the starting value of d before
+    estimation — not a formal hypothesis test.  The formal test for d on an
+    estimated model is Shin-Fuller (1998); see formal_tests.shin_fuller().
 
-    Verdict:
+    For each d, applies d regular differences to boxcox(y) and runs:
+      - ADF (H₀: unit root, autolag='AIC');  reject → evidence of stationarity
+      - KPSS (H₀: stationary, nlags='auto'); reject → evidence of non-stationarity
+
+    Verdict by consensus:
       'stationary'  — ADF rejects AND KPSS does not reject
       'unit_root'   — ADF does not reject AND KPSS rejects
       'ambiguous'   — tests disagree or both fail to reject

@@ -152,17 +152,17 @@ def seasonal_analysis(inp_path: str) -> list:
 def unit_root_analysis(inp_path: str, lam: float = 0.0,
                        max_d: int = 2) -> list:
     """
-    Run ADF + KPSS unit-root tests for d = 0, 1, ..., max_d.
+    Initial d specification via ADF + KPSS for d = 0, 1, ..., max_d.
 
-    For each differencing level, applies d regular differences to
-    boxcox(y, lam) and runs ADF (H₀: unit root) and KPSS (H₀: stationary).
-    Returns a coloured table per d level and a recommended d.
+    Exploratory tool for choosing the starting value of d before estimation
+    (equivalent in status to visual inspection of ACF/residuals).
+    NOT a formal hypothesis test — for formal testing of d on an estimated
+    model use the formal_tests tool (Shin-Fuller 1998).
 
     Parameters
     ----------
     inp_path : path to the .inp file
-    lam      : Box-Cox lambda (0.0 = log, 1.0 = none; use boxcox_analysis
-               to choose the right value first)
+    lam      : Box-Cox lambda (0.0 = log, 1.0 = none; run boxcox_analysis first)
     max_d    : highest differencing order to test (default 2)
     """
     try:
