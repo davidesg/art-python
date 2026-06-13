@@ -1289,6 +1289,225 @@ def export_guion(guion_path: str, output_html: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Tool: compare_versions — side-by-side model comparison  (Bloque Q)
+# ---------------------------------------------------------------------------
+
+def _spec_diff(spec_a: dict, spec_b: dict) -> list[str]:
+    """Return list of 'key: a→b' strings for each spec field that changed."""
+    changes = []
+    for key in ("d", "D", "p", "q", "P", "Q", "n_harmonics"):
+        a, b = spec_a.get(key, 0), spec_b.get(key, 0)
+        if a != b:
+            changes.append(f"{key}: {a}→{b}")
+    itvs_a = {(iv.get("type", "?"), iv.get("date", "?"))
+               for iv in spec_a.get("interventions", [])}
+    itvs_b = {(iv.get("type", "?"), iv.get("date", "?"))
+               for iv in spec_b.get("interventions", [])}
+    for t, d in sorted(itvs_b - itvs_a):
+        changes.append(f"+{t}({d})")
+    for t, d in sorted(itvs_a - itvs_b):
+        changes.append(f"−{t}({d})")
+    return changes
+
+
+def _nested_relation(spec_a: dict, spec_b: dict,
+                     npar_a: int, npar_b: int) -> str:
+    """
+    Return "A_in_B", "B_in_A", or "none".
+
+    A is nested in B if d,D match, p_a≤p_b, q_a≤q_b, P_a≤P_b, Q_a≤Q_b,
+    n_h_a≤n_h_b, all interventions of A are in B, and npar_a < npar_b.
+    """
+    def a_in_b(sa, sb, na, nb):
+        if na >= nb:
+            return False
+        if sa.get("d") != sb.get("d") or sa.get("D") != sb.get("D"):
+            return False
+        for k in ("p", "q", "P", "Q", "n_harmonics"):
+            if sa.get(k, 0) > sb.get(k, 0):
+                return False
+        itvs_a = {(iv.get("type"), iv.get("date"))
+                   for iv in sa.get("interventions", [])}
+        itvs_b = {(iv.get("type"), iv.get("date"))
+                   for iv in sb.get("interventions", [])}
+        return itvs_a <= itvs_b
+
+    if a_in_b(spec_a, spec_b, npar_a, npar_b):
+        return "A_in_B"
+    if a_in_b(spec_b, spec_a, npar_b, npar_a):
+        return "B_in_A"
+    return "none"
+
+
+@mcp.tool()
+def compare_versions(inp_path_a: str, inp_path_b: str,
+                     lam_a: float = 0.0, lam_b: float = 0.0,
+                     guion_path: str = "") -> list:
+    """
+    Compare two estimated models: spec diff, stats table, nested LR test.
+
+    Loads and fits both .inp files. Returns:
+    - Spec comparison (what parameters changed)
+    - Side-by-side stats: loglik, AIC, BIC, σ_a, Q-pass, JB-pass
+    - Nested LR test if one model is a restricted version of the other
+    - ACF/PACF comparison figure (residuals of both models)
+
+    Parameters
+    ----------
+    inp_path_a  : .inp file for model A (baseline / more restricted)
+    inp_path_b  : .inp file for model B (alternative / richer)
+    lam_a       : Box-Cox lambda for model A (0.0 = log)
+    lam_b       : Box-Cox lambda for model B (0.0 = log)
+    guion_path  : (optional) guion.json — unused currently, reserved
+    """
+    try:
+        from mcp.types import TextContent, ImageContent
+        from art.guion import _extract_spec, _build_equation
+        from art.diagnosis import diagnose
+        from art.describe import _fig_b64
+        from art.identification import _default_lags_fug
+        from fue.diagnostics import acf as _fue_acf, pacf as _fue_pacf
+        from fue.plots import _draw_acf_panel, _snap_cmax
+        import numpy as np
+        import scipy.stats as sp_stats
+        import matplotlib.pyplot as plt
+
+        _, ma = _load_fitted(inp_path_a)
+        _, mb = _load_fitted(inp_path_b)
+
+        spec_a = _extract_spec(ma, lam=lam_a)
+        spec_b = _extract_spec(mb, lam=lam_b)
+        eq_a   = _build_equation(spec_a, ma.series.freq)
+        eq_b   = _build_equation(spec_b, mb.series.freq)
+
+        diag_a = diagnose(ma)
+        diag_b = diagnose(mb)
+
+        la, lb = ma._result.loglik, mb._result.loglik
+        aic_a, bic_a = ma._result.aic, ma._result.bic
+        aic_b, bic_b = mb._result.aic, mb._result.bic
+        npar_a, npar_b = ma._result.npar, mb._result.npar
+        import math
+        sa = math.sqrt(ma._result.sigma2) if ma._result.sigma2 > 0 else 0.0
+        sb = math.sqrt(mb._result.sigma2) if mb._result.sigma2 > 0 else 0.0
+
+        name_a = os.path.basename(inp_path_a)
+        name_b = os.path.basename(inp_path_b)
+
+        # ── Spec diff ──────────────────────────────────────────────────────
+        changes = _spec_diff(spec_a, spec_b)
+        diff_str = (", ".join(changes)) if changes else "Sin cambios en la estructura"
+
+        # ── Nested LR test ─────────────────────────────────────────────────
+        nested = _nested_relation(spec_a, spec_b, npar_a, npar_b)
+        lr_lines = []
+        if nested == "A_in_B":
+            lr = 2.0 * (lb - la)
+            df = npar_b - npar_a
+            pval = sp_stats.chi2.sf(lr, df) if lr > 0 else 1.0
+            verdict = "B mejora significativamente ✓" if pval < 0.05 else "mejora no significativa ✗"
+            lr_lines = [
+                f"**Test LR** (B es más rico, A ⊂ B):",
+                f"LR = 2·({lb:.3f}−{la:.3f}) = **{lr:.3f}**, df={df}, p={pval:.4f} → {verdict}",
+            ]
+        elif nested == "B_in_A":
+            lr = 2.0 * (la - lb)
+            df = npar_a - npar_b
+            pval = sp_stats.chi2.sf(lr, df) if lr > 0 else 1.0
+            verdict = "A mejora significativamente ✓" if pval < 0.05 else "mejora no significativa ✗"
+            lr_lines = [
+                f"**Test LR** (A es más rico, B ⊂ A):",
+                f"LR = 2·({la:.3f}−{lb:.3f}) = **{lr:.3f}**, df={df}, p={pval:.4f} → {verdict}",
+            ]
+        else:
+            lr_lines = ["Modelos no anidados — test LR no aplicable."]
+
+        # ── Stats comparison table ─────────────────────────────────────────
+        def _fmt(v, fmt=".2f"):
+            return f"{v:{fmt}}" if v is not None else "—"
+
+        delta_loglik = lb - la
+        delta_aic    = (bic_b or 0) - (bic_a or 0)  # use BIC for penalty
+        delta_aic_v  = (aic_b or 0) - (aic_a or 0)
+
+        rows = [
+            ("", f"**{name_a}**", f"**{name_b}**", "**Δ (B−A)**"),
+            ("loglik", _fmt(la, ".3f"), _fmt(lb, ".3f"), f"{delta_loglik:+.3f}"),
+            ("AIC",    _fmt(aic_a), _fmt(aic_b), f"{delta_aic_v:+.2f}"),
+            ("BIC",    _fmt(bic_a), _fmt(bic_b), f"{delta_aic:+.2f}"),
+            ("σ_a",   f"{sa:.5f}", f"{sb:.5f}", f"{sb-sa:+.5f}"),
+            ("npar",  str(npar_a), str(npar_b), f"{npar_b-npar_a:+d}"),
+            ("Q✓",    "✓" if diag_a.white_noise else "✗",
+                      "✓" if diag_b.white_noise else "✗", ""),
+            ("JB✓",   "✓" if diag_a.normal else "✗",
+                      "✓" if diag_b.normal else "✗", ""),
+            ("Anomalías", str(len(diag_a.extreme)), str(len(diag_b.extreme)), ""),
+        ]
+        col_w = [max(len(r[i]) for r in rows) for i in range(4)]
+        tbl = []
+        for row in rows:
+            tbl.append("| " + " | ".join(cell.ljust(col_w[i]) for i, cell in enumerate(row)) + " |")
+        sep = "|" + "|".join("-" * (w + 2) for w in col_w) + "|"
+        tbl.insert(1, sep)
+
+        # ── ACF/PACF comparison figure ─────────────────────────────────────
+        res_a = np.asarray(diag_a.residuals, dtype=float)
+        res_b = np.asarray(diag_b.residuals, dtype=float)
+        freq  = ma.series.freq
+        lags  = _default_lags_fug(min(len(res_a), len(res_b)), freq)
+        lag_x = np.arange(1, lags + 1)
+
+        acf_a_arr  = np.asarray(_fue_acf(res_a,  lags=lags), dtype=float)
+        acf_b_arr  = np.asarray(_fue_acf(res_b,  lags=lags), dtype=float)
+        pacf_a_arr = np.asarray(_fue_pacf(res_a, lags=lags), dtype=float)
+        pacf_b_arr = np.asarray(_fue_pacf(res_b, lags=lags), dtype=float)
+
+        band_a = 1.96 / np.sqrt(len(res_a))
+        band_b = 1.96 / np.sqrt(len(res_b))
+
+        all_acf  = np.concatenate([acf_a_arr,  acf_b_arr])
+        all_pacf = np.concatenate([pacf_a_arr, pacf_b_arr])
+        cmax = _snap_cmax(all_acf, all_pacf)
+
+        fig, axes = plt.subplots(2, 2, figsize=(14, 6))
+        fig.suptitle(f"Comparación: {name_a}  vs  {name_b}", fontsize=11, fontweight="bold")
+
+        panels = [
+            (axes[0, 0], acf_a_arr,  band_a, f"ACF — {name_a}"),
+            (axes[0, 1], acf_b_arr,  band_b, f"ACF — {name_b}"),
+            (axes[1, 0], pacf_a_arr, band_a, f"PACF — {name_a}"),
+            (axes[1, 1], pacf_b_arr, band_b, f"PACF — {name_b}"),
+        ]
+        for ax, vals, band, title in panels:
+            _draw_acf_panel(ax, lag_x, vals, band=band, cmax=cmax,
+                            freq=freq, lags=lags, label=title)
+
+        fig.tight_layout()
+        b64 = _fig_b64(fig)
+        plt.close(fig)
+
+        # ── Compose text ───────────────────────────────────────────────────
+        lines = [
+            f"## Comparación de versiones",
+            f"",
+            f"**A**: `{name_a}` — `{eq_a}`",
+            f"**B**: `{name_b}` — `{eq_b}`",
+            f"",
+            f"**Cambios (A→B)**: {diff_str}",
+            f"",
+            "### Estadísticos",
+        ] + tbl + [""] + lr_lines
+
+        items = [TextContent(type="text", text="\n".join(lines))]
+        if b64:
+            items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
+        return items
+
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
 # Tool: suggest intervention form (B3)
 # ---------------------------------------------------------------------------
 
