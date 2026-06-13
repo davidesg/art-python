@@ -145,6 +145,35 @@ def seasonal_analysis(inp_path: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Tool: Unit root tests (Bloque L)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def unit_root_analysis(inp_path: str, lam: float = 0.0,
+                       max_d: int = 2) -> list:
+    """
+    Run ADF + KPSS unit-root tests for d = 0, 1, ..., max_d.
+
+    For each differencing level, applies d regular differences to
+    boxcox(y, lam) and runs ADF (H₀: unit root) and KPSS (H₀: stationary).
+    Returns a coloured table per d level and a recommended d.
+
+    Parameters
+    ----------
+    inp_path : path to the .inp file
+    lam      : Box-Cox lambda (0.0 = log, 1.0 = none; use boxcox_analysis
+               to choose the right value first)
+    max_d    : highest differencing order to test (default 2)
+    """
+    try:
+        from art.describe import describe_unit_root
+        ts, _ = _load_ts_model(inp_path)
+        return _result(describe_unit_root(ts, lam=lam, max_d=max_d))
+    except Exception as e:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
 # Tool: Identification
 # ---------------------------------------------------------------------------
 
@@ -877,16 +906,17 @@ def guided_identification(inp_path: str, lam: float = -1.0,
     try:
         from mcp.types import TextContent, ImageContent
         from art.describe import (describe_boxcox, describe_seasonality,
-                                   describe_identification)
+                                   describe_identification, describe_unit_root)
         ts, _ = _load_ts_model(inp_path)
 
         if lam < 0:
-            # Stage 1a + 1b: Box-Cox and seasonality
+            # Stage 1a + 1b: Box-Cox, seasonality and unit root tests
             bc  = describe_boxcox(ts)
             sea = describe_seasonality(ts)
-
             rec_lam = bc.data["recommended_lambda"]
-            rec_d   = sea.data["recommended_d"]
+            urt = describe_unit_root(ts, lam=max(rec_lam, 0.0))
+
+            rec_d   = urt.data["recommended_d"]
             rec_D   = sea.data["recommended_D"]
             decision = sea.data["decision"]
 
@@ -894,6 +924,8 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 bc.summary + "\n\n---\n" + bc.recommendation
                 + "\n\n" + "=" * 60 + "\n\n"
                 + sea.summary + "\n\n---\n" + sea.recommendation
+                + "\n\n" + "=" * 60 + "\n\n"
+                + urt.summary + "\n\n---\n" + urt.recommendation
                 + "\n\n" + "=" * 60 + "\n\n"
                 + f"**Próximo paso:** confirma λ={rec_lam}, d={rec_d}, D={rec_D} "
                 f"(decisión {decision}) y llama de nuevo con esos valores "
@@ -906,6 +938,9 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             if sea.figure_b64:
                 items.append(ImageContent(type="image",
                                           data=sea.figure_b64, mimeType="image/png"))
+            if urt.figure_b64:
+                items.append(ImageContent(type="image",
+                                          data=urt.figure_b64, mimeType="image/png"))
             return items
 
         else:
@@ -1227,10 +1262,13 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
 
         # ── 2. Seasonality / d / D ────────────────────────────────────────
         seas     = describe_seasonality(ts)
-        d        = seas.data.get("recommended_d", 1)
         D        = seas.data.get("recommended_D", 0)
         decision = seas.data.get("decision", "B1")
         n_harmonics = ts.freq // 2 if decision != "A" else 0
+        # Use unit root tests (Bloque L) to determine d
+        from art.describe import describe_unit_root
+        urt = describe_unit_root(ts, lam=lam)
+        d   = urt.data.get("recommended_d", 1)
         log.append(f"**Estacionalidad:** decisión={decision}  d={d}  D={D}  armónicos={n_harmonics}")
 
         # ── 3. ARMA orders ────────────────────────────────────────────────

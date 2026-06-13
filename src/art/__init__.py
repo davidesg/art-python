@@ -3,6 +3,7 @@ from .identification import (
     BoxCoxSelection, boxcox_selection,
     plot_boxcox_selection, save_boxcox_selection,
     save_identification_report,
+    UnitRootResult, unit_root_tests, recommended_d,
 )
 from .seasonal_detection import (
     SeasonalDetectionResult, detect_seasonality,
@@ -29,6 +30,7 @@ from .full_report import FullReport, save_full_report
 from .describe import (
     Description,
     describe_boxcox, describe_seasonality, describe_identification,
+    describe_unit_root,
     describe_diagnosis, describe_formal_tests, describe_interventions,
 )
 
@@ -50,4 +52,6 @@ __all__ = [
     "MEGResult", "meg",
     "OutlierWarning", "InterventionDiagnosis", "diagnose_interventions",
     "FullReport", "save_full_report",
+    "UnitRootResult", "unit_root_tests", "recommended_d",
+    "describe_unit_root",
 ]

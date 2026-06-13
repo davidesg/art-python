@@ -233,6 +233,99 @@ class IdentificationListing:
 
 
 # ---------------------------------------------------------------------------
+# Unit root tests (Bloque L)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class UnitRootResult:
+    """ADF + KPSS result for one differencing level."""
+    d: int
+    label: str           # e.g. "∇ln P"
+    n: int               # length of differenced series
+    adf_stat: float
+    adf_pvalue: float
+    adf_rejects: bool    # True → stationary (H₀ unit root rejected at 5%)
+    kpss_stat: float
+    kpss_pvalue: float
+    kpss_rejects: bool   # True → non-stationary (H₀ stationarity rejected at 5%)
+    verdict: str         # "stationary" | "unit_root" | "ambiguous"
+
+
+def unit_root_tests(ts: "TimeSeries",
+                    lam: float = 0.0,
+                    max_d: int = 2) -> list[UnitRootResult]:
+    """
+    ADF + KPSS unit-root tests for d = 0, 1, …, max_d.
+
+    For each d, applies d regular differences to boxcox(y) (no seasonal
+    differencing) and runs:
+      - ADF (H₀: unit root, autolag='AIC');  reject → stationary
+      - KPSS (H₀: stationary, nlags='auto'); reject → non-stationary
+
+    Verdict:
+      'stationary'  — ADF rejects AND KPSS does not reject
+      'unit_root'   — ADF does not reject AND KPSS rejects
+      'ambiguous'   — tests disagree or both fail to reject
+
+    Parameters
+    ----------
+    ts    : fue.TimeSeries (provides ts.data and ts.freq)
+    lam   : Box-Cox lambda (0.0 = log)
+    max_d : highest differencing order to test (default 2)
+
+    Returns
+    -------
+    list[UnitRootResult], one entry per d from 0 to max_d
+    (may be shorter if the differenced series becomes too short)
+    """
+    import warnings
+    from statsmodels.tsa.stattools import adfuller, kpss as _kpss
+
+    y = np.asarray(ts.data, dtype=float)
+    z = boxcox_transform(y, lam)
+    freq = ts.freq
+
+    results = []
+    for d in range(max_d + 1):
+        w = apply_differences(z, freq, d, 0)
+        if len(w) < 10:
+            break
+        lbl = transform_label(lam, d, 0, freq)
+
+        adf_stat, adf_p, *_ = adfuller(w, autolag="AIC")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            kpss_stat, kpss_p, *_ = _kpss(w, regression="c", nlags="auto")
+
+        adf_rejects  = adf_p   < 0.05
+        kpss_rejects = kpss_p  < 0.05
+
+        if adf_rejects and not kpss_rejects:
+            verdict = "stationary"
+        elif not adf_rejects and kpss_rejects:
+            verdict = "unit_root"
+        else:
+            verdict = "ambiguous"
+
+        results.append(UnitRootResult(
+            d=d, label=lbl, n=len(w),
+            adf_stat=adf_stat, adf_pvalue=adf_p, adf_rejects=adf_rejects,
+            kpss_stat=kpss_stat, kpss_pvalue=kpss_p, kpss_rejects=kpss_rejects,
+            verdict=verdict,
+        ))
+
+    return results
+
+
+def recommended_d(results: list[UnitRootResult]) -> int:
+    """Smallest d with verdict 'stationary'; last d tested if none found."""
+    for r in results:
+        if r.verdict == "stationary":
+            return r.d
+    return results[-1].d if results else 0
+
+
+# ---------------------------------------------------------------------------
 # Plotting — style mirrors fue.plots (Treadway-Jenkins design)
 # ---------------------------------------------------------------------------
 

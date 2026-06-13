@@ -26,6 +26,7 @@ from .identification import (
     identification_listing, save_identification_report,
     apply_differences, boxcox_transform, transform_label,
     _listing_figure,
+    unit_root_tests, recommended_d, UnitRootResult,
 )
 from .seasonal_detection import detect_seasonality, plot_seasonality
 from .model_detection import suggest_orders
@@ -264,6 +265,145 @@ def describe_seasonality(ts) -> Description:
             "recommended_D": 0,
             "d_stationary": d_ok,
             "significant_frequencies": [fr.freq_idx for fr in freqs if fr.p_value < 0.05],
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unit root tests (Bloque L)
+# ---------------------------------------------------------------------------
+
+def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
+    """
+    Run ADF + KPSS for d=0…max_d and return a coloured summary table.
+
+    Returns a Description with:
+      summary      — markdown table of test statistics and verdicts
+      figure_b64   — matplotlib coloured table (one row per d level)
+      recommendation — recommended d with reasoning
+      data         — list of per-level dicts + recommended_d
+    """
+    results = unit_root_tests(ts, lam=lam, max_d=max_d)
+    rec_d   = recommended_d(results)
+
+    _VERDICT_ES = {
+        "stationary": "estacionaria ✓",
+        "unit_root":  "raíz unitaria ✗",
+        "ambiguous":  "ambiguo ⚠",
+    }
+    _COLOR = {
+        "stationary": "#c8e6c9",   # light green
+        "unit_root":  "#ffcdd2",   # light red
+        "ambiguous":  "#fff9c4",   # light yellow
+    }
+
+    # --- markdown summary -----------------------------------------------
+    lines = ["## Tests de raíz unitaria (ADF + KPSS)", ""]
+    lines.append(
+        "| d | Serie | n | ADF t | ADF p | ADF | KPSS η | KPSS p | KPSS | Veredicto |"
+    )
+    lines.append("|---|-------|---|-------|-------|-----|--------|--------|------|-----------|")
+    for r in results:
+        adf_v  = "✓" if r.adf_rejects  else "✗"
+        kpss_v = "✓" if not r.kpss_rejects else "✗"
+        lines.append(
+            f"| {r.d} | {r.label} | {r.n} |"
+            f" {r.adf_stat:+.3f} | {r.adf_pvalue:.4f} | {adf_v} |"
+            f" {r.kpss_stat:.3f} | {r.kpss_pvalue:.4f} | {kpss_v} |"
+            f" {_VERDICT_ES[r.verdict]} |"
+        )
+
+    lines += [
+        "",
+        f"**Recomendación**: d = {rec_d} "
+        f"({'primera diferencia con consenso' if rec_d > 0 else 'serie ya estacionaria en niveles'}).",
+        "",
+        "ADF H₀: raíz unitaria — rechazar (✓) indica estacionariedad.",
+        "KPSS H₀: estacionariedad — no rechazar (✓) indica estacionariedad.",
+    ]
+
+    # --- figure: coloured matplotlib table --------------------------------
+    if results:
+        col_labels = ["d", "Serie", "n",
+                      "ADF t", "ADF p", "ADF",
+                      "KPSS η", "KPSS p", "KPSS",
+                      "Veredicto"]
+        rows, colors = [], []
+        for r in results:
+            adf_v  = "✓" if r.adf_rejects      else "✗"
+            kpss_v = "✓" if not r.kpss_rejects  else "✗"
+            rows.append([
+                str(r.d), r.label, str(r.n),
+                f"{r.adf_stat:+.3f}", f"{r.adf_pvalue:.4f}", adf_v,
+                f"{r.kpss_stat:.3f}", f"{r.kpss_pvalue:.4f}", kpss_v,
+                _VERDICT_ES[r.verdict],
+            ])
+            bg = _COLOR[r.verdict]
+            colors.append([bg] * len(col_labels))
+
+        fig_h = max(1.8, 0.55 * len(results) + 0.8)
+        fig, ax = plt.subplots(figsize=(10, fig_h))
+        ax.axis("off")
+        tbl = ax.table(
+            cellText=rows,
+            colLabels=col_labels,
+            cellColours=colors,
+            loc="center",
+            cellLoc="center",
+        )
+        tbl.auto_set_font_size(False)
+        tbl.set_fontsize(9)
+        tbl.auto_set_column_width(list(range(len(col_labels))))
+        # Style header row
+        for j in range(len(col_labels)):
+            tbl[0, j].set_facecolor("#455a64")
+            tbl[0, j].set_text_props(color="white", fontweight="bold")
+        fig.tight_layout()
+        b64 = _fig_b64(fig)
+        plt.close(fig)
+    else:
+        b64 = None
+
+    # --- recommendation ---------------------------------------------------
+    verdicts = {r.d: r.verdict for r in results}
+    if rec_d == 0 and verdicts.get(0) == "stationary":
+        rec_text = (
+            "La serie en niveles (d=0) es estacionaria según ADF y KPSS. "
+            "Procede con d=0."
+        )
+    elif verdicts.get(rec_d) == "stationary":
+        rec_text = (
+            f"La serie con d={rec_d} diferencia(s) es estacionaria. "
+            f"Usa d={rec_d}."
+        )
+    elif any(r.verdict == "ambiguous" for r in results):
+        rec_text = (
+            f"Resultados ambiguos. La inspección visual del ACF (listado de "
+            f"identificación) es necesaria para confirmar d={rec_d}."
+        )
+    else:
+        rec_text = (
+            f"No se detectó estacionariedad hasta d={max_d}. "
+            "Revisa la serie: posible varianza no estacionaria o outliers."
+        )
+
+    return Description(
+        summary="\n".join(lines),
+        figure_b64=b64,
+        recommendation=rec_text,
+        data={
+            "recommended_d": rec_d,
+            "results": [
+                {
+                    "d": r.d, "label": r.label, "n": r.n,
+                    "adf_stat": r.adf_stat, "adf_pvalue": r.adf_pvalue,
+                    "adf_rejects": r.adf_rejects,
+                    "kpss_stat": r.kpss_stat, "kpss_pvalue": r.kpss_pvalue,
+                    "kpss_rejects": r.kpss_rejects,
+                    "verdict": r.verdict,
+                }
+                for r in results
+            ],
         },
     )
 
