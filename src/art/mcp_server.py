@@ -1208,6 +1208,10 @@ def _make_model(ts, lam: float, d: int, D: int,
     When D=0: harmonic det-vars (cos/sin + alter) + optional extra interventions.
     When D=1: seasonal AR/MA operators; no harmonics added.
     extra_itvs : list of (at_0based, form_str) tuples for pulse/step/ramp
+
+    Known fue C backend bug: combining ar_s (P≥1) AND ma_s (Q≥1) simultaneously
+    crashes the C estimator (Aborted/segfault — see fue/TODO.md, AR_s+MA_s entry).
+    Only P=0,Q≥1 or P≥1,Q=0 are safe.  Use estimate_py() as workaround if needed.
     """
     import fue
     freq = ts.freq
