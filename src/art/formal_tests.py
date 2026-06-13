@@ -959,3 +959,135 @@ def meg(model, frequencies=None) -> list[MEGResult]:
                                      status='ambiguous'))
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Bloque H — Joint LR test for seasonal harmonic simplification
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SeasonalSimplificationResult:
+    """Result of the joint H₀: cos_k = sin_k = 0 for k in harmonics_tested."""
+    harmonics_tested: list[int]    # k values restricted to zero
+    components: dict               # k → {'cos', 'sin'} sets — which components exist
+    df: int                        # degrees of freedom = Σ |components_k|
+    loglik_free: float
+    loglik_constrained: float
+    lr: float                      # 2·(L_free − L_constrained)
+    pvalue: float                  # chi²(df) p-value
+    alpha: float = 0.05
+
+    @property
+    def rejects(self) -> bool:
+        """True when H₀ is rejected — harmonics are jointly significant."""
+        return self.pvalue < self.alpha
+
+    def summary(self) -> str:
+        crit_90 = sp_stats.chi2.ppf(0.90, df=self.df)
+        crit_95 = sp_stats.chi2.ppf(0.95, df=self.df)
+        crit_99 = sp_stats.chi2.ppf(0.99, df=self.df)
+        ks = ", ".join(f"k={k}" for k in self.harmonics_tested)
+        verdict = ("RECHAZA H₀ — armónicos significativos ✗"
+                   if self.rejects
+                   else "No rechaza H₀ — armónicos pueden eliminarse ✓")
+        return "\n".join([
+            f"Test RV de simplificación estacional",
+            f"  H₀: cos_k = sin_k = 0  para {ks}",
+            f"  df = {self.df}",
+            f"  logL(libre)       = {self.loglik_free:.4f}",
+            f"  logL(restringido) = {self.loglik_constrained:.4f}",
+            f"  LR = {self.lr:.4f}",
+            f"  Valores críticos χ²({self.df}): 10%={crit_90:.2f}  5%={crit_95:.2f}  1%={crit_99:.2f}",
+            f"  p-value = {self.pvalue:.4f}  (α={self.alpha})",
+            f"  → {verdict}",
+        ])
+
+
+def seasonal_simplification_test(model, freq_list=None,
+                                  alpha: float = 0.05) -> SeasonalSimplificationResult:
+    """
+    Joint LR test H₀: cos_k = sin_k = 0 for all k in freq_list.
+
+    Fits a restricted model with the specified harmonic parameters fixed to zero
+    and computes LR = 2·(L_free − L_restricted) ~ χ²(df), where df = number
+    of constrained free parameters (2 per regular harmonic, 1 for Nyquist/alter).
+
+    Parameters
+    ----------
+    model      : fue.Model, already fitted
+    freq_list  : list[int] | None
+        Harmonic indices k to restrict. None = all free harmonics in model.
+    alpha      : significance level for the ``rejects`` property (default 0.05)
+
+    Returns
+    -------
+    SeasonalSimplificationResult
+
+    Raises
+    ------
+    RuntimeError  if model is not fitted
+    ValueError    if no free harmonics found, or if freq_list names absent harmonics
+    """
+    if model._result is None:
+        raise RuntimeError("Model has not been fitted — call model.fit() first.")
+
+    freq = model.series.freq
+
+    # Inventory all free harmonics in model
+    all_harmonics: dict[int, set] = {}
+    for itv in (model.interventions or []):
+        t    = itv.type
+        om_f = (list(itv.omega_free)
+                if (hasattr(itv, "omega_free") and itv.omega_free)
+                else [True])
+        if t in ("cos", "sin", "alter") and om_f[0]:
+            k         = (freq // 2) if t == "alter" else int(round(getattr(itv, "harmonic", 1)))
+            component = "cos" if t in ("cos", "alter") else "sin"
+            all_harmonics.setdefault(k, set()).add(component)
+
+    if not all_harmonics:
+        raise ValueError("No free harmonic (cos/sin/alter) parameters found in model.")
+
+    if freq_list is None:
+        freq_list = sorted(all_harmonics.keys())
+    else:
+        unknown = [k for k in freq_list if k not in all_harmonics]
+        if unknown:
+            raise ValueError(
+                f"Harmonic(s) {unknown} not found in model. "
+                f"Available: {sorted(all_harmonics)}"
+            )
+
+    # Degrees of freedom = number of free params being restricted
+    df = sum(len(all_harmonics[k]) for k in freq_list)
+
+    L_free = float(model._result.loglik)
+
+    # Build restricted model: fix listed harmonics to 0
+    mc = copy.deepcopy(model)
+    mc._result = None
+    test_set = set(freq_list)
+    for itv in mc.interventions:
+        t = itv.type
+        if t not in ("cos", "sin", "alter"):
+            continue
+        k = (freq // 2) if t == "alter" else int(round(getattr(itv, "harmonic", 1)))
+        if k in test_set:
+            itv.omega      = [0.0]
+            itv.omega_free = [False]
+    mc.fit()
+
+    L_const = float(mc._result.loglik)
+    lr      = 2.0 * (L_free - L_const)
+    pvalue  = float(1.0 - sp_stats.chi2.cdf(max(lr, 0.0), df=df))
+
+    return SeasonalSimplificationResult(
+        harmonics_tested=sorted(freq_list),
+        components={k: all_harmonics[k] for k in freq_list},
+        df=df,
+        loglik_free=L_free,
+        loglik_constrained=L_const,
+        lr=lr,
+        pvalue=pvalue,
+        alpha=alpha,
+    )

@@ -324,6 +324,41 @@ def seasonal_param_analysis(inp_path: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Tool: Seasonal simplification (Bloque H)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def test_seasonal_simplification(inp_path: str,
+                                  freq_list: list[int] | None = None,
+                                  alpha: float = 0.05) -> list:
+    """
+    Joint LR test for eliminating seasonal harmonics: H₀: cos_k = sin_k = 0.
+
+    Fits a restricted model with the specified harmonics fixed to zero and
+    computes LR = 2·(L_free − L_restricted) ~ χ²(df), where df = number of
+    constrained parameters (2 per regular harmonic, 1 for Nyquist/alter).
+
+    Typical workflow after seasonal_param_analysis:
+    - Pass the k values with |t| ≤ 2 in both cos and sin as freq_list.
+    - If LR < χ²(df, 5%): safely remove those harmonics and refit.
+    - If LR ≥ χ²(df, 5%): the harmonics are jointly significant — keep them.
+
+    Parameters
+    ----------
+    inp_path  : path to a fitted .inp or .pre file
+    freq_list : harmonic indices to test (None = test all harmonics jointly)
+    alpha     : significance level (default 0.05)
+    """
+    try:
+        from art.describe import describe_seasonal_simplification
+        _, m = _load_fitted(inp_path)
+        return _result(describe_seasonal_simplification(m, freq_list=freq_list,
+                                                        alpha=alpha))
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
 # Tool: Interventions
 # ---------------------------------------------------------------------------
 

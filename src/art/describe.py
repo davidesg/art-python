@@ -1580,6 +1580,94 @@ def describe_seasonal_params(model) -> Description:
 
 
 # ---------------------------------------------------------------------------
+# Seasonal simplification test (Bloque H)
+# ---------------------------------------------------------------------------
+
+def describe_seasonal_simplification(model, freq_list=None,
+                                      alpha: float = 0.05) -> Description:
+    """
+    Joint LR test for eliminating seasonal harmonics from a fitted model.
+
+    H₀: cos_k = sin_k = 0 for all k in freq_list.
+    LR ~ χ²(df), df = number of constrained parameters.
+
+    Parameters
+    ----------
+    model     : fue.Model, already fitted
+    freq_list : list[int] | None
+        Harmonic indices k to test (None = all free harmonics in model).
+    alpha     : significance level (default 0.05)
+    """
+    from .formal_tests import seasonal_simplification_test
+    import scipy.stats as sp_stats
+
+    if model._result is None:
+        raise RuntimeError("Model has not been fitted — call model.fit() first.")
+
+    result = seasonal_simplification_test(model, freq_list=freq_list, alpha=alpha)
+
+    freq     = model.series.freq
+    name     = getattr(model.series, "name", "") or "modelo"
+    ks_str   = ", ".join(f"k={k}" for k in result.harmonics_tested)
+    crit_90  = sp_stats.chi2.ppf(0.90, df=result.df)
+    crit_95  = sp_stats.chi2.ppf(0.95, df=result.df)
+    crit_99  = sp_stats.chi2.ppf(0.99, df=result.df)
+    verdict  = ("**RECHAZA H₀** — los armónicos son conjuntamente significativos ✗"
+                if result.rejects
+                else "**No rechaza H₀** — los armónicos pueden eliminarse ✓")
+    stars    = ("***" if result.pvalue < 0.01
+                else "** " if result.pvalue < 0.05
+                else "*  " if result.pvalue < 0.10
+                else "   ")
+
+    lines = [
+        f"## Test de simplificación estacional — {name}  (freq={freq})\n",
+        f"**H₀:** cos_k = sin_k = 0  para  {ks_str}",
+        f"**df** = {result.df}  "
+        f"({'2 por armónico regular, 1 para Nyquist' if result.df > 1 else '1 param'})\n",
+        "| Estadístico | Valor |",
+        "|-------------|-------|",
+        f"| logL(libre)       | {result.loglik_free:.4f} |",
+        f"| logL(restringido) | {result.loglik_constrained:.4f} |",
+        f"| **LR**            | **{result.lr:.4f}** {stars} |",
+        f"| p-value           | {result.pvalue:.4f} |",
+        "",
+        f"Valores críticos χ²({result.df}): "
+        f"10%={crit_90:.2f}  5%={crit_95:.2f}  1%={crit_99:.2f}\n",
+        f"→ {verdict}",
+    ]
+
+    if result.rejects:
+        rec = (
+            f"Los armónicos {ks_str} son conjuntamente significativos "
+            f"(LR={result.lr:.3f} > χ²({result.df}, 5%)={crit_95:.2f}). "
+            f"No se pueden eliminar del modelo sin pérdida de ajuste."
+        )
+    else:
+        rec = (
+            f"Los armónicos {ks_str} pueden eliminarse: "
+            f"LR={result.lr:.3f} < χ²({result.df}, 5%)={crit_95:.2f}, "
+            f"p={result.pvalue:.4f}. "
+            f"Reformula el modelo sin esos armónicos y reestima."
+        )
+
+    return Description(
+        summary="\n".join(lines),
+        figure_b64=None,
+        recommendation=rec,
+        data={
+            "harmonics_tested": result.harmonics_tested,
+            "df": result.df,
+            "lr": result.lr,
+            "pvalue": result.pvalue,
+            "rejects": result.rejects,
+            "loglik_free": result.loglik_free,
+            "loglik_constrained": result.loglik_constrained,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
