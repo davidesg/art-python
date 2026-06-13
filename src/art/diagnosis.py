@@ -58,6 +58,10 @@ class DiagnosisResult:
     seasonal: SeasonalDetectionResult | None = None
     # Model label (for titles)
     label: str = ""
+    # Over-parametrization (Bloque I)
+    param_labels: list[str] | None = None          # label for each free param
+    param_corr: np.ndarray | None = None           # full correlation matrix
+    high_corr_pairs: list | None = None            # (i, j, r, lbl_i, lbl_j) with |r|>threshold
 
     @property
     def white_noise(self) -> bool:
@@ -92,6 +96,154 @@ class DiagnosisResult:
             lines.append(f"  Seasonal in residuals: {self.seasonal.seasonal_detected} "
                          f"(p={self.seasonal.p_value:.4f})")
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Parameter labeling and correlation (Bloque I)
+# ---------------------------------------------------------------------------
+
+def _build_param_labels(model) -> list[str]:
+    """Human-readable label for each free parameter in model.params order.
+
+    Order matches fue cast_us._build_initial_x:
+      1. omega_free per intervention
+      2. delta_free per intervention
+      3. AR regular (free)
+      4. AR seasonal (free)
+      5. MA regular (free)
+      6. MA seasonal (free)
+      7. AR_f free coefs
+      8. MA_f free coefs
+      9. mu (if estimate_mu)
+    """
+    labels: list[str] = []
+    freq = model.series.freq if model.series is not None else 12
+
+    # 1. Intervention omega_free
+    for itv in (model.interventions or []):
+        t    = itv.type
+        om_f = (list(itv.omega_free)
+                if (hasattr(itv, "omega_free") and itv.omega_free) else [])
+        h    = int(round(getattr(itv, "harmonic", 1)))
+        for i, free in enumerate(om_f):
+            if not free:
+                continue
+            if t == "cos":
+                labels.append(f"cos(k={h})")
+            elif t == "sin":
+                labels.append(f"sin(k={h})")
+            elif t == "alter":
+                labels.append("alter")
+            else:
+                xi = {"step": "S", "pulse": "I", "impulse": "I",
+                      "ramp": "R", "compimp": "CI"}.get(t, t)
+                labels.append(f"ω({xi})" if i == 0 else f"ω({xi},l{i})")
+
+    # 2. Intervention delta_free
+    for itv in (model.interventions or []):
+        df = (list(itv.delta_free)
+              if (hasattr(itv, "delta_free") and itv.delta_free) else [])
+        for i, free in enumerate(df):
+            if free:
+                labels.append(f"δ(l{i})")
+
+    # 3. AR regular
+    for fi, factor in enumerate(model.ar or []):
+        fl = (model.ar_free[fi]
+              if (model.ar_free and fi < len(model.ar_free))
+              else [True] * len(factor))
+        for li, free in enumerate(fl):
+            if free:
+                labels.append(f"AR({li+1})")
+
+    # 4. AR seasonal
+    for fi, factor in enumerate(model.ar_s or []):
+        fl = (model.ar_s_free[fi]
+              if (hasattr(model, "ar_s_free") and model.ar_s_free
+                  and fi < len(model.ar_s_free))
+              else [True] * len(factor))
+        for li, free in enumerate(fl):
+            if free:
+                labels.append(f"AR_s({(li+1)*freq})")
+
+    # 5. MA regular
+    for fi, factor in enumerate(model.ma or []):
+        fl = (model.ma_free[fi]
+              if (model.ma_free and fi < len(model.ma_free))
+              else [True] * len(factor))
+        for li, free in enumerate(fl):
+            if free:
+                labels.append(f"MA({li+1})")
+
+    # 6. MA seasonal
+    for fi, factor in enumerate(model.ma_s or []):
+        fl = (model.ma_s_free[fi]
+              if (hasattr(model, "ma_s_free") and model.ma_s_free
+                  and fi < len(model.ma_s_free))
+              else [True] * len(factor))
+        for li, free in enumerate(fl):
+            if free:
+                labels.append(f"MA_s({(li+1)*freq})")
+
+    # 7. AR_f free coefs
+    for f_idx, ff in enumerate(model.ar_f or []):
+        if ff.free:
+            labels.append(f"AR_f(f={f_idx})")
+
+    # 8. MA_f free coefs
+    for f_idx, ff in enumerate(model.ma_f or []):
+        if ff.free:
+            labels.append(f"MA_f(f={f_idx})")
+
+    # 9. mu
+    if getattr(model, "estimate_mu", False):
+        labels.append("μ")
+
+    return labels
+
+
+def _compute_param_corr(model,
+                         threshold: float = 0.7) -> tuple[np.ndarray | None, list, list[str]]:
+    """
+    Compute correlation matrix of estimated parameters from cov_matrix.
+
+    Returns (corr_matrix, high_corr_pairs, param_labels).
+    high_corr_pairs: list of (i, j, r, label_i, label_j) for |r| > threshold.
+    Returns (None, [], []) when the covariance matrix is unavailable.
+    """
+    if model._result is None:
+        return None, [], []
+    cov_raw = getattr(model._result, "cov_matrix", None)
+    if cov_raw is None:
+        return None, [], []
+
+    cov = np.asarray(cov_raw, dtype=float)
+    n   = cov.shape[0]
+    if n < 2:
+        return None, [], []
+
+    var = np.diag(cov)
+    if np.any(var < 0) or np.any(np.sqrt(np.maximum(var, 0)) < 1e-15):
+        return None, [], []
+
+    stds = np.sqrt(var)
+    corr = cov / np.outer(stds, stds)
+    np.clip(corr, -1.0, 1.0, out=corr)
+
+    labels = _build_param_labels(model)
+    # Safety: align label count with matrix dimension
+    if len(labels) < n:
+        labels = labels + [f"p{i}" for i in range(len(labels), n)]
+    labels = labels[:n]
+
+    pairs = [
+        (i, j, float(corr[i, j]), labels[i], labels[j])
+        for i in range(n)
+        for j in range(i + 1, n)
+        if abs(corr[i, j]) > threshold
+    ]
+
+    return corr, pairs, labels
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +328,9 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
     name = getattr(model.series, 'name', '') if model.series else ''
     label = name or "model"
 
+    # --- Over-parametrization: correlation matrix (Bloque I) ---
+    param_corr, high_corr_pairs, param_labels = _compute_param_corr(model)
+
     return DiagnosisResult(
         residuals=r,
         nobs=n,
@@ -192,6 +347,9 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
         pacf=pacf_r,
         seasonal=seasonal,
         label=label,
+        param_labels=param_labels,
+        param_corr=param_corr,
+        high_corr_pairs=high_corr_pairs,
     )
 
 

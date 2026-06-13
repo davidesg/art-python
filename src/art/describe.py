@@ -975,6 +975,14 @@ def describe_diagnosis(model) -> Description:
                 "un pulse es un shock transitorio de un solo período."
             )
 
+    # Over-parametrization warning (Bloque I)
+    overpar_pairs = result.high_corr_pairs or []
+    if overpar_pairs:
+        lines.append("")
+        lines.append("**⚠ Posible sobreparametrización** (|corr| > 0.7):")
+        for _, _, r_val, lbl_i, lbl_j in overpar_pairs:
+            lines.append(f"  - corr({lbl_i}, {lbl_j}) = {r_val:+.3f}")
+
     if result.clean:
         rec = "El modelo pasa la diagnosis. Procede a los contrastes formales (DCD, MEG)."
     else:
@@ -1006,6 +1014,17 @@ def describe_diagnosis(model) -> Description:
             )
         rec = "Reformulación necesaria: " + "; ".join(parts) + "."
 
+    if overpar_pairs:
+        pair_str = "; ".join(
+            f"corr({lbl_i},{lbl_j})={r_val:+.3f}"
+            for _, _, r_val, lbl_i, lbl_j in overpar_pairs
+        )
+        overpar_note = (
+            f" Sobreparametrización: {pair_str}. "
+            f"Considera eliminar el parámetro menos significativo de cada par."
+        )
+        rec = rec.rstrip(".") + "." + overpar_note
+
     summary_parts = []
     if eq_text:
         summary_parts.append(eq_text)
@@ -1026,6 +1045,11 @@ def describe_diagnosis(model) -> Description:
             "intervention_hints": [
                 {"obs": o, "z": z, "form": h} for o, z, h in intervention_hints
             ],
+            "high_corr_pairs": [
+                {"i": i, "j": j, "corr": r_val, "label_i": li, "label_j": lj}
+                for i, j, r_val, li, lj in overpar_pairs
+            ],
+            "param_labels": result.param_labels or [],
         },
     )
 
