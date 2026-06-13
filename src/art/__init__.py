@@ -15,7 +15,7 @@ from .model_detection import (
 )
 from .diagnosis import (
     DiagnosisResult, diagnose,
-    plot_diagnosis, save_diagnosis_report,
+    plot_diagnosis, plot_diagnosis_histogram, save_diagnosis_report,
 )
 from .formal_tests import (
     ShinFullerResult, shin_fuller,
@@ -52,7 +52,7 @@ __all__ = [
     "ModelSpec", "suggest_orders",
     "plot_model_comparison", "save_model_detection_report",
     "DiagnosisResult", "diagnose",
-    "plot_diagnosis", "save_diagnosis_report",
+    "plot_diagnosis", "plot_diagnosis_histogram", "save_diagnosis_report",
     "ShinFullerResult", "shin_fuller",
     "DCDResult", "dcd", "dcd_f",
     "RVResult", "rv",

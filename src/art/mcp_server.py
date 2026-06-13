@@ -296,6 +296,38 @@ def estimate_and_diagnose(inp_path: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Tool: Residuals histogram (optional complement to estimate_and_diagnose)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def model_histogram(inp_path: str) -> list:
+    """
+    Show the residuals histogram with normal overlay for a fitted model.
+
+    Optional complement to the basic Treadway diagnostic module
+    (estimate_and_diagnose / confirm_and_estimate).  The histogram is not
+    part of the basic diagnostic module — request it explicitly when you
+    want to inspect the distributional shape of the residuals.
+
+    Parameters
+    ----------
+    inp_path : path to the .inp or .pre file with the estimated model
+    """
+    try:
+        from mcp.types import ImageContent
+        from art.describe import _fig_b64
+        from art.diagnosis import plot_diagnosis_histogram
+        import matplotlib.pyplot as plt
+        ts, m = _load_fitted(inp_path)
+        fig = plot_diagnosis_histogram(m)
+        b64 = _fig_b64(fig)
+        plt.close(fig)
+        return [ImageContent(type="image", data=b64, mimeType="image/png")]
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
 # Tool: Formal tests
 # ---------------------------------------------------------------------------
 

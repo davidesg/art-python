@@ -374,79 +374,66 @@ def _period_label(start: tuple[int, int], offset: int, freq: int) -> str:
 
 
 def plot_diagnosis(result: DiagnosisResult, model=None) -> plt.Figure:
-    """
-    Four-panel diagnosis figure:
-      top-left:  standardized residuals time series
-      top-right: QQ-normal plot
-      bot-left:  ACF of residuals
-      bot-right: PACF of residuals
-    """
-    r     = result.residuals
-    n     = result.nobs
-    lags  = len(result.acf)
-    band  = 1.96 / math.sqrt(n)
+    """Treadway-Jenkins diagnostic panel (fue layout).
 
-    s = 1
-    start = (1900, 1)
+    When *model* is fitted, delegates to fue.plots.plot_model_diagnostics which
+    produces the canonical layout: residuals time-series (left, full height) +
+    stacked ACF/PACF (right).  This is the basic diagnostic module; the
+    histogram is a separate optional figure (see plot_diagnosis_histogram).
+    """
+    if model is not None and getattr(model, "_result", None) is not None:
+        from fue.plots import plot_model_diagnostics
+        fig, _ = plot_model_diagnostics(model)
+        return fig
+
+    # Fallback when no fitted model object is available (should not happen in
+    # normal ART usage, but kept for defensive completeness).
+    r    = result.residuals
+    n    = result.nobs
+    lags = len(result.acf)
+    band = 1.96 / math.sqrt(n)
+    s    = 1
     if model is not None and model.series is not None:
-        s     = model.series.freq
-        start = model.series.start
+        s = model.series.freq
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 7))
     fig.suptitle(f"Diagnosis: {result.label}", fontweight='bold', fontsize=13)
 
-    # ---- top-left: residuals time series ----
     ax = axes[0, 0]
-    x = np.arange(n)
-    ax.axhline(0,   color='black', lw=0.8)
-    ax.axhline(+2,  color='red',   lw=0.6, ls='--')
-    ax.axhline(-2,  color='red',   lw=0.6, ls='--')
-    ax.axhline(+3,  color='red',   lw=0.4, ls=':')
-    ax.axhline(-3,  color='red',   lw=0.4, ls=':')
-    ax.plot(x, r, color='#333333', lw=0.8)
+    ax.axhline(0, color='black', lw=0.8)
+    ax.axhline(+2, color='red', lw=0.6, ls='--')
+    ax.axhline(-2, color='red', lw=0.6, ls='--')
+    ax.plot(np.arange(n), r, color='#333333', lw=0.8)
     for obs, z in result.extreme:
         ax.scatter(obs - 1, z, color='red', s=20, zorder=5)
-    ax.set_title("Residuals", fontsize=10)
-    ax.set_xlabel("obs")
-    ax.set_ylabel("z")
-    _tj_spines(ax)
+    ax.set_title("Residuals"); _tj_spines(ax)
 
-    # ---- top-right: QQ normal ----
     ax = axes[0, 1]
     (osm, osr), (slope, intercept, _) = sp_stats.probplot(r, dist='norm')
     ax.plot(osm, osr, 'o', ms=2.5, color='#333333', alpha=0.7)
-    lo, hi = osm[0], osm[-1]
-    ax.plot([lo, hi], [slope * lo + intercept, slope * hi + intercept],
+    ax.plot([osm[0], osm[-1]],
+            [slope * osm[0] + intercept, slope * osm[-1] + intercept],
             color='red', lw=1.2)
-    ax.set_title("QQ Normal", fontsize=10)
-    ax.set_xlabel("Theoretical quantiles")
-    ax.set_ylabel("Sample quantiles")
-    _tj_spines(ax)
+    ax.set_title("QQ Normal"); _tj_spines(ax)
 
-    # ---- bottom-left: ACF of residuals ----
-    ax = axes[1, 0]
     lag_x = np.arange(1, lags + 1)
     cmax  = max(float(np.abs(result.acf).max()),
                 float(np.abs(result.pacf).max())) * 1.15 + 0.05
-    _draw_acf_panel(ax, lag_x, result.acf, band=band, cmax=cmax,
-                    freq=s, lags=lags, label="ACF")
+    _draw_acf_panel(axes[1, 0], lag_x, result.acf,  band=band,
+                    cmax=cmax, freq=s, lags=lags, label="ACF")
+    _draw_acf_panel(axes[1, 1], lag_x, result.pacf, band=band,
+                    cmax=cmax, freq=s, lags=lags, label="PACF")
 
-    # ---- bottom-right: PACF of residuals ----
-    ax = axes[1, 1]
-    _draw_acf_panel(ax, lag_x, result.pacf, band=band, cmax=cmax,
-                    freq=s, lags=lags, label="PACF")
-
-    # Add Q-test annotation
-    q_str = "  ".join(
-        f"Q({l})={q:.1f}" + ("*" if p < 0.05 else "")
-        for l, q, p in zip(result.q_lags, result.q_stats, result.q_pvalues)
-    )
-    jb_str = f"JB={result.jb_stat:.2f} (p={result.jb_pvalue:.3f})"
-    fig.text(0.5, 0.01, f"{q_str}    {jb_str}",
-             ha='center', fontsize=8.5, style='italic')
-
-    fig.tight_layout(rect=[0, 0.03, 1, 0.97])
+    fig.tight_layout()
     return fig
+
+
+def plot_diagnosis_histogram(model) -> plt.Figure:
+    """Residuals histogram with normal overlay (optional complement to
+    plot_diagnosis).  Delegates to fue.plots.plot_model_diagnostics fig2."""
+    from fue.plots import plot_model_diagnostics
+    _, fig_hist = plot_model_diagnostics(model)
+    return fig_hist
 
 
 # ---------------------------------------------------------------------------
