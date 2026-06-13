@@ -295,6 +295,35 @@ def formal_tests(inp_path: str, run_meg: bool = True) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Tool: Seasonal parameters (Bloque G)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def seasonal_param_analysis(inp_path: str) -> list:
+    """
+    Visualise estimated seasonal harmonic parameters (cos/sin) with ±2 SE bars.
+
+    For each harmonic k=1..freq//2 present in the model, reports:
+    - cos_k and sin_k coefficients with SE and t-ratio
+    - Amplitude A_k = sqrt(cos_k² + sin_k²)
+    - Which harmonics are significant (|t| > 2) and which could be dropped
+
+    Bar chart figure: two panels (cos coefficients | sin coefficients),
+    colour-coded by significance.
+
+    Parameters
+    ----------
+    inp_path : path to a fitted .inp or .pre file
+    """
+    try:
+        from art.describe import describe_seasonal_params
+        _, m = _load_fitted(inp_path)
+        return _result(describe_seasonal_params(m))
+    except Exception as e:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
 # Tool: Interventions
 # ---------------------------------------------------------------------------
 

@@ -1354,6 +1354,232 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
 
 
 # ---------------------------------------------------------------------------
+# Seasonal parameters (Bloque G)
+# ---------------------------------------------------------------------------
+
+def describe_seasonal_params(model) -> Description:
+    """
+    Visualise estimated cos/sin harmonic coefficients with ±2 SE error bars.
+
+    Two-panel bar chart (cos_k | sin_k) by harmonic index k=1..freq//2.
+    Significant bars (|t| > 2) are coloured; non-significant are grey.
+    Text table summarises t-ratios and amplitude A_k = sqrt(cos_k²+sin_k²).
+    Recommendation flags harmonics that could be dropped.
+    """
+    import numpy as np
+
+    if model._result is None:
+        raise RuntimeError("Model has not been fitted — call model.fit() first.")
+
+    freq = model.series.freq
+
+    # ── extract harmonic parameters in model.params order ──────────────────
+    params = list(model.params)
+    ses    = list(model.std_errors)
+    pi_idx = 0
+    harmonic_data: dict[int, dict] = {}   # k → {component: (v, se)}
+
+    for itv in (model.interventions or []):
+        t    = itv.type
+        om   = list(itv.omega)     if itv.omega     else []
+        om_f = (list(itv.omega_free)
+                if (hasattr(itv, "omega_free") and itv.omega_free)
+                else [True] * len(om))
+        h    = int(round(getattr(itv, "harmonic", 1)))
+
+        if t in ("cos", "sin", "alter"):
+            if om_f[0]:
+                v, se = params[pi_idx], ses[pi_idx]
+                pi_idx += 1
+            else:
+                v, se = (om[0] if om else 0.0), 0.0
+            k         = (freq // 2) if t == "alter" else h
+            component = "cos" if t in ("cos", "alter") else "sin"
+            harmonic_data.setdefault(k, {})[component] = (v, se)
+
+        elif t in ("step", "pulse", "impulse", "ramp", "compimp"):
+            for free in om_f:
+                if free:
+                    pi_idx += 1
+
+    if not harmonic_data:
+        return Description(
+            summary="No hay parámetros estacionales (cos/sin) en este modelo.",
+            figure_b64=None,
+            recommendation="El modelo no contiene armónicos estacionales.",
+            data={},
+        )
+
+    # ── frequency label helper ──────────────────────────────────────────────
+    def _freq_label(k: int) -> str:
+        from math import gcd as _gcd
+        half = freq // 2
+        g    = _gcd(k, half)
+        num, den = k // g, half // g
+        if den == 1:
+            frac = "π" if num == 1 else f"{num}π"
+        else:
+            frac = f"π/{den}" if num == 1 else f"{num}π/{den}"
+        return f"k={k}\n({frac})"
+
+    k_all = sorted(harmonic_data.keys())
+
+    # ── figure ──────────────────────────────────────────────────────────────
+    k_cos = [k for k in k_all if "cos" in harmonic_data[k]]
+    k_sin = [k for k in k_all if "sin" in harmonic_data[k]]
+
+    has_cos = bool(k_cos)
+    has_sin = bool(k_sin)
+    n_panels = (1 if has_cos else 0) + (1 if has_sin else 0)
+    fig, axes = plt.subplots(1, n_panels, figsize=(5 * n_panels, 4.5), squeeze=False)
+    ax_iter = iter(axes[0])
+
+    def _bar_panel(ax, k_list, component, title):
+        vals  = [harmonic_data[k][component][0] for k in k_list]
+        svals = [harmonic_data[k][component][1] for k in k_list]
+        t_abs = [abs(v) / (s + 1e-12) for v, s in zip(vals, svals)]
+        cols  = ["steelblue" if t > 2 else "lightgrey" for t in t_abs]
+        xerrs = [2 * s for s in svals]
+        xs    = list(range(len(k_list)))
+        ax.bar(xs, vals, yerr=xerrs, capsize=5, color=cols,
+               edgecolor="dimgrey", linewidth=0.6, error_kw={"elinewidth": 1.2})
+        ax.axhline(0, color="crimson", linestyle="--", linewidth=0.8)
+        ax.set_title(title, fontsize=11)
+        ax.set_xticks(xs)
+        ax.set_xticklabels([_freq_label(k) for k in k_list], fontsize=8)
+        ax.set_xlabel("Frecuencia k", fontsize=9)
+        ax.set_ylabel("Coeficiente", fontsize=9)
+        ax.tick_params(axis="y", labelsize=8)
+
+    if has_cos:
+        _bar_panel(next(ax_iter), k_cos, "cos", "Coeficientes cos(ωₖt)")
+    if has_sin:
+        _bar_panel(next(ax_iter), k_sin, "sin", "Coeficientes sin(ωₖt)")
+
+    series_name = getattr(model.series, "name", "") or "modelo"
+    fig.suptitle(f"Parámetros estacionales — {series_name}  (freq={freq})",
+                 fontsize=12, y=1.01)
+    fig.tight_layout()
+    b64 = _fig_b64(fig)
+    plt.close(fig)
+
+    # ── text table ──────────────────────────────────────────────────────────
+    def _fv(v: float) -> str:
+        a = abs(v)
+        if a == 0:
+            return "  0"
+        if a >= 0.001:
+            return f"{v:+.4f}"   # "+0.1234"  7 chars
+        return f"{v:+.2e}"       # "+1.23e-05"  9 chars — use wider col for these
+
+    def _fse(se: float) -> str:
+        if se <= 0:
+            return "(—)"
+        if se >= 0.001:
+            return f"({se:.4f})"  # "(0.0456)"  8 chars
+        return f"({se:.2e})"      # "(1.23e-05)" 10 chars
+
+    # Use dynamic column widths to accommodate scientific notation for tiny values
+    VW = 9   # value column width
+    SW = 10  # SE column width
+
+    NA_V  = " " * (VW - 1) + "—"
+    NA_SE = " " * (SW - 1) + "—"
+    NA_T  = "     —"
+
+    header = (f"{'k':>3}  {'freq':>6}  "
+              f"{'cos_k':>{VW}}  {'SE_cos':>{SW}}  {'t_cos':>6}  "
+              f"{'sin_k':>{VW}}  {'SE_sin':>{SW}}  {'t_sin':>6}  "
+              f"{'A_k':>7}")
+    sep = "-" * len(header)
+    rows = [header, sep]
+
+    sig_k: list[int] = []
+    drop_k: list[int] = []
+    table_data = []
+
+    for k in k_all:
+        grp = harmonic_data[k]
+        cos_v, cos_se = grp.get("cos", (None, None))
+        sin_v, sin_se = grp.get("sin", (None, None))
+
+        t_cos = (abs(cos_v) / (cos_se + 1e-12) if cos_v is not None else 0.0)
+        t_sin = (abs(sin_v) / (sin_se + 1e-12) if sin_v is not None else 0.0)
+        A_k   = math.sqrt(
+            (cos_v ** 2 if cos_v is not None else 0.0)
+            + (sin_v ** 2 if sin_v is not None else 0.0)
+        )
+
+        cos_str = f"{_fv(cos_v):>{VW}}"   if cos_v is not None else NA_V
+        cse_str = f"{_fse(cos_se):>{SW}}" if cos_v is not None else NA_SE
+        tc_str  = f"{t_cos:>6.2f}"        if cos_v is not None else NA_T
+        sin_str = f"{_fv(sin_v):>{VW}}"   if sin_v is not None else NA_V
+        sse_str = f"{_fse(sin_se):>{SW}}" if sin_v is not None else NA_SE
+        ts_str  = f"{t_sin:>6.2f}"        if sin_v is not None else NA_T
+
+        from math import gcd as _gcd
+        half = freq // 2
+        g    = _gcd(k, half)
+        num, den = k // g, half // g
+        frac = (f"π/{den}" if num == 1 else f"{num}π/{den}") if den > 1 else ("π" if num == 1 else f"{num}π")
+
+        rows.append(f"{k:>3}  {frac:>6}  "
+                    f"{cos_str}  {cse_str}  {tc_str}  "
+                    f"{sin_str}  {sse_str}  {ts_str}  "
+                    f"{A_k:>7.4f}")
+
+        sig_cos = cos_v is not None and t_cos > 2
+        sig_sin = sin_v is not None and t_sin > 2
+        if sig_cos or sig_sin:
+            sig_k.append(k)
+        else:
+            drop_k.append(k)
+
+        table_data.append({
+            "k": k, "freq": frac,
+            "cos_v": cos_v, "cos_se": cos_se, "t_cos": t_cos if cos_v is not None else None,
+            "sin_v": sin_v, "sin_se": sin_se, "t_sin": t_sin if sin_v is not None else None,
+            "A_k": A_k,
+        })
+
+    name = getattr(model.series, "name", "") or "modelo"
+    summary_lines = [
+        f"## Parámetros estacionales — {name}  (freq={freq})\n",
+        "```",
+        *rows,
+        "```",
+        "",
+    ]
+    if sig_k:
+        summary_lines.append(
+            f"**Frecuencias significativas (|t| > 2):** "
+            + ", ".join(f"k={k}" for k in sig_k)
+        )
+    if drop_k:
+        summary_lines.append(
+            f"**Frecuencias no significativas (|t| ≤ 2 en ambos componentes):** "
+            + ", ".join(f"k={k}" for k in drop_k)
+        )
+
+    if drop_k:
+        rec = (
+            f"Los armónicos {', '.join(f'k={k}' for k in drop_k)} tienen |t| ≤ 2 "
+            f"en ambos componentes. Considera eliminarlos con un test RV conjunto "
+            f"(Bloque H) antes de simplificar."
+        )
+    else:
+        rec = "Todos los armónicos son significativos (|t| > 2). No se recomienda simplificación."
+
+    return Description(
+        summary="\n".join(summary_lines),
+        figure_b64=b64,
+        recommendation=rec,
+        data={"freq": freq, "harmonics": table_data,
+              "significant_k": sig_k, "droppable_k": drop_k},
+    )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
