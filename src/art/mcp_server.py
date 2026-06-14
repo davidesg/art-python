@@ -56,61 +56,55 @@ PROTOCOLO GUIADO — 4 ETAPAS
 ETAPA 1 — IDENTIFICACIÓN
 ─────────────────────────────────────────────────────
 
-Paso 1a: Transformación Box-Cox
-  → Llama boxcox_analysis
-  → MUESTRA el gráfico media–desviación típica
-  → Lee la nube con el usuario: pendiente positiva → varianza crece con el nivel → λ=0 (log)
-  → REGLA: series índice (IPC, IPI, IPP…) y series con base arbitraria → SIEMPRE λ=0,
-    incluso si el gráfico parece neutral. Menciona esta regla explícitamente.
-  → ESPERA confirmación del usuario antes de continuar.
+PASO 1 — CALL: guided_identification(inp_path, lam=-1, d=-1, D=-1)
+  ⚠ OBLIGATORIO: llama guided_identification SIN lam/d/D como PRIMER Y ÚNICO
+    tool de identificación. NO llames boxcox_analysis, identification_analysis,
+    seasonal_analysis ni unit_root_analysis por separado — guided_identification
+    los integra internamente en el orden correcto.
 
-Paso 1b: Gráfico de identificación — HERRAMIENTA PRINCIPAL
-  → Llama identification_analysis con d=2, D=0 y el λ confirmado
-  → MUESTRA el gráfico listing (tres filas: nivel original, ∇y, ∇²y + ACF/PACF en cada fila)
-  → Este gráfico es la herramienta fundamental del análisis Box-Jenkins. Lee con el usuario:
+  Este tool devuelve 4 gráficos y texto en este orden:
+    1. Box-Cox (media vs desviación típica) → decide λ
+    2. Listing ACF/PACF (filas d=0, d=1, d=2) → HERRAMIENTA PRINCIPAL
+    3. Test raíces unitarias ADF/KPSS → soporte para d
+    4. Test HAC estacionalidad → soporte para D
 
-    DECISIÓN d (diferenciación regular):
-    • ¿La serie en d=0 tiene tendencia visible? → d≥1
-    • ¿La serie en d=1 parece estacionaria (sin tendencia)? → d=1
-    • ¿Sigue con tendencia en d=1? → d=2
-    • Las ACF/PACF de la fila elegida: ¿decaen rápido? → la serie es estacionaria
+  Lee con el usuario los 4 gráficos:
 
-    DECISIÓN D (estacionalidad):
-    • ¿En d=1 (o d=2) hay picos pronunciados en ACF a lags s, 2s, 3s…? → hay estacionalidad
-    • ¿Los picos son regulares y estables? → hipótesis B1 (D=0, armónicos deterministas)
-    • ¿Los picos son irregulares o muy dominantes? → hipótesis B2 (D=1, diferencia estacional)
+  Del gráfico Box-Cox:
+  • Nube con pendiente positiva → λ=0 (log)
+  • Nube horizontal → λ=1 (original)
+  • REGLA: series índice (IPC, IPI, IPP…) → SIEMPRE λ=0, aunque parezca neutral
 
-  → HERRAMIENTAS DE SOPORTE (llama después del listing, no antes):
-    · unit_root_analysis (ADF/KPSS) → apoya la decisión de d
-    · seasonal_analysis (test HAC) → apoya la decisión de D
-    Los tests cuantifican lo que el gráfico ya muestra; la decisión es del analista.
+  Del listing (HERRAMIENTA PRINCIPAL — aquí se decide d y D):
+  • Fila d=0: ¿hay tendencia? → d≥1
+  • Fila d=1: ¿estacionaria? → d=1. ¿Sigue con tendencia? → d=2
+  • Fila d=1 o d=2: ¿picos en ACF a lags s, 2s, 3s…? → hay estacionalidad
+    – Picos regulares y estables → hipótesis B1 (D=0, armónicos deterministas)
+    – Picos dominantes e irregulares → hipótesis B2 (D=1, diferencia estacional)
+  • Hipótesis B1 es revisable al final mediante contraste MEG (formal_tests)
 
-  → HIPÓTESIS DE TRABAJO B1: si D=0 (armónicos), es una hipótesis revisable.
-    Al final del ciclo, el contraste MEG (en formal_tests) evalúa estocasticidad
-    frecuencia por frecuencia y puede llevar a reformular con D=1.
-    Comunica este matiz al usuario cuando elija B1.
+  De los tests (soporte):
+  • ADF/KPSS confirman/desempatan la decisión de d del gráfico
+  • HAC confirma/desempata la decisión de D del gráfico
 
-  → ESPERA confirmación de d y D antes de continuar.
+  → ESPERA que el usuario confirme λ, d, D antes de continuar.
 
-Paso 1c: Primer modelo de referencia — ARIMA(0,d,0) + armónicos completos
-  Una vez confirmados λ y d, y tomada la hipótesis de trabajo D=0 (armónicos):
-  → Llama confirm_and_estimate con p=0, q=0, n_harmonics=freq//2-1 (máximo)
-    output_path: usa un path temporal tipo /tmp/<serie>_ref.inp
-    Este tool construye el INP internamente — NO busques ficheros en el disco.
-  → MUESTRA la ecuación del modelo llamando a model_equation_display
-  → MUESTRA el gráfico diagnóstico Treadway (residuos + ACF/PACF)
-  → Evalúa con el usuario DOS cosas del gráfico ACF/PACF:
-    1. Lags estacionales (s, 2s, 3s…): ¿están limpios? → representación armónica adecuada
-       Si hay picos residuales a lags múltiplos de s → revisar hipótesis D=0 vs D=1
-    2. Lags no-estacionales (1,2,3…): ¿hay estructura residual? → decide p y q
+PASO 2 — CALL: guided_identification(inp_path, lam=<confirmado>, d=<confirmado>, D=<confirmado>)
+  Devuelve el gráfico ACF/PACF de ∇^d ∇_s^D y_t + sugerencias ARMA.
+  Lee con el usuario:
+  • Corte brusco PACF, decaimiento ACF → AR(p)
+  • Decaimiento PACF, corte brusco ACF → MA(q)
+  • Ambas decaen → ARMA(p,q)
+  → ESPERA que el usuario confirme p, q.
 
-Paso 1d: Identificación ARMA — p y q
-  → A partir del ACF/PACF del modelo de referencia:
-    • Corte brusco en PACF, decaimiento en ACF → AR(p)
-    • Decaimiento en PACF, corte brusco en ACF → MA(q)
-    • Ambas decaen → ARMA(p,q)
-  → Si el ACF/PACF ya estaba limpio en el modelo de referencia → p=0, q=0 es suficiente
-  → ESPERA que el usuario confirme p y q.
+PASO 3 — Modelo de referencia ARIMA(0,d,0) + armónicos
+  Una vez confirmados λ, d, D=0:
+  → Llama confirm_and_estimate con p=0, q=0, n_harmonics=<freq//2-1>
+    output_path: /tmp/<nombre_serie>_ref.inp
+  → Llama model_equation_display con ese output_path
+  → Evalúa con el usuario el gráfico diagnóstico:
+    1. Lags s, 2s, 3s en ACF/PACF → ¿representación armónica adecuada?
+    2. Lags 1,2,3 → estructura residual → confirma o ajusta p,q
 
 ─────────────────────────────────────────────────────
 ETAPA 2 — ESTIMACIÓN DEL MODELO ARMA ELEGIDO
@@ -143,12 +137,15 @@ ETAPA 4 — CONTRASTES FORMALES
 ══════════════════════════════════════════════════════
 REGLAS GENERALES
 ══════════════════════════════════════════════════════
-- El gráfico listing (identification_analysis) es la herramienta principal.
-  Muéstralo SIEMPRE antes de decidir d, D y p, q.
+- En modo guiado, NUNCA llames boxcox_analysis, identification_analysis,
+  seasonal_analysis ni unit_root_analysis individualmente para la identificación.
+  USA guided_identification — integra los 4 análisis en el orden correcto.
+- El gráfico listing ACF/PACF (segunda figura de guided_identification) es la
+  herramienta principal. Discútelo ANTES de los tests.
 - Los tests HAC, ADF, KPSS son herramientas de soporte, no árbitros.
   La decisión es siempre del analista a partir de los gráficos.
 - NUNCA encadenes pasos sin mostrar el gráfico y esperar confirmación del usuario.
-- confirm_and_estimate construye el INP — nunca busques ni edites ficheros .inp.
+- confirm_and_estimate construye el INP del modelo — nunca busques ficheros .inp.
 - Las decisiones finales (λ, d, D, p, q) son del USUARIO, no del modelo.
 """
 
@@ -328,7 +325,11 @@ def series_info(inp_path: str) -> str:
 @mcp.tool()
 def boxcox_analysis(inp_path: str) -> list:
     """
-    Analyse Box-Cox transformation for a time series.
+    Analyse Box-Cox transformation for a time series (standalone use).
+
+    NOTE: in guided analysis use guided_identification instead — it integrates
+    Box-Cox, the identification listing, unit-root tests and seasonality test
+    in the correct order (listing first, tests as support).
 
     Computes the mean-std scatter for lambda=0 (log) and lambda=1 (identity),
     recommends the transformation, and returns the comparison figure.
@@ -354,11 +355,13 @@ def boxcox_analysis(inp_path: str) -> list:
 @mcp.tool()
 def seasonal_analysis(inp_path: str) -> list:
     """
-    Run the HAC F-test for seasonal patterns and recommend D.
+    HAC F-test for seasonal patterns — support tool, standalone use only.
 
-    Tests all harmonic frequencies using a joint F-test with HAC
-    Newey-West standard errors. Returns the seasonality plot and
-    a recommendation for D (0 = deterministic harmonics, 1 = seasonal diff).
+    NOTE: in guided analysis use guided_identification instead — seasonal_analysis
+    is a support tool called internally after the identification listing.
+
+    Tests all harmonic frequencies using a joint F-test with HAC Newey-West
+    standard errors. Returns the seasonality plot and a recommendation for D.
 
     Parameters
     ----------
@@ -382,17 +385,18 @@ def seasonal_analysis(inp_path: str) -> list:
 def unit_root_analysis(inp_path: str, lam: float = 0.0,
                        max_d: int = 2) -> list:
     """
-    Initial d specification via ADF + KPSS for d = 0, 1, ..., max_d.
+    ADF + KPSS unit root tests for d = 0, 1, ..., max_d — support tool.
 
-    Exploratory tool for choosing the starting value of d before estimation
-    (equivalent in status to visual inspection of ACF/residuals).
-    NOT a formal hypothesis test — for formal testing of d on an estimated
-    model use the formal_tests tool (Shin-Fuller 1998).
+    NOTE: in guided analysis use guided_identification instead — unit_root_analysis
+    is a support tool called internally after the identification listing.
+
+    Exploratory tool for the starting value of d. NOT a formal hypothesis test —
+    for formal testing on an estimated model use formal_tests (Shin-Fuller 1998).
 
     Parameters
     ----------
     inp_path : path to the .inp file
-    lam      : Box-Cox lambda (0.0 = log, 1.0 = none; run boxcox_analysis first)
+    lam      : Box-Cox lambda (0.0 = log, 1.0 = none)
     max_d    : highest differencing order to test (default 2)
     """
     try:
@@ -413,11 +417,15 @@ def unit_root_analysis(inp_path: str, lam: float = 0.0,
 def identification_analysis(inp_path: str, d: int = 2, D: int = 0,
                              lam: float = 0.0) -> list:
     """
-    Generate ACF/PACF identification listing and suggest ARMA orders.
+    ACF/PACF identification listing + ARMA order suggestions — standalone use.
 
-    Compares the empirical ACF/PACF of the differenced series with
-    theoretical ACF/PACF of candidate ARIMA models. Returns top-5
-    suggestions ranked by pattern similarity.
+    NOTE: in guided analysis use guided_identification instead:
+      - Call 1 (lam=-1): shows Box-Cox + listing (d=0,1,2) + unit-root + HAC
+      - Call 2 (lam confirmed): shows ACF/PACF of ∇^d ∇_s^D y_t + suggestions
+    identification_analysis is called internally by guided_identification.
+
+    Compares the empirical ACF/PACF of the differenced series with theoretical
+    ACF/PACF of candidate ARIMA models. Returns top-5 suggestions by similarity.
 
     Parameters
     ----------
