@@ -148,6 +148,24 @@ def _err(msg: str) -> list:
     return [TextContent(type="text", text=f"❌ Error: {msg}")]
 
 
+def _show_fig(b64: str | None, label: str = "art") -> None:
+    """Save figure to /tmp and open with xdg-open (non-blocking)."""
+    if not b64:
+        return
+    import base64, subprocess, tempfile, threading
+    data = base64.b64decode(b64)
+    # Use a stable path per label so repeated calls replace the same window.
+    path = f"/tmp/art_{label.replace(' ', '_').replace('/', '_')}.png"
+    with open(path, "wb") as fh:
+        fh.write(data)
+    threading.Thread(
+        target=lambda: subprocess.Popen(["xdg-open", path],
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL),
+        daemon=True,
+    ).start()
+
+
 # ---------------------------------------------------------------------------
 # Tool: series info
 # ---------------------------------------------------------------------------
@@ -204,7 +222,9 @@ def boxcox_analysis(inp_path: str) -> list:
     try:
         from art.describe import describe_boxcox
         ts, _ = _load_ts_model(inp_path)
-        return _result(describe_boxcox(ts))
+        desc = describe_boxcox(ts)
+        _show_fig(desc.figure_b64, "boxcox")
+        return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
 
@@ -229,7 +249,9 @@ def seasonal_analysis(inp_path: str) -> list:
     try:
         from art.describe import describe_seasonality
         ts, _ = _load_ts_model(inp_path)
-        return _result(describe_seasonality(ts))
+        desc = describe_seasonality(ts)
+        _show_fig(desc.figure_b64, "seasonality")
+        return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
 
@@ -258,7 +280,9 @@ def unit_root_analysis(inp_path: str, lam: float = 0.0,
     try:
         from art.describe import describe_unit_root
         ts, _ = _load_ts_model(inp_path)
-        return _result(describe_unit_root(ts, lam=lam, max_d=max_d))
+        desc = describe_unit_root(ts, lam=lam, max_d=max_d)
+        _show_fig(desc.figure_b64, "unit_root")
+        return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
 
@@ -287,7 +311,9 @@ def identification_analysis(inp_path: str, d: int = 2, D: int = 0,
     try:
         from art.describe import describe_identification
         ts, _ = _load_ts_model(inp_path)
-        return _result(describe_identification(ts, d=d, D=D, lam=lam))
+        desc = describe_identification(ts, d=d, D=D, lam=lam)
+        _show_fig(desc.figure_b64, "identification")
+        return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
 
@@ -380,7 +406,9 @@ def estimate_and_diagnose(inp_path: str) -> list:
         from art.describe import describe_diagnosis
         ts, m = _load_ts_model(inp_path)
         m.fit()
-        return _result(describe_diagnosis(m))
+        desc = describe_diagnosis(m)
+        _show_fig(desc.figure_b64, "diagnosis")
+        return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
 
@@ -1086,6 +1114,9 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 f"(decisión {decision}) y llama de nuevo con esos valores "
                 f"para ver las sugerencias ARMA."
             )
+            _show_fig(bc.figure_b64,  "boxcox")
+            _show_fig(sea.figure_b64, "seasonality")
+            _show_fig(urt.figure_b64, "unit_root")
             items = [TextContent(type="text", text=text)]
             if bc.figure_b64:
                 items.append(ImageContent(type="image",
@@ -1128,6 +1159,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 + "\n\n" + "=" * 60 + "\n\n"
                 + next_step
             )
+            _show_fig(ident.figure_b64, "identification")
             items = [TextContent(type="text", text=text)]
             if ident.figure_b64:
                 items.append(ImageContent(type="image",
@@ -1297,6 +1329,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             + (f"\n\n{guion_note}" if guion_note else "")
         )
 
+        _show_fig(diag.figure_b64, "diagnosis")
         items = [TextContent(type="text", text=text)]
         if diag.figure_b64:
             items.append(ImageContent(type="image",
@@ -1758,6 +1791,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             + f"\n\n*Modelo actualizado en: {output_path}*"
         )
 
+        _show_fig(diag.figure_b64, "diagnosis")
         items = [TextContent(type="text", text=text)]
         if diag.figure_b64:
             items.append(ImageContent(type="image",
