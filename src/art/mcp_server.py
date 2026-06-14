@@ -53,58 +53,56 @@ PROTOCOLO GUIADO — 4 ETAPAS
 ══════════════════════════════════════════════════════
 
 ─────────────────────────────────────────────────────
-ETAPA 1 — IDENTIFICACIÓN
+ETAPA 1 — IDENTIFICACIÓN (árbol de decisiones secuencial)
 ─────────────────────────────────────────────────────
 
-PASO 1 — CALL: guided_identification(inp_path, lam=-1, d=-1, D=-1)
-  ⚠ OBLIGATORIO: llama guided_identification SIN lam/d/D como PRIMER Y ÚNICO
-    tool de identificación. NO llames boxcox_analysis, identification_analysis,
-    seasonal_analysis ni unit_root_analysis por separado — guided_identification
-    los integra internamente en el orden correcto.
+⚠ USA SOLO guided_identification para toda la identificación.
+  NO llames boxcox_analysis, identification_analysis, seasonal_analysis
+  ni unit_root_analysis individualmente — son herramientas internas.
 
-  Este tool devuelve 4 gráficos y texto en este orden:
-    1. Box-Cox (media vs desviación típica) → decide λ
-    2. Listing ACF/PACF (filas d=0, d=1, d=2) → HERRAMIENTA PRINCIPAL
-    3. Test raíces unitarias ADF/KPSS → soporte para d
-    4. Test HAC estacionalidad → soporte para D
-
-  Lee con el usuario los 4 gráficos:
-
-  Del gráfico Box-Cox:
+LLAMADA 1 — guided_identification(inp_path)   [lam=-1 por defecto]
+  Devuelve: gráfico Box-Cox (media vs desviación típica)
+  Lee con el usuario:
   • Nube con pendiente positiva → λ=0 (log)
   • Nube horizontal → λ=1 (original)
-  • REGLA: series índice (IPC, IPI, IPP…) → SIEMPRE λ=0, aunque parezca neutral
+  • REGLA: series índice (IPC, IPI, IPP…) → SIEMPRE λ=0
+  → ESPERA confirmación de λ.
 
-  Del listing (HERRAMIENTA PRINCIPAL — aquí se decide d y D):
-  • Fila d=0: ¿hay tendencia? → d≥1
-  • Fila d=1: ¿estacionaria? → d=1. ¿Sigue con tendencia? → d=2
-  • Fila d=1 o d=2: ¿picos en ACF a lags s, 2s, 3s…? → hay estacionalidad
-    – Picos regulares y estables → hipótesis B1 (D=0, armónicos deterministas)
-    – Picos dominantes e irregulares → hipótesis B2 (D=1, diferencia estacional)
-  • Hipótesis B1 es revisable al final mediante contraste MEG (formal_tests)
+LLAMADA 2 — guided_identification(inp_path, lam=X)   [d=-1 por defecto]
+  Devuelve: serie transformada(λ) + ACF/PACF en nivel d=0
+  Lee con el usuario:
+  • ¿Tendencia visible o ACF muy lenta? → d=1 necesario
+  • ¿Serie estacionaria? → posible d=0
+  → Si quieres apoyo estadístico: llama unit_root_analysis por separado.
+  → ESPERA decisión sobre d.
 
-  De los tests (soporte):
-  • ADF/KPSS confirman/desempatan la decisión de d del gráfico
-  • HAC confirma/desempata la decisión de D del gráfico
+LLAMADA 3 — guided_identification(inp_path, lam=X, d=<nivel>)   [D=-1 por defecto]
+  Devuelve: ∇^d y(λ) + ACF/PACF + test HAC como soporte (si d>0)
+  Lee con el usuario:
+  • ¿Picos en ACF/PACF a lags s, 2s, 3s? → hay estacionalidad
+    – Regulares y estables → hipótesis B1 (D=0, armónicos deterministas)
+    – Dominantes e irregulares → hipótesis B2 (D=1, diferencia estacional)
+  • ¿Sin picos estacionales? → D=0 sin armónicos
+  • ¿Todavía con tendencia? → repite con d+1
+  • Hipótesis B1 es revisable al final mediante MEG (formal_tests)
+  → ESPERA confirmación de d y D.
 
-  → ESPERA que el usuario confirme λ, d, D antes de continuar.
-
-PASO 2 — CALL: guided_identification(inp_path, lam=<confirmado>, d=<confirmado>, D=<confirmado>)
-  Devuelve el gráfico ACF/PACF de ∇^d ∇_s^D y_t + sugerencias ARMA.
+LLAMADA 4 — guided_identification(inp_path, lam=X, d=<confirmado>, D=<confirmado>)
+  Devuelve: ACF/PACF de ∇^d ∇_s^D y(λ) + sugerencias ARMA
   Lee con el usuario:
   • Corte brusco PACF, decaimiento ACF → AR(p)
-  • Decaimiento PACF, corte brusco ACF → MA(q)
+  • Corte brusco ACF, decaimiento PACF → MA(q)
   • Ambas decaen → ARMA(p,q)
-  → ESPERA que el usuario confirme p, q.
+  • Sin estructura → p=0, q=0
+  → ESPERA confirmación de p, q.
 
-PASO 3 — Modelo de referencia ARIMA(0,d,0) + armónicos
-  Una vez confirmados λ, d, D=0:
-  → Llama confirm_and_estimate con p=0, q=0, n_harmonics=<freq//2-1>
-    output_path: /tmp/<nombre_serie>_ref.inp
-  → Llama model_equation_display con ese output_path
-  → Evalúa con el usuario el gráfico diagnóstico:
-    1. Lags s, 2s, 3s en ACF/PACF → ¿representación armónica adecuada?
-    2. Lags 1,2,3 → estructura residual → confirma o ajusta p,q
+DESPUÉS DE LLAMADA 4 — Modelo de referencia (si D=0):
+  → confirm_and_estimate con p=0, q=0, n_harmonics=<freq//2-1>,
+    output_path=/tmp/<serie>_ref.inp
+  → model_equation_display con ese output_path
+  → Evalúa ACF/PACF del modelo de referencia:
+    1. Lags s, 2s, 3s limpios → representación armónica adecuada
+    2. Lags 1,2,3 con estructura → ajusta p, q
 
 ─────────────────────────────────────────────────────
 ETAPA 2 — ESTIMACIÓN DEL MODELO ARMA ELEGIDO
@@ -206,6 +204,107 @@ def _show_fig(b64: str | None, label: str = "art") -> None:
                                         stderr=subprocess.DEVNULL),
         daemon=True,
     ).start()
+
+
+# ---------------------------------------------------------------------------
+# Helper: single-level series + ACF/PACF figure
+# ---------------------------------------------------------------------------
+
+def _plot_series_at_d(ts, lam: float, d: int) -> str | None:
+    """
+    Plot series after Box-Cox(lam) and d-fold differencing.
+    Layout: time series left (full height) + ACF top-right + PACF bottom-right.
+    Returns base64 PNG or None on error.
+    """
+    try:
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from fue.diagnostics import acf as _fue_acf, pacf as _fue_pacf
+        from fue.plots import _draw_acf_panel, _snap_cmax
+        from art.identification import _default_lags_fug
+        from art.describe import _fig_b64
+
+        data = np.asarray(ts.data, dtype=float)
+
+        # Box-Cox transform
+        if lam == 0.0:
+            y = np.log(data)
+        elif lam == 1.0:
+            y = data.copy()
+        else:
+            y = (data ** lam - 1.0) / lam
+
+        # d-fold differencing
+        for _ in range(d):
+            y = np.diff(y)
+
+        n = len(y)
+        if n < 4:
+            return None
+
+        freq  = ts.freq
+        lags  = _default_lags_fug(n, freq)
+        lag_x = np.arange(1, lags + 1)
+
+        acf_v  = np.asarray(_fue_acf(y,  lags=lags), dtype=float)
+        pacf_v = np.asarray(_fue_pacf(y, lags=lags), dtype=float)
+        band   = 1.96 / np.sqrt(n)
+        cmax   = _snap_cmax(acf_v, pacf_v)
+
+        # Labels
+        name   = ts.name or "y"
+        base   = f"log({name})" if lam == 0.0 else name
+        sym    = {0: "", 1: "∇", 2: "∇²"}.get(d, f"∇^{d}")
+        label  = f"{sym}{base}"
+        title  = f"{label}   (d={d})"
+
+        # Figure
+        fig = plt.figure(figsize=(12, 4))
+        gs  = fig.add_gridspec(2, 2, width_ratios=[2, 1], hspace=0.45, wspace=0.3)
+        ax_ts   = fig.add_subplot(gs[:, 0])
+        ax_acf  = fig.add_subplot(gs[0, 1])
+        ax_pacf = fig.add_subplot(gs[1, 1])
+        fig.suptitle(title, fontsize=11, fontweight="bold")
+
+        # Time axis (account for observations lost to differencing)
+        start      = list(ts.start) if hasattr(ts.start, '__iter__') else [int(ts.start), 1]
+        beg_year   = start[0]
+        beg_period = start[1] if freq > 1 else 1
+        xs = np.array([
+            beg_year + (beg_period - 1 + d + i) / freq for i in range(n)
+        ])
+
+        ax_ts.plot(xs, y, color='steelblue', lw=0.9)
+        ax_ts.axhline(0.0, color='k', lw=0.5, ls='--')
+        ax_ts.set_ylabel(label, fontsize=9)
+        ax_ts.set_title("Serie temporal", fontsize=9)
+        ax_ts.grid(axis='y', alpha=0.3)
+
+        # Year tick lines aligned with labels (same fix as fue/plots.py)
+        if freq > 1:
+            tick_pos, tick_lbl = [], []
+            x0, x1 = xs[0], xs[-1]
+            step = 2 if (x1 - x0) > 5 else 1
+            first_yr = int(np.ceil(x0 - 1e-9))
+            for yr in range(first_yr, int(x1) + 2, step):
+                if x0 < yr <= x1 + 1.0 / freq:
+                    ax_ts.axvline(yr, color='k', lw=0.5, zorder=1)
+                    tick_pos.append(yr)
+                    tick_lbl.append(str(yr))
+            if tick_pos:
+                ax_ts.set_xticks(tick_pos)
+                ax_ts.set_xticklabels(tick_lbl, fontsize=8)
+
+        _draw_acf_panel(ax_acf,  lag_x, acf_v,  band=band, cmax=cmax,
+                        freq=freq, lags=lags, label="ACF")
+        _draw_acf_panel(ax_pacf, lag_x, pacf_v, band=band, cmax=cmax,
+                        freq=freq, lags=lags, label="PACF")
+
+        b64 = _fig_b64(fig)
+        plt.close(fig)
+        return b64
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -1192,132 +1291,169 @@ def _param_names(model) -> list[str]:
 def guided_identification(inp_path: str, lam: float = -1.0,
                            d: int = -1, D: int = -1) -> list:
     """
-    Identification — steps 1a/1b/1c (lambda+d+D) or 1d (ARMA orders).
+    Sequential identification — ONE decision node per call.
 
-    TWO-CALL PROTOCOL — never collapse into a single call:
+    DECISION TREE — call in this sequence, one at a time:
 
-    CALL 1 (lam=-1, d=-1, D=-1):
-      Returns four figures in this order:
-        1. Box-Cox scatter (mean vs std) → decide lambda
-        2. Identification listing (d=0,1,2 rows: series + ACF + PACF) → PRIMARY TOOL
-           Use this to decide d (look for stationarity) and D (look for seasonal spikes)
-        3. Unit-root table (ADF/KPSS) → support for d decision
-        4. Seasonality test (HAC) → support for D decision
-      SHOW ALL FOUR FIGURES. Discuss d and D from the listing first, then use
-      tests as supporting evidence. Communicate that B1 (D=0) is a working
-      hypothesis revisable later via the MEG test in formal_tests.
-      WAIT for the user to confirm lambda, d, D before the second call.
-      NOTE: for index series (IPC, IPI…) always recommend lambda=0 (log).
+    Call 1  lam=-1  (default)
+      → Box-Cox scatter. Decide λ. WAIT for user.
 
-    CALL 2 (with confirmed lam, d, D):
-      Returns the ACF/PACF of the stationary series ∇^d ∇_s^D y_t + ARMA suggestions.
-      SHOW THE GRAPH. Read patterns: sharp PACF cutoff → AR(p); sharp ACF cutoff →
-      MA(q); both decay → ARMA(p,q). WAIT for the user to choose (p,q).
+    Call 2  lam=X  d=-1  (default)
+      → Series(λ) + ACF/PACF at level d=0.
+        ¿Trend? → next call with d=1.
+        ¿No trend? → next call with d=0, D confirmed.
+        Support: unit_root_analysis available if needed.
+      WAIT for user.
+
+    Call 3  lam=X  d=<level>  D=-1
+      → Series(λ) differenced d times + ACF/PACF.
+        If d>0: also shows HAC seasonality test as support.
+        ¿Seasonal spikes at lags s,2s,3s? → B1 (D=0) or B2 (D=1).
+        ¿Still trending? → call again with d+1.
+        ¿No seasonality? → D=0, no harmonics.
+        NOTE: B1 (D=0+harmonics) is a working hypothesis revisable
+        at the end via MEG test in formal_tests.
+      WAIT for user to confirm d and D.
+
+    Call 4  lam=X  d=<confirmed>  D=<confirmed>
+      → ACF/PACF of ∇^d ∇_s^D y(λ) + top-5 ARMA suggestions.
+        Sharp PACF cutoff → AR(p).
+        Sharp ACF cutoff  → MA(q).
+        Both decay        → ARMA(p,q).
+      WAIT for user to confirm p, q.
 
     Parameters
     ----------
-    inp_path : path to .inp file with the time series
-    lam      : confirmed Box-Cox lambda (-1 = not yet decided, triggers Call 1)
-    d        : confirmed regular differencing order (-1 = not yet decided)
-    D        : confirmed seasonal differencing order (-1 = not yet decided)
+    inp_path : path to .inp file
+    lam      : Box-Cox lambda  (-1 = not yet decided → Call 1)
+    d        : differencing level to display, OR confirmed d when D≥0
+               (-1 = not yet decided → Call 2 shows d=0)
+    D        : seasonal differencing (-1 = not yet decided → Call 2 or 3)
+               (≥0 with lam≥0 and d≥0 → Call 4, ARMA identification)
     """
     try:
         from mcp.types import TextContent, ImageContent
-        from art.describe import (describe_boxcox, describe_seasonality,
-                                   describe_identification, describe_unit_root)
+        from art.describe import describe_boxcox, describe_seasonality, describe_identification
         ts, _ = _load_ts_model(inp_path)
 
+        # ── Call 1: Box-Cox scatter ────────────────────────────────────────
         if lam < 0:
-            # ── Step 1a: Box-Cox ───────────────────────────────────────────
             bc      = describe_boxcox(ts)
             rec_lam = bc.data["recommended_lambda"]
+            _show_fig(bc.figure_b64, "boxcox")
+            text = (
+                "## Paso 1 — Transformación Box-Cox\n\n"
+                + bc.summary + "\n\n---\n" + bc.recommendation
+                + f"\n\n**Próximo paso:** confirma λ y llama con `lam={rec_lam}` "
+                "(o el valor que decidas) para ver la serie transformada."
+            )
+            items = [TextContent(type="text", text=text)]
+            if bc.figure_b64:
+                items.append(ImageContent(type="image",
+                                          data=bc.figure_b64, mimeType="image/png"))
+            return items
 
-            # ── Step 1b: Identification listing (PRIMARY) ──────────────────
-            # Show d=0,1,2 before deciding anything — this is the main tool.
-            listing = describe_identification(ts, d=2, D=0, lam=max(rec_lam, 0.0))
+        # ── Call 2: Series at d=0 ─────────────────────────────────────────
+        if d < 0:
+            b64     = _plot_series_at_d(ts, lam=lam, d=0)
+            lam_str = "log" if lam == 0.0 else f"λ={lam}"
+            _show_fig(b64, "series_d0")
+            text = (
+                f"## Paso 2 — Serie transformada ({lam_str}), nivel d=0\n\n"
+                "Observa la serie y su ACF/PACF:\n"
+                "- **Tendencia visible** o ACF que decae muy lentamente → diferencia necesaria → d=1\n"
+                "- **Sin tendencia aparente** → posiblemente d=0 es suficiente\n\n"
+                "*(Soporte estadístico: llama a `unit_root_analysis` con este fichero "
+                f"y `lam={lam}` si quieres apoyo ADF/KPSS antes de decidir.)*\n\n"
+                "**Próximo paso:**\n"
+                f"- ¿Hay tendencia? → llama con `lam={lam}, d=1`\n"
+                f"- ¿Sin tendencia? → llama con `lam={lam}, d=0, D=0` (o D=1 si hay estacionalidad)"
+            )
+            items = [TextContent(type="text", text=text)]
+            if b64:
+                items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
+            return items
 
-            # ── Support tools ──────────────────────────────────────────────
-            urt      = describe_unit_root(ts, lam=max(rec_lam, 0.0))
-            sea      = describe_seasonality(ts)
+        # ── Call 3: Series at level d, D not yet decided ──────────────────
+        if D < 0:
+            b64     = _plot_series_at_d(ts, lam=lam, d=d)
+            lam_str = "log" if lam == 0.0 else f"λ={lam}"
+            sym     = {0: "", 1: "∇", 2: "∇²"}.get(d, f"∇^{d}")
+            _show_fig(b64, f"series_d{d}")
 
-            rec_d    = urt.data["recommended_d"]
-            rec_D    = sea.data["recommended_D"]
-            decision = sea.data["decision"]
+            sea_text = ""
+            sea_fig  = None
+            if d > 0:
+                sea     = describe_seasonality(ts)
+                _show_fig(sea.figure_b64, "seasonality")
+                sea_fig  = sea.figure_b64
+                sea_text = (
+                    "\n\n**Test HAC de estacionalidad (soporte):**\n"
+                    + sea.summary + "\n\n---\n" + sea.recommendation
+                )
 
             b1_note = (
-                "\n\n> **Nota B1:** si se elige D=0 (armónicos deterministas), "
-                "es una **hipótesis de trabajo revisable**. Al final del ciclo, "
-                "el contraste MEG (`formal_tests`) evalúa la estocasticidad "
-                "frecuencia por frecuencia."
+                "\n\n> **Hipótesis B1:** D=0 con armónicos es una hipótesis de "
+                "trabajo revisable. Al final, el contraste MEG (`formal_tests`) "
+                "evalúa estocasticidad frecuencia por frecuencia."
             )
-
             text = (
-                "## Paso 1a — Transformación Box-Cox\n\n"
-                + bc.summary + "\n\n---\n" + bc.recommendation
-                + "\n\n" + "═" * 60 + "\n\n"
-                + "## Paso 1b — Gráfico de identificación (herramienta principal)\n\n"
-                + listing.summary + "\n\n---\n" + listing.recommendation
-                + b1_note
-                + "\n\n" + "═" * 60 + "\n\n"
-                + "## Soporte — Raíces unitarias (ADF/KPSS)\n\n"
-                + urt.summary + "\n\n---\n" + urt.recommendation
-                + "\n\n" + "─" * 40 + "\n\n"
-                + "## Soporte — Test HAC de estacionalidad\n\n"
-                + sea.summary + "\n\n---\n" + sea.recommendation
-                + "\n\n" + "═" * 60 + "\n\n"
-                + f"**Próximo paso:** confirma λ, d y D a partir del gráfico listing "
-                f"(sugerencia automática: λ={rec_lam}, d={rec_d}, D={rec_D}, decisión={decision}). "
-                f"Luego llama de nuevo con esos valores para ver la ACF/PACF de la serie "
-                f"estacionarizada e identificar p y q."
+                f"## Paso 3 — {sym}y({lam_str}), d={d}\n\n"
+                "Observa la serie diferenciada y su ACF/PACF:\n\n"
+                "**¿Estacionalidad?** (picos en ACF/PACF a lags s, 2s, 3s…)\n"
+                "  - Picos regulares y estables → **B1** (D=0, armónicos deterministas)\n"
+                "  - Picos muy dominantes o irregulares → **B2** (D=1, diferencia estacional)\n"
+                "  - Sin picos estacionales → **sin estacionalidad** (D=0, sin armónicos)\n\n"
+                "**¿Tendencia residual?** → considera d=" + str(d + 1)
+                + sea_text + b1_note
+                + "\n\n**Próximo paso:**\n"
+                f"- B1 (armónicos) → llama con `lam={lam}, d={d}, D=0`\n"
+                f"- B2 (dif. estacional) → llama con `lam={lam}, d={d}, D=1`\n"
+                f"- Sin estacionalidad → llama con `lam={lam}, d={d}, D=0`\n"
+                f"- Tendencia → llama con `lam={lam}, d={d + 1}`"
             )
-            _show_fig(bc.figure_b64,      "boxcox")
-            _show_fig(listing.figure_b64, "identification")
-            _show_fig(urt.figure_b64,     "unit_root")
-            _show_fig(sea.figure_b64,     "seasonality")
             items = [TextContent(type="text", text=text)]
-            for fig_b64 in [bc.figure_b64, listing.figure_b64,
-                            urt.figure_b64, sea.figure_b64]:
-                if fig_b64:
-                    items.append(ImageContent(type="image",
-                                              data=fig_b64, mimeType="image/png"))
+            if b64:
+                items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
+            if sea_fig:
+                items.append(ImageContent(type="image", data=sea_fig, mimeType="image/png"))
             return items
 
+        # ── Call 4: ARMA identification — d and D confirmed ───────────────
+        ident   = describe_identification(ts, d=d, D=D, lam=lam)
+        _show_fig(ident.figure_b64, "identification")
+        top     = ident.data["suggestions"][0] if ident.data["suggestions"] else {}
+        rec_p   = top.get("p", 0)
+        rec_q   = top.get("q", 1)
+        n_harm  = max(ts.freq // 2 - 1, 0)
+
+        if D == 1:
+            next_call = (
+                f"Llama a `confirm_and_estimate` con "
+                f"`lam={lam}, d={d}, D=1, p=<p>, q=<q>, P=<P>, Q=<Q>`."
+            )
         else:
-            # Stage 1c: ARMA order suggestions
-            ident = describe_identification(ts, d=d, D=D, lam=lam)
-            top   = ident.data["suggestions"][0] if ident.data["suggestions"] else {}
-            rec_p = top.get("p", 0)
-            rec_q = top.get("q", 1)
-            rec_P = top.get("P", 0)
-            rec_Q = top.get("Q", 0)
-
-            if D == 1:
-                next_step = (
-                    f"**Próximo paso:** cuando decidas (p, q, P, Q), llama a "
-                    f"`confirm_and_estimate` con lam={lam}, d={d}, D={D}, "
-                    f"p=<tu elección>, q=<tu elección>, P=<tu elección>, Q=<tu elección>."
-                    f"\n*(D=1: sin armónicos — la diferencia estacional captura la estacionalidad)*"
-                )
-            else:
-                n_harm = ts.freq // 2
-                next_step = (
-                    f"**Próximo paso:** cuando decidas (p, q), llama a "
-                    f"`confirm_and_estimate` con lam={lam}, d={d}, D={D}, "
-                    f"p=<tu elección>, q=<tu elección>, n_harmonics={n_harm}."
-                )
-
-            text = (
-                f"**Especificación confirmada:** λ={lam}, d={d}, D={D}\n\n"
-                + ident.summary + "\n\n---\n" + ident.recommendation
-                + "\n\n" + "=" * 60 + "\n\n"
-                + next_step
+            next_call = (
+                f"Llama a `confirm_and_estimate` con "
+                f"`lam={lam}, d={d}, D=0, p=<p>, q=<q>, n_harmonics={n_harm}`.\n"
+                f"*(Sugerencia automática: p={rec_p}, q={rec_q})*"
             )
-            _show_fig(ident.figure_b64, "identification")
-            items = [TextContent(type="text", text=text)]
-            if ident.figure_b64:
-                items.append(ImageContent(type="image",
-                                          data=ident.figure_b64, mimeType="image/png"))
-            return items
+
+        text = (
+            f"## Paso 4 — Identificación ARMA  (λ={lam}, d={d}, D={D})\n\n"
+            "Lee el ACF/PACF de la serie estacionarizada ∇^d ∇_s^D y(λ):\n"
+            "- **Corte brusco en PACF**, decaimiento ACF → AR(p): p = último lag significativo PACF\n"
+            "- **Corte brusco en ACF**, decaimiento PACF → MA(q): q = último lag significativo ACF\n"
+            "- **Ambas decaen** (exponencial u oscilante) → ARMA(p,q)\n"
+            "- **Sin estructura residual** → p=0, q=0 puede ser suficiente\n\n"
+            + ident.summary + "\n\n---\n" + ident.recommendation
+            + "\n\n**Próximo paso:** " + next_call
+        )
+        items = [TextContent(type="text", text=text)]
+        if ident.figure_b64:
+            items.append(ImageContent(type="image",
+                                      data=ident.figure_b64, mimeType="image/png"))
+        return items
 
     except Exception:
         return _err(traceback.format_exc())
