@@ -84,24 +84,34 @@ Paso 1b: Gráfico de identificación — HERRAMIENTA PRINCIPAL
 
   → ESPERA confirmación de d y D antes de continuar.
 
-Paso 1c: Identificación ARMA — p y q
-  → Llama identification_analysis con los (λ, d, D) confirmados
-    (o usa guided_identification con lam, d, D confirmados)
-  → MUESTRA el gráfico ACF/PACF de la serie estacionarizada ∇^d ∇_s^D y_t
-  → Lee los patrones con el usuario:
-    • Corte brusco en PACF, decaimiento en ACF → AR(p): p = lag del último pico en PACF
-    • Decaimiento en PACF, corte brusco en ACF → MA(q): q = lag del último pico en ACF
-    • Ambas decaen exponencialmente o con oscilaciones → ARMA(p,q)
-    • Picos residuales a lags s → puede quedar estacionalidad → revisar D o añadir P,Q
-  → ESPERA que el usuario elija p y q antes de estimar.
+Paso 1c: Primer modelo de referencia — ARIMA(0,d,0) + armónicos completos
+  Una vez confirmados λ y d, y tomada la hipótesis de trabajo D=0 (armónicos):
+  → Llama confirm_and_estimate con p=0, q=0, n_harmonics=freq//2-1 (máximo)
+    output_path: usa un path temporal tipo /tmp/<serie>_ref.inp
+    Este tool construye el INP internamente — NO busques ficheros en el disco.
+  → MUESTRA la ecuación del modelo llamando a model_equation_display
+  → MUESTRA el gráfico diagnóstico Treadway (residuos + ACF/PACF)
+  → Evalúa con el usuario DOS cosas del gráfico ACF/PACF:
+    1. Lags estacionales (s, 2s, 3s…): ¿están limpios? → representación armónica adecuada
+       Si hay picos residuales a lags múltiplos de s → revisar hipótesis D=0 vs D=1
+    2. Lags no-estacionales (1,2,3…): ¿hay estructura residual? → decide p y q
+
+Paso 1d: Identificación ARMA — p y q
+  → A partir del ACF/PACF del modelo de referencia:
+    • Corte brusco en PACF, decaimiento en ACF → AR(p)
+    • Decaimiento en PACF, corte brusco en ACF → MA(q)
+    • Ambas decaen → ARMA(p,q)
+  → Si el ACF/PACF ya estaba limpio en el modelo de referencia → p=0, q=0 es suficiente
+  → ESPERA que el usuario confirme p y q.
 
 ─────────────────────────────────────────────────────
-ETAPA 2 — ESTIMACIÓN
+ETAPA 2 — ESTIMACIÓN DEL MODELO ARMA ELEGIDO
 ─────────────────────────────────────────────────────
-  → Llama confirm_and_estimate con (λ, d, D, p, q, n_harmonics) confirmados
-    Este tool construye el INP y estima. No busques ficheros .inp.
-  → MUESTRA tabla de parámetros con SE y t-ratio + gráfico diagnóstico Treadway
-    (residuos estandarizados izquierda, ACF/PACF derechas)
+  → Llama confirm_and_estimate con (λ, d, D, p, q, n_harmonics=freq//2-1) confirmados
+    output_path: usa /tmp/<serie>_v1.inp o la ruta que el usuario indique
+    Este tool construye el INP — nunca busques ficheros .inp en el disco.
+  → Llama model_equation_display para mostrar la ecuación del modelo estimado
+  → MUESTRA el gráfico diagnóstico Treadway
   → Discute: ¿parámetros significativos (|t|>2)? ¿Q-test pasa? ¿JB pasa?
 
 ─────────────────────────────────────────────────────
@@ -958,8 +968,12 @@ def _build_inp(ts, lam: float, d: int, D: int,
     ma_f = [[True]  * q] if q > 0 else []
 
     if D == 0:
-        # Deterministic seasonality: cos/sin harmonics + alter (Treadway B1)
-        n_harm_pairs = min(n_harmonics, freq // 2)
+        # Deterministic seasonality: cos/sin pairs k=1..freq//2-1, plus alter.
+        # alter covers the Nyquist harmonic k=freq//2 (cos only; sin=0 there).
+        # For s=12: 5 pairs (cos1..cos5, sin1..sin5) + alter = 11 params.
+        # For s=4:  1 pair  (cos1, sin1) + alter = 3 params.
+        max_pairs    = max(freq // 2 - 1, 0)
+        n_harm_pairs = min(n_harmonics, max_pairs)
         itvs = []
         for k in range(1, n_harm_pairs + 1):
             itvs.append(fue.Intervention("cos", at=0,
@@ -1888,7 +1902,9 @@ def _make_model(ts, lam: float, d: int, D: int,
     ma_f = [[True]  * q] if q > 0 else []
 
     if D == 0:
-        n_harm = min(n_harmonics, freq // 2)
+        # Same Nyquist correction as _build_inp: pairs 1..freq//2-1 + alter.
+        max_pairs = max(freq // 2 - 1, 0)
+        n_harm    = min(n_harmonics, max_pairs)
         itvs = []
         for k in range(1, n_harm + 1):
             itvs.append(fue.Intervention("cos", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
@@ -1985,7 +2001,8 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
         seas     = describe_seasonality(ts)
         D        = seas.data.get("recommended_D", 0)
         decision = seas.data.get("decision", "B1")
-        n_harmonics = ts.freq // 2 if decision != "A" else 0
+        # freq//2-1 pairs + alter = full deterministic spec (Nyquist covered by alter)
+        n_harmonics = max(ts.freq // 2 - 1, 0) if decision != "A" else 0
         # Use unit root tests (Bloque L) to determine d
         from art.describe import describe_unit_root
         urt = describe_unit_root(ts, lam=lam)
@@ -2168,7 +2185,7 @@ def batch_build(inp_paths: list[str], output_dir: str,
                 d        = seas.data.get("recommended_d", 1)
                 D        = seas.data.get("recommended_D", 0)
                 decision = seas.data.get("decision", "B1")
-                n_harm   = ts.freq // 2 if decision != "A" else 0
+                n_harm   = max(ts.freq // 2 - 1, 0) if decision != "A" else 0
 
                 # ── 3. ARMA orders ────────────────────────────────────────
                 specs = suggest_orders(ts, d=d, D=D, lam=lam, top_n=3)
