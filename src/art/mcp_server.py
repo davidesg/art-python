@@ -212,15 +212,17 @@ def _show_fig(b64: str | None, label: str = "art") -> None:
 
 def _plot_series_at_d(ts, lam: float, d: int) -> str | None:
     """
-    Plot series after Box-Cox(lam) and d-fold differencing.
-    Layout: time series left (full height) + ACF top-right + PACF bottom-right.
+    Plot Box-Cox(lam) + d-fold differenced series as standardized z-scores.
+    Layout: standardized series left (full height) + ACF top-right + PACF bottom-right.
     Returns base64 PNG or None on error.
     """
     try:
+        import math
         import numpy as np
         import matplotlib.pyplot as plt
         from fue.diagnostics import acf as _fue_acf, pacf as _fue_pacf
-        from fue.plots import _draw_acf_panel, _snap_cmax
+        from fue.plots import (_draw_acf_panel, _snap_cmax,
+                               _obs_to_decimal_year, _tj_spines, _snap_series_max)
         from art.identification import _default_lags_fug
         from art.describe import _fig_b64
 
@@ -252,11 +254,24 @@ def _plot_series_at_d(ts, lam: float, d: int) -> str | None:
         cmax   = _snap_cmax(acf_v, pacf_v)
 
         # Labels
-        name   = ts.name or "y"
-        base   = f"log({name})" if lam == 0.0 else name
-        sym    = {0: "", 1: "∇", 2: "∇²"}.get(d, f"∇^{d}")
-        label  = f"{sym}{base}"
-        title  = f"{label}   (d={d})"
+        name  = ts.name or "y"
+        base  = f"log({name})" if lam == 0.0 else name
+        sym   = {0: "", 1: "∇", 2: "∇²"}.get(d, f"∇^{d}")
+        label = f"{sym}{base}"
+
+        # Adjusted start period after d differences
+        start      = list(ts.start) if hasattr(ts.start, '__iter__') else [int(ts.start), 1]
+        beg_year   = int(start[0])
+        beg_period = int(start[1]) if freq > 1 else 1
+        total_p    = beg_period - 1 + d
+        start_adj  = (beg_year + total_p // freq, total_p % freq + 1)
+
+        # Standardize (matching _draw_series_standardized in identification.py)
+        mu      = y.mean()
+        sigma   = y.std(ddof=0)
+        z       = (y - mu) / sigma if sigma > 1e-10 else y - mu
+        abs_max = _snap_series_max(float(np.abs(z).max()))
+        xs      = _obs_to_decimal_year(n, start_adj[0], start_adj[1], freq)
 
         # Figure
         fig = plt.figure(figsize=(12, 4))
@@ -264,36 +279,35 @@ def _plot_series_at_d(ts, lam: float, d: int) -> str | None:
         ax_ts   = fig.add_subplot(gs[:, 0])
         ax_acf  = fig.add_subplot(gs[0, 1])
         ax_pacf = fig.add_subplot(gs[1, 1])
-        fig.suptitle(title, fontsize=11, fontweight="bold")
 
-        # Time axis (account for observations lost to differencing)
-        start      = list(ts.start) if hasattr(ts.start, '__iter__') else [int(ts.start), 1]
-        beg_year   = start[0]
-        beg_period = start[1] if freq > 1 else 1
-        xs = np.array([
-            beg_year + (beg_period - 1 + d + i) / freq for i in range(n)
-        ])
+        # Standardized series panel
+        _tj_spines(ax_ts)
+        ax_ts.plot(xs, z, color='k', linewidth=0.9,
+                   marker='o', markersize=4.5, markerfacecolor='k',
+                   markeredgewidth=0, zorder=3)
+        ax_ts.axhline(0,  color='k',   lw=0.8, zorder=2)
+        ax_ts.axhline( 2, color='0.3', lw=1.0, linestyle='--', zorder=2)
+        ax_ts.axhline(-2, color='0.3', lw=1.0, linestyle='--', zorder=2)
 
-        ax_ts.plot(xs, y, color='steelblue', lw=0.9)
-        ax_ts.axhline(0.0, color='k', lw=0.5, ls='--')
-        ax_ts.set_ylabel(label, fontsize=9)
-        ax_ts.set_title("Serie temporal", fontsize=9)
-        ax_ts.grid(axis='y', alpha=0.3)
-
-        # Year tick lines aligned with labels (same fix as fue/plots.py)
         if freq > 1:
-            tick_pos, tick_lbl = [], []
             x0, x1 = xs[0], xs[-1]
             step = 2 if (x1 - x0) > 5 else 1
-            first_yr = int(np.ceil(x0 - 1e-9))
-            for yr in range(first_yr, int(x1) + 2, step):
+            for yr in range(int(np.ceil(x0 - 1e-9)), int(x1) + 2, step):
                 if x0 < yr <= x1 + 1.0 / freq:
                     ax_ts.axvline(yr, color='k', lw=0.5, zorder=1)
-                    tick_pos.append(yr)
-                    tick_lbl.append(str(yr))
-            if tick_pos:
-                ax_ts.set_xticks(tick_pos)
-                ax_ts.set_xticklabels(tick_lbl, fontsize=8)
+
+        y_max = int(abs_max)
+        ax_ts.set_ylim(-y_max - 0.15, y_max + 0.15)
+        ax_ts.set_yticks(range(-y_max, y_max + 1, 2))
+        ax_ts.tick_params(axis='both', direction='out', labelsize=9)
+        ax_ts.set_xlim(xs[0] - 0.3 / freq, xs[-1] + 0.3 / freq)
+
+        se = sigma / math.sqrt(n)
+        ax_ts.set_xlabel(
+            f"$\\bar{{w}}$ = {mu:.4f}  ({se:.4f})    $\\hat{{\\sigma}}_w$ = {sigma:.4f}",
+            fontsize=10,
+        )
+        ax_ts.set_title(label, fontweight='bold', fontsize=12)
 
         _draw_acf_panel(ax_acf,  lag_x, acf_v,  band=band, cmax=cmax,
                         freq=freq, lags=lags, label="ACF")
@@ -1340,10 +1354,27 @@ def guided_identification(inp_path: str, lam: float = -1.0,
         if lam < 0:
             bc      = describe_boxcox(ts)
             rec_lam = bc.data["recommended_lambda"]
+
+            # Index series rule: series without a natural zero base → always log
+            _INDEX_PREFIXES = ("ipc", "ipi", "ipp", "cpi", "ppi", "cci",
+                               "indice", "índice", "index", "idx", "price")
+            name_lower = (ts.name or "").lower()
+            is_index   = any(name_lower.startswith(p) for p in _INDEX_PREFIXES)
+            if is_index and rec_lam != 0.0:
+                rec_lam   = 0.0
+                index_note = (
+                    f"\n\n> ⚠ **REGLA ÍNDICE APLICADA:** «{ts.name or 'serie'}» es una "
+                    "serie índice sin base natural — se impone **λ=0 (log)** "
+                    "independientemente de las estadísticas Box-Cox."
+                )
+            else:
+                index_note = ""
+
             _show_fig(bc.figure_b64, "boxcox")
             text = (
                 "## Paso 1 — Transformación Box-Cox\n\n"
                 + bc.summary + "\n\n---\n" + bc.recommendation
+                + index_note
                 + f"\n\n**Próximo paso:** confirma λ y llama con `lam={rec_lam}` "
                 "(o el valor que decidas) para ver la serie transformada."
             )
