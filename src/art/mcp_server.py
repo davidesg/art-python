@@ -33,12 +33,20 @@ Si el usuario elige autónomo → usa build_model o batch_build.
 Si elige guiado → sigue el protocolo siguiente.
 
 ══════════════════════════════════════════════════════
-CREACIÓN DEL INP — REGLA FUNDAMENTAL
+DATOS DE ENTRADA — DOS CASOS
 ══════════════════════════════════════════════════════
-confirm_and_estimate construye el fichero .inp desde cero a partir de los parámetros
-confirmados (λ, d, D, p, q, n_harmonics). NUNCA busques, edites ni interpretes ficheros
-.inp manualmente. El fichero .inp de origen solo sirve para leer los datos de la serie;
-el modelo completo lo construye ART internamente.
+CASO 1 — El usuario proporciona datos (Excel, CSV, lista de números):
+  → Llama create_inp con los datos, nombre, frecuencia y fecha de inicio.
+  → Este tool crea el .inp de datos. A partir de ahí continúa el análisis normal.
+  → NO intentes escribir o interpretar el formato .inp manualmente.
+
+CASO 2 — El usuario ya tiene un fichero .inp:
+  → Úsalo directamente como inp_path en los tools de análisis.
+
+CONSTRUCCIÓN DEL MODELO:
+  confirm_and_estimate construye el fichero .inp del modelo desde cero a partir
+  de los parámetros confirmados (λ, d, D, p, q, n_harmonics). Nunca busques ni
+  edites ficheros .inp de modelo manualmente.
 
 ══════════════════════════════════════════════════════
 PROTOCOLO GUIADO — 4 ETAPAS
@@ -201,6 +209,79 @@ def _show_fig(b64: str | None, label: str = "art") -> None:
                                         stderr=subprocess.DEVNULL),
         daemon=True,
     ).start()
+
+
+# ---------------------------------------------------------------------------
+# Tool: create INP from raw data (entry point for spreadsheet / CSV data)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def create_inp(
+    data: list[float],
+    output_path: str,
+    name: str = "series",
+    freq: int = 12,
+    start_year: int = 2000,
+    start_period: int = 1,
+) -> str:
+    """
+    Create a .inp file from raw time series data.
+
+    This is the FIRST tool to call when the user provides data from a
+    spreadsheet, CSV, or any source other than an existing .inp file.
+    The .inp produced is a minimal data container (no model structure) ready
+    for boxcox_analysis, guided_identification, and the full guided workflow.
+
+    Parameters
+    ----------
+    data         : list of numeric observations in chronological order
+    output_path  : path where the .inp file will be written (e.g. ~/data/IPC.inp)
+    name         : series name (e.g. "IPC", "PCE", "GDP")
+    freq         : observation frequency — 1=annual, 4=quarterly, 12=monthly
+    start_year   : year of the first observation (e.g. 2003)
+    start_period : period of the first observation, 1-based
+                   (month 1-12 for monthly; quarter 1-4 for quarterly; 1 for annual)
+
+    Returns
+    -------
+    Confirmation string with the path, series name, n, freq, and start date.
+    """
+    try:
+        import numpy as np
+        import fue
+
+        output_path = os.path.expanduser(output_path)
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+
+        ts = fue.TimeSeries(
+            data=np.array(data, dtype=float),
+            freq=freq,
+            start=(start_year, start_period),
+            name=name,
+        )
+
+        # Minimal model — no structure, no transformation
+        m = fue.Model(
+            ts,
+            d=0, D=0, boxlam=1.0,
+            ar=[], ar_free=None,
+            ma=[], ma_free=None,
+            ar_s=[], ar_s_free=None,
+            ma_s=[], ma_s_free=None,
+            interventions=[],
+            ifadf=[0] * (max(freq // 2, 1) + 1),
+            mu=0.0, estimate_mu=False,
+        )
+        _write_inp(ts, m, output_path)
+
+        period_str = f"P{start_period}/{start_year}" if freq > 1 else str(start_year)
+        return (
+            f"✓ INP creado: {output_path}\n"
+            f"  Serie: {name}  |  n={len(data)}  |  freq={freq}  |  inicio={period_str}\n"
+            f"Siguiente paso: boxcox_analysis o guided_identification con este fichero."
+        )
+    except Exception:
+        return f"❌ {traceback.format_exc()}"
 
 
 # ---------------------------------------------------------------------------
