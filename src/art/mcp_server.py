@@ -33,78 +33,105 @@ Si el usuario elige autónomo → usa build_model o batch_build.
 Si elige guiado → sigue el protocolo siguiente.
 
 ══════════════════════════════════════════════════════
+CREACIÓN DEL INP — REGLA FUNDAMENTAL
+══════════════════════════════════════════════════════
+confirm_and_estimate construye el fichero .inp desde cero a partir de los parámetros
+confirmados (λ, d, D, p, q, n_harmonics). NUNCA busques, edites ni interpretes ficheros
+.inp manualmente. El fichero .inp de origen solo sirve para leer los datos de la serie;
+el modelo completo lo construye ART internamente.
+
+══════════════════════════════════════════════════════
 PROTOCOLO GUIADO — 4 ETAPAS
 ══════════════════════════════════════════════════════
 
+─────────────────────────────────────────────────────
 ETAPA 1 — IDENTIFICACIÓN
+─────────────────────────────────────────────────────
 
-Paso 1a: Lambda (transformación Box-Cox)
+Paso 1a: Transformación Box-Cox
   → Llama boxcox_analysis
-  → MUESTRA el gráfico (media vs desviación típica por subperiodo)
-  → Discute: si la nube es horizontal → λ=1 (identidad); si tiene pendiente positiva → λ=0 (log)
-  → REGLA ESPECIAL: series índice (IPC, IPI, IPP…) y series con base arbitraria
-    SIEMPRE usar log (λ=0), incluso si el gráfico parece neutral. Menciona esta regla.
+  → MUESTRA el gráfico media–desviación típica
+  → Lee la nube con el usuario: pendiente positiva → varianza crece con el nivel → λ=0 (log)
+  → REGLA: series índice (IPC, IPI, IPP…) y series con base arbitraria → SIEMPRE λ=0,
+    incluso si el gráfico parece neutral. Menciona esta regla explícitamente.
   → ESPERA confirmación del usuario antes de continuar.
 
-Paso 1b: Estacionalidad y D
-  → Llama seasonal_analysis
-  → MUESTRA el gráfico (espectro HAC o periodograma)
-  → Discute la decisión B1/B2/A: B1=armónicos deterministas (D=0), B2=diferencia estacional (D=1), A=sin estacionalidad
-  → ESPERA confirmación del usuario. NO impongas D sin que el usuario lo confirme.
+Paso 1b: Gráfico de identificación — HERRAMIENTA PRINCIPAL
+  → Llama identification_analysis con d=2, D=0 y el λ confirmado
+  → MUESTRA el gráfico listing (tres filas: nivel original, ∇y, ∇²y + ACF/PACF en cada fila)
+  → Este gráfico es la herramienta fundamental del análisis Box-Jenkins. Lee con el usuario:
 
-Paso 1c: Raíces unitarias y d
-  → Llama unit_root_analysis con el λ confirmado
-  → MUESTRA el gráfico (series diferenciadas + estadísticos ADF/KPSS)
-  → Discute qué orden d parece adecuado
-  → ESPERA confirmación del usuario.
+    DECISIÓN d (diferenciación regular):
+    • ¿La serie en d=0 tiene tendencia visible? → d≥1
+    • ¿La serie en d=1 parece estacionaria (sin tendencia)? → d=1
+    • ¿Sigue con tendencia en d=1? → d=2
+    • Las ACF/PACF de la fila elegida: ¿decaen rápido? → la serie es estacionaria
 
-Paso 1d: Identificación ARMA (p, q)
+    DECISIÓN D (estacionalidad):
+    • ¿En d=1 (o d=2) hay picos pronunciados en ACF a lags s, 2s, 3s…? → hay estacionalidad
+    • ¿Los picos son regulares y estables? → hipótesis B1 (D=0, armónicos deterministas)
+    • ¿Los picos son irregulares o muy dominantes? → hipótesis B2 (D=1, diferencia estacional)
+
+  → HERRAMIENTAS DE SOPORTE (llama después del listing, no antes):
+    · unit_root_analysis (ADF/KPSS) → apoya la decisión de d
+    · seasonal_analysis (test HAC) → apoya la decisión de D
+    Los tests cuantifican lo que el gráfico ya muestra; la decisión es del analista.
+
+  → HIPÓTESIS DE TRABAJO B1: si D=0 (armónicos), es una hipótesis revisable.
+    Al final del ciclo, el contraste MEG (en formal_tests) evalúa estocasticidad
+    frecuencia por frecuencia y puede llevar a reformular con D=1.
+    Comunica este matiz al usuario cuando elija B1.
+
+  → ESPERA confirmación de d y D antes de continuar.
+
+Paso 1c: Identificación ARMA — p y q
   → Llama identification_analysis con los (λ, d, D) confirmados
-  → MUESTRA el gráfico de listado ACF/PACF (filas por nivel de diferenciación)
-  → Discute los patrones: corte brusco en PACF → AR; corte brusco en ACF → MA; ambas decaen → ARMA
-  → Sugiere los 3-5 modelos candidatos con su similitud
-  → ESPERA que el usuario elija (p, q) antes de estimar.
+    (o usa guided_identification con lam, d, D confirmados)
+  → MUESTRA el gráfico ACF/PACF de la serie estacionarizada ∇^d ∇_s^D y_t
+  → Lee los patrones con el usuario:
+    • Corte brusco en PACF, decaimiento en ACF → AR(p): p = lag del último pico en PACF
+    • Decaimiento en PACF, corte brusco en ACF → MA(q): q = lag del último pico en ACF
+    • Ambas decaen exponencialmente o con oscilaciones → ARMA(p,q)
+    • Picos residuales a lags s → puede quedar estacionalidad → revisar D o añadir P,Q
+  → ESPERA que el usuario elija p y q antes de estimar.
 
+─────────────────────────────────────────────────────
 ETAPA 2 — ESTIMACIÓN
-
-Paso 2: Estimar el modelo confirmado
+─────────────────────────────────────────────────────
   → Llama confirm_and_estimate con (λ, d, D, p, q, n_harmonics) confirmados
-  → MUESTRA tabla de parámetros + gráfico diagnóstico (diseño Treadway: residuos izda, ACF/PACF dcha)
-  → Discute: ¿parámetros significativos? ¿residuos ruido blanco? ¿normalidad?
+    Este tool construye el INP y estima. No busques ficheros .inp.
+  → MUESTRA tabla de parámetros con SE y t-ratio + gráfico diagnóstico Treadway
+    (residuos estandarizados izquierda, ACF/PACF derechas)
+  → Discute: ¿parámetros significativos (|t|>2)? ¿Q-test pasa? ¿JB pasa?
 
+─────────────────────────────────────────────────────
 ETAPA 3 — DIAGNOSIS E INTERVENCIONES
+─────────────────────────────────────────────────────
+  → Si hay residuos extremos (|z|>3.5): llama intervention_analysis
+  → Discute impacto en ACF/PACF y tipo probable (pulse/step/ramp)
+  → ESPERA confirmación del usuario antes de añadir cada intervención
+  → Añade una a una con suggest_intervention_form → MUESTRA diagnosis actualizada
+  → Cuando el modelo parezca limpio: llama test_interventions para verificar
+    que todas las intervenciones son significativas
 
-Paso 3a: Si la diagnosis muestra residuos extremos
-  → Llama intervention_analysis
-  → Discute cuáles son los candidatos a intervención y su impacto en ACF/PACF
-  → ESPERA confirmación del usuario antes de añadir intervenciones.
-
-Paso 3b: Añadir intervenciones una a una
-  → Llama suggest_intervention_form con la fecha y forma (pulse/step/ramp) confirmadas
-  → MUESTRA tabla de parámetros actualizada + gráfico diagnóstico
-  → Repite hasta que la diagnosis esté limpia.
-
-Paso 3c: Contraste de intervenciones
-  → Llama test_interventions para identificar intervenciones no significativas
-  → ESPERA confirmación antes de eliminar alguna.
-
+─────────────────────────────────────────────────────
 ETAPA 4 — CONTRASTES FORMALES
-
-Paso 4: Cuando la diagnosis esté limpia
+─────────────────────────────────────────────────────
   → Llama formal_tests (Shin-Fuller, DCD, RV, MEG)
-  → Discute si algún contraste indica reformulación necesaria.
+  → MEG: si detecta estocasticidad en alguna frecuencia → reformular con D=1
+    (revisión de la hipótesis de trabajo B1)
+  → DCD: si no rechaza invertibilidad → reformular el factor MA
 
 ══════════════════════════════════════════════════════
 REGLAS GENERALES
 ══════════════════════════════════════════════════════
-- NUNCA encadenes más de un paso sin mostrar el gráfico y esperar al usuario.
-- SIEMPRE muestra el gráfico que devuelve cada tool antes de interpretar el resultado.
-- Los gráficos son el instrumento principal de análisis — no los omitas.
+- El gráfico listing (identification_analysis) es la herramienta principal.
+  Muéstralo SIEMPRE antes de decidir d, D y p, q.
+- Los tests HAC, ADF, KPSS son herramientas de soporte, no árbitros.
+  La decisión es siempre del analista a partir de los gráficos.
+- NUNCA encadenes pasos sin mostrar el gráfico y esperar confirmación del usuario.
+- confirm_and_estimate construye el INP — nunca busques ni edites ficheros .inp.
 - Las decisiones finales (λ, d, D, p, q) son del USUARIO, no del modelo.
-- El tool guided_identification existe como atajo: llámalo sin lam/d/D para el bloque
-  1a+1b+1c de golpe, o con lam/d/D para el bloque 1d. Pero si el usuario quiere
-  ver cada paso por separado, usa boxcox_analysis / seasonal_analysis / unit_root_analysis
-  / identification_analysis individualmente.
 """
 
 mcp = FastMCP("ART — Box-Jenkins-Treadway Analysis", instructions=_INSTRUCTIONS)
@@ -1067,17 +1094,22 @@ def guided_identification(inp_path: str, lam: float = -1.0,
     TWO-CALL PROTOCOL — never collapse into a single call:
 
     CALL 1 (lam=-1, d=-1, D=-1):
-      Returns Box-Cox graph + seasonality graph + unit-root graph.
-      SHOW ALL THREE GRAPHS to the user. Then WAIT for the user to confirm
-      lambda, d, D before making the second call.
-      NOTE: for index series (IPC, IPI…) always recommend lambda=0 (log)
-      even if the Box-Cox graph looks neutral.
+      Returns four figures in this order:
+        1. Box-Cox scatter (mean vs std) → decide lambda
+        2. Identification listing (d=0,1,2 rows: series + ACF + PACF) → PRIMARY TOOL
+           Use this to decide d (look for stationarity) and D (look for seasonal spikes)
+        3. Unit-root table (ADF/KPSS) → support for d decision
+        4. Seasonality test (HAC) → support for D decision
+      SHOW ALL FOUR FIGURES. Discuss d and D from the listing first, then use
+      tests as supporting evidence. Communicate that B1 (D=0) is a working
+      hypothesis revisable later via the MEG test in formal_tests.
+      WAIT for the user to confirm lambda, d, D before the second call.
+      NOTE: for index series (IPC, IPI…) always recommend lambda=0 (log).
 
     CALL 2 (with confirmed lam, d, D):
-      Returns the ACF/PACF identification listing graph + ARMA suggestions.
-      SHOW THE GRAPH. Discuss the ACF/PACF patterns (sharp cutoff in PACF →
-      AR; sharp cutoff in ACF → MA; both decay → ARMA(p,q)).
-      Then WAIT for the user to choose (p, q) before calling confirm_and_estimate.
+      Returns the ACF/PACF of the stationary series ∇^d ∇_s^D y_t + ARMA suggestions.
+      SHOW THE GRAPH. Read patterns: sharp PACF cutoff → AR(p); sharp ACF cutoff →
+      MA(q); both decay → ARMA(p,q). WAIT for the user to choose (p,q).
 
     Parameters
     ----------
@@ -1093,40 +1125,58 @@ def guided_identification(inp_path: str, lam: float = -1.0,
         ts, _ = _load_ts_model(inp_path)
 
         if lam < 0:
-            # Stage 1a + 1b: Box-Cox, seasonality and unit root tests
-            bc  = describe_boxcox(ts)
-            sea = describe_seasonality(ts)
+            # ── Step 1a: Box-Cox ───────────────────────────────────────────
+            bc      = describe_boxcox(ts)
             rec_lam = bc.data["recommended_lambda"]
-            urt = describe_unit_root(ts, lam=max(rec_lam, 0.0))
 
-            rec_d   = urt.data["recommended_d"]
-            rec_D   = sea.data["recommended_D"]
+            # ── Step 1b: Identification listing (PRIMARY) ──────────────────
+            # Show d=0,1,2 before deciding anything — this is the main tool.
+            listing = describe_identification(ts, d=2, D=0, lam=max(rec_lam, 0.0))
+
+            # ── Support tools ──────────────────────────────────────────────
+            urt      = describe_unit_root(ts, lam=max(rec_lam, 0.0))
+            sea      = describe_seasonality(ts)
+
+            rec_d    = urt.data["recommended_d"]
+            rec_D    = sea.data["recommended_D"]
             decision = sea.data["decision"]
 
-            text = (
-                bc.summary + "\n\n---\n" + bc.recommendation
-                + "\n\n" + "=" * 60 + "\n\n"
-                + sea.summary + "\n\n---\n" + sea.recommendation
-                + "\n\n" + "=" * 60 + "\n\n"
-                + urt.summary + "\n\n---\n" + urt.recommendation
-                + "\n\n" + "=" * 60 + "\n\n"
-                + f"**Próximo paso:** confirma λ={rec_lam}, d={rec_d}, D={rec_D} "
-                f"(decisión {decision}) y llama de nuevo con esos valores "
-                f"para ver las sugerencias ARMA."
+            b1_note = (
+                "\n\n> **Nota B1:** si se elige D=0 (armónicos deterministas), "
+                "es una **hipótesis de trabajo revisable**. Al final del ciclo, "
+                "el contraste MEG (`formal_tests`) evalúa la estocasticidad "
+                "frecuencia por frecuencia."
             )
-            _show_fig(bc.figure_b64,  "boxcox")
-            _show_fig(sea.figure_b64, "seasonality")
-            _show_fig(urt.figure_b64, "unit_root")
+
+            text = (
+                "## Paso 1a — Transformación Box-Cox\n\n"
+                + bc.summary + "\n\n---\n" + bc.recommendation
+                + "\n\n" + "═" * 60 + "\n\n"
+                + "## Paso 1b — Gráfico de identificación (herramienta principal)\n\n"
+                + listing.summary + "\n\n---\n" + listing.recommendation
+                + b1_note
+                + "\n\n" + "═" * 60 + "\n\n"
+                + "## Soporte — Raíces unitarias (ADF/KPSS)\n\n"
+                + urt.summary + "\n\n---\n" + urt.recommendation
+                + "\n\n" + "─" * 40 + "\n\n"
+                + "## Soporte — Test HAC de estacionalidad\n\n"
+                + sea.summary + "\n\n---\n" + sea.recommendation
+                + "\n\n" + "═" * 60 + "\n\n"
+                + f"**Próximo paso:** confirma λ, d y D a partir del gráfico listing "
+                f"(sugerencia automática: λ={rec_lam}, d={rec_d}, D={rec_D}, decisión={decision}). "
+                f"Luego llama de nuevo con esos valores para ver la ACF/PACF de la serie "
+                f"estacionarizada e identificar p y q."
+            )
+            _show_fig(bc.figure_b64,      "boxcox")
+            _show_fig(listing.figure_b64, "identification")
+            _show_fig(urt.figure_b64,     "unit_root")
+            _show_fig(sea.figure_b64,     "seasonality")
             items = [TextContent(type="text", text=text)]
-            if bc.figure_b64:
-                items.append(ImageContent(type="image",
-                                          data=bc.figure_b64, mimeType="image/png"))
-            if sea.figure_b64:
-                items.append(ImageContent(type="image",
-                                          data=sea.figure_b64, mimeType="image/png"))
-            if urt.figure_b64:
-                items.append(ImageContent(type="image",
-                                          data=urt.figure_b64, mimeType="image/png"))
+            for fig_b64 in [bc.figure_b64, listing.figure_b64,
+                            urt.figure_b64, sea.figure_b64]:
+                if fig_b64:
+                    items.append(ImageContent(type="image",
+                                              data=fig_b64, mimeType="image/png"))
             return items
 
         else:
