@@ -52,6 +52,127 @@ rondas. Útil para análisis masivos o como punto de partida para el modo guiado
 
 ---
 
+## Estado jun-2026 — Síntesis y plan de prioridades
+
+### Lo que funciona (infraestructura consolidada)
+
+| Componente | Estado | Notas |
+|-----------|--------|-------|
+| **pyfug** graphics | ✅ estable | plot_combined, plot_acf_pacf, plot_histogram, plot_mean_deviation_pair |
+| **fue** estimación | ✅ estable | Model, write_pre, load, Intervention; `at=` **0-based** |
+| `model_equation` (Unicode) | ✅ — bug fix | Ecuación (2): ∇ ahora dentro: `(1−φB)(∇Nₜ−μ)=aₜ` |
+| `describe_prelim_scan` + contrib. ACF | ✅ | Bloques E + N implementados |
+| `detect_seasonality` / `plot_seasonality` | ✅ | HAC F-test, gráfico efectos mensuales |
+| ADF / KPSS | ✅ | Embebidos en identify; exponer como tool dedicada (Bloque L) |
+| Sistema `cases/SERIE/SERIE_mNN.pre` | ✅ | Flujo `write_pre` → `load` → modificar → estimar |
+| `CHANGELOG.md` por caso | ✅ | Convención mNN documentada en cases/IPC_ES/ |
+
+### Lecciones del análisis IPC_ES (jun-2026)
+
+1. **Flujo BJ-T completo** (λ → d → B1/B2 → intervenciones primero → ARMA):
+   documentado en TODO.md; cada bifurcación requiere confirmación del analista
+   en modo guiado.
+
+2. **Output post-estimación obligatorio**: gráfico ACF/PACF + histograma +
+   `model_equation` + párrafo de diagnóstico + sugerencia de reformulación.
+   Nunca mostrar solo un subconjunto.
+
+3. **Intervenciones ANTES de ARMA** ("lo más obvio primero"): los outliers
+   distorsionan ACF/PACF. El ciclo correcto es:
+   ```
+   mNN (solo armónicos) → scan ACF contrib → añadir steps → m(NN+1) →
+   scan de nuevo → cuando residuos limpios → identificar ARMA → m(NN+2)
+   ```
+
+4. **Identificación outliers es iterativa** ("peeling the onion"): al bajar σ
+   emergen outliers que estaban enmascarados. Aplicar `describe_prelim_scan`
+   sobre residuos del modelo anterior en cada ronda.
+
+5. **`at=` en fue es 0-based**: `at = (año−inicio_año)×freq + (período−1)`.
+   Error común: usar 1-based produce desplazamientos silenciosos.
+
+6. **Regla ACF/PACF** (error corregido durante análisis):
+   - PACF corta en lag p → **AR(p)**
+   - ACF corta en lag q → **MA(q)**
+
+7. **Documentación por decisión**: cada paso debe registrar evidencia usada,
+   decisión tomada, herramienta de soporte y alternativas consideradas.
+
+### Flujo MCP guiado — secuencia de tools (revisada)
+
+```
+1. plot_mean_deviation_pair  → λ (razón teórica o evidencia m-dt)
+2. unit_root_analysis [L]    → d=0,1,2 (ADF+KPSS por nivel)
+3. detect_seasonality        → B1 (Treadway) o B2 (BJ), HAC F-test
+   ↳ PREGUNTA MODO: guiado / autónomo
+4. confirm_and_estimate      → m00: solo armónicos (sin ARMA, sin interv.)
+   → OUTPUT: ACF/PACF + histograma + model_equation + diagnóstico
+5. describe_prelim_scan      → sobre residuos de m00: outliers + contrib. ACF
+   → ITERATIVO hasta residuos limpios:
+     a. añadir steps/pulses para outliers > 2.5σ
+     b. estimar → describe_prelim_scan sobre nuevos residuos
+     c. guardar mNN.pre en cases/
+6. ACF/PACF residuos limpios → identificar p, q (ARMA)
+   ↳ PREGUNTA: ¿media significativa? (μ̄/SE > 2)
+7. confirm_and_estimate      → mFINAL: armónicos + interv. + ARMA + (μ)
+   → OUTPUT: ecuación + gráfico + diagnóstico
+── SUITE REFINAMIENTO (opcional, en este orden) ──────────────────────
+8. seasonal_param_analysis [G] → ¿todos los armónicos son significativos?
+9. test_seasonal_simplification [H] → LR test de reducción estacional
+10. formal_tests (MEG)          → ¿estacionalidad residual estocástica?
+11. sobreparametrizacion [I]    → correlaciones altas entre parámetros
+12. compare_versions [Q]        → LR / ΔAIC / ΔBIC entre versiones
+```
+
+### Prioridades de implementación
+
+**Prioridad 1 — completan el flujo guiado básico**
+
+| Bloque | Qué | Esfuerzo |
+|--------|-----|---------|
+| L | Unit root tool dedicado (ADF+KPSS por d=0,1,2 + figura) | medio |
+| G | Visualización parámetros estacionales (barras cos/sin ± 2SE) | bajo |
+| H | LR test simplificación estacional (qué armónicos eliminar) | medio |
+| M | B1/B2 explícito en `guided_identification` (opción D=1) | medio |
+
+**Prioridad 2 — refinamiento y parsimonia**
+
+| Bloque | Qué | Esfuerzo |
+|--------|-----|---------|
+| I | Sobreparametrización: matriz correlación parámetros | bajo |
+| K | Shin-Fuller en `describe_formal_tests` | bajo |
+| Q | `compare_versions`: LR / diff especificación / figura dual | medio |
+
+**Prioridad 3 — documentación integrada**
+
+| Bloque | Qué | Esfuerzo |
+|--------|-----|---------|
+| P | `record_version` + `export_guion` HTML (guion.json) | alto |
+
+**Fuera de scope por ahora**
+
+| Bloque | Qué |
+|--------|-----|
+| J | Discriminación automática pulse/step/ramp (LR entre formas) |
+| C2 | Batch autónomo refinado |
+
+### Principio de diseño de cada tool MCP
+
+Toda tool del MCP debe seguir la estructura:
+
+```
+1. EVIDENCIA    — figura pyfug (base64 ImageContent)
+2. ANÁLISIS     — qué se ve, estadísticos clave
+3. DECISIÓN     — qué se recomienda y con qué herramienta se fundamenta
+4. ALTERNATIVAS — qué otras opciones tiene el analista (para poder volver atrás)
+5. ESTADO       — qué modelo/archivo se genera; próximo paso sugerido
+```
+
+Esta estructura garantiza trazabilidad completa: el analista siempre sabe
+qué decidió, por qué, y cómo deshacer si la decisión resulta incorrecta.
+
+---
+
 ## Metodología de referencia
 
 Las 5 etapas iterativas del proceso de construcción de modelos (tesis cap. 2.4):
@@ -958,32 +1079,27 @@ el flujo guiado. Esta era la tradición Box-Jenkins original.
 
 ---
 
-### Bloque N — Visualización de contribuciones ACF en pre-escaneo  [PENDIENTE]
+### Bloque N — Visualización de contribuciones ACF en pre-escaneo  [✅ HECHO jun-2026]
 
-**Motivación (fue C + diagnose_interventions)**:
-`diagnose_interventions` ya calcula `acf_lags_affected` y `variance_fraction`.
-El paso 3 pre-escaneo debería usar esta misma lógica sobre la serie diferenciada
-(antes de tener modelo estimado), y el paso 3 post-estimación debería mostrarlo
-siempre que haya outliers.
+Implementado en `describe_prelim_scan`: figura bipartita con residuos tipificados
+(panel superior) y barras de contribución de outliers a la ACF (panel inferior,
+rojo = parte del coeficiente ACF debida al outlier, azul = ACF total).
 
-**Implementación**:
-```python
-# En describe_prelim_scan: ampliar para calcular también
-# qué % de cada coeficiente ACF se debe al outlier más grande
-# Usar fue.acf() + contribución por pares: C_k(i) = ẑ_i * ẑ_{i+k} / Σẑ_j²
-# Figura adicional: barras de contribución por lag para el outlier mayor
+Función auxiliar `_acf_outlier_contributions` calcula:
+`C_k(p) = [ẑ_p · ẑ_{p+k} + ẑ_{p-k} · ẑ_p] / Σ_j ẑ_j²`
 
-# En describe_interventions: ya devuelve figura de residuos
-# Añadir panel extra con barras de contribución ACF por lag
-```
-
-- [ ] Añadir cálculo de contribución ACF por lag en `describe_prelim_scan`
-- [ ] Añadir figura de contribución ACF en `describe_interventions`
-- [ ] Función auxiliar `_acf_outlier_contributions(w_std, outlier_idx, lags)`
+**Uso**: llamar `describe_prelim_scan` sobre residuos de un modelo estimado
+(creando `TimeSeries` con `d=0, lam=1.0`) para ver qué outliers distorsionan
+la ACF y en qué lags, antes de identificar la parte ARMA.
 
 ---
 
-### Bloque O — Ecuación del modelo estimado  [✅ HECHO]
+### Bloque O — Ecuación del modelo estimado  [✅ HECHO — bug fix jun-2026]
+
+**Bug fix jun-2026**: la ecuación de ruido mostraba `∇(1−φB)(Nₜ−μ)` (∇ fuera del
+polinomio AR). Corregido a `(1−φB)(∇Nₜ−μ)=aₜ` — μ es la media del proceso
+diferenciado ∇Nₜ, no del nivel. Fix en `describe.py` líneas ~888–905:
+incorporar `diff_s` dentro del `nt_label` en lugar de prependerlo a `lhs_items`.
 
 **Motivación**: fue C escribe el modelo como operadores polinomiales en LaTeX.
 En Claude, sin renderizar LaTeX, usar Unicode para la misma estructura.

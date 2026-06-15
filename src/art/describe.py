@@ -877,30 +877,33 @@ def model_equation(ts, model) -> str:
     mu_val_str = ""
     mu_se_str  = ""
     mu_sign    = ""
-    mu_pfx_len = 0   # chars before mu value within nt_label: "(Nₜ − " = 6
     if model.estimate_mu:
         v_mu, se_mu = pi.pop()
         mu_sign    = "−" if v_mu >= 0 else "+"
         mu_val_str = _fv(abs(v_mu))
         mu_se_str  = _fse(se_mu)
-        mu_pfx_len = len(f"(Nₜ {mu_sign} ")  # always 6
 
     diff_s  = _diff_str()
     has_ar  = bool(left_blocks)
 
+    # ∇ is placed INSIDE the Nₜ term so that μ is the mean of the
+    # differenced process (∇Nₜ), not of the non-stationary level Nₜ.
+    # Correct form: (1−φB)(∇Nₜ − μ) = aₜ
+    nt_core = f"{diff_s}Nₜ" if diff_s else "Nₜ"
     if mu_val_str:
-        nt_label = f"(Nₜ {mu_sign} {mu_val_str})"
+        nt_label   = f"({nt_core} {mu_sign} {mu_val_str})"
+        mu_pfx_len = len(f"({nt_core} {mu_sign} ")
     elif has_ar:
-        nt_label = "(Nₜ)"
+        nt_label   = f"({nt_core})"
+        mu_pfx_len = 0
     else:
-        nt_label = "Nₜ"
+        nt_label   = nt_core
+        mu_pfx_len = 0
 
     # Each item is (val_str, se_str) where se_str is pre-padded relative to
     # the block's own start (matching _TwoLine.add semantics).
     nt_se     = (" " * mu_pfx_len + mu_se_str) if (mu_se_str and mu_pfx_len) else ""
     lhs_items = []
-    if diff_s:
-        lhs_items.append((diff_s, ""))
     lhs_items.extend(left_blocks)
     lhs_items.append((nt_label, nt_se))
 

@@ -168,34 +168,105 @@ result = preliminary_outlier_scan(model_residuals, sigma, ...)
 ### Paso 4 — Identificación ARMA (sobre residuos limpios)
 
 ACF/PACF de residuos tras tratar outliers:
+- PACF(1..p) corta, ACF decae → **AR(p)**   ← regla clave
+- ACF(1..q) corta, PACF decae → **MA(q)**
 - ACF(s) significativo, PACF(s) decae → SMA(1)
-- ACF(1..p) corta, PACF decae → MA(p)
-- PACF(1..p) corta, ACF decae → AR(p)
 - Ambas decaen → ARMA(p,q)
+
+**Regla mnemotécnica**: PACF corta → AR; ACF corta → MA.
+
+**Media**: si $\bar{w}/\sigma_{\bar{w}} > 2$, la media es significativa → incluir `estimate_mu=True`.
+La media en $\nabla \ln x_t$ implica una tendencia (drift) en $\ln x_t$.
+
+**Caso IPC_ES (jun-2026)**:
+- PACF(1)=+0.35*, corte → AR(1)
+- μ=+0.14%/mes, t=7 → media significativa (inflación promedio 2002-2024)
+- Modelo: ARI(1,1) con media
 
 ---
 
-### Paso 4 — Estimación
+### Paso 5 — Estimación y presentación
+
+**Ciclo `mNN.pre` → `m(NN+1)`**:
 
 ```python
-m = fue.Model(ts, boxlam=0.0, d=1, D=1,
-              ma_s=[[-0.4]], ma_s_free=[[True]])
-m.fit()
-resids = np.array(m.residuals.data)
-npar = len(m.params)
+from fue.report import write_pre
+
+# 1. Guardar modelo estimado como .pre
+write_pre(m_fitted, "cases/SERIE/SERIE_mNN.pre")
+
+# 2. Cargar .pre del modelo anterior como punto de partida
+ts, m_init = fue.load("cases/SERIE/SERIE_mNN.pre")
+
+# 3. Construir modelo siguiente añadiendo la modificación
+m_next = fue.Model(ts, ..., ar=[[-0.35]], ar_free=[[True]],
+                   mu=0.0014, estimate_mu=True,
+                   interventions=m_init.interventions)
+m_next.fit()
+write_pre(m_next, "cases/SERIE/SERIE_m(NN+1).pre")
+```
+
+**Presentación del modelo**: siempre incluir:
+1. Gráfico residuos + ACF/PACF (`plot_combined`)
+2. Histograma (`plot_histogram`)
+3. **Ecuación del modelo en Unicode** — usar `art.describe.model_equation`:
+
+```python
+from art.describe import model_equation
+print(model_equation(ts, m_fitted))
+```
+
+Produce la forma BJ-T completa con coeficientes, errores estándar y estadísticos:
+```
+(1)  ln Xₜ = Dₜ + Nₜ          ← parte determinista (intervenciones + armónicos)
+(2)  ∇(1 − φ₁B)(Nₜ − μ) = aₜ  ← ecuación de ruido (ARMA + media)
+σ̂ₐ = ...   ℓ = ...   AIC = ...   BIC = ...
+```
+Visible directamente en Claude Code (terminal Unicode).
+
+**Indexación `at=` en fue**: **0-based** (at=0 = primera obs).
+Para (año y, mes m) con serie iniciando en (2002,1):
+```python
+at = (y - 2002)*12 + (m - 1)   # 0-based
 ```
 
 ---
 
-### Paso 5 — Diagnóstico de residuos
+### Paso 6 — Diagnóstico de residuos
 
 - `plot_combined(residuos)` — serie + ACF/PACF: buscar Q(k) no significativo
 - `plot_histogram(residuos)` — normalidad: JB+p-valor
-- Outliers > 2σ → `m.add_intervention('step', at=...)` y reestimar
+- Outliers > 2σ → nueva intervención → ciclo `mNN.pre` → `m(NN+1)`
 
 **Lección WTI** (jun-2026): escalones consecutivos (at=218,219,220 para crash COVID
 mar-abr-may 2020) tienen multicolinealidad alta. Un t bajo no implica que el escalón
 sea prescindible — revisar los residuos antes de eliminar.
+
+---
+
+### Sistema de control de cambios por caso (jun-2026)
+
+Cada caso de análisis BJ tiene su directorio en `art-python/cases/SERIE/`:
+
+```
+cases/
+  IPC_ES/
+    IPC_ES_m00.pre   — armónicos base (sin ARMA, sin intervenciones)
+    IPC_ES_m01.pre   — + intervenciones outliers
+    IPC_ES_m02.pre   — + AR(1) + media
+    CHANGELOG.md     — control de cambios modelo a modelo
+```
+
+**`CHANGELOG.md`** documenta por cada `mNN`:
+- Especificación (qué se añadió/eliminó respecto al anterior)
+- Parámetros estimados clave
+- Diagnóstico (σ̂, Q, JB)
+- Outliers restantes
+- Próximos pasos
+
+**Principio**: cada `.pre` es el punto de partida del siguiente modelo.
+Los parámetros estimados en `mNN` se convierten en valores iniciales de `m(NN+1)`,
+garantizando convergencia rápida y trazabilidad completa del proceso de refinamiento.
 
 ---
 
