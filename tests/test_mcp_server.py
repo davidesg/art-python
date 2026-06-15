@@ -440,6 +440,86 @@ def test_guided_identification_call4_b2_returns_figure():
     assert "image" in types, "Block M B2 Call 4 returned no figure"
 
 
+# ---------------------------------------------------------------------------
+# Block P: record_version / export_guion (guion.json system)
+# ---------------------------------------------------------------------------
+
+def test_record_version_creates_guion(tmp_path):
+    """Block P: record_version adds entries to guion.json (creates if absent)."""
+    _skip_if_missing(_IPC_ES_M00)
+    _skip_if_missing(_IPC_ES_M02)
+    from art.mcp_server import record_version
+    import json
+    guion = str(tmp_path / "guion.json")
+    # Record two versions
+    r1 = record_version(_IPC_ES_M00, guion, name="PC1",
+                         decision="Modelo inicial sin ARMA",
+                         next_version="Añadir MA(1)")
+    r2 = record_version(_IPC_ES_M02, guion, name="PC2",
+                         decision="Añadido AR(1)")
+    assert r1[0].type == "text"
+    assert "PC1" in r1[0].text
+    assert r2[0].type == "text"
+    assert "PC2" in r2[0].text
+    # guion.json must have 2 entries
+    with open(guion, encoding="utf-8") as f:
+        data = json.load(f)
+    assert len(data["entries"]) == 2
+    assert data["entries"][0]["name"] == "PC1"
+    assert data["entries"][1]["name"] == "PC2"
+    assert data["entries"][0]["version"] == 1
+    assert data["entries"][1]["version"] == 2
+    # Stats fields must be populated
+    assert "loglik" in data["entries"][0]["stats"]
+    assert "aic" in data["entries"][0]["stats"]
+    assert "equation" in data["entries"][0]
+
+
+def test_export_guion_creates_html(tmp_path):
+    """Block P: export_guion renders guion.json to navigable HTML."""
+    _skip_if_missing(_IPC_ES_M00)
+    _skip_if_missing(_IPC_ES_M02)
+    from art.mcp_server import record_version, export_guion
+    guion  = str(tmp_path / "guion.json")
+    out_html = str(tmp_path / "guion.html")
+    record_version(_IPC_ES_M00, guion, name="PC1", decision="Initial model")
+    record_version(_IPC_ES_M02, guion, name="PC2", decision="Added AR(1)")
+    result = export_guion(guion, out_html)
+    assert result[0].type == "text"
+    assert "guion.html" in result[0].text or "guion" in result[0].text.lower()
+    import os
+    assert os.path.exists(out_html)
+    with open(out_html, encoding="utf-8") as f:
+        html = f.read()
+    assert len(html) > 5_000
+    assert "PC1" in html and "PC2" in html
+    assert "<details" in html           # collapsible sections
+    assert "<table" in html             # summary table
+    assert "loglik" in html or "AIC" in html
+
+
+def test_confirm_and_estimate_records_to_guion(tmp_path):
+    """Block P: confirm_and_estimate with guion_path records the model."""
+    _skip_if_missing(_IPC_ES_M00)
+    import json
+    from art.mcp_server import confirm_and_estimate
+    out_inp = str(tmp_path / "test_b2.inp")
+    guion   = str(tmp_path / "guion.json")
+    result = confirm_and_estimate(
+        _IPC_ES_M00, out_inp,
+        lam=0.0, d=1, D=0, p=0, q=1, n_harmonics=5,
+        guion_path=guion,
+        guion_name="PC_test",
+        guion_decision="Test MA(1) con armonicos",
+    )
+    assert result[0].type == "text"
+    assert "PC_test" in result[0].text or "Registrado" in result[0].text
+    with open(guion, encoding="utf-8") as f:
+        data = json.load(f)
+    assert len(data["entries"]) == 1
+    assert data["entries"][0]["name"] == "PC_test"
+
+
 def test_batch_build_creates_html_reports(tmp_path):
     _skip_if_missing(_IPC_ES_INP)
     from art.mcp_server import batch_build

@@ -817,7 +817,7 @@ Este diagnóstico debe mostrarse automáticamente tras cada estimación.
 
 ---
 
-### Bloque P — Sistema de documentación: guion de análisis  [PENDIENTE]
+### Bloque P — Sistema de documentación: guion de análisis  [✅ HECHO jun-2026]
 
 **Motivación (guion.tex de la tesis):**
 La tesis documenta cada modelo como una página: ecuación del modelo, figura de diagnosis
@@ -905,12 +905,13 @@ export_guion(guion_path: str, output_html: str) -> str
   → si se proporciona, añaden automáticamente la versión al guion sin llamar record_version
 - `build_model`: genera guion.json automáticamente si se especifica `guion_path`
 
-- [ ] Definir `GuionEntry` dataclass en nuevo módulo `art/guion.py`
-- [ ] Implementar `record_version` MCP tool
-- [ ] Implementar `export_guion` MCP tool → HTML con una sección por versión
-- [ ] Integrar parámetro `guion_path` opcional en `confirm_and_estimate` y `suggest_intervention_form`
-- [ ] Integrar en `build_model` (C1): generación automática de guion.json
-- [ ] Tests: crear guion de Chile PC1→PC6 y verificar HTML exportado
+- [x] Definir `GuionEntry` dataclass en `art/guion.py` (con `GuionStats`, `Guion`, load/save)
+- [x] Implementar `record_version` MCP tool (fit + diagnose + append a guion.json)
+- [x] Implementar `export_guion` MCP tool → HTML con tabla resumen + sección colapsable por versión
+- [x] Integrar `guion_path` en `confirm_and_estimate` (con name/decision/rationale/problems/next)
+- [x] Integrar `guion_path` en `suggest_intervention_form` (mismos parámetros opcionales)
+- [x] Integrar `guion_path` en `build_model` (registra modelo final auto-construido)
+- [x] Tests: `record_version` crea guion.json con 2 entradas; `export_guion` genera HTML navegable; `confirm_and_estimate` con guion_path registra PC_test
 
 ---
 

@@ -2316,7 +2316,13 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                                date: str,
                                form: str = "auto",
                                context_hint: str = "",
-                               include_histogram: bool = False) -> list:
+                               include_histogram: bool = False,
+                               guion_path: str = "",
+                               guion_name: str = "",
+                               guion_decision: str = "",
+                               guion_rationale: str = "",
+                               guion_problems: str = "",
+                               guion_next: str = "") -> list:
     """
     Add an intervention to the .inp, re-estimate and show updated diagnosis.
 
@@ -2333,6 +2339,12 @@ def suggest_intervention_form(inp_path: str, output_path: str,
     context_hint      : free-text note about the economic event (for logging)
     include_histogram : return histogram PNG (default False — saves tokens
                         during the outlier cycle; set True for final round)
+    guion_path        : (optional) path to guion.json — records this version
+    guion_name        : version name (e.g. "PC3"); auto-assigned if empty
+    guion_decision    : brief description of what this model tests or concludes
+    guion_rationale   : justification for the intervention choice
+    guion_problems    : problems found in the diagnosis
+    guion_next        : description of the next version to try
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -2412,12 +2424,27 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         diag     = describe_diagnosis(m_fit)
 
         context_str = f"  Contexto: {context_hint}" if context_hint else ""
+
+        # Optional guion recording
+        guion_note = ""
+        if guion_path:
+            lam_fit = float(getattr(m_fit, "boxlam", 0.0) or 0.0)
+            guion_note = _record_to_guion(
+                model=m_fit, inp_path=output_path, lam=lam_fit,
+                guion_path=guion_path,
+                name=guion_name, decision=guion_decision,
+                rationale=guion_rationale, problems_found=guion_problems,
+                next_version=guion_next,
+                figure_b64=diag.figure_b64,
+            )
+
         text = (
             f"**Intervención añadida:** {form.upper()} en {date}{context_str}\n\n"
             + "### Parámetros estimados\n\n" + param_md
             + "\n\n---\n\n"
             + diag.summary + "\n\n---\n" + diag.recommendation
             + f"\n\n*Modelo actualizado en: {output_path}*"
+            + (f"\n\n{guion_note}" if guion_note else "")
         )
 
         _show_fig(diag.figure_b64, "diagnosis")
@@ -2530,7 +2557,11 @@ def _format_dcd_meg(dcd_results, meg_results) -> str:
 
 @mcp.tool()
 def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
-                run_meg: bool = False) -> list:
+                run_meg: bool = False,
+                guion_path: str = "",
+                guion_name: str = "",
+                guion_decision: str = "",
+                guion_rationale: str = "") -> list:
     """
     Autonomous Box-Jenkins-Treadway pipeline for a single series.
 
@@ -2541,10 +2572,14 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
 
     Parameters
     ----------
-    inp_path    : source .inp file — only the series is used
-    output_path : path for the final estimated .inp
-    max_rounds  : maximum intervention-addition rounds (default 5)
-    run_meg     : run MEG stochastic seasonality test (slow; default False)
+    inp_path      : source .inp file — only the series is used
+    output_path   : path for the final estimated .inp
+    max_rounds    : maximum intervention-addition rounds (default 5)
+    run_meg       : run MEG stochastic seasonality test (slow; default False)
+    guion_path    : (optional) path to guion.json — records the final model
+    guion_name    : version name (e.g. "PC1"); auto-assigned if empty
+    guion_decision: brief description of the model or pipeline result
+    guion_rationale: justification for the auto-selected spec
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -2683,12 +2718,24 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
 
         formal_md = _format_dcd_meg(dcd_results, meg_results)
 
+        # Optional guion recording of final model
+        guion_note = ""
+        if guion_path and m_fit is not None:
+            guion_note = _record_to_guion(
+                model=m_fit, inp_path=output_path, lam=lam,
+                guion_path=guion_path,
+                name=guion_name, decision=guion_decision,
+                rationale=guion_rationale,
+                figure_b64=diag_desc.figure_b64 if m_fit is not None else None,
+            )
+
         text = (
             "\n".join(log)
             + "\n\n### Parámetros estimados\n\n" + param_md
             + "\n\n---\n\n" + diag_text
             + "\n\n---\n\n### Contrastes formales\n\n" + formal_md
             + f"\n\n*Modelo guardado en: {output_path}*"
+            + (f"\n\n{guion_note}" if guion_note else "")
         )
 
         # ── Return: text + one figure per round (Block D) ─────────────────
