@@ -1346,6 +1346,7 @@ def _build_inp(ts, lam: float, d: int, D: int,
     m = fue.Model(
         ts,
         d=d, D=D, boxlam=lam,
+        refactor=100.0 if lam == 0.0 else 1.0,
         ar=ar, ar_free=ar_f,
         ma=ma, ma_free=ma_f,
         ar_s=ar_s_val, ar_s_free=ar_sf_val if ar_sf_val else None,
@@ -2523,6 +2524,7 @@ def _make_model(ts, lam: float, d: int, D: int,
     return fue.Model(
         ts,
         d=d, D=D, boxlam=lam,
+        refactor=100.0 if lam == 0.0 else 1.0,
         ar=ar, ar_free=ar_f,
         ma=ma, ma_free=ma_f,
         ar_s=ar_s_val, ar_s_free=ar_sf_val if ar_sf_val else None,
@@ -2957,30 +2959,33 @@ def generate_forecast(inp_path: str,
     """
     try:
         from mcp.types import TextContent
+        import fue as _fue
         from fue.report_forecast import write_forecast_report
 
+        # 1. Fit from .pre → write fuf
         _, m = _load_fitted(inp_path)
-        ts   = m.series
-
-        fr = m.forecast(horizon=horizon)
 
         output_fuf_path = os.path.expanduser(output_fuf_path)
         os.makedirs(os.path.dirname(os.path.abspath(output_fuf_path)), exist_ok=True)
         m.write_fuf(horizon=horizon, path=output_fuf_path)
 
+        # 2. Reload as fuf model → forecast_fuf (correct fuf workflow)
+        ts_fuf, m_fuf = _fue.load_fuf(output_fuf_path)
+        fr = m_fuf.forecast_fuf()
+
+        # 3. Write HTML report
         output_html = os.path.expanduser(output_html)
         os.makedirs(os.path.dirname(os.path.abspath(output_html)), exist_ok=True)
-        write_forecast_report(m, fr, path=output_html,
-                              title=ts.name or "", source=inp_path)
+        write_forecast_report(m_fuf, fr, path=output_html,
+                              title=ts_fuf.name or "", source=inp_path)
 
-        last_date = _forecast_date(ts.start, ts.nobs, ts.freq, 0)
-        end_date  = _forecast_date(ts.start, ts.nobs + 1, ts.freq, horizon - 1)
-        sigma_a   = fr.sigma2 ** 0.5
+        last_date = _forecast_date(ts_fuf.start, ts_fuf.nobs, ts_fuf.freq, 0)
+        end_date  = _forecast_date(ts_fuf.start, ts_fuf.nobs + 1, ts_fuf.freq, horizon - 1)
 
         text = (
-            f"## Previsiones — {ts.name or 'Serie'} "
+            f"## Previsiones — {ts_fuf.name or 'Serie'} "
             f"({last_date} → {end_date}, horizonte={horizon})\n\n"
-            f"σ̂_a = {sigma_a:.6f}\n\n"
+            f"σ̂_a = {fr.sigma2**0.5:.6f}\n\n"
             f"Archivo fuf: {output_fuf_path}\n"
             f"Informe HTML: {output_html}"
         )

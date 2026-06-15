@@ -198,15 +198,23 @@ def test_overparametrization_detected_arma11():
 
 
 def test_overparametrization_absent_ar1_only():
-    """Block I: AR(1)-only model on IPC_ES_m02 has no high correlations."""
-    _skip_if_missing(_IPC_ES_M02)
+    """Block I: AR(1) with no harmonics has no high-corr pairs."""
+    _skip_if_missing(_IPC_ES_M00)
+    import tempfile, os
+    from art.mcp_server import _build_inp, _load_fitted
     from art.describe import describe_diagnosis
     import fue
-    _, m = fue.inp.load(_IPC_ES_M02)
-    m.fit()
+    ts, _ = fue.inp.load(_IPC_ES_M00)
+    with tempfile.NamedTemporaryFile(suffix=".inp", delete=False) as f:
+        tmp = f.name
+    try:
+        _build_inp(ts, lam=0.0, d=1, D=0, p=1, q=0, n_harmonics=0, output_path=tmp)
+        _, m = _load_fitted(tmp)
+    finally:
+        os.unlink(tmp)
     d = describe_diagnosis(m)
     pairs = d.data.get("high_corr_pairs", [])
-    assert pairs == [], f"Expected no high-corr pairs for AR(1) model, got: {pairs}"
+    assert pairs == [], f"Expected no high-corr pairs for AR(1), got: {pairs}"
 
 
 # ---------------------------------------------------------------------------
