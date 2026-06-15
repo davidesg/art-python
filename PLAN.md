@@ -770,7 +770,7 @@ seasonal_param_analysis(inp_path) -> list
 
 ---
 
-### Bloque H — Test conjunto de simplificación estacional  [PENDIENTE]
+### Bloque H — Test conjunto de simplificación estacional  [✅ COMPLETADO]
 
 **Motivación (tesis Chile, PC10 → PC11):**
 Test RV H₀: todos los armónicos de frecuencias f₁..fₖ son simultáneamente = 0.
@@ -788,9 +788,9 @@ seasonal_simplification_test(model, freq_list=None) -> SeasonalSimplificationRes
 test_seasonal_simplification(inp_path, freq_list=None) -> list
 ```
 
-- [ ] Implementar `seasonal_simplification_test` en `formal_tests.py`
-- [ ] Añadir MCP tool `test_seasonal_simplification`
-- [ ] Test unitario con Chile PC10 (esperar RV ≈ 1.6 para restricción de 10 params)
+- [x] Implementar `seasonal_simplification_test` en `formal_tests.py`
+- [x] Añadir MCP tool `test_seasonal_simplification`
+- [x] Tests: 22 tests en `test_seasonal_simplification.py`
 
 ---
 
