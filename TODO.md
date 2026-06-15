@@ -270,24 +270,205 @@ garantizando convergencia rápida y trazabilidad completa del proceso de refinam
 
 ---
 
-## Gráficos pyfug en el flujo
+## Arquitectura de servidores de datos, gráficos y modelos (jun-2026)
 
-| Paso | Función pyfug |
-|------|--------------|
-| 1. λ | `plot_mean_deviation_pair(ser, name="X")` |
-| 2-3. d, D, ARMA | `plot_combined(ser, d=..., ds=..., title="...")` |
-| 3b. ACF detallado | `plot_acf_pacf(ser, ...)` |
-| 4. Histograma residuos | `plot_histogram(ser, ...)` |
-| — Serie sola | `plot_series(ser, ...)` |
+### Motor de datos — fue
+
+```
+Entrada         Tipo                    Función
+──────────────────────────────────────────────────────────────────
+array/CSV/xlsx  → fue.TimeSeries        .from_array / .from_csv / .from_pandas
+.inp / .pre     → (TimeSeries, Model)   fue.inp.load(path)   ← _InpParser.parse()
+                                        at= en .inp/pre es 1-based → at_0 = at_1-1
+                                        Model no estimado; .fit() para estimar
+
+Propiedades clave de fue.TimeSeries:
+  .data  : np.array   (valores en niveles tal cual se cargan)
+  .freq  : int        (1=anual, 4=trim., 12=mensual)
+  .start : (year, period)   1-based
+  .name  : str
+
+Nota: .residuals devuelve TimeSeries sin .start correcto → usar _resid_start(model)
+```
+
+### Motor de modelos — fue.Model
+
+```
+Construcción        Helpers ART              Parámetros clave
+─────────────────────────────────────────────────────────────────
+fue.Model(ts, ...)  _build_inp(...)          d, D, boxlam, ar, ma, ar_s, ma_s
+                    _build_arma_on_model(m)  interventions (cos/sin/step/pulse)
+                                             estimate_mu, ifadf
+
+Estimación:   m.fit()  →  C engine MVENC  →  m._result: FitResult
+Resultados:   m.residuals / .params / .std_errors / .aic / .bic / .sigma2
+
+Serialización:
+  write_pre(m, path)   →  .pre  (parámetros estimados como valores iniciales)
+  fue.load(path)       ←  .pre / .inp  (Model sin estimar)
+
+Workaround obligatorio (bug C backend):
+  Si p=0 y q=0: añadir AR(1) φ=0 fijo para evitar crash del estimador C.
+  _build_inp y _build_arma_on_model lo aplican automáticamente.
+
+Bug conocido (fue/TODO.md):
+  ar_s (P≥1) + ma_s (Q≥1) simultáneos → crash C. Solo P>0 ó Q>0, no ambos.
+```
+
+### Motor de gráficos — pyfug
+
+```
+Tipo entrada    Preparación ART             Función pyfug              Output
+────────────────────────────────────────────────────────────────────────────────
+fue.TimeSeries  _pyfug_from_fue(ts)         plot_mean_deviation_pair   PNG b64 (λ)
+numpy + meta    _pyfug_ts(w, freq, start)   plot_combined(pf)          PNG b64 (serie+ACF+PACF)
+residuos        _pyfug_ts(r, f, _resid_start(m))  plot_combined(pf)  PNG b64 (diagnosis)
+residuos        idem                        plot_histogram(pf)         PNG b64 (histograma)
+
+Regla crítica: pyfug opera sobre .data tal cual — NO diferencia internamente.
+  plot_combined(d=, ds=) acepta esos params pero los ignora.
+  ART aplica boxcox_transform + apply_differences ANTES de crear pyfug.Tseries.
+
+Figuras internas ART (sin equivalente en pyfug, quedan en matplotlib):
+  describe_unit_root        →  tabla coloreada ADF/KPSS
+  describe_prelim_scan      →  serie tipificada + barras contrib. ACF outliers
+  describe_seasonal_params  →  barras cos/sin ± 2SE por armónico
+  _plot_series_at_d         →  [PENDIENTE migrar a pyfug — ver §Optimizaciones]
+```
+
+### Bridge fue ↔ pyfug (describe.py:53–78)
 
 ```python
-# Número de retardos por defecto (pyfug)
+# Array numpy → pyfug.Tseries
+def _pyfug_ts(data, freq, start, name) -> Tseries
+
+# fue.TimeSeries → pyfug.Tseries (datos en niveles)
+def _pyfug_from_fue(ts) -> Tseries
+
+# Start correcto para residuos (fue.TimeSeries.residuals no propaga start)
+def _resid_start(model) -> tuple:
+    n_skip = model.d + model.D * freq
+    off    = (start[1] - 1) + n_skip
+    return (start[0] + off // freq, off % freq + 1)
+```
+
+### Retorno al MCP — Description
+
+```python
+@dataclass
+class Description:
+    summary    : str        # markdown análisis para el LLM
+    figure_b64 : str|None   # ACF/PACF o figura principal (PNG base64)
+    recommendation: str     # próxima decisión sugerida
+    data: dict              # {
+                            #   "hist_b64": str|None,     ← histograma pyfug
+                            #   "d", "D", "lam": ...,
+                            #   "suggestions": [...],     ← candidatos ARMA
+                            #   "outliers": [...],        ← prelim scan
+                            # }
+
+# Cada MCP tool devuelve:
+[TextContent(summary + recommendation),
+ ImageContent(figure_b64),        ← ACF/PACF
+ ImageContent(data["hist_b64"])]  ← histograma (cuando disponible)
+```
+
+---
+
+## Gráficos pyfug en el flujo
+
+| Paso | Preparación | Función pyfug |
+|------|------------|--------------|
+| 1. λ | `_pyfug_from_fue(ts)` | `plot_mean_deviation_pair(pf, name)` |
+| 2–3. Serie diferenciada | `boxcox_transform + apply_differences + new_start` | `plot_combined(pf)` |
+| 4. ARMA sobre residuos | `_pyfug_ts(resid, freq, _resid_start(m))` | `plot_combined(pf, d=0)` |
+| Histograma residuos | idem | `plot_histogram(pf, d=0)` |
+
+```python
+# Retardos por defecto (pyfug)
 nlags = max(10, 3 * (freq + 1))   # 39 mensual, 15 trimestral, 10 anual
 ```
 
 ---
 
+## Optimización de flujos — tokens y tiempo (pendiente)
+
+### Ineficiencias actuales
+
+**1. `_plot_series_at_d` — duplicación + matplotlib interno**
+
+`guided_identification` calls 2 y 3 usan `_plot_series_at_d`, que reimplementa
+manualmente lo que pyfug ya hace en `plot_combined`. ~110 líneas duplicadas.
+
+```
+_plot_series_at_d(ts, lam, d)
+  → boxcox manual (lam=0 → log, else → (x^lam-1)/lam)
+  → np.diff(y) d veces
+  → fue.diagnostics.acf / pacf
+  → fue.plots._draw_acf_panel  (privado de fue)
+  → matplotlib figura propia
+```
+
+**Solución**: reemplazar con `_pyfug_ts(w, freq, start) + plot_combined(pf)`.
+Mismo output, cero código duplicado, coherencia visual con el resto del flujo.
+
+**2. Re-estimación en cada llamada MCP**
+
+`_load_fitted(path)` = `fue.load(path)` + `m.fit()`. Cada tool que necesita
+el modelo estimado lo re-estima desde cero aunque el `.pre` tenga parámetros.
+
+Impacto: estimación MVENC ≈ 0.1-2s por modelo (C backend); en el ciclo de
+outliers (5-20 rondas) esto suma. Sin cache entre llamadas MCP.
+
+**Solución mínima**: leer parámetros del `.pre` como valores fijos cuando todos
+los `free=False` (forecast mode). Para el caso guiado no aplica directamente,
+pero documentar como limitación.
+
+**3. Dos imágenes por llamada de diagnosis**
+
+`estimate_and_diagnose`, `confirm_and_estimate`, `suggest_intervention_form`
+devuelven ahora `[Text, ImageContent(ACF), ImageContent(hist)]`.
+Cada imagen PNG base64 ≈ 15-40 KB = 20.000-55.000 tokens.
+En el ciclo de outliers (10+ rondas) esto supone 200.000-550.000 tokens solo en imágenes.
+
+**Solución**: añadir parámetro `include_histogram: bool = False` a estas tools.
+El histograma solo es necesario en el diagnóstico FINAL, no en cada ronda del ciclo.
+
+**4. `describe_diagnosis` llama al estimador dos veces vía model_equation**
+
+`describe_diagnosis` llama `model_equation(model.series, model)` que puede
+redundar con accesos a `model._result` ya disponibles.
+Impacto menor pero documentar.
+
+**5. Coste total tokens por análisis completo (estimación)**
+
+| Fase | Tools | Imágenes | Tokens imagen aprox. |
+|------|-------|----------|---------------------|
+| Identificación (calls 1-4) | 4 | 1×call ≈ 1-2 imgs | 40-80 K |
+| m00 estimación | 1 | 2 imgs (ACF+hist) | 40-80 K |
+| Ciclo outliers × N rondas | N×2 | 2 imgs/ronda | 40-80 K × N |
+| Modelo final | 1 | 2 imgs | 40-80 K |
+| Refinamiento (G, H, MEG) | 3 | 1-2 imgs/tool | 40-120 K |
+| **Total (N=10 rondas)** | ~20 | ~28 imgs | **~800 K tokens** |
+
+### Acciones recomendadas (por impacto)
+
+- [ ] **Alta**: reemplazar `_plot_series_at_d` con pyfug `plot_combined`
+      (elimina ~110 líneas de código interno de fue, coherencia visual)
+- [ ] **Alta**: añadir `include_histogram: bool = False` a `confirm_and_estimate`
+      y `suggest_intervention_form` — histograma solo en diagnosis final
+- [ ] **Media**: en `guided_identification` call 3 (HAC seasonality), no mostrar
+      imagen de seasonality si el analista ya confirmó d — se puede omitir
+- [ ] **Media**: documentar el bug P+Q simultáneos en fue C backend en CHANGELOG
+      y en la docstring de `confirm_and_estimate`
+- [ ] **Baja**: añadir `include_histogram` a `estimate_and_diagnose` también
+
+---
+
 ## Pendiente
 
+- [ ] **Bloque M**: `_plot_series_at_d` → migrar a pyfug (ver §Optimizaciones)
+- [ ] **Bloque M**: `seasonality_form="deterministic"|"multiplicative"` en
+      `guided_identification` call 3 como parámetro explícito (no solo texto)
 - [ ] **Pruebas de raíz unitaria**: integrar ADF/KPSS/Shin-Fuller en el flujo
 - [ ] **Notebook de demostración**: flujo completo IPC_DE con pyfug + fue

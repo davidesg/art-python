@@ -139,8 +139,8 @@ rondas. Útil para análisis masivos o como punto de partida para el modo guiado
 
 | Bloque | Qué | Esfuerzo |
 |--------|-----|---------|
-| I | Sobreparametrización: matriz correlación parámetros | bajo |
-| K | Shin-Fuller en `describe_formal_tests` | bajo |
+| I | Sobreparametrización: matriz correlación parámetros | bajo | ✅ |
+| K | Shin-Fuller en `describe_formal_tests` | bajo | ✅ |
 | Q | `compare_versions`: LR / diff especificación / figura dual | medio |
 
 **Prioridad 3 — documentación integrada**
@@ -420,7 +420,7 @@ dcd_f(model) -> list[DCDResult]
 - [x] H₀: λ₂ = −1 (raíz unitaria en frecuencia f del polinomio MA_f)
 - [x] LR = 2·[l(λ̂₂) − l(λ₂=−1)]  distribución no estándar
 - [x] Valores críticos: 10%=1.07, 5%=2.02, 1%=4.52
-- [x] Usa `estimate_py` para ambos modelos (workaround bug `nlatools.c:tensor()`)
+- [x] Usa `model.fit()` (motor C; bug `nlatools.c:tensor()` corregido 2026-06-15)
 - [x] Tests funcionales + API con datos IPC mensual (RIPC.1)
 - [x] Tests con datos Chile (guion3): PC6 DCD (LR≈149.6), PC7 DCD+DCD_f (LR_MA≈152, LR_f≈4.32)
   - PC7 DCD_f: caso límite — rechaza al 5% pero NO al 1% (LR=4.32 entre 2.02 y 4.52)
@@ -428,10 +428,9 @@ dcd_f(model) -> list[DCDResult]
   - PC8 DCD_f falla por convergencia: cuando ifadf ya incluye freq=1 y se restringe MA_f(freq=1)=-1,
     el likelihood se degrada (raíces comunes AR/MA); no es un bug, es un caso degenerado
 
-**Bug pendiente (fue Python)**: `nlatools.c:tensor()` crash con `nrl < 0`.
-El backend C falla al combinar AR + MA_f porque `gamwa = tensor(-q+1, 0, ...)`
-con q≥2 hace `t[-1]=...` (escribe antes del bloque asignado).
-El estimador Python puro no se ve afectado. Ver `fue/TODO.md`.
+**Bug corregido (2026-06-15)**: `nlatools.c:tensor()` — `calloc(nrh+1,...)` con nrl<0
+asignaba 1 slot pero el loop escribía en `t[-1]`. Fix: `calloc(nrh-nrl+1,...)` + `t -= nrl`;
+`free_tensor` usa `free(t+nrl)`. Ver `fue/TODO.md`.
 
 #### 3b. Contraste RV de frecuencia fija para AR(2)  ✅
 ```python
@@ -451,10 +450,11 @@ meg(model, frequencies=None) -> list[MEGResult]
   - Eliminar armónicos cos/sin en f de las intervenciones (cancelación teórica)
   - Activar ifadf[f]=1 (raíz unitaria en f)
   - Añadir MA_f testigo libre (coef inicial -0.9)
-  - Reestimar con `estimate_py`
+  - Reestimar con `model.fit()` (motor C; ~0.13s/frecuencia)
   - Aplicar DCD_f al testigo
   - MA_f invertible (DCD_f rechaza) → **estocástica**; no invertible → **determinista**
 - [x] Datos Chile PC6 freq=1: coef≈-0.915, LR≈4.32, rechaza al 5% → **estocástica**
+- [x] IPC_ES_m02 (AR(1), 5 frecuencias): todas deterministas; tiempo total 1.58s (C backend)
 - [x] Estrategia iterativa documentada: rondas independientes por frecuencia,
       analista decide antes de proceder a ronda 2 con raíces confirmadas
 - [x] Frecuencia biannual (f=s//2, alter) excluida por defecto (requiere MA_f orden 1)
@@ -914,18 +914,20 @@ export_guion(guion_path: str, output_html: str) -> str
 
 ---
 
-### Bloque Q — Control de versiones y comparación de modelos  [PENDIENTE]
+### Bloque Q — Control de versiones y comparación de modelos  [SIGUIENTE PRIORIDAD]
+
+**Motivación**: el flujo iterativo B-J-T produce una secuencia de versiones del modelo
+(PC1 → PC2 → … → PC11 en la tesis). El analista necesita comparar versiones adyacentes
+para justificar cada cambio con evidencia estadística: LR test si están anidadas, ΔAIC/ΔBIC
+si no lo están. `compare_versions` cierra este ciclo en el flujo guiado (paso 12 del flujo MCP).
 
 **Convención de nombrado:**
 
 ```
-# Opción 1 (preferida): nombre semántico en el guion.json
-chile_ipc/v01_PC1.inp   → guion entry name="PC1"
-chile_ipc/v02_PC2.inp   → guion entry name="PC2"
-chile_ipc/v11_PC11.inp  → guion entry name="PC11" (modelo final)
-
-# El prefijo vNN garantiza orden cronológico en el directorio
-# El sufijo _NAME es el nombre del analista (libre, como en la tesis)
+# Prefijo vNN garantiza orden cronológico; sufijo libre (como en la tesis)
+cases/IPC_ES/IPC_ES_m01.pre  →  "m01" (inicial: solo armónicos)
+cases/IPC_ES/IPC_ES_m02.pre  →  "m02" (+ AR(1))
+cases/IPC_ES/IPC_ES_m03.pre  →  "m03" (reformulación)
 ```
 
 **MCP tool de comparación:**
@@ -933,22 +935,63 @@ chile_ipc/v11_PC11.inp  → guion entry name="PC11" (modelo final)
 ```python
 compare_versions(inp_path_a: str, inp_path_b: str,
                  guion_path: str = "") -> list
-# - Carga y estima ambos modelos
-# - Diff de especificación: qué parámetros/intervenciones se añadieron/eliminaron
-# - Diff de estadísticos: Δloglik, ΔAIC, ΔBIC, ΔQ, ΔJB
-# - Test LR si los modelos son anidados: LR = 2(l_b - l_a) ~ chi^2(k)
-# - Tabla comparativa lado a lado
-# - [figura]: ACF/PACF residuos de ambos modelos en paneles contiguos
+# Salida: TextContent + ImageContent
+#
+# TextContent:
+#   1. Diff de especificación:
+#      - ARIMA(p,d,q): A=(1,1,0) → B=(1,1,1) [añadido MA(1)]
+#      - Intervenciones: +step 3/2022, −pulse 5/2021
+#      - Armónicos: sin cambio
+#   2. Tabla estadísticos lado a lado:
+#      | Estadístico | Modelo A | Modelo B | Δ (B−A) |
+#      | loglik      | −145.3   | −138.7   | +6.6    |
+#      | AIC         |  304.7   |  291.4   | −13.3   |
+#      | BIC         |  312.1   |  302.7   | −9.4    |
+#      | σ̂_a         | 0.00314  | 0.00289  | −8%     |
+#      | Q-test      | ✗        | ✓        |         |
+#      | JB          | ✓        | ✓        |         |
+#   3. Test LR si anidados: LR = 2·(l_B − l_A) ~ χ²(k), p-valor
+#      Detección de anidamiento: B anida A si spec(A) ⊆ spec(B)
+#      (misma serie, mismo d, D; B tiene todo lo de A + algo más)
+#   4. Veredicto: "B mejora significativamente" / "B no justificado (ΔAIC>0)"
+#
+# ImageContent: figura 2×3 paneles
+#   Col izq: residuos tipificados, ACF, PACF de A
+#   Col der: residuos tipificados, ACF, PACF de B
 ```
 
-**Integración con guion:**
-- `compare_versions` puede opcionalmente anotar la comparación en el guion.json
-- `export_guion` incluye una tabla de evolución: AIC, BIC, Q-pass, JB-pass por versión
+**Detección de anidamiento** (para decidir si aplicar LR o solo ΔAIC/ΔBIC):
 
-- [ ] Implementar `compare_versions` MCP tool
-- [ ] Figura comparativa: 2 figuras diagnosis en un solo ImageContent
-- [ ] LR test automático si modelos son anidados (detectar si a es submodelo de b)
-- [ ] Tests con Chile PC5 vs PC6 (eliminación AR(1) → esperado ΔAIC > 0 a favor de PC5)
+```python
+def _are_nested(m_a, m_b) -> tuple[bool, int]:
+    # B anida A si: misma serie (n, freq, lam, d, D iguales)
+    # Y la spec de A es subconjunto de la de B:
+    #   - p_a <= p_b, q_a <= q_b (ARMA regular)
+    #   - intervenciones de A ⊆ intervenciones de B (mismas fechas y tipos)
+    #   - armónicos de A ⊆ armónicos de B
+    # k = número de parámetros adicionales en B vs A
+    # Devuelve (True, k) si B anida A, (False, 0) si no
+```
+
+**Integración con guion** (independiente de Bloque P — no depende de guion.json):
+- `compare_versions` funciona solo con dos ficheros `.pre`/`.inp`, sin guion
+- Si `guion_path` se proporciona, anota el resultado de la comparación en la entrada
+  correspondiente del guion.json (campo `"comparison_with_prev"`)
+
+**Casos de prueba:**
+
+| Par A → B | Cambio | LR esperado | Veredicto esperado |
+|-----------|--------|------------|-------------------|
+| IPC_ES_m01 → IPC_ES_m02 | +AR(1) | ~10–20 | B mejora (χ²(1), p<0.01) |
+| Chile PC5 → PC6 (de la tesis) | −AR(1) | ~4–6 | A mejor (ΔAIC > 0 al eliminar AR) |
+
+- [ ] Implementar `_are_nested(m_a, m_b) -> (bool, int)` en `formal_tests.py` o módulo aux
+- [ ] Implementar `compare_versions` en `mcp_server.py`
+- [ ] Figura comparativa: `plot_comparison(diag_a, diag_b) -> Figure` (2 cols × 3 filas:
+      residuos tipificados, ACF residuos, PACF residuos — sin QQ)
+      en `diagnosis.py`; devolver como único `ImageContent`
+- [ ] LR test automático si `_are_nested` → `True`; ΔAIC/ΔBIC siempre
+- [ ] Tests con IPC_ES_m01 vs IPC_ES_m02 (verificar Δloglik, LR, ΔAIC)
 
 ---
 
@@ -966,10 +1009,13 @@ discriminate_intervention_form(model, at_0based) -> InterventionFormResult
 
 ---
 
-### Bloque K — Shin-Fuller en MCP/describe  [PENDIENTE]
+### Bloque K — Shin-Fuller en MCP/describe  [✅ COMPLETADO]
 
-**Estado**: `shin_fuller(model)` está implementado en `formal_tests.py` y tiene tests.
-**Problema**: NO está expuesto en `describe_formal_tests` ni en el MCP tool `formal_tests`.
+**Estado**: `shin_fuller(model)` implementado en `formal_tests.py`. Integrado en
+`describe_formal_tests` con formato completo (φ̂, Φ̂₁ᵤ, valores críticos 10/5/1%).
+Bug corregido: condición "Ningún contraste" ahora incluye `sf_res is None`.
+Tests en `test_mcp_server.py`: `test_formal_tests_shin_fuller_ipc_es` y
+`test_formal_tests_shin_fuller_data_field`.
 
 **Acción**: añadir Shin-Fuller a `describe_formal_tests` junto con DCD, RV, MEG.
 

@@ -16,6 +16,7 @@ import io
 import math
 from dataclasses import dataclass, field
 
+import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -34,6 +35,47 @@ from .diagnosis import diagnose, plot_diagnosis
 from .formal_tests import dcd, dcd_f, rv, meg, shin_fuller
 from .interventions import diagnose_interventions
 from .full_report import _meg_suitable, _try
+
+# ── pyfug integration ─────────────────────────────────────────────────────────
+# pyfug is the primary graphics engine for standard plots (series+ACF/PACF,
+# histogram, mean-deviation). Internal ART matplotlib figures are kept only for
+# specialized plots (unit-root coloured table, ACF contribution bars, etc.).
+try:
+    from pyfug.graphics import plot_combined as _pyfug_combined
+    from pyfug.graphics import plot_histogram as _pyfug_histogram
+    from pyfug.graphics import plot_mean_deviation_pair as _pyfug_mdt_pair
+    from pyfug.core import Tseries as _Tseries
+    _PYFUG = True
+except ImportError:
+    _PYFUG = False
+
+
+def _pyfug_ts(data, freq: int, start: tuple, name: str = "") -> "_Tseries":
+    """Wrap a numpy array (or fue TimeSeries .data) as a pyfug Tseries."""
+    arr = np.asarray(data, dtype=float)
+    begyear, begtime = int(start[0]), int(start[1])
+    return _Tseries(name=name, freq=freq, nobs=len(arr),
+                    begyear=begyear, begtime=begtime, data=arr)
+
+
+def _pyfug_from_fue(ts) -> "_Tseries":
+    """Convert a fue TimeSeries to pyfug Tseries."""
+    return _pyfug_ts(ts.data, ts.freq, ts.start, name=ts.name or "")
+
+
+def _resid_start(model) -> tuple:
+    """Compute the correct calendar start for model.residuals.
+
+    fue's TimeSeries.residuals doesn't propagate the series start, so we
+    derive it: the first residual corresponds to the first observation of
+    the original series that survives d regular differences and D seasonal
+    differences (total n_lost = d + D*freq observations lost from the front).
+    """
+    s0   = model.series.start
+    freq = model.series.freq if model.series.freq > 0 else 1
+    n_skip = model.d + model.D * freq
+    off    = (int(s0[1]) - 1) + n_skip
+    return (int(s0[0]) + off // freq, off % freq + 1)
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +110,13 @@ class Description:
 
 def describe_boxcox(ts) -> Description:
     """Compute Box-Cox selection and recommend lambda."""
-    import numpy as np
     result = boxcox_selection(ts)
-    fig    = plot_boxcox_selection(ts)
-    b64    = _fig_b64(fig)
+    if _PYFUG:
+        pf = _pyfug_from_fue(ts)
+        fig = _pyfug_mdt_pair(pf, name=ts.name or "")
+    else:
+        fig = plot_boxcox_selection(ts)
+    b64 = _fig_b64(fig)
     plt.close(fig)
 
     s = result.name or ts.name or "series"
@@ -506,22 +551,35 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0) -> Description
             + seasonal_note
         )
 
-    # ACF/PACF figure for the chosen (d, D): show all differentiation levels up to (d, D)
-    # so the analyst can see why d was chosen and what the clean series looks like.
+    # ACF/PACF figure at the chosen (d, D) level via pyfug (primary) or internal fallback.
+    # pyfug plot_combined operates on ser.data directly (no internal differencing), so we
+    # apply the transform and differences here and pass the already-differenced series.
     b64_ident = None
     try:
-        listing = identification_listing(ts, lam=lam, max_d=d, max_D=D)
-        start   = getattr(ts, "start", (1, 1))
-        if D == 0:
-            panels = listing.panels                  # d=0, 1, ..., d_chosen (all D=0)
+        if _PYFUG:
+            z     = boxcox_transform(np.array(ts.data), lam)
+            w     = apply_differences(z, ts.freq, d, D)
+            # Compute start of differenced series
+            orig  = getattr(ts, "start", (1, 1))
+            n_skip = d + D * ts.freq          # observations lost
+            off    = (int(orig[1]) - 1) + n_skip
+            new_start = (int(orig[0]) + off // ts.freq, off % ts.freq + 1)
+            name_w = transform_label(lam, d, D, ts.freq)
+            pf     = _pyfug_ts(w, ts.freq, new_start, name=name_w)
+            fig    = _pyfug_combined(pf, title=name_w)
+            b64_ident = _fig_b64(fig)
+            plt.close(fig)
         else:
-            # panels order: [D=0, d=0..d_chosen], [D=1, d=0..d_chosen]
-            # We show only the D=1 panels (the analyst has already decided D=1)
-            n_per_D = d + 1
-            panels  = listing.panels[n_per_D:]      # D=1 panels
-        fig = _listing_figure(listing, panels, start)
-        b64_ident = _fig_b64(fig)
-        plt.close(fig)
+            listing = identification_listing(ts, lam=lam, max_d=d, max_D=D)
+            start   = getattr(ts, "start", (1, 1))
+            if D == 0:
+                panels = listing.panels
+            else:
+                n_per_D = d + 1
+                panels  = listing.panels[n_per_D:]
+            fig = _listing_figure(listing, panels, start)
+            b64_ident = _fig_b64(fig)
+            plt.close(fig)
     except Exception:
         b64_ident = None
 
@@ -1079,9 +1137,22 @@ def describe_diagnosis(model) -> Description:
         raise RuntimeError("Model has not been fitted — call model.fit() first.")
 
     result = diagnose(model)
-    fig    = plot_diagnosis(result, model)
-    b64    = _fig_b64(fig)
-    plt.close(fig)
+
+    # ── figures via pyfug (primary) or internal fallback ──────────────────
+    hist_b64 = None
+    if _PYFUG and model.residuals is not None:
+        res  = model.residuals
+        name = model.series.name or ""
+        pf   = _pyfug_ts(res.data, res.freq, _resid_start(model), name=f"Resid {name}")
+        title_acf  = f"Residuos — {name}" if name else "Residuos"
+        title_hist = f"Histograma residuos — {name}" if name else "Histograma residuos"
+        fig_acf  = _pyfug_combined(pf, d=0, title=title_acf)
+        b64      = _fig_b64(fig_acf);  plt.close(fig_acf)
+        fig_hist = _pyfug_histogram(pf, d=0, title=title_hist)
+        hist_b64 = _fig_b64(fig_hist); plt.close(fig_hist)
+    else:
+        fig = plot_diagnosis(result, model)
+        b64 = _fig_b64(fig);  plt.close(fig)
 
     # Prepend model equation (Bloque O) as the first block of the summary
     try:
@@ -1239,6 +1310,7 @@ def describe_diagnosis(model) -> Description:
                 for i, j, r_val, li, lj in overpar_pairs
             ],
             "param_labels": result.param_labels or [],
+            "hist_b64": hist_b64,   # histogram figure (pyfug); None if unavailable
         },
     )
 
@@ -1339,7 +1411,7 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
             "\n*MEG no aplica: requiere D=0 con armónicos cos/sin en el modelo.*"
         )
 
-    if not dcd_res and not dcd_f_res and not rv_res and not meg_res:
+    if sf_res is None and not dcd_res and not dcd_f_res and not rv_res and not meg_res:
         lines.append("*Ningún contraste aplicable a esta especificación.*")
 
     # Build recommendation
@@ -1399,11 +1471,22 @@ def describe_interventions(model, threshold: float = 3.5) -> Description:
     result = diagnose_interventions(model, threshold=threshold)
 
     # Residual plot: always include so the analyst can see extreme observations
+    b64_diag = None
     try:
-        diag_result = diagnose(model, z_threshold=threshold)
-        fig_diag    = plot_diagnosis(diag_result, model)
-        b64_diag    = _fig_b64(fig_diag)
-        plt.close(fig_diag)
+        if _PYFUG and model.residuals is not None:
+            res  = model.residuals
+            name = model.series.name or ""
+            pf   = _pyfug_ts(res.data, res.freq, _resid_start(model),
+                             name=f"Resid {name}" if name else "Residuos")
+            fig_diag = _pyfug_combined(pf, d=0,
+                                       title=f"Residuos — {name}" if name else "Residuos")
+            b64_diag = _fig_b64(fig_diag)
+            plt.close(fig_diag)
+        else:
+            diag_result = diagnose(model, z_threshold=threshold)
+            fig_diag    = plot_diagnosis(diag_result, model)
+            b64_diag    = _fig_b64(fig_diag)
+            plt.close(fig_diag)
     except Exception:
         b64_diag = None
 

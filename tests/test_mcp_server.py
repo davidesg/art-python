@@ -134,6 +134,38 @@ def test_formal_tests_dcd_po3():
     assert "Invertible" in text
 
 
+_IPC_ES_M02 = os.path.join(
+    os.path.dirname(__file__), "..", "cases", "IPC_ES", "IPC_ES_m02.pre"
+)
+
+
+def test_formal_tests_shin_fuller_ipc_es():
+    """Shin-Fuller test runs and reports stationarity for IPC_ES_m02 (AR(1))."""
+    _skip_if_missing(_IPC_ES_M02)
+    from art.mcp_server import formal_tests
+    result = formal_tests(_IPC_ES_M02, run_meg=False)
+    assert result[0].type == "text"
+    text = result[0].text
+    assert "Shin-Fuller" in text
+    assert "Estacionario" in text
+    assert "Ningún contraste aplicable" not in text
+
+
+def test_formal_tests_shin_fuller_data_field():
+    """formal_tests returns shin_fuller dict with phi_1u and stationary fields."""
+    _skip_if_missing(_IPC_ES_M02)
+    from art.describe import describe_formal_tests
+    import fue
+    _, m = fue.load(_IPC_ES_M02)
+    m.fit()
+    desc = describe_formal_tests(m, run_meg=False)
+    sf = desc.data.get("shin_fuller")
+    assert sf is not None, "shin_fuller key missing from data"
+    assert "phi_1u" in sf
+    assert "stationary" in sf
+    assert sf["stationary"] is True        # IPC_ES_m02 AR(1) is well inside unit circle
+
+
 # ---------------------------------------------------------------------------
 # intervention_analysis
 # ---------------------------------------------------------------------------
@@ -347,6 +379,31 @@ def test_test_interventions_returns_significance_table(tmp_path):
     assert "Significativas" in text
     # Must contain at least one intervention result row
     assert "ω[0]=" in text
+
+
+def test_compare_versions_block_q():
+    """Block Q: compare_versions returns text+figure with LR test and dated diff."""
+    _skip_if_missing(_IPC_ES_M02)
+    m00 = os.path.join(os.path.dirname(__file__), "..", "cases", "IPC_ES", "IPC_ES_m00.pre")
+    _skip_if_missing(m00)
+    from art.mcp_server import compare_versions
+    result = compare_versions(m00, _IPC_ES_M02)
+    assert len(result) == 2
+    assert result[0].type == "text"
+    text = result[0].text
+    # Stats table
+    assert "loglik" in text
+    assert "AIC" in text
+    assert "Δ (B−A)" in text
+    # LR test applied (models are nested)
+    assert "Test LR" in text
+    assert "B mejora significativamente" in text
+    # Dated diff (not None)
+    assert "step(" in text
+    assert "None" not in text
+    # Figure: 3x2 layout (residuals + ACF + PACF)
+    assert result[1].type == "image"
+    assert len(result[1].data) > 10_000
 
 
 def test_batch_build_creates_html_reports(tmp_path):

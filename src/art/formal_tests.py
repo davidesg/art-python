@@ -577,8 +577,10 @@ def _fit_py(mc) -> None:
     """
     Fit a model in-place using the pure-Python estimator only.
 
-    Bypasses the C backend (which crashes on AR + MA_f due to a tensor()
-    allocation bug in nlatools.c — see fue/TODO.md).
+    Retained as a fallback for environments where the C extension is not
+    compiled.  The tensor() bug that required this workaround for AR+MA_f
+    models has been fixed in fue/csrc/internal/nlatools.c (nrh-nrl+1
+    allocation + shifted pointer).
     """
     from fue.cast_us import estimate_py
     from fue.model import FitResult
@@ -606,12 +608,10 @@ def dcd_f(model) -> list[DCDResult]:
 
     Implementation note
     -------------------
-    Both the free and constrained models are estimated with the pure-Python
-    estimator (cast_us.estimate_py) regardless of whether the C extension is
-    available.  This is necessary because the C backend crashes when combining
-    AR + MA_f due to a heap-corruption bug in nlatools.c:tensor() — the
-    gamwa tensor is allocated with nrl < 0 but the allocation size ignores the
-    negative lower bound.  See fue/TODO.md for the fix.
+    Both the free and constrained models are estimated with model.fit() which
+    uses the C backend when available.  The tensor() bug in nlatools.c that
+    previously caused a crash for AR + MA_f combinations has been fixed
+    (calloc size corrected to nrh−nrl+1, shifted pointer for negative nrl).
 
     Parameters
     ----------
@@ -637,9 +637,10 @@ def dcd_f(model) -> list[DCDResult]:
             "No free MA_f factors found — DCD_f not applicable."
         )
 
-    # Re-fit the free model with pure Python for numerical consistency.
+    # Re-fit the free model to get a consistent loglik baseline.
     m_free = copy.deepcopy(model)
-    _fit_py(m_free)
+    m_free._result = None
+    m_free.fit()
     L_free = float(m_free._result.loglik)
 
     results = []
@@ -653,7 +654,7 @@ def dcd_f(model) -> list[DCDResult]:
         from fue.model import FixedFreqFactor
         orig = mc.ma_f[i]
         mc.ma_f[i] = FixedFreqFactor(freq=orig.freq, coef=-1.0, free=False)
-        _fit_py(mc)
+        mc.fit()
 
         L_const = float(mc._result.loglik)
         lr = 2.0 * (L_free - L_const)
@@ -992,9 +993,9 @@ def meg(model, frequencies=None) -> list[MEGResult]:
         testigo_idx = len(mc.ma_f)
         mc.ma_f = list(mc.ma_f) + [FixedFreqFactor(freq=float(f), coef=-0.9, free=True)]
 
-        # Estimate augmented model
+        # Estimate augmented model (C backend, now supports AR+MA_f)
         try:
-            _fit_py(mc)
+            mc.fit()
         except Exception:
             results.append(MEGResult(freq=f, coef_ma_f=None, dcd_result=None,
                                      status='ambiguous'))

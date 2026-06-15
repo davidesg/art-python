@@ -212,120 +212,39 @@ def _show_fig(b64: str | None, label: str = "art") -> None:
 
 def _plot_series_at_d(ts, lam: float, d: int) -> str | None:
     """
-    Plot Box-Cox(lam) + d-fold differenced series as standardized z-scores.
-    Layout: standardized series left (full height) + ACF top-right + PACF bottom-right.
+    Plot Box-Cox(lam) + d-fold differenced series via pyfug plot_combined.
     Returns base64 PNG or None on error.
     """
     try:
-        import math
         import numpy as np
         import matplotlib.pyplot as plt
-        from fue.diagnostics import acf as _fue_acf, pacf as _fue_pacf
-        from fue.plots import (_draw_acf_panel, _snap_cmax,
-                               _obs_to_decimal_year, _tj_spines, _snap_series_max)
-        from art.identification import _default_lags_fug
-        from art.describe import _fig_b64
+        from art.identification import boxcox_transform, apply_differences, transform_label
+        from art.describe import _fig_b64, _pyfug_ts
 
-        data = np.asarray(ts.data, dtype=float)
-
-        # Box-Cox transform
-        if lam == 0.0:
-            y = np.log(data)
-        elif lam == 1.0:
-            y = data.copy()
-        else:
-            y = (data ** lam - 1.0) / lam
-
-        # d-fold differencing
-        for _ in range(d):
-            y = np.diff(y)
-
-        n = len(y)
-        if n < 4:
+        try:
+            from pyfug.graphics import plot_combined as _pyfug_combined
+        except ImportError:
             return None
 
-        freq  = ts.freq
-        lags  = _default_lags_fug(n, freq)
-        lag_x = np.arange(1, lags + 1)
+        data  = np.asarray(ts.data, dtype=float)
+        freq  = ts.freq if ts.freq > 0 else 1
+        start = getattr(ts, "start", (1, 1))
 
-        acf_v  = np.asarray(_fue_acf(y,  lags=lags), dtype=float)
-        pacf_v = np.asarray(_fue_pacf(y, lags=lags), dtype=float)
-        band   = 1.96 / np.sqrt(n)
-        cmax   = _snap_cmax(acf_v, pacf_v)
+        z = boxcox_transform(data, lam)
+        w = apply_differences(z, freq, d, 0)   # D=0: calls 2 and 3 never use seasonal diff
 
-        # Labels
-        name  = ts.name or "y"
-        base  = f"log({name})" if lam == 0.0 else name
-        sym   = {0: "", 1: "∇", 2: "∇²"}.get(d, f"∇^{d}")
-        label = f"{sym}{base}"
+        off       = (int(start[1]) - 1) + d
+        new_start = (int(start[0]) + off // freq, off % freq + 1)
+        title     = transform_label(lam, d, 0, freq)
 
-        # Adjusted start period after d differences
-        start      = list(ts.start) if hasattr(ts.start, '__iter__') else [int(ts.start), 1]
-        beg_year   = int(start[0])
-        beg_period = int(start[1]) if freq > 1 else 1
-        total_p    = beg_period - 1 + d
-        start_adj  = (beg_year + total_p // freq, total_p % freq + 1)
-
-        # Standardize (matching _draw_series_standardized in identification.py)
-        mu      = y.mean()
-        sigma   = y.std(ddof=0)
-        z       = (y - mu) / sigma if sigma > 1e-10 else y - mu
-        abs_max = _snap_series_max(float(np.abs(z).max()))
-        xs      = _obs_to_decimal_year(n, start_adj[0], start_adj[1], freq)
-
-        # Figure
-        fig = plt.figure(figsize=(12, 4))
-        gs  = fig.add_gridspec(2, 2, width_ratios=[2, 1], hspace=0.45, wspace=0.3)
-        ax_ts   = fig.add_subplot(gs[:, 0])
-        ax_acf  = fig.add_subplot(gs[0, 1])
-        ax_pacf = fig.add_subplot(gs[1, 1])
-
-        # Standardized series panel
-        _tj_spines(ax_ts)
-        ax_ts.plot(xs, z, color='k', linewidth=0.9,
-                   marker='o', markersize=4.5, markerfacecolor='k',
-                   markeredgewidth=0, zorder=3)
-        ax_ts.axhline(0,  color='k',   lw=0.8, zorder=2)
-        ax_ts.axhline( 2, color='0.3', lw=1.0, linestyle='--', zorder=2)
-        ax_ts.axhline(-2, color='0.3', lw=1.0, linestyle='--', zorder=2)
-
-        if freq > 1:
-            x0, x1 = xs[0], xs[-1]
-            step = 2 if (x1 - x0) > 5 else 1
-            for yr in range(int(np.ceil(x0 - 1e-9)), int(x1) + 2, step):
-                if x0 < yr <= x1 + 1.0 / freq:
-                    ax_ts.axvline(yr, color='k', lw=0.5, zorder=1)
-
-        y_max = int(abs_max)
-        ax_ts.set_ylim(-y_max - 0.15, y_max + 0.15)
-        ax_ts.set_yticks(range(-y_max, y_max + 1, 2))
-        ax_ts.tick_params(axis='both', direction='out', labelsize=9)
-        ax_ts.set_xlim(xs[0] - 0.3 / freq, xs[-1] + 0.3 / freq)
-
-        se = sigma / math.sqrt(n)
-        ax_ts.set_xlabel(
-            f"$\\bar{{w}}$ = {mu:.4f}  ({se:.4f})    $\\hat{{\\sigma}}_w$ = {sigma:.4f}",
-            fontsize=10,
-        )
-        ax_ts.set_title(label, fontweight='bold', fontsize=12)
-
-        _draw_acf_panel(ax_acf,  lag_x, acf_v,  band=band, cmax=cmax,
-                        freq=freq, lags=lags, label="ACF")
-        _draw_acf_panel(ax_pacf, lag_x, pacf_v, band=band, cmax=cmax,
-                        freq=freq, lags=lags, label="PACF")
-
+        pf  = _pyfug_ts(w, freq, new_start, name=title)
+        fig = _pyfug_combined(pf, title=title)
         b64 = _fig_b64(fig)
         plt.close(fig)
         return b64
     except Exception:
         return None
 
-
-# ---------------------------------------------------------------------------
-# Tool: create INP from raw data (entry point for spreadsheet / CSV data)
-# ---------------------------------------------------------------------------
-
-@mcp.tool()
 def create_inp(
     data: list[float],
     output_path: str,
@@ -642,12 +561,22 @@ def estimate_and_diagnose(inp_path: str) -> list:
     inp_path : path to the .inp file with the model specification
     """
     try:
+        from mcp.types import TextContent, ImageContent
         from art.describe import describe_diagnosis
         ts, m = _load_ts_model(inp_path)
         m.fit()
         desc = describe_diagnosis(m)
         _show_fig(desc.figure_b64, "diagnosis")
-        return _result(desc)
+        items = [TextContent(type="text",
+                             text=desc.summary + "\n\n---\n" + desc.recommendation)]
+        if desc.figure_b64:
+            items.append(ImageContent(type="image",
+                                      data=desc.figure_b64, mimeType="image/png"))
+        hist_b64 = desc.data.get("hist_b64")
+        if hist_b64:
+            items.append(ImageContent(type="image",
+                                      data=hist_b64, mimeType="image/png"))
+        return items
     except Exception as e:
         return _err(traceback.format_exc())
 
@@ -672,14 +601,187 @@ def model_histogram(inp_path: str) -> list:
     """
     try:
         from mcp.types import ImageContent
-        from art.describe import _fig_b64
-        from art.diagnosis import plot_diagnosis_histogram
-        import matplotlib.pyplot as plt
+        from art.describe import describe_diagnosis
         ts, m = _load_fitted(inp_path)
-        fig = plot_diagnosis_histogram(m)
+        desc = describe_diagnosis(m)
+        b64 = desc.data.get("hist_b64") or desc.figure_b64
+        if b64 is None:
+            return _err("No se pudo generar el histograma de residuos.")
+        return [ImageContent(type="image", data=b64, mimeType="image/png")]
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
+# Tool: Over-parameterization analysis (Bloque I)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def overparameterization_analysis(inp_path: str, threshold: float = 0.7) -> list:
+    """
+    Check for over-parameterization by inspecting parameter correlation matrix.
+
+    Computes the correlation matrix of all estimated parameters from the
+    covariance matrix returned by fue (MVENC).  Parameter pairs with
+    |corr| > threshold are flagged as potentially redundant.
+
+    The correlation matrix is shown as a colour heatmap with the ARMA/mu
+    block highlighted.  High-correlation pairs are listed with labels and
+    a note on whether the high correlation is structural (expected) or
+    indicates true redundancy.
+
+    Run this after estimate_and_diagnose if the diagnosis text mentions
+    sobreparametrización, or as a routine check before finalising the model.
+
+    Parameters
+    ----------
+    inp_path  : path to .inp or .pre file with the estimated model
+    threshold : |corr| threshold for flagging (default 0.7)
+    """
+    try:
+        import io, base64
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from mcp.types import TextContent, ImageContent
+        from art.diagnosis import _compute_param_corr, _build_param_labels
+        from art.describe import _fig_b64
+
+        _, m = _load_fitted(inp_path)
+        corr, pairs, labels = _compute_param_corr(m, threshold=threshold)
+
+        if corr is None:
+            return [TextContent(type="text",
+                                text="No se pudo calcular la matriz de correlación "
+                                     "(modelo no estimado o sin matriz de covarianza).")]
+
+        n = corr.shape[0]
+
+        # ── heatmap figure ────────────────────────────────────────────────
+        fig, ax = plt.subplots(figsize=(max(6, n * 0.42 + 1.5),
+                                        max(5, n * 0.38 + 1.2)))
+        im = ax.imshow(corr, vmin=-1, vmax=1, cmap="RdBu_r", aspect="auto")
+        plt.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
+
+        # Tick labels — show all if ≤20 params, else abbreviated
+        tick_labels = labels if n <= 20 else [
+            lbl if i in (0, n - 1) or i % max(1, n // 10) == 0 else ""
+            for i, lbl in enumerate(labels)
+        ]
+        ax.set_xticks(range(n))
+        ax.set_yticks(range(n))
+        ax.set_xticklabels(tick_labels, rotation=90, fontsize=7)
+        ax.set_yticklabels(tick_labels, fontsize=7)
+
+        # Highlight cells with |corr| > threshold
+        for i in range(n):
+            for j in range(n):
+                if i != j and abs(corr[i, j]) > threshold:
+                    ax.add_patch(plt.Rectangle(
+                        (j - 0.5, i - 0.5), 1, 1,
+                        fill=False, edgecolor="gold", lw=1.5
+                    ))
+
+        # Draw box around ARMA+mu block (last ARMA params)
+        n_arma = (
+            sum(len(f) for f in (m.ar or []))
+            + sum(len(f) for f in (m.ar_s or []))
+            + sum(len(f) for f in (m.ma or []))
+            + sum(len(f) for f in (m.ma_s or []))
+            + (1 if getattr(m, "estimate_mu", False) else 0)
+        )
+
+        if n_arma > 0:
+            i0 = n - n_arma
+            rect = plt.Rectangle((i0 - 0.5, i0 - 0.5), n_arma, n_arma,
+                                  fill=False, edgecolor="black", lw=2.0, linestyle="--")
+            ax.add_patch(rect)
+
+        ax.set_title(f"Correlación de parámetros — {m.series.name if m.series else ''}\n"
+                     f"(n_param={n}, umbral={threshold})", fontsize=10)
+        fig.tight_layout()
         b64 = _fig_b64(fig)
         plt.close(fig)
-        return [ImageContent(type="image", data=b64, mimeType="image/png")]
+
+        # ── text summary ──────────────────────────────────────────────────
+        # Classify each pair:  "flt" = always structural, "arma" = check RV test,
+        # "" = unknown/genuine overpar candidate
+        def _classify(lbl_i: str, lbl_j: str) -> str:
+            a, b_lbl = lbl_i.lower(), lbl_j.lower()
+            # FLT transfer function: ω + δ always structural
+            if ("ω(" in lbl_i or "δ(" in lbl_i) and ("ω(" in lbl_j or "δ(" in lbl_j):
+                return "flt"
+            if "ω(" in lbl_i and lbl_j.startswith("δ"):
+                return "flt"
+            if lbl_i.startswith("δ") and "ω(" in lbl_j:
+                return "flt"
+            # AR + MA mixed: may be structural if AR(2) with complex roots
+            is_ar_i = lbl_i.startswith("AR")
+            is_ma_i = lbl_i.startswith("MA")
+            is_ar_j = lbl_j.startswith("AR")
+            is_ma_j = lbl_j.startswith("MA")
+            if (is_ar_i and is_ma_j) or (is_ma_i and is_ar_j):
+                return "arma"
+            return ""
+
+        def _note_text(kind: str, lbl_i: str, lbl_j: str) -> str:
+            if kind == "flt":
+                return "FLT (ω,δ): estructural, sin acción"
+            if kind == "arma":
+                return "AR+MA: si AR(2) con φ₂<0 puede ser estructural → verificar test RV"
+            return "Sobreparametrización probable → reducir modelo"
+
+        lines = ["## Sobreparametrización — análisis de correlaciones de parámetros", ""]
+        lines.append(f"Parámetros: **{n}**  |  Umbral: **|r| > {threshold}**")
+        lines.append("")
+
+        if not pairs:
+            lines.append("✅ **Sin sobreparametrización detectada.** "
+                         "Ningún par de parámetros supera el umbral de correlación.")
+        else:
+            lines.append(f"⚠ **{len(pairs)} par(es) con |r| > {threshold}:**")
+            lines.append("")
+            lines.append("| # | Param i | Param j | r | Diagnóstico |")
+            lines.append("|---|---------|---------|---|------------|")
+            for k, (i, j, r_val, lbl_i, lbl_j) in enumerate(pairs, 1):
+                kind = _classify(lbl_i, lbl_j)
+                note = _note_text(kind, lbl_i, lbl_j)
+                lines.append(f"| {k} | {lbl_i} | {lbl_j} | {r_val:+.3f} | {note} |")
+            lines.append("")
+
+            flt_pairs   = [(li, lj, rv) for _, _, rv, li, lj in pairs if _classify(li, lj) == "flt"]
+            arma_pairs  = [(li, lj, rv) for _, _, rv, li, lj in pairs if _classify(li, lj) == "arma"]
+            true_pairs  = [(li, lj, rv) for _, _, rv, li, lj in pairs if _classify(li, lj) == ""]
+
+            if flt_pairs:
+                lines.append(f"**{len(flt_pairs)} par(es) FLT** — estructurales, no requieren acción.")
+            if arma_pairs:
+                lines.append(f"**{len(arma_pairs)} par(es) AR+MA** — verificar si AR(2) tiene raíces "
+                              "complejas (φ₂ < 0). Si no, es sobreparametrización real.")
+                lines.append("  → Aplicar `formal_tests` (test RV) para confirmarlo.")
+            if true_pairs:
+                lines.append("")
+                lines.append("**Sobreparametrización confirmada — acción recomendada:**")
+                for lbl_i, lbl_j, r_val in true_pairs:
+                    lines.append(f"- Eliminar uno de: `{lbl_i}` / `{lbl_j}` "
+                                 f"(|r|={abs(r_val):.3f}). "
+                                 "Comparar AIC/BIC con `compare_versions`.")
+            elif not true_pairs and not arma_pairs:
+                lines.append("")
+                lines.append("Todos los pares son estructurales. No se requiere acción.")
+
+        lines += [
+            "",
+            "---",
+            "**Matriz de correlación** — heatmap adjunto.",
+            "Recuadro negro punteado = bloque ARMA+μ. Celdas con borde dorado = pares flagged.",
+        ]
+
+        text = "\n".join(lines)
+        items = [TextContent(type="text", text=text)]
+        if b64:
+            items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
+        return items
+
     except Exception:
         return _err(traceback.format_exc())
 
@@ -1139,6 +1241,51 @@ def _write_inp(ts, model, output_path: str) -> None:
         fh.write("\n".join(lines) + "\n")
 
 
+def _build_arma_on_model(m_base, p: int, q: int,
+                         P: int = 0, Q: int = 0,
+                         estimate_mu: bool = False):
+    """
+    Return a new unfitted fue.Model that keeps all interventions and harmonics
+    from m_base but replaces the ARMA specification with (p, q, P, Q).
+
+    Used by confirm_and_estimate(base_pre_path=...) to add ARMA to a model
+    that already has its outlier interventions estimated.
+    """
+    import fue
+
+    if p > 0:
+        ar   = [[0.0] * p]
+        ar_f = [[True] * p]
+    elif q == 0 and P == 0 and Q == 0:
+        # Keep the p=0,q=0 workaround only when there is truly no ARMA at all
+        ar   = m_base.ar or [[0.0]]
+        ar_f = m_base.ar_free or [[False]]
+    else:
+        ar   = []
+        ar_f = []
+
+    ma   = [[-0.3] * q] if q > 0 else []
+    ma_f = [[True]  * q] if q > 0 else []
+
+    ar_s_val  = [[0.0]  * P] if P > 0 else []
+    ar_sf_val = [[True] * P] if P > 0 else []
+    ma_s_val  = [[-0.3] * Q] if Q > 0 else []
+    ma_sf_val = [[True] * Q] if Q > 0 else []
+
+    return fue.Model(
+        m_base.series,
+        d=m_base.d, D=m_base.D, boxlam=m_base.boxlam,
+        ar=ar,       ar_free=ar_f       if ar   else None,
+        ma=ma,       ma_free=ma_f       if ma   else None,
+        ar_s=ar_s_val,  ar_s_free=ar_sf_val if ar_s_val  else None,
+        ma_s=ma_s_val,  ma_s_free=ma_sf_val if ma_s_val  else None,
+        interventions=list(m_base.interventions or []),
+        ifadf=list(m_base.ifadf or []),
+        mu=0.0, estimate_mu=estimate_mu,
+        refactor=m_base.refactor,
+    )
+
+
 def _build_inp(ts, lam: float, d: int, D: int,
                p: int, q: int,
                n_harmonics: int,
@@ -1303,7 +1450,8 @@ def _param_names(model) -> list[str]:
 
 @mcp.tool()
 def guided_identification(inp_path: str, lam: float = -1.0,
-                           d: int = -1, D: int = -1) -> list:
+                           d: int = -1, D: int = -1,
+                           pre_path: str = "") -> list:
     """
     Sequential identification — ONE decision node per call.
 
@@ -1320,30 +1468,38 @@ def guided_identification(inp_path: str, lam: float = -1.0,
       WAIT for user.
 
     Call 3  lam=X  d=<level>  D=-1
-      → Series(λ) differenced d times + ACF/PACF.
-        If d>0: also shows HAC seasonality test as support.
-        ¿Seasonal spikes at lags s,2s,3s? → B1 (D=0) or B2 (D=1).
-        ¿Still trending? → call again with d+1.
-        ¿No seasonality? → D=0, no harmonics.
-        NOTE: B1 (D=0+harmonics) is a working hypothesis revisable
-        at the end via MEG test in formal_tests.
+      → Series(λ) differenced d times + ACF/PACF + HAC seasonality.
+        ¿Seasonal? + B1 (Treadway, deterministic harmonics, D=0):
+          Confirm d and D=0, then:
+            a) confirm_and_estimate(m00: harmonics only, p=0, q=0)
+            b) preliminary_outlier_scan on m00 residuals
+            c) [cycle: add steps → re-estimate → scan] until clean
+            d) Call 4 with pre_path=<mNN.pre> (ARMA on clean residuals)
+        ¿Seasonal? + B2 (Box-Jenkins multiplicative, D=1):
+          → Call 4 with lam, d, D=1 (ARMA+P+Q on ∇∇_s series)
+        ¿No seasonality? → D=0, no harmonics, Call 4 directly.
       WAIT for user to confirm d and D.
 
-    Call 4  lam=X  d=<confirmed>  D=<confirmed>
-      → ACF/PACF of ∇^d ∇_s^D y(λ) + top-5 ARMA suggestions.
-        Sharp PACF cutoff → AR(p).
-        Sharp ACF cutoff  → MA(q).
-        Both decay        → ARMA(p,q).
-      WAIT for user to confirm p, q.
+    Call 4  lam=X  d=<confirmed>  D=<confirmed>  [pre_path=<.pre>]
+      B1 path (D=0, pre_path given):
+        → ACF/PACF of clean model RESIDUALS from pre_path.
+          PACF cuts → AR(p).  ACF cuts → MA(q).
+          Also: mean significant? (μ̄/SE > 2) → estimate_mu=True
+      B2 path (D=1, no pre_path):
+        → ACF/PACF of ∇^d ∇_s y(λ).
+          Also check lags s,2s,3s for seasonal P and Q.
+      B1 no-outliers (D=0, no pre_path):
+        → ACF/PACF of ∇^d y(λ) directly.
+      WAIT for user to confirm p, q (and P, Q if D=1).
 
     Parameters
     ----------
-    inp_path : path to .inp file
+    inp_path : path to series .inp file (all calls)
     lam      : Box-Cox lambda  (-1 = not yet decided → Call 1)
-    d        : differencing level to display, OR confirmed d when D≥0
-               (-1 = not yet decided → Call 2 shows d=0)
-    D        : seasonal differencing (-1 = not yet decided → Call 2 or 3)
-               (≥0 with lam≥0 and d≥0 → Call 4, ARMA identification)
+    d        : differencing order (-1 = not yet decided → Call 2)
+    D        : seasonal differencing (-1 = not yet decided → Call 3)
+    pre_path : path to fitted .pre (Call 4, B1): ARMA identified on
+               its residuals instead of the raw transformed series.
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -1423,25 +1579,59 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                     + sea.summary + "\n\n---\n" + sea.recommendation
                 )
 
-            b1_note = (
-                "\n\n> **Hipótesis B1:** D=0 con armónicos es una hipótesis de "
-                "trabajo revisable. Al final, el contraste MEG (`formal_tests`) "
-                "evalúa estocasticidad frecuencia por frecuencia."
+            n_harm = max(ts.freq // 2 - 1, 0)
+            sname  = ts.name or "SERIE"
+
+            # B1 path: estimate harmonics-only first, then outlier cycle, then ARMA
+            b1_steps = (
+                "\n\n### Ruta B1 (Treadway, D=0 + armónicos)\n\n"
+                "Secuencia obligatoria — **intervenciones ANTES de ARMA**:\n\n"
+                f"**1.** Estima m00 (armónicos, sin ARMA):\n"
+                f"```\nconfirm_and_estimate(\n"
+                f"    inp_path=\"{inp_path}\",\n"
+                f"    output_path=\"cases/{sname}/{sname}_m00.inp\",\n"
+                f"    lam={lam}, d={d}, D=0, p=0, q=0, n_harmonics={n_harm}\n)\n```\n\n"
+                f"**2.** Escanea residuos de m00 (outliers > 2.5σ):\n"
+                f"```\npreliminary_outlier_scan(\n"
+                f"    inp_path=\"cases/{sname}/{sname}_m00.pre\",\n"
+                f"    d=0, D=0, lam=1.0, threshold=2.5\n)\n```\n\n"
+                "**3.** [Ciclo hasta residuos limpios]:\n"
+                "    `suggest_intervention_form` → `confirm_and_estimate` → "
+                "`preliminary_outlier_scan`\n"
+                "    Cada estimación guarda el `.pre` automáticamente.\n\n"
+                "**4.** Cuando los residuos estén limpios, identifica ARMA sobre ellos:\n"
+                f"```\nguided_identification(\n"
+                f"    inp_path=\"{inp_path}\",\n"
+                f"    lam={lam}, d={d}, D=0,\n"
+                f"    pre_path=\"cases/{sname}/{sname}_mNN.pre\"\n)\n```"
             )
+
+            # B2 path: go directly to ARMA identification on ∇∇_s series
+            b2_steps = (
+                "\n\n### Ruta B2 (Box-Jenkins, D=1)\n\n"
+                f"```\nguided_identification(\n"
+                f"    inp_path=\"{inp_path}\",\n"
+                f"    lam={lam}, d={d}, D=1\n)\n```\n"
+                "Identifica p, q (regular) y P, Q (estacional) sobre ∇∇_s y(λ), "
+                "luego llama a `confirm_and_estimate`."
+            )
+
+            b1_note = (
+                "\n\n> **Hipótesis B1:** D=0 + armónicos es revisable. "
+                "El contraste MEG (`formal_tests`) evalúa al final si alguna "
+                "frecuencia requiere tratamiento estocástico."
+            )
+
             text = (
                 f"## Paso 3 — {sym}y({lam_str}), d={d}\n\n"
                 "Observa la serie diferenciada y su ACF/PACF:\n\n"
                 "**¿Estacionalidad?** (picos en ACF/PACF a lags s, 2s, 3s…)\n"
-                "  - Picos regulares y estables → **B1** (D=0, armónicos deterministas)\n"
-                "  - Picos muy dominantes o irregulares → **B2** (D=1, diferencia estacional)\n"
-                "  - Sin picos estacionales → **sin estacionalidad** (D=0, sin armónicos)\n\n"
+                "  - Picos regulares/estables → **B1** (D=0, armónicos deterministas)\n"
+                "  - Picos muy dominantes o irregulares → **B2** (D=1, dif. estacional)\n"
+                "  - Sin picos estacionales → D=0, sin armónicos, → Call 4 directo\n\n"
                 "**¿Tendencia residual?** → considera d=" + str(d + 1)
                 + sea_text + b1_note
-                + "\n\n**Próximo paso:**\n"
-                f"- B1 (armónicos) → llama con `lam={lam}, d={d}, D=0`\n"
-                f"- B2 (dif. estacional) → llama con `lam={lam}, d={d}, D=1`\n"
-                f"- Sin estacionalidad → llama con `lam={lam}, d={d}, D=0`\n"
-                f"- Tendencia → llama con `lam={lam}, d={d + 1}`"
+                + b1_steps + b2_steps
             )
             items = [TextContent(type="text", text=text)]
             if b64:
@@ -1450,33 +1640,77 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 items.append(ImageContent(type="image", data=sea_fig, mimeType="image/png"))
             return items
 
-        # ── Call 4: ARMA identification — d and D confirmed ───────────────
-        ident   = describe_identification(ts, d=d, D=D, lam=lam)
+        # ── Call 4: ARMA identification ───────────────────────────────────
+        # B1 with clean residuals: pre_path points to fitted model after outlier cycle
+        # B2 or no-outlier B1: identify directly on transformed series
+        if pre_path:
+            import fue as _fue
+            _, m_pre = _load_fitted(pre_path)
+            # Compute correct calendar start for residuals
+            s0     = m_pre.series.start
+            freq_p = m_pre.series.freq if m_pre.series.freq > 0 else 1
+            n_skip = m_pre.d + m_pre.D * freq_p
+            off    = (int(s0[1]) - 1) + n_skip
+            res_start = (int(s0[0]) + off // freq_p, off % freq_p + 1)
+            res_ts = _fue.TimeSeries(
+                m_pre.residuals.data, freq=ts.freq,
+                start=res_start, name=f"Resid {ts.name or ''}"
+            )
+            ident      = describe_identification(res_ts, d=0, D=0, lam=1.0)
+            data_label = f"residuos de `{os.path.basename(pre_path)}`"
+        else:
+            ident      = describe_identification(ts, d=d, D=D, lam=lam)
+            data_label = f"∇^{d}∇_s^{D} y(λ={lam})"
+
         _show_fig(ident.figure_b64, "identification")
-        top     = ident.data["suggestions"][0] if ident.data["suggestions"] else {}
-        rec_p   = top.get("p", 0)
-        rec_q   = top.get("q", 1)
-        n_harm  = max(ts.freq // 2 - 1, 0)
+        top   = ident.data["suggestions"][0] if ident.data["suggestions"] else {}
+        rec_p = top.get("p", 0)
+        rec_q = top.get("q", 0)
+        n_harm = max(ts.freq // 2 - 1, 0)
 
         if D == 1:
+            # B2: regular + seasonal ARMA — check lags s, 2s for P, Q
+            seasonal_note = (
+                "\n\n**Para P y Q (operadores estacionales lag s={ts.freq}):**\n"
+                f"- ACF en lag {ts.freq} significativo, PACF(lag {ts.freq}) decae → **Q=1** (SMA)\n"
+                f"- PACF en lag {ts.freq} significativo, ACF(lag {ts.freq}) decae → **P=1** (SAR)\n"
+                "- Caso más común para mensuales con D=1: Q=1 (ARIMA×(0,1,1)_12)\n"
+            )
             next_call = (
-                f"Llama a `confirm_and_estimate` con "
-                f"`lam={lam}, d={d}, D=1, p=<p>, q=<q>, P=<P>, Q=<Q>`."
+                f"Llama a `confirm_and_estimate` con\n"
+                f"`lam={lam}, d={d}, D=1, p=<p>, q=<q>, P=<P>, Q=<Q>`\n"
+                f"*(Sugerencia regular: p={rec_p}, q={rec_q})*"
             )
         else:
-            next_call = (
-                f"Llama a `confirm_and_estimate` con "
-                f"`lam={lam}, d={d}, D=0, p=<p>, q=<q>, n_harmonics={n_harm}`.\n"
-                f"*(Sugerencia automática: p={rec_p}, q={rec_q})*"
+            seasonal_note = ""
+            mu_note = (
+                "\n\n**¿Media significativa?** Si μ̄/SE > 2, añade `estimate_mu=True` "
+                "a `confirm_and_estimate`."
             )
+            if pre_path:
+                next_call = (
+                    f"Llama a `confirm_and_estimate` añadiendo el ARMA al modelo "
+                    f"de `{os.path.basename(pre_path)}`:\n"
+                    f"`inp_path=\"{pre_path}\", output_path=..._mFinal.inp, "
+                    f"lam={lam}, d={d}, D=0, p=<p>, q=<q>, n_harmonics={n_harm}`\n"
+                    f"*(Sugerencia: p={rec_p}, q={rec_q})*"
+                )
+            else:
+                next_call = (
+                    f"Llama a `confirm_and_estimate` con\n"
+                    f"`lam={lam}, d={d}, D=0, p=<p>, q=<q>, n_harmonics={n_harm}`\n"
+                    f"*(Sugerencia: p={rec_p}, q={rec_q})*"
+                )
+            seasonal_note = mu_note
 
         text = (
-            f"## Paso 4 — Identificación ARMA  (λ={lam}, d={d}, D={D})\n\n"
-            "Lee el ACF/PACF de la serie estacionarizada ∇^d ∇_s^D y(λ):\n"
-            "- **Corte brusco en PACF**, decaimiento ACF → AR(p): p = último lag significativo PACF\n"
-            "- **Corte brusco en ACF**, decaimiento PACF → MA(q): q = último lag significativo ACF\n"
-            "- **Ambas decaen** (exponencial u oscilante) → ARMA(p,q)\n"
-            "- **Sin estructura residual** → p=0, q=0 puede ser suficiente\n\n"
+            f"## Paso 4 — Identificación ARMA  (sobre {data_label})\n\n"
+            "**Regla ACF/PACF:**\n"
+            "- PACF corta en lag p, ACF decae → **AR(p)**\n"
+            "- ACF corta en lag q, PACF decae → **MA(q)**\n"
+            "- Ambas decaen → **ARMA(p,q)**\n"
+            "- Sin estructura → p=0, q=0\n"
+            + seasonal_note + "\n\n"
             + ident.summary + "\n\n---\n" + ident.recommendation
             + "\n\n**Próximo paso:** " + next_call
         )
@@ -1567,6 +1801,9 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                           p: int = 0, q: int = 1,
                           n_harmonics: int = 5,
                           P: int = 0, Q: int = 0,
+                          base_pre_path: str = "",
+                          estimate_mu: bool = False,
+                          include_histogram: bool = False,
                           guion_path: str = "",
                           guion_name: str = "",
                           guion_decision: str = "",
@@ -1576,25 +1813,41 @@ def confirm_and_estimate(inp_path: str, output_path: str,
     """
     Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
 
-    Constructs the model file from scratch using the series in inp_path and
-    the analyst-confirmed (lam, d, D, p, q, P, Q) spec. Always returns:
+    Two modes:
+    - Fresh model (base_pre_path=""): constructs from scratch using series in
+      inp_path and the analyst-confirmed (lam, d, D, p, q, P, Q) spec.
+    - Incremental (base_pre_path=<.pre>): loads all existing interventions and
+      harmonics from the .pre, then replaces/adds only the ARMA part (p, q,
+      P, Q) and mu. Use this to add ARMA to a model after the outlier cycle.
+
+    Always returns:
       - Parameter table with SE and t-stats
       - Diagnosis verdict (Q-test, JB, outliers)
-      - Residual plot (standardised residuals + ACF/PACF + QQ)
+      - Residual ACF/PACF + histogram
 
     Parameters
     ----------
-    inp_path        : source .inp file (series data is used; model spec ignored)
-    output_path     : path to write the new .inp (can be re-used for later tools)
+    inp_path        : source .inp/.pre (series data and name; spec ignored
+                      unless base_pre_path is given)
+    output_path     : path to write the new .inp
     lam             : Box-Cox lambda (0.0=log, 1.0=identity)
     d               : regular differencing order
-    D               : seasonal differencing order (0=deterministic B1, 1=multiplicative B2)
-    p               : AR order
-    q               : MA order
-    n_harmonics     : harmonic pairs cos/sin (used when D=0; ignored when D=1)
-    P               : seasonal AR order (used when D=1)
-    Q               : seasonal MA order (used when D=1)
-    guion_path      : (optional) path to guion.json — if provided, records this version
+    D               : seasonal differencing order (0=B1 harmonics, 1=B2 multiplicative)
+    p               : regular AR order
+    q               : regular MA order
+    n_harmonics     : harmonic pairs cos/sin (D=0 fresh only; ignored when
+                      base_pre_path is given — harmonics come from the .pre)
+    P               : seasonal AR order (D=1 only)
+    Q               : seasonal MA order (D=1 only)
+    base_pre_path   : if given, load interventions+harmonics from this .pre and
+                      add only the ARMA spec. Typical use: final ARMA step after
+                      outlier cycle in B1 flow.
+    estimate_mu     : include mean parameter μ in estimation (default False).
+                      Set True when μ̄/SE > 2 in the residuals of the clean model.
+    include_histogram : return histogram PNG as third item (default False).
+                      Keep False during the outlier cycle to save tokens; set True
+                      for the final model only.
+    guion_path      : (optional) path to guion.json — records this version
     guion_name      : version name (e.g. "PC3"); auto-assigned if empty
     guion_decision  : brief description of what this model tests or concludes
     guion_rationale : justification for the choices made
@@ -1609,14 +1862,26 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         ts, _ = _load_ts_model(inp_path)
         output_path = os.path.expanduser(output_path)
 
-        _build_inp(ts, lam=lam, d=d, D=D, p=p, q=q,
-                   n_harmonics=n_harmonics, output_path=output_path,
-                   P=P, Q=Q)
+        if base_pre_path:
+            # Incremental: preserve interventions + harmonics from .pre; replace ARMA
+            base_pre_path = os.path.expanduser(base_pre_path)
+            _, m_base = _load_ts_model(base_pre_path)
+            m = _build_arma_on_model(m_base, p=p, q=q, P=P, Q=Q,
+                                     estimate_mu=estimate_mu)
+            _write_inp(ts, m, output_path)
+        else:
+            _build_inp(ts, lam=lam, d=d, D=D, p=p, q=q,
+                       n_harmonics=n_harmonics, output_path=output_path,
+                       P=P, Q=Q)
 
         _, m = _load_fitted(output_path)
 
         # Parameter table
-        if D == 1 and (P > 0 or Q > 0):
+        if base_pre_path:
+            n_itvs = len(m.interventions) if m.interventions else 0
+            spec_str = (f"ARIMA({p},{d},{q}) + {n_itvs} interv. "
+                        f"[desde {os.path.basename(base_pre_path)}]")
+        elif D == 1 and (P > 0 or Q > 0):
             spec_str = f"SARIMA({p},{d},{q})({P},{D},{Q})_{ts.freq}"
         elif D == 1:
             spec_str = f"ARIMA({p},{d},{q}) D=1"
@@ -1627,6 +1892,15 @@ def confirm_and_estimate(inp_path: str, output_path: str,
 
         # Diagnosis
         diag = describe_diagnosis(m)
+
+        # Auto-save fitted model as .pre (same name as .inp but .pre extension)
+        pre_path = os.path.splitext(output_path)[0] + ".pre"
+        try:
+            from fue.report import write_pre
+            write_pre(m, pre_path)
+            pre_note = f"\n\n*Parámetros estimados guardados en: {pre_path}*"
+        except Exception:
+            pre_note = ""
 
         # Optional guion recording
         guion_note = ""
@@ -1646,6 +1920,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             + "\n\n---\n\n"
             + diag.summary + "\n\n---\n" + diag.recommendation
             + f"\n\n*Modelo guardado en: {output_path}*"
+            + pre_note
             + (f"\n\n{guion_note}" if guion_note else "")
         )
 
@@ -1654,6 +1929,11 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         if diag.figure_b64:
             items.append(ImageContent(type="image",
                                       data=diag.figure_b64, mimeType="image/png"))
+        if include_histogram:
+            hist_b64 = diag.data.get("hist_b64")
+            if hist_b64:
+                items.append(ImageContent(type="image",
+                                          data=hist_b64, mimeType="image/png"))
         return items
 
     except Exception:
@@ -1861,7 +2141,7 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
         from art.describe import _fig_b64
         from art.identification import _default_lags_fug
         from fue.diagnostics import acf as _fue_acf, pacf as _fue_pacf
-        from fue.plots import _draw_acf_panel, _snap_cmax
+        from fue.plots import _draw_acf_panel, _snap_cmax, _tj_spines
         import numpy as np
         import scipy.stats as sp_stats
         import matplotlib.pyplot as plt
@@ -1963,16 +2243,29 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
         all_pacf = np.concatenate([pacf_a_arr, pacf_b_arr])
         cmax = _snap_cmax(all_acf, all_pacf)
 
-        fig, axes = plt.subplots(2, 2, figsize=(14, 6))
+        fig, axes = plt.subplots(3, 2, figsize=(14, 10))
         fig.suptitle(f"Comparación: {name_a}  vs  {name_b}", fontsize=11, fontweight="bold")
 
-        panels = [
-            (axes[0, 0], acf_a_arr,  band_a, f"ACF — {name_a}"),
-            (axes[0, 1], acf_b_arr,  band_b, f"ACF — {name_b}"),
-            (axes[1, 0], pacf_a_arr, band_a, f"PACF — {name_a}"),
-            (axes[1, 1], pacf_b_arr, band_b, f"PACF — {name_b}"),
+        # Row 0: standardized residuals
+        for col, (res, name_lbl) in enumerate([(res_a, name_a), (res_b, name_b)]):
+            ax = axes[0, col]
+            r_std_v = res.std(ddof=1) if len(res) > 1 else 1.0
+            r_z = (res - res.mean()) / r_std_v if r_std_v > 0 else res
+            ax.axhline(0, color="black", lw=0.8)
+            ax.axhline(+2, color="red", lw=0.6, ls="--")
+            ax.axhline(-2, color="red", lw=0.6, ls="--")
+            ax.plot(np.arange(len(r_z)), r_z, color="#333333", lw=0.8)
+            ax.set_title(f"Residuos — {name_lbl}", fontsize=9)
+            _tj_spines(ax)
+
+        # Rows 1-2: ACF and PACF
+        acf_pacf_panels = [
+            (axes[1, 0], acf_a_arr,  band_a, f"ACF — {name_a}"),
+            (axes[1, 1], acf_b_arr,  band_b, f"ACF — {name_b}"),
+            (axes[2, 0], pacf_a_arr, band_a, f"PACF — {name_a}"),
+            (axes[2, 1], pacf_b_arr, band_b, f"PACF — {name_b}"),
         ]
-        for ax, vals, band, title in panels:
+        for ax, vals, band, title in acf_pacf_panels:
             _draw_acf_panel(ax, lag_x, vals, band=band, cmax=cmax,
                             freq=freq, lags=lags, label=title)
 
@@ -2009,7 +2302,8 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
 def suggest_intervention_form(inp_path: str, output_path: str,
                                date: str,
                                form: str = "auto",
-                               context_hint: str = "") -> list:
+                               context_hint: str = "",
+                               include_histogram: bool = False) -> list:
     """
     Add an intervention to the .inp, re-estimate and show updated diagnosis.
 
@@ -2019,11 +2313,13 @@ def suggest_intervention_form(inp_path: str, output_path: str,
 
     Parameters
     ----------
-    inp_path     : current .inp file (with any previous interventions)
-    output_path  : path to write the updated .inp
-    date         : observation date in "MM/YYYY" or "QN/YYYY" or "YYYY" format
-    form         : "pulse", "step", "ramp" or "auto" (heuristic from residuals)
-    context_hint : free-text note about the economic event (used for logging)
+    inp_path          : current .inp/.pre (with any previous interventions)
+    output_path       : path to write the updated .inp
+    date              : observation date "MM/YYYY" or "QN/YYYY" or "YYYY"
+    form              : "pulse", "step", "ramp" or "auto" (heuristic)
+    context_hint      : free-text note about the economic event (for logging)
+    include_histogram : return histogram PNG (default False — saves tokens
+                        during the outlier cycle; set True for final round)
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -2116,6 +2412,11 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         if diag.figure_b64:
             items.append(ImageContent(type="image",
                                       data=diag.figure_b64, mimeType="image/png"))
+        if include_histogram:
+            hist_b64 = diag.data.get("hist_b64")
+            if hist_b64:
+                items.append(ImageContent(type="image",
+                                          data=hist_b64, mimeType="image/png"))
         return items
 
     except Exception:

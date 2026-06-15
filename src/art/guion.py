@@ -97,6 +97,22 @@ def save_guion(guion: Guion, path: str) -> None:
 # Spec / stats extraction
 # ---------------------------------------------------------------------------
 
+def _at_to_date(at: int, start_year: int, start_per: int, freq: int) -> str:
+    """Convert 0-based observation index to a date string (MM/YYYY or QN/YYYY or YYYY)."""
+    if freq == 12:
+        total = (start_per - 1) + at
+        month = total % 12 + 1
+        year  = start_year + total // 12
+        return f"{month:02d}/{year}"
+    elif freq == 4:
+        total = (start_per - 1) + at
+        q    = total % 4 + 1
+        year = start_year + total // 4
+        return f"Q{q}/{year}"
+    else:
+        return str(start_year + at)
+
+
 def _extract_spec(model, lam: float) -> dict[str, Any]:
     """Build spec dict from a fue.Model instance."""
     p = len(model.ar[0]) if model.ar else 0
@@ -106,8 +122,12 @@ def _extract_spec(model, lam: float) -> dict[str, Any]:
 
     itv = model.interventions or []
     n_harmonics = sum(1 for i in itv if i.type == "cos")
+
+    freq = model.series.freq if model.series else 12
+    sy, sp = (model.series.start if model.series else (2000, 1))
+
     other_itvs = [
-        {"type": i.type, "date": getattr(i, "date", None)}
+        {"type": i.type, "date": _at_to_date(i.at, sy, sp, freq)}
         for i in itv
         if i.type not in ("cos", "sin", "alter")
     ]
@@ -210,8 +230,8 @@ def _build_equation(spec: dict[str, Any], freq: int) -> str:
     rhs_parts = []
     if n_h > 0:
         rhs_parts.append(f"D_t({n_h} arm.)")
-    for iv in itvs:
-        rhs_parts.append(f"I_t({iv.get('type','?')},{iv.get('date','?')})")
+    if itvs:
+        rhs_parts.append(f"I_t({len(itvs)} itvs)")
 
     # Stochastic noise N_t
     ar_str  = f"φ(B)"  if p > 0 else ""
