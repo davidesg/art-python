@@ -167,6 +167,64 @@ def test_formal_tests_shin_fuller_data_field():
 
 
 # ---------------------------------------------------------------------------
+# Block I: overparametrization detection (param correlation matrix)
+# ---------------------------------------------------------------------------
+
+def test_overparametrization_detected_arma11():
+    """Block I: ARMA(1,1) on IPC_ES shows high corr(AR(1),MA(1)) in describe_diagnosis."""
+    _skip_if_missing(_IPC_ES_M00)
+    from art.describe import describe_diagnosis
+    from art.mcp_server import _build_inp, _load_fitted
+    import tempfile, os
+    import fue
+    ts, _ = fue.inp.load(_IPC_ES_M00)
+    with tempfile.NamedTemporaryFile(suffix='.inp', delete=False) as f:
+        tmp = f.name
+    try:
+        _build_inp(ts, lam=0.0, d=1, D=0, p=1, q=1, n_harmonics=5, output_path=tmp)
+        _, m = _load_fitted(tmp)
+    finally:
+        os.unlink(tmp)
+    d = describe_diagnosis(m)
+    # high_corr_pairs must flag AR(1)/MA(1)
+    pairs = d.data.get("high_corr_pairs", [])
+    # pairs are dicts with label_i, label_j, corr
+    label_pairs = {(p["label_i"], p["label_j"]) for p in pairs}
+    assert ("AR(1)", "MA(1)") in label_pairs or ("MA(1)", "AR(1)") in label_pairs, \
+        f"Expected AR(1)/MA(1) pair, got: {label_pairs}"
+    assert any(abs(p["corr"]) > 0.7 for p in pairs)
+    # Warning must appear in summary or recommendation
+    assert "sobreparametrización" in d.summary.lower() or "sobreparametrización" in d.recommendation.lower()
+
+
+def test_overparametrization_absent_ar1_only():
+    """Block I: AR(1)-only model on IPC_ES_m02 has no high correlations."""
+    _skip_if_missing(_IPC_ES_M02)
+    from art.describe import describe_diagnosis
+    import fue
+    _, m = fue.inp.load(_IPC_ES_M02)
+    m.fit()
+    d = describe_diagnosis(m)
+    pairs = d.data.get("high_corr_pairs", [])
+    assert pairs == [], f"Expected no high-corr pairs for AR(1) model, got: {pairs}"
+
+
+# ---------------------------------------------------------------------------
+# Block E: preliminary_outlier_scan
+# ---------------------------------------------------------------------------
+
+def test_preliminary_outlier_scan_returns_content():
+    """Block E: preliminary_outlier_scan returns text + figure."""
+    _skip_if_missing(_IPC_ES_M00)
+    from art.mcp_server import preliminary_outlier_scan
+    result = preliminary_outlier_scan(_IPC_ES_M00, d=1, D=0, lam=0.0)
+    assert len(result) >= 1
+    assert result[0].type == "text"
+    text = result[0].text
+    assert "scan" in text.lower() or "outlier" in text.lower() or "anomal" in text.lower()
+
+
+# ---------------------------------------------------------------------------
 # intervention_analysis
 # ---------------------------------------------------------------------------
 

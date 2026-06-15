@@ -725,7 +725,7 @@ preliminary_outlier_scan(inp_path, d, D, lam, threshold=3.5) -> list
 
 - [x] `describe_prelim_scan` en `describe.py` (incluye figura inline)
 - [x] MCP tool `preliminary_outlier_scan` en `mcp_server.py`
-- [ ] Test unitario en `test_mcp_server.py`
+- [x] Test unitario en `test_mcp_server.py`
 
 ---
 
@@ -794,7 +794,7 @@ test_seasonal_simplification(inp_path, freq_list=None) -> list
 
 ---
 
-### Bloque I — Detección de sobreparametrización  [PENDIENTE]
+### Bloque I — Detección de sobreparametrización  [✅ HECHO jun-2026]
 
 **Motivación (tesis, criterio de correlación de parámetros):**
 Cuando |corr(θ̂_i, θ̂_j)| > 0.7, el modelo puede estar sobreparametrizado
@@ -810,10 +810,10 @@ Este diagnóstico debe mostrarse automáticamente tras cada estimación.
 # Ampliar plot_diagnosis con tabla adicional o heatmap de correlaciones
 ```
 
-- [ ] Extraer matriz de correlación de parámetros de `fue.Model._result`
-- [ ] Añadir `param_corr` y `high_corr_pairs` a `DiagnosisResult`
-- [ ] Mostrar en `describe_diagnosis` como advertencia
-- [ ] Test unitario
+- [x] Extraer `cov_matrix` de `fue.Model._result` → correlación via `_compute_param_corr`
+- [x] `param_corr`, `high_corr_pairs`, `param_labels` en `DiagnosisResult`
+- [x] `describe_diagnosis` muestra ⚠ en summary y recomendación; distingue AR/MA (normal en AR(2)), FLT (ω+δ)
+- [x] Tests: ARMA(1,1) detecta corr(AR(1),MA(1))≈0.94; AR(1) solo → sin pares
 
 ---
 
@@ -915,7 +915,7 @@ export_guion(guion_path: str, output_html: str) -> str
 
 ---
 
-### Bloque Q — Control de versiones y comparación de modelos  [SIGUIENTE PRIORIDAD]
+### Bloque Q — Control de versiones y comparación de modelos  [✅ HECHO jun-2026]
 
 **Motivación**: el flujo iterativo B-J-T produce una secuencia de versiones del modelo
 (PC1 → PC2 → … → PC11 en la tesis). El analista necesita comparar versiones adyacentes
