@@ -70,13 +70,41 @@ Para WTI el m-dt confirma empíricamente lo que la teoría ya indica.
 
 Sobre la serie transformada (`ln x` si λ=0):
 
-1. **Nivel** `plot_combined(ln x)` → ACF decae lentamente → d=1
-2. **∇ ln x** `plot_combined(∇ ln x)` → patrón estacional en ACF → D=1 (si aplica)
-3. **∇_s ln x** `plot_combined(∇_s ln x)` → ACF decae regular → d=1
-4. **∇∇_s ln x** `plot_combined(∇∇_s ln x)` → ACF/PACF → identificar p,q,P,Q
+**2a. Diferencia regular (d)**
 
-**IPC_DE** (mensual, freq=12): d=1, D=1 → ARIMA(0,1,0)(0,1,1)₁₂
-**WTI** (mensual, freq=12): d=1, D=0 → AR(2) + escalones para outliers COVID/crisis
+`plot_combined(ln x)` + ADF/KPSS sobre ln x → ACF decae → d=1
+
+Comentario tipo:
+> La ACF decae lentamente desde valores cercanos a 1 — no estacionariedad clara.
+> ADF no rechaza raíz unitaria; KPSS rechaza estacionariedad. Los contrastes son
+> herramienta de apoyo: la estacionalidad marcada reduce la potencia del ADF
+> (residuos del AR auxiliar no son ruido blanco). La decisión d=1 descansa
+> principalmente en el patrón ACF/PACF.
+
+**2b. Estacionalidad (D)**
+
+`plot_combined(∇ ln x)` + **contraste HAC de estacionalidad** (ART) → D=1 si aplica
+
+El test HAC de ART (`detect_seasonality(ts, d=1, lam=0.0)`) realiza una regresión
+harmónica con corrección Newey-West sobre ∇ ln x y contrasta H₀: no hay estacionalidad.
+Aporta además un gráfico con los efectos mensuales y el Wald por frecuencia (opcional).
+
+Comentario tipo:
+> La ACF de ∇ ln x muestra picos en lags 12, 24, 36 — estacionalidad visible.
+> El contraste HAC confirma: F(s-1, n-s) >> 0, p=0.000. Cuando la estacionalidad
+> no es obvia visualmente, el test HAC es especialmente valioso — proporciona
+> además los efectos mensuales estimados.
+
+Secuencia completa:
+1. `plot_combined(ln x)` → d=1
+2. `plot_combined(∇ ln x)` → ¿patrón estacional en ACF?
+3. `detect_seasonality(ts, d=1)` → confirma / descarta D=1
+4. `plot_combined(∇∇_s ln x)` → ACF/PACF estacionaria → identificar p,q,P,Q
+
+**Casos documentados (jun-2026)**:
+- **IPC_ES** (mensual): d=1 (ADF t=−2.42 p=0.37 / KPSS p<0.01), D=1 (HAC F(11,250)=6351.7 p=0.0000)
+- **IPC_DE** (mensual): d=1, D=1 → ARIMA(0,1,0)(0,1,1)₁₂
+- **WTI**   (mensual): d=1, D=0 (sin estacionalidad marcada) → AR(2) + escalones
 
 ---
 
