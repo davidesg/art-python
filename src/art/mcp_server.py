@@ -2932,6 +2932,13 @@ def _forecast_date(start: tuple, nobs: int, freq: int, offset: int = 0) -> str:
     return str(y0 + total)
 
 
+def _fuf_path(path: str) -> str:
+    """Ensure fuf file path ends with .inp (required by fue.load_fuf)."""
+    if not path.endswith(".inp") and not path.endswith(".pre"):
+        path += ".inp"
+    return path
+
+
 # ---------------------------------------------------------------------------
 # Tool: generate_forecast — fuf previsión desde modelo estimado  (Bloque R)
 # ---------------------------------------------------------------------------
@@ -2963,7 +2970,7 @@ def generate_forecast(inp_path: str,
         # 1. Fit from .pre → write fuf
         _, m = _load_fitted(inp_path)
 
-        output_fuf_path = os.path.expanduser(output_fuf_path)
+        output_fuf_path = _fuf_path(os.path.expanduser(output_fuf_path))
         os.makedirs(os.path.dirname(os.path.abspath(output_fuf_path)), exist_ok=True)
         m.write_fuf(horizon=horizon, path=output_fuf_path)
 
@@ -3025,7 +3032,7 @@ def update_and_forecast(fuf_path: str,
         import numpy as np
         from fue.report_forecast import write_forecast_report
 
-        fuf_path = os.path.expanduser(fuf_path)
+        fuf_path = _fuf_path(os.path.expanduser(fuf_path))
         ts_old, m_old = _fue.load_fuf(fuf_path)
         L_old = m_old._fuf_horizon
         sig2  = m_old._fuf_sigma2
@@ -3069,7 +3076,7 @@ def update_and_forecast(fuf_path: str,
 
         fr_new = m_new.forecast_fuf()
 
-        out_path = os.path.expanduser(output_fuf_path or fuf_path)
+        out_path = _fuf_path(os.path.expanduser(output_fuf_path or fuf_path))
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
         m_new.write_fuf(horizon=L_old, sigma2=sig2, path=out_path)
 
