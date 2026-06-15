@@ -95,18 +95,24 @@ def apply_differences(z: np.ndarray, freq: int,
     return w
 
 
+_SUB = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
+_SUP = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+
+
 def transform_label(lam: float, nrdiff: int, nadiff: int, freq: int) -> str:
-    """Human-readable label for the transformed series, e.g. '∇²ln P'."""
+    """Human-readable label for the transformed series, e.g. '∇²∇₁₂ ln P'."""
     bc = boxcox_label(lam)
     diff = ""
     if nrdiff == 1:
         diff = "∇"
-    elif nrdiff == 2:
-        diff = "∇²"
+    elif nrdiff > 1:
+        diff = f"∇{str(nrdiff).translate(_SUP)}"
     sdiff = ""
     if nadiff == 1:
-        sdiff = f"∇_{freq}"
-    return f"{sdiff}{diff}{bc}"
+        sdiff = f"∇{str(freq).translate(_SUB)}"
+    elif nadiff > 1:
+        sdiff = f"∇{str(freq).translate(_SUB)}{str(nadiff).translate(_SUP)}"
+    return f"{diff}{sdiff}{bc}"
 
 
 # ---------------------------------------------------------------------------

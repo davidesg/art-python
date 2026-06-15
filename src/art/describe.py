@@ -680,6 +680,10 @@ def model_equation(ts, model) -> str:
         sup_map = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
         return str(n).translate(sup_map)
 
+    def _sub(n: int) -> str:
+        sub_map = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
+        return str(n).translate(sub_map)
+
     def _harm_label(ttype: str, harmonic: float) -> str:
         h = int(round(harmonic))
         if ttype == "alter":
@@ -701,9 +705,9 @@ def model_equation(ts, model) -> str:
         elif d > 1:
             parts.append(f"∇{_sup(d)}")
         if D == 1:
-            parts.append(f"∇_{freq}")
+            parts.append(f"∇{_sub(freq)}")
         elif D > 1:
-            parts.append(f"∇_{freq}{_sup(D)}")
+            parts.append(f"∇{_sub(freq)}{_sup(D)}")
         return "".join(parts)
 
     def _transform_label() -> str:
