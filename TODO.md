@@ -39,16 +39,30 @@ provee instrumentos, Claude aporta criterio.
   nivel, σ ∝ μ es la norma; el log estabiliza la varianza.
 - Regla práctica: si hay razón teórica para λ=0, usarlo aunque el m-dt no lo exija.
 
+**Comentario inicial al analista** (antes de ver el gráfico):
+
+> El analista puede imponer λ a priori sin necesidad de ver el m-dt:
+> - Para **números índice** (IPC, IPCA, IPP, deflactores) con base arbitraria,
+>   λ=0 es la elección natural — las diferencias logarítmicas son tasas de variación.
+> - Para **precios de commodities** (WTI, Brent, gas natural) y series multiplicativas,
+>   el log estabiliza la varianza por construcción.
+> - El m-dt sirve para **confirmar o cuestionar** esa elección, no para sustituirla.
+>   Si el m-dt contradice la elección teórica, es señal de que algo inusual ocurre
+>   (cambio estructural, truncamiento, error de datos).
+
 **Análisis de casos (jun-2026)**:
 
-| Serie | Nivel m-dt | Log m-dt | Decisión | Razón |
-|-------|-----------|----------|----------|-------|
-| IPC_DE | nube casi horizontal, outlier 2022 en esquina sup-der | similar, sin cambio apreciable | **λ=0** | número índice (base 2015=100) |
-| WTI | pendiente positiva visible (σ crece con μ) | nube dispersa sin pendiente | **λ=0** | precio commodity + evidencia empírica |
+| Serie | Evidencia m-dt nivel | Evidencia m-dt log | Decisión | Razón principal |
+|-------|---------------------|-------------------|----------|----------------|
+| IPC_DE | nube horizontal, outlier 2022 sup-der | similar | **λ=0** | índice base arbitraria (2015=100) |
+| IPC_ES | nube dispersa, sin pendiente clara | similar | **λ=0** | índice base arbitraria (2016=100) |
+| IPC_FR | nube horizontal, outlier 2022 sup-der | similar | **λ=0** | índice base arbitraria (2015=100) |
+| WTI    | pendiente positiva visible | nube sin pendiente | **λ=0** | commodity + evidencia empírica |
 
-Para IPC_DE el m-dt no muestra heteroscedasticidad fuerte (la serie crece despacio
-y de forma muy regular hasta 2022); la decisión λ=0 se apoya principalmente en la
-naturaleza de índice. Para WTI la evidencia empírica es clara: el log estabiliza σ.
+Para los tres IPC el criterio teórico es determinante: el m-dt no muestra
+heteroscedasticidad fuerte porque la inflación fue estable y baja en 2002-2021;
+el outlier de 2022 (crisis energética) es un episodio excepcional, no estructura.
+Para WTI el m-dt confirma empíricamente lo que la teoría ya indica.
 
 ---
 
