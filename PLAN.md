@@ -1191,6 +1191,48 @@ def model_equation(model) -> str
 
 ---
 
+### Bloque R — Previsión con informe Jenkins-Treadway  [✅ HECHO jun-2026]
+
+**Motivación (etapa 5 B-J-T)**:
+Una vez validado el modelo, el analista genera previsiones y las actualiza con nuevas
+observaciones. `fue` ya dispone de `write_fuf`, `load_fuf`, `forecast_fuf` y
+`write_forecast_report` (informe HTML con figura y tabla en formato Jenkins-Treadway).
+
+**Pipeline correcto** (fuf workflow):
+```
+load .pre → fit → write_fuf(horizon) → load_fuf → forecast_fuf() → write_forecast_report
+```
+Nunca usar `m.forecast()` directamente (usa `_result` MLE en lugar de re-evaluar con sigma2_fuf).
+
+**MCP tools:**
+
+```python
+generate_forecast(inp_path, horizon, output_fuf_path, output_html)
+# Genera previsiones y escribe informe HTML nativo Jenkins-Treadway.
+# Devuelve: TextContent con σ̂_a, horizonte, rutas de archivos.
+
+update_and_forecast(inp_path, new_obs, new_dates, horizon, output_fuf_path, output_html)
+# Añade nuevas observaciones al modelo, re-fija parámetros, genera previsiones actualizadas.
+# Devuelve: TextContent con tracking (actual vs previsión anterior) + ruta HTML.
+
+sps_dashboard(sps_dir, output_dir)
+# Escanea .inp/.pre de una carpeta SPS; genera informe HTML por serie + index.html.
+```
+
+**Fix refactor-agnostic en fue (report_forecast.py):**
+- ERR tabla: `100 * residuals / refactor` (era raw ln-scale → "0.00" con refactor=1)
+- level_std: `fr.level_std[h] * 100` (level_std es refactor-invariante)
+- sigma_plot gráfico: `sqrt(sigma2) * 100 / refactor` (coherencia con err_vals en %)
+
+- [x] `generate_forecast`: pipeline write_fuf → load_fuf → forecast_fuf → write_forecast_report
+- [x] `update_and_forecast`: nuevas obs + mismos parámetros → previsiones + tracking
+- [x] `sps_dashboard`: index.html con informe por serie
+- [x] Fix fue/report_forecast.py: ERR, level_std, sigma_plot siempre en % independiente de refactor
+- [x] Revert forced refactor=100 en _build_inp y _make_model (la corrección está en fue)
+- [x] Tests: 4 tests en test_mcp_server.py
+
+---
+
 ## Archivos de prueba
 
 Series reales usadas para desarrollo:
