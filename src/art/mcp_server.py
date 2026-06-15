@@ -1677,20 +1677,22 @@ def guided_identification(inp_path: str, lam: float = -1.0,
         top   = ident.data["suggestions"][0] if ident.data["suggestions"] else {}
         rec_p = top.get("p", 0)
         rec_q = top.get("q", 0)
+        rec_P = top.get("P", 0)
+        rec_Q = top.get("Q", 0)
         n_harm = max(ts.freq // 2 - 1, 0)
 
         if D == 1:
             # B2: regular + seasonal ARMA — check lags s, 2s for P, Q
             seasonal_note = (
-                "\n\n**Para P y Q (operadores estacionales lag s={ts.freq}):**\n"
+                f"\n\n**Para P y Q (operadores estacionales, lag s={ts.freq}):**\n"
                 f"- ACF en lag {ts.freq} significativo, PACF(lag {ts.freq}) decae → **Q=1** (SMA)\n"
                 f"- PACF en lag {ts.freq} significativo, ACF(lag {ts.freq}) decae → **P=1** (SAR)\n"
-                "- Caso más común para mensuales con D=1: Q=1 (ARIMA×(0,1,1)_12)\n"
+                f"- Caso más común para mensuales con D=1: Q=1 → ARIMA×(0,1,1)_{ts.freq}\n"
             )
             next_call = (
                 f"Llama a `confirm_and_estimate` con\n"
                 f"`lam={lam}, d={d}, D=1, p=<p>, q=<q>, P=<P>, Q=<Q>`\n"
-                f"*(Sugerencia regular: p={rec_p}, q={rec_q})*"
+                f"*(Sugerencia: p={rec_p}, q={rec_q}, P={rec_P}, Q={rec_Q})*"
             )
         else:
             seasonal_note = ""

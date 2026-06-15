@@ -1086,42 +1086,26 @@ Proporciona evidencia formal para elegir d (complementa la inspección visual de
 
 ---
 
-### Bloque M — Estacionalidad: determinista por defecto + opción D=1  [PENDIENTE]
+### Bloque M — Estacionalidad: determinista por defecto + opción D=1  [✅ HECHO jun-2026]
 
-**Situación actual**: `describe_seasonality` siempre recomienda B1 (determinista).
-No hay forma de elegir D=1 (modelo multiplicativo ARIMA(p,d,q)(P,D,Q)_s) desde
-el flujo guiado. Esta era la tradición Box-Jenkins original.
+**Implementado**: `guided_identification` Call 4 con D=1 activa ruta B2 (SARIMA multiplicativo).
+El parámetro `D` distingue B1 (D=0, armónicos) vs B2 (D=1, operadores estacionales P,Q).
 
-**Cambio de diseño**:
-- **Por defecto**: D=0 + armónicos (determinista, tradición Treadway) → decisión B1
-- **Opción D=1**: estacionalidad multiplicativa (tradición B-J original) → decisión B2
-  - Solo ofrecida si HAC F-test detecta estacionalidad
-  - Si se elige D=1: el modelo pasa a ARIMA(p,d,q)(P,D,Q)_s
-  - P, Q a determinar en paso de identificación ARMA (seasonal AR/MA)
-  - No se añaden armónicos cos/sin (los sustituye la diferencia estacional)
+**Cambios implementados**:
+- Call 3 ya ofrecía al analista elegir D=0 (B1, Treadway) o D=1 (B2, Box-Jenkins)
+- Call 4 con D=1: nota seasonal renderiza `lag s={freq}` correctamente (fix f-string)
+- `suggest_orders` con `P_max=1, Q_max=1` devuelve `P`, `Q`; ambos se muestran en sugerencia
+- `next_call` indica `lam, d, D=1, p=<p>, q=<q>, P=<P>, Q=<Q>` con valores recomendados
+- `confirm_and_estimate` con D=1 construye SARIMA vía `_build_inp` (ya soportaba `ar_s`, `ma_s`)
 
-```python
-# En describe_seasonality y guided_identification:
-# Añadir parámetro: seasonality_form="deterministic" | "multiplicative"
-# Si "multiplicative": D=1, n_harmonics=0, modelo SARIMA
+**Tests añadidos** (`test_mcp_server.py`):
+- `test_guided_identification_call4_b2_seasonal_note`: verifica f-string evaluado, P/Q en sugerencia
+- `test_guided_identification_call4_b2_returns_figure`: verifica figura ACF/PACF en salida
 
-# En _build_inp / _make_model: soporte para D=1 + MA_s/AR_s
-# (ya hay soporte en fue para ma_s, ar_s — solo hay que usarlo)
-
-# MCP: guided_identification(inp_path, lam, d, D, seasonality_form="deterministic")
-# Si seasonality_form="multiplicative": sugerir también P, Q además de p, q
-```
-
-**Notas de implementación**:
-- La opción multiplicativa usa `ma_s` / `ar_s` en fue (seasonal MA/AR), no `ma_f`
-- `_make_model` ya construye `ar_s=[], ma_s=[]` — ampliar para P,Q > 0
-- La identificación de P, Q sigue el mismo patrón que p, q pero en lags estacionales
-
-- [ ] Añadir parámetro `seasonality_form` a `describe_seasonality` y `guided_identification`
-- [ ] Ampliar `_make_model` para soportar P > 0 y Q > 0 (ma_s, ar_s)
-- [ ] Ampliar `suggest_orders` en `model_detection.py` para sugerir también P, Q (ya tiene lógica)
-- [ ] Ampliar `_build_inp` para generar sección anual MA/AR con fue
-- [ ] Tests con serie de ejemplo mensual usando SARIMA(0,1,1)(0,1,1)_12
+- [x] Call 4 B2: nota estacional con lag s=freq (f-string corregido)
+- [x] Extracción de `rec_P`, `rec_Q` de `suggest_orders` y mostrados en `next_call`
+- [x] `confirm_and_estimate` ya soporta D>0, P>0, Q>0 via `_build_inp`
+- [x] Tests con IPC_ES_m00.pre (mensual, freq=12) verificando ruta B2
 
 ---
 

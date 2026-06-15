@@ -406,6 +406,40 @@ def test_compare_versions_block_q():
     assert len(result[1].data) > 10_000
 
 
+# ---------------------------------------------------------------------------
+# Block M: guided_identification B2 path (D=1, seasonal ARMA)
+# ---------------------------------------------------------------------------
+
+_IPC_ES_M00 = os.path.join(
+    os.path.dirname(__file__), "..", "cases", "IPC_ES", "IPC_ES_m00.pre"
+)
+
+
+def test_guided_identification_call4_b2_seasonal_note():
+    """Block M: Call 4 with D=1 renders 'lag s=12' (not literal {ts.freq}) and P/Q suggestion."""
+    _skip_if_missing(_IPC_ES_M00)
+    from art.mcp_server import guided_identification
+    result = guided_identification(_IPC_ES_M00, lam=0.0, d=1, D=1)
+    assert len(result) >= 1
+    text = result[0].text
+    # B2 seasonal note must render with actual frequency value
+    assert "lag s=12" in text, f"f-string not evaluated; got: {text[:300]}"
+    # Next-step instruction must show explicit P/Q suggestion
+    assert "P=<P>" in text and "Q=<Q>" in text
+    assert "Sugerencia:" in text
+    # Must include ACF/PACF rule for seasonal operators
+    assert "SMA" in text or "SAR" in text
+
+
+def test_guided_identification_call4_b2_returns_figure():
+    """Block M: Call 4 B2 returns identification figure."""
+    _skip_if_missing(_IPC_ES_M00)
+    from art.mcp_server import guided_identification
+    result = guided_identification(_IPC_ES_M00, lam=0.0, d=1, D=1)
+    types = [x.type for x in result]
+    assert "image" in types, "Block M B2 Call 4 returned no figure"
+
+
 def test_batch_build_creates_html_reports(tmp_path):
     _skip_if_missing(_IPC_ES_INP)
     from art.mcp_server import batch_build
