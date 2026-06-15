@@ -81,30 +81,39 @@ Comentario tipo:
 > (residuos del AR auxiliar no son ruido blanco). La decisión d=1 descansa
 > principalmente en el patrón ACF/PACF.
 
-**2b. Estacionalidad (D)**
+**2b. Estacionalidad — bifurcación B1/B2**
 
-`plot_combined(∇ ln x)` + **contraste HAC de estacionalidad** (ART) → D=1 si aplica
+`plot_combined(∇ ln x)` + **contraste HAC de estacionalidad** (ART):
 
-El test HAC de ART (`detect_seasonality(ts, d=1, lam=0.0)`) realiza una regresión
-harmónica con corrección Newey-West sobre ∇ ln x y contrasta H₀: no hay estacionalidad.
-Aporta además un gráfico con los efectos mensuales y el Wald por frecuencia (opcional).
+```python
+from art.seasonal_detection import detect_seasonality, plot_seasonality
+result = detect_seasonality(ts, d=1, lam=0.0)
+# result.f_stat, result.p_value, result.seasonal_detected
+fig = plot_seasonality(result)   # opcional — efectos mensuales + Wald por frecuencia
+```
 
-Comentario tipo:
-> La ACF de ∇ ln x muestra picos en lags 12, 24, 36 — estacionalidad visible.
-> El contraste HAC confirma: F(s-1, n-s) >> 0, p=0.000. Cuando la estacionalidad
-> no es obvia visualmente, el test HAC es especialmente valioso — proporciona
-> además los efectos mensuales estimados.
+Comentario tipo cuando la estacionalidad es evidente:
+> La ACF de ∇ ln x muestra picos en lags s, 2s, 3s — estacionalidad clara.
+> HAC F(s-1, n-s) >> 0, p=0.000. Cuando no es obvia visualmente, el test HAC
+> es especialmente valioso; el gráfico aporta además los efectos mensuales estimados.
 
-Secuencia completa:
-1. `plot_combined(ln x)` → d=1
-2. `plot_combined(∇ ln x)` → ¿patrón estacional en ACF?
-3. `detect_seasonality(ts, d=1)` → confirma / descarta D=1
-4. `plot_combined(∇∇_s ln x)` → ACF/PACF estacionaria → identificar p,q,P,Q
+**Bifurcación B1 / B2** — hipótesis de trabajo sobre la estacionalidad:
+
+| Opción | Especificación | Ventaja | Cuándo preferir |
+|--------|---------------|---------|----------------|
+| **B1** | d=1, D=0 + armónicos cos/sin | Más general; residuos limpios para identificar ARMA; contraste MEG posterior por frecuencia | Punto de partida habitual |
+| **B2** | d=1, D=1 (SARIMA) | Parsimonia si estacionalidad claramente estocástica | Evidencia previa fuerte o modelo multiplicativo preferido |
+
+Ambas son hipótesis de trabajo. Tras estimar en B1, el test MEG de ART contrasta
+si alguna frecuencia estacional requiere tratamiento estocástico (D=1 parcial).
+En B2, MEG puede contrastar si la diferencia estacional es excesiva.
+
+La práctica BJ-T habitual: empezar por **B1**, construir modelo, aplicar MEG.
 
 **Casos documentados (jun-2026)**:
-- **IPC_ES** (mensual): d=1 (ADF t=−2.42 p=0.37 / KPSS p<0.01), D=1 (HAC F(11,250)=6351.7 p=0.0000)
-- **IPC_DE** (mensual): d=1, D=1 → ARIMA(0,1,0)(0,1,1)₁₂
-- **WTI**   (mensual): d=1, D=0 (sin estacionalidad marcada) → AR(2) + escalones
+- **IPC_ES** (mensual): d=1 (ADF t=−2.42 p=0.37; KPSS p<0.01); HAC F(11,250)=6351.7 p=0.0000 → **B1**
+- **IPC_DE** (mensual): d=1, D=1 → ARIMA(0,1,0)(0,1,1)₁₂ (B2)
+- **WTI**   (mensual): d=1, D=0, sin estacionalidad → AR(2) + escalones
 
 ---
 
