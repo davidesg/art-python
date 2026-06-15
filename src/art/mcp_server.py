@@ -2918,6 +2918,305 @@ def batch_build(inp_paths: list[str], output_dir: str,
 
 
 # ---------------------------------------------------------------------------
+# Block R helpers — forecasting
+# ---------------------------------------------------------------------------
+
+def _forecast_date(start: tuple, nobs: int, freq: int, offset: int = 0) -> str:
+    """Calendar label for obs index nobs-1+offset (0-based offset from obs nobs)."""
+    y0, p0 = int(start[0]), int(start[1])
+    total = (p0 - 1) + (nobs - 1) + offset
+    if freq == 12:
+        return f"{total % 12 + 1:02d}/{y0 + total // 12}"
+    if freq == 4:
+        return f"Q{total % 4 + 1}/{y0 + total // 4}"
+    return str(y0 + total)
+
+
+# ---------------------------------------------------------------------------
+# Tool: generate_forecast — fuf previsión desde modelo estimado  (Bloque R)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def generate_forecast(inp_path: str,
+                      horizon: int,
+                      output_fuf_path: str,
+                      output_html: str) -> list:
+    """
+    Generate L-step-ahead forecasts from a fitted model.
+
+    Loads the model from inp_path (fitted .pre), computes forecasts, writes a
+    fuf file to output_fuf_path for future updates, and writes the full
+    Treadway/Jenkins HTML forecast report (tables + charts) to output_html.
+
+    Parameters
+    ----------
+    inp_path        : fitted model file (.pre)
+    horizon         : number of periods ahead to forecast (e.g. 24)
+    output_fuf_path : path to write the fuf input file (for update_and_forecast)
+    output_html     : path to write the fue HTML forecast report (required)
+    """
+    try:
+        from mcp.types import TextContent
+        from fue.report_forecast import write_forecast_report
+
+        _, m = _load_fitted(inp_path)
+        ts   = m.series
+
+        fr = m.forecast(horizon=horizon)
+
+        output_fuf_path = os.path.expanduser(output_fuf_path)
+        os.makedirs(os.path.dirname(os.path.abspath(output_fuf_path)), exist_ok=True)
+        m.write_fuf(horizon=horizon, path=output_fuf_path)
+
+        output_html = os.path.expanduser(output_html)
+        os.makedirs(os.path.dirname(os.path.abspath(output_html)), exist_ok=True)
+        write_forecast_report(m, fr, path=output_html,
+                              title=ts.name or "", source=inp_path)
+
+        last_date = _forecast_date(ts.start, ts.nobs, ts.freq, 0)
+        end_date  = _forecast_date(ts.start, ts.nobs + 1, ts.freq, horizon - 1)
+        sigma_a   = fr.sigma2 ** 0.5
+
+        text = (
+            f"## Previsiones — {ts.name or 'Serie'} "
+            f"({last_date} → {end_date}, horizonte={horizon})\n\n"
+            f"σ̂_a = {sigma_a:.6f}\n\n"
+            f"Archivo fuf: {output_fuf_path}\n"
+            f"Informe HTML: {output_html}"
+        )
+        return [TextContent(type="text", text=text)]
+
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
+# Tool: update_and_forecast — añade observaciones y actualiza previsiones
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def update_and_forecast(fuf_path: str,
+                        new_values: list,
+                        output_html: str,
+                        output_fuf_path: str = "",
+                        actual_dates: list = []) -> list:
+    """
+    Append new observations to a fuf file and update the forecast.
+
+    Loads the fuf file, appends new_values to the series, re-runs the
+    forecast (fixed parameters), compares actual observations against the
+    previous forecast to report tracking errors, and writes the updated
+    Treadway/Jenkins HTML report to output_html.
+
+    Parameters
+    ----------
+    fuf_path         : existing fuf .inp file (from generate_forecast)
+    new_values       : list of new observations in original scale
+    output_html      : path to write the fue HTML forecast report (required)
+    output_fuf_path  : where to save the updated fuf file (default: overwrites fuf_path)
+    actual_dates     : (optional) date labels for new observations ("MM/YYYY")
+    """
+    try:
+        from mcp.types import TextContent
+        import fue as _fue
+        import numpy as np
+        from fue.report_forecast import write_forecast_report
+
+        fuf_path = os.path.expanduser(fuf_path)
+        ts_old, m_old = _fue.load_fuf(fuf_path)
+        L_old = m_old._fuf_horizon
+        sig2  = m_old._fuf_sigma2
+
+        fr_old  = m_old.forecast_fuf()
+        n_new   = len(new_values)
+        new_arr = np.array(new_values, dtype=float)
+
+        # Tracking: actual vs previous forecast
+        track_lines = []
+        for i, actual in enumerate(new_arr):
+            if i < len(fr_old.level):
+                prev    = fr_old.level[i]
+                err_pct = 100.0 * (actual - prev) / prev if prev != 0 else float("nan")
+                date_lbl = (actual_dates[i] if actual_dates and i < len(actual_dates)
+                            else _forecast_date(ts_old.start, ts_old.nobs + 1,
+                                                ts_old.freq, i))
+                track_lines.append(
+                    f"  {date_lbl}: obs={actual:.4f}  prev={prev:.4f}  "
+                    f"err={err_pct:+.2f}%"
+                )
+
+        # Build updated series and model (same spec, fixed params)
+        new_data = list(ts_old.data) + list(new_arr)
+        ts_new   = _fue.TimeSeries(new_data, freq=ts_old.freq,
+                                   start=ts_old.start, name=ts_old.name)
+        m_new = _fue.Model(
+            ts_new,
+            ar=m_old.ar, ar_free=m_old.ar_free,
+            ma=m_old.ma, ma_free=m_old.ma_free,
+            ar_s=m_old.ar_s, ar_s_free=m_old.ar_s_free,
+            ma_s=m_old.ma_s, ma_s_free=m_old.ma_s_free,
+            ar_f=m_old.ar_f, ma_f=m_old.ma_f,
+            d=m_old.d, D=m_old.D, ifadf=m_old.ifadf,
+            interventions=m_old.interventions,
+            mu=m_old.mu0, estimate_mu=m_old.estimate_mu,
+            boxlam=m_old.boxlam,
+        )
+        m_new._fuf_sigma2  = sig2
+        m_new._fuf_horizon = L_old
+
+        fr_new = m_new.forecast_fuf()
+
+        out_path = os.path.expanduser(output_fuf_path or fuf_path)
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+        m_new.write_fuf(horizon=L_old, sigma2=sig2, path=out_path)
+
+        output_html = os.path.expanduser(output_html)
+        os.makedirs(os.path.dirname(os.path.abspath(output_html)), exist_ok=True)
+        write_forecast_report(m_new, fr_new, path=output_html,
+                              title=ts_new.name or "", source=fuf_path,
+                              sps_name=os.path.basename(fuf_path))
+
+        end_date = _forecast_date(ts_new.start, ts_new.nobs + 1, ts_new.freq, L_old - 1)
+
+        track_block = ""
+        if track_lines:
+            track_block = "\nSeguimiento (actual vs. previsión anterior):\n" + "\n".join(track_lines) + "\n"
+
+        text = (
+            f"## Previsiones actualizadas — {ts_new.name or 'Serie'} "
+            f"(+{n_new} obs → {end_date})\n"
+            + track_block
+            + f"\nσ̂_a = {sig2**0.5:.6f}\n"
+            + f"Archivo fuf actualizado: {out_path}\n"
+            + f"Informe HTML: {output_html}"
+        )
+        return [TextContent(type="text", text=text)]
+
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
+# Tool: sps_dashboard — informe de seguimiento multi-serie
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def sps_dashboard(sps_dir: str, output_dir: str) -> list:
+    """
+    Generate a sequential prediction (SPS) dashboard for all series in a directory.
+
+    Scans sps_dir for fuf .inp files, generates a fue HTML forecast report
+    for each series in output_dir, and writes an index.html with a summary
+    table linking to the per-series reports.
+
+    Parameters
+    ----------
+    sps_dir    : directory containing fuf .inp files (one per series)
+    output_dir : directory to write per-series HTML reports and index.html
+    """
+    try:
+        from mcp.types import TextContent
+        import fue as _fue
+        from fue.report_forecast import write_forecast_report
+
+        sps_dir    = os.path.expanduser(sps_dir)
+        output_dir = os.path.expanduser(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+
+        fuf_files = sorted(
+            f for f in os.listdir(sps_dir)
+            if f.endswith(".inp") and os.path.isfile(os.path.join(sps_dir, f))
+        )
+        if not fuf_files:
+            return [TextContent(type="text",
+                                text=f"No se encontraron archivos .inp en {sps_dir}")]
+
+        entries = []
+        for fname in fuf_files:
+            fuf_p = os.path.join(sps_dir, fname)
+            stem  = os.path.splitext(fname)[0]
+            try:
+                ts, m = _fue.load_fuf(fuf_p)
+                fr    = m.forecast_fuf()
+
+                html_p = os.path.join(output_dir, f"{stem}.html")
+                write_forecast_report(m, fr, path=html_p,
+                                      title=ts.name or stem,
+                                      source=fuf_p,
+                                      sps_name=stem)
+
+                last = _forecast_date(ts.start, ts.nobs, ts.freq, 0)
+                end  = _forecast_date(ts.start, ts.nobs + 1, ts.freq, fr.horizon - 1)
+                entries.append({
+                    "name": ts.name or stem,
+                    "html": f"{stem}.html",
+                    "last": last, "end": end,
+                    "horizon": fr.horizon,
+                    "level_1": fr.level[0],
+                    "diff1_1": fr.diff1[0],
+                    "sdiff_1": fr.seasonal_diff[0],
+                    "error": None,
+                })
+            except Exception as exc:
+                entries.append({"name": stem, "html": "", "error": str(exc)})
+
+        # Write index.html
+        idx_rows = []
+        for e in entries:
+            if e.get("error"):
+                idx_rows.append(
+                    f"<tr><td>{e['name']}</td>"
+                    f"<td colspan='5' style='color:red'>{e['error']}</td></tr>"
+                )
+            else:
+                sign1 = "+" if e["diff1_1"] >= 0 else ""
+                signa = "+" if e["sdiff_1"] >= 0 else ""
+                idx_rows.append(
+                    f"<tr>"
+                    f"<td><a href='{e['html']}'>{e['name']}</a></td>"
+                    f"<td>{e['last']}</td><td>{e['end']}</td>"
+                    f"<td>{e['level_1']:.4f}</td>"
+                    f"<td>{sign1}{e['diff1_1']:.2f}%</td>"
+                    f"<td>{signa}{e['sdiff_1']:.2f}%</td>"
+                    f"</tr>"
+                )
+        index_html = (
+            "<!DOCTYPE html><html lang='es'><meta charset='utf-8'>"
+            "<title>SPS Index</title>"
+            "<body style='font-family:sans-serif;max-width:900px;margin:40px auto'>"
+            "<h1>SPS — Panel de seguimiento</h1>"
+            "<table border='1' cellpadding='6' cellspacing='0' width='100%'>"
+            "<tr><th>Serie</th><th>Último dato</th><th>Fin horizonte</th>"
+            "<th>Prev₁</th><th>Δ período</th><th>Δ anual</th></tr>"
+            + "".join(idx_rows)
+            + "</table></body></html>"
+        )
+        with open(os.path.join(output_dir, "index.html"), "w", encoding="utf-8") as f:
+            f.write(index_html)
+
+        n_ok = sum(1 for e in entries if not e.get("error"))
+        lines = [
+            f"### SPS Dashboard — {n_ok}/{len(entries)} series",
+            f"Directorio: {output_dir}",
+            "",
+        ]
+        for e in entries:
+            if not e.get("error"):
+                lines.append(
+                    f"- {e['name']}: {e['last']} → {e['end']}  "
+                    f"prev₁={e['level_1']:.4f}  "
+                    f"Δ={e['diff1_1']:+.2f}%  ΔA={e['sdiff_1']:+.2f}%"
+                )
+            else:
+                lines.append(f"- {e['name']}: ERROR — {e['error']}")
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

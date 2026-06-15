@@ -589,3 +589,114 @@ def test_batch_build_creates_html_reports(tmp_path):
     with open(os.path.join(out_dir, htmls[0])) as fh:
         content = fh.read()
     assert len(content) > 5_000
+
+
+# ---------------------------------------------------------------------------
+# Block R: generate_forecast / update_and_forecast / sps_dashboard
+# ---------------------------------------------------------------------------
+
+_IPC_ES_M02 = os.path.join(
+    os.path.dirname(__file__), "..", "cases", "IPC_ES", "IPC_ES_m02.pre"
+)
+
+
+def test_generate_forecast_writes_html_and_fuf(tmp_path):
+    """Block R: generate_forecast writes fue HTML report + fuf file, no inline image."""
+    _skip_if_missing(_IPC_ES_M02)
+    from art.mcp_server import generate_forecast
+    fuf_path  = str(tmp_path / "IPC_ES.inp")
+    html_path = str(tmp_path / "forecast.html")
+    result = generate_forecast(_IPC_ES_M02, horizon=6,
+                               output_fuf_path=fuf_path,
+                               output_html=html_path)
+    assert len(result) == 1
+    assert result[0].type == "text"
+    text = result[0].text
+    assert "σ̂_a" in text
+    assert html_path in text
+    assert fuf_path in text
+
+    assert os.path.exists(fuf_path)
+    assert os.path.exists(html_path)
+    with open(html_path, encoding="utf-8") as f:
+        html = f.read()
+    assert len(html) > 5_000
+
+
+def test_generate_forecast_fuf_round_trip(tmp_path):
+    """Block R: fuf file written by generate_forecast can be loaded and reforecast."""
+    _skip_if_missing(_IPC_ES_M02)
+    import fue
+    from art.mcp_server import generate_forecast
+    fuf_path  = str(tmp_path / "IPC_ES.inp")
+    html_path = str(tmp_path / "forecast.html")
+    generate_forecast(_IPC_ES_M02, horizon=12,
+                      output_fuf_path=fuf_path, output_html=html_path)
+    ts, m = fue.load_fuf(fuf_path)
+    assert m._fuf_horizon == 12
+    fr = m.forecast_fuf()
+    assert fr.horizon == 12
+    assert len(fr.level) == 12
+
+
+def test_update_and_forecast_tracking(tmp_path):
+    """Block R: update_and_forecast reports tracking errors and writes HTML."""
+    _skip_if_missing(_IPC_ES_M02)
+    import fue
+    from art.mcp_server import generate_forecast, update_and_forecast
+    fuf_path     = str(tmp_path / "IPC_ES.inp")
+    fuf_upd_path = str(tmp_path / "IPC_ES_upd.inp")
+    html_path    = str(tmp_path / "forecast_upd.html")
+
+    generate_forecast(_IPC_ES_M02, horizon=6,
+                      output_fuf_path=fuf_path,
+                      output_html=str(tmp_path / "f0.html"))
+
+    ts, m = fue.load_fuf(fuf_path)
+    fr0 = m.forecast_fuf()
+    new_obs = [float(fr0.level[0])]
+
+    result = update_and_forecast(fuf_path, new_obs,
+                                 output_html=html_path,
+                                 output_fuf_path=fuf_upd_path,
+                                 actual_dates=["01/2099"])
+    assert len(result) == 1
+    assert result[0].type == "text"
+    text = result[0].text
+    assert "01/2099" in text
+    assert "obs=" in text
+    assert html_path in text
+    assert os.path.exists(fuf_upd_path)
+    assert os.path.exists(html_path)
+
+
+def test_sps_dashboard_writes_html_per_series(tmp_path):
+    """Block R: sps_dashboard creates per-series HTML and index.html."""
+    _skip_if_missing(_IPC_ES_M02)
+    from art.mcp_server import generate_forecast, sps_dashboard
+    sps_dir = str(tmp_path / "sps")
+    os.makedirs(sps_dir)
+    fuf_path = os.path.join(sps_dir, "IPC_ES.inp")
+    generate_forecast(_IPC_ES_M02, horizon=6,
+                      output_fuf_path=fuf_path,
+                      output_html=str(tmp_path / "f0.html"))
+
+    out_dir = str(tmp_path / "sps_out")
+    result = sps_dashboard(sps_dir, out_dir)
+    assert len(result) == 1
+    assert result[0].type == "text"
+    text = result[0].text
+    assert "1/1" in text or "1/" in text
+
+    index_html = os.path.join(out_dir, "index.html")
+    assert os.path.exists(index_html)
+    with open(index_html, encoding="utf-8") as f:
+        html = f.read()
+    assert "<table" in html
+    assert "IPC_ES" in html
+
+    htmls = [f for f in os.listdir(out_dir) if f.endswith(".html") and f != "index.html"]
+    assert len(htmls) >= 1
+    with open(os.path.join(out_dir, htmls[0]), encoding="utf-8") as f:
+        series_html = f.read()
+    assert len(series_html) > 5_000
