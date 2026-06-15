@@ -986,13 +986,11 @@ def _are_nested(m_a, m_b) -> tuple[bool, int]:
 | IPC_ES_m01 → IPC_ES_m02 | +AR(1) | ~10–20 | B mejora (χ²(1), p<0.01) |
 | Chile PC5 → PC6 (de la tesis) | −AR(1) | ~4–6 | A mejor (ΔAIC > 0 al eliminar AR) |
 
-- [ ] Implementar `_are_nested(m_a, m_b) -> (bool, int)` en `formal_tests.py` o módulo aux
-- [ ] Implementar `compare_versions` en `mcp_server.py`
-- [ ] Figura comparativa: `plot_comparison(diag_a, diag_b) -> Figure` (2 cols × 3 filas:
-      residuos tipificados, ACF residuos, PACF residuos — sin QQ)
-      en `diagnosis.py`; devolver como único `ImageContent`
-- [ ] LR test automático si `_are_nested` → `True`; ΔAIC/ΔBIC siempre
-- [ ] Tests con IPC_ES_m01 vs IPC_ES_m02 (verificar Δloglik, LR, ΔAIC)
+- [x] Implementar `_nested_relation` en `mcp_server.py`
+- [x] Implementar `compare_versions` en `mcp_server.py`
+- [x] Figura 3×2: residuos tipificados + ACF + PACF (A izq, B der) — sin QQ
+- [x] LR test automático si anidados; ΔAIC/ΔBIC siempre
+- [x] Tests: IPC_ES_m00 vs IPC_ES_m02 (loglik, AIC, LR, diff con fechas calendario)
 
 ---
 
@@ -1037,9 +1035,9 @@ original Shin & Fuller 1998 JTSA 19(5)) deben verificarse antes de usar en produ
 Al añadir este contraste, **pedir el artículo** Shin & Fuller (1998) para confirmar los
 valores críticos exactos a 1%, 5%, 10% por tamaño muestral.
 
-- [ ] Añadir SF a `describe_formal_tests` (3 líneas de código)
-- [ ] Verificar valores críticos con artículo Shin & Fuller (1998)
-- [ ] Test en `test_mcp_server.py` para verificar que `formal_tests` incluye SF
+- [x] Añadir SF a `describe_formal_tests`
+- [ ] Verificar valores críticos con artículo Shin & Fuller (1998) ← pendiente investigación
+- [x] Tests en `test_mcp_server.py`: `test_formal_tests_shin_fuller_ipc_es` + `test_formal_tests_shin_fuller_data_field`
 
 ---
 
@@ -1125,7 +1123,7 @@ la ACF y en qué lags, antes de identificar la parte ARMA.
 
 ---
 
-### Bloque O — Ecuación del modelo estimado  [✅ HECHO — bug fix jun-2026]
+### Bloque O — Ecuación del modelo estimado  [✅ HECHO jun-2026]
 
 **Bug fix jun-2026**: la ecuación de ruido mostraba `∇(1−φB)(Nₜ−μ)` (∇ fuera del
 polinomio AR). Corregido a `(1−φB)(∇Nₜ−μ)=aₜ` — μ es la media del proceso
@@ -1188,8 +1186,8 @@ def model_equation(model) -> str
 - [x] Mapear frecuencias de armónicos (freq=4, 12) con fracciones de π correctas
 - [x] Integrar en `describe_diagnosis`: ecuación precede a la sección de diagnosis
 - [x] Nuevo MCP tool `model_equation_display(inp_path)` → TextContent con la ecuación
-- [ ] Integrar en `build_model` log final (pendiente)
-- [ ] Tests: verificar output con Chile PC6 y Colombia PO3 (pendiente)
+- [x] Ecuación incluida en `describe_diagnosis.summary` → aparece en `build_model` vía `diag_text`
+- [ ] Tests con Chile PC6 / Colombia PO3 — pendiente datos de prueba externos
 
 ---
 
