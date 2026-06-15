@@ -742,7 +742,7 @@ Corregidos los gaps de visualización encontrados en el análisis de la tesis:
 
 ---
 
-### Bloque G — Visualización de parámetros estacionales  [PENDIENTE]
+### Bloque G — Visualización de parámetros estacionales  [✅ COMPLETADO]
 
 **Motivación (tesis cap. 4, figura 4.1 Chile):**
 Después de estimar, mostrar un gráfico de los coeficientes cos/sin por
@@ -764,9 +764,9 @@ describe_seasonal_params(model) -> Description
 seasonal_param_analysis(inp_path) -> list
 ```
 
-- [ ] Implementar `describe_seasonal_params` en `describe.py`
-- [ ] Añadir MCP tool `seasonal_param_analysis`
-- [ ] Test unitario
+- [x] Implementar `describe_seasonal_params` en `describe.py`
+- [x] Añadir MCP tool `seasonal_param_analysis`
+- [x] Tests: 14 tests en `test_seasonal_params.py`
 
 ---
 
