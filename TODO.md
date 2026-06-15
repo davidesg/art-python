@@ -97,18 +97,26 @@ Comentario tipo cuando la estacionalidad es evidente:
 > HAC F(s-1, n-s) >> 0, p=0.000. Cuando no es obvia visualmente, el test HAC
 > es especialmente valioso; el gráfico aporta además los efectos mensuales estimados.
 
-**Bifurcación B1 / B2** — hipótesis de trabajo sobre la estacionalidad:
+**Bifurcación B1 / B2** — el analista elige la tradición metodológica:
 
-| Opción | Especificación | Ventaja | Cuándo preferir |
-|--------|---------------|---------|----------------|
-| **B1** | d=1, D=0 + armónicos cos/sin | Más general; residuos limpios para identificar ARMA; contraste MEG posterior por frecuencia | Punto de partida habitual |
-| **B2** | d=1, D=1 (SARIMA) | Parsimonia si estacionalidad claramente estocástica | Evidencia previa fuerte o modelo multiplicativo preferido |
+| Opción | Tradición | Especificación | Contrastación posterior |
+|--------|-----------|---------------|------------------------|
+| **B1** | **Treadway** | d=1, D=0 + armónicos cos/sin en D_t | MEG frecuencia por frecuencia |
+| **B2** | **Box-Jenkins** | d=1, D=1 (SARIMA multiplicativo) | MEG sobre D=1 vs D=0 |
 
-Ambas son hipótesis de trabajo. Tras estimar en B1, el test MEG de ART contrasta
-si alguna frecuencia estacional requiere tratamiento estocástico (D=1 parcial).
-En B2, MEG puede contrastar si la diferencia estacional es excesiva.
+**B1 (Treadway)**: la estacionalidad se modela como determinista (efectos fijos mensuales
+via armónicos). Más general: permite que cada frecuencia estacional sea significativa
+o no de forma independiente. Los residuos quedan más limpios para identificar el ARMA.
+Tras estimar, el test MEG de ART contrasta si alguna frecuencia requiere tratamiento
+estocástico. Es el camino propio del enfoque BJ-Treadway de ART.
 
-La práctica BJ-T habitual: empezar por **B1**, construir modelo, aplicar MEG.
+**B2 (Box-Jenkins)**: la estacionalidad se modela como estocástica imponiendo D=1.
+Conduce directamente a los modelos multiplicativos ARIMA(p,1,q)(P,1,Q)₁₂ de BJ.
+Más parsimonioso cuando la estacionalidad es claramente estocástica, pero impone
+una restricción que puede no ser necesaria en todas las frecuencias.
+
+El analista elige explícitamente entre las dos tradiciones. ART implementa B1 como
+flujo principal; B2 es también soportado como hipótesis de trabajo alternativa.
 
 **Casos documentados (jun-2026)**:
 - **IPC_ES** (mensual): d=1 (ADF t=−2.42 p=0.37; KPSS p<0.01); HAC F(11,250)=6351.7 p=0.0000 → **B1**
