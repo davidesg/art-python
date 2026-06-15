@@ -1540,18 +1540,26 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                                           data=bc.figure_b64, mimeType="image/png"))
             return items
 
-        # ── Call 2: Series at d=0 ─────────────────────────────────────────
+        # ── Call 2: Series at d=0 + ADF/KPSS unit root table ─────────────
         if d < 0:
+            from art.describe import describe_unit_root
             b64     = _plot_series_at_d(ts, lam=lam, d=0)
             lam_str = "log" if lam == 0.0 else f"λ={lam}"
             _show_fig(b64, "series_d0")
+
+            urt       = describe_unit_root(ts, lam=lam, max_d=2)
+            rec_d     = urt.data.get("recommended_d", 1)
+            _show_fig(urt.figure_b64, "unit_root")
+
             text = (
                 f"## Paso 2 — Serie transformada ({lam_str}), nivel d=0\n\n"
                 "Observa la serie y su ACF/PACF:\n"
                 "- **Tendencia visible** o ACF que decae muy lentamente → diferencia necesaria → d=1\n"
                 "- **Sin tendencia aparente** → posiblemente d=0 es suficiente\n\n"
-                "*(Soporte estadístico: llama a `unit_root_analysis` con este fichero "
-                f"y `lam={lam}` si quieres apoyo ADF/KPSS antes de decidir.)*\n\n"
+                "---\n\n"
+                + urt.summary + "\n\n"
+                + f"**Recomendación ADF+KPSS:** d = {rec_d}. {urt.recommendation}\n\n"
+                "---\n\n"
                 "**Próximo paso:**\n"
                 f"- ¿Hay tendencia? → llama con `lam={lam}, d=1`\n"
                 f"- ¿Sin tendencia? → llama con `lam={lam}, d=0, D=0` (o D=1 si hay estacionalidad)"
@@ -1559,6 +1567,9 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             items = [TextContent(type="text", text=text)]
             if b64:
                 items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
+            if urt.figure_b64:
+                items.append(ImageContent(type="image",
+                                          data=urt.figure_b64, mimeType="image/png"))
             return items
 
         # ── Call 3: Series at level d, D not yet decided ──────────────────

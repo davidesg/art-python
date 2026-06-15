@@ -1042,7 +1042,7 @@ valores críticos exactos a 1%, 5%, 10% por tamaño muestral.
 
 ---
 
-### Bloque L — Tests de raíz unitaria dedicados (ADF + KPSS por nivel)  [PENDIENTE]
+### Bloque L — Tests de raíz unitaria dedicados (ADF + KPSS por nivel)  [✅ COMPLETADO]
 
 **Estado actual**: ADF + KPSS están embebidos en `describe_seasonality` solo para d=1 fijo.
 El ART C (`ART_18/src/unit_root_tests.c`) los aplica en cada nivel d=0,1,2.
@@ -1078,11 +1078,11 @@ unit_root_analysis(inp_path, lam=0.0, max_d=2) -> list
 **Integración con flujo guiado**: insertar entre Box-Cox y el listado de identificación.
 Proporciona evidencia formal para elegir d (complementa la inspección visual de ACF).
 
-- [ ] Implementar `unit_root_tests` en `identification.py`
-- [ ] Figura: tabla de resultados por nivel d + recomendación visual
-- [ ] MCP tool `unit_root_analysis`
-- [ ] Integrar en `guided_identification` (etapa 1b mejorada)
-- [ ] Tests unitarios con series de ejemplo (n=68 PCE, n=72 IPC mensual)
+- [x] Implementar `unit_root_tests` en `identification.py`
+- [x] Figura: tabla coloreada por nivel d + recomendación visual
+- [x] MCP tool `unit_root_analysis`
+- [x] Integrar en `guided_identification` (Call 2): ADF+KPSS tabla + figura automáticos
+- [x] Tests unitarios: 25 tests en `test_unit_root.py` (PCE n=68, verdicts, describe)
 
 ---
 
