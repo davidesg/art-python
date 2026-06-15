@@ -125,14 +125,53 @@ flujo principal; B2 es también soportado como hipótesis de trabajo alternativa
 
 ---
 
-### Paso 3 — Identificación ARMA
+### Paso 2c — Modo de análisis (pregunta obligatoria al analista)
 
-`plot_combined(∇∇_s ln x)` — ACF/PACF sobre la serie estacionaria.
+**Antes de continuar con la identificación ARMA**, Claude debe preguntar:
 
-Señales habituales:
-- ACF(s) significativo, PACF(s) decae → SMA(1): θ_s < 0 si ACF(s) < 0
-- ACF(1..p) significativo, PACF corta en p → AR(p)
-- ACF y PACF decaen → ARMA(p,q)
+> ¿El análisis está en **modo guiado** (un paso a la vez, con comentario y confirmación)
+> o en **modo autónomo** (flujo completo hasta diagnóstico final)?
+
+Esto determina el ritmo de la sesión y si Claude espera respuesta en cada bifurcación.
+
+---
+
+### Paso 3 — Intervenciones primero ("lo más obvio primero")
+
+**Principio BJ-T**: los outliers extremos distorsionan las ACF/PACF ("las matan"),
+haciendo que los coeficientes ARMA identificados sean artefactos de las interacciones
+entre valores extremos, no estructura genuina de la serie. La secuencia correcta es:
+
+1. **Identificar y tratar intervenciones** antes de identificar el ARMA
+2. **Luego** identificar ARMA en los residuos limpios
+
+**Error a evitar** (documentado en IPC_ES, jun-2026): tras el primer modelo con armónicos,
+ACF(1)=+0.31* llevó a proponer MA(1). Pero había 16 outliers en 2021-2023 (máx +6.1σ)
+que distorsionaban toda la ACF. El MA(1) era probablemente un artefacto. La decisión
+correcta es tratar primero los outliers, luego reidentificar el ARMA.
+
+**Herramienta ART**: `preliminary_outlier_scan` — identifica residuos > 2σ y muestra
+sus contribuciones a la ACF, permitiendo calibrar cuánto distorsionan los correlogramas.
+
+```python
+from art.interventions import preliminary_outlier_scan
+result = preliminary_outlier_scan(model_residuals, sigma, ...)
+```
+
+**Secuencia correcta para B1 (Treadway)**:
+1. Estimar armónicos (sin ARMA)
+2. **Identificar outliers** → añadir escalones/impulsos para los más extremos
+3. Reestimar con intervenciones → ACF/PACF limpias
+4. **Ahora** identificar ARMA en residuos limpios
+5. Estimar modelo completo (armónicos + intervenciones + ARMA)
+
+### Paso 4 — Identificación ARMA (sobre residuos limpios)
+
+ACF/PACF de residuos tras tratar outliers:
+- ACF(s) significativo, PACF(s) decae → SMA(1)
+- ACF(1..p) corta, PACF decae → MA(p)
+- PACF(1..p) corta, ACF decae → AR(p)
+- Ambas decaen → ARMA(p,q)
 
 ---
 
