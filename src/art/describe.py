@@ -1743,7 +1743,9 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
             for r in top:
                 pct_str = f"{r['pct']:+.0f}%" if r["pct"] is not None else "n.a."
                 lag_strs.append(f"k={r['lag']} ({pct_str})")
-                if r["pct"] is not None:
+                # Only count percentage for lags where ACF itself is significant;
+                # when |acf| < CI the denominator is near zero → spuriously huge pct.
+                if r["pct"] is not None and abs(r["acf"]) > ci_val:
                     max_acf_pct = max(max_acf_pct, abs(r["pct"]))
             lines += [
                 "",

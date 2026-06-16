@@ -1473,11 +1473,30 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
     Returns ("", None) on any error.
     """
     try:
-        from art.describe import describe_prelim_scan as _prelim_scan
+        import fue as _fue
+        from art.describe import describe_prelim_scan as _prelim_scan, _resid_start
         if m.residuals is None:
             return "", None
-        scan = _prelim_scan(m.residuals, d=0, D=0, lam=1.0, threshold=2.5)
-        has_arma = (p > 0 or q > 0 or P > 0 or Q > 0)
+        # m.residuals.start is unreliable (fue sets it to 1900); recompute it
+        _rstart = _resid_start(m)
+        _res_ts = _fue.TimeSeries(
+            m.residuals.data, freq=ts.freq,
+            start=_rstart, name=f"Resid {ts.name or ''}",
+        )
+        scan = _prelim_scan(_res_ts, d=0, D=0, lam=1.0, threshold=2.5)
+        # Count only FREE (estimated) ARMA parameters to distinguish m00 from final
+        def _n_free(vals, free):
+            if not vals:
+                return 0
+            if free is None:
+                return len(vals)
+            return sum(1 for f in (free[0] if isinstance(free[0], (list, tuple)) else free) if f)
+        has_arma = any([
+            _n_free(m.ar,   m.ar_free)   > 0,
+            _n_free(m.ma,   m.ma_free)   > 0,
+            _n_free(m.ar_s, m.ar_s_free) > 0,
+            _n_free(m.ma_s, m.ma_s_free) > 0,
+        ])
         if has_arma:
             ab_choice = (
                 "\n\n**¿Qué hacemos?**\n\n"
