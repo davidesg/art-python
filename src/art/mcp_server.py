@@ -1462,6 +1462,48 @@ def _param_table(model) -> str:
     return "\n".join(rows) + ("\n\n" + "  ".join(footer) if footer else "")
 
 
+def _auto_scan_section(ts, m, lam: float, d: int, D: int,
+                        p: int, q: int, P: int, Q: int,
+                        inp_path: str, pre_path: str
+                        ) -> "tuple[str, str | None]":
+    """Auto-scan model residuals for outlier impact; return (text_section, b64).
+
+    Calls describe_prelim_scan on residuals (d=0, D=0, lam=1.0) and appends
+    an A/B choice: A) add intervention, B) proceed (ARMA or formal tests).
+    Returns ("", None) on any error.
+    """
+    try:
+        from art.describe import describe_prelim_scan as _prelim_scan
+        if m.residuals is None:
+            return "", None
+        scan = _prelim_scan(m.residuals, d=0, D=0, lam=1.0, threshold=2.5)
+        has_arma = (p > 0 or q > 0 or P > 0 or Q > 0)
+        if has_arma:
+            ab_choice = (
+                "\n\n**¿Qué hacemos?**\n\n"
+                "**A) Añadir intervención** (si aún hay anomalías significativas):\n"
+                f"→ `suggest_intervention_form(inp_path=\"{pre_path}\", "
+                "output_path=<próxima_versión.inp>, date=\"MM/YYYY\", form=\"auto\")`\n\n"
+                "**B) Contrastes formales** (si los residuos están limpios):\n"
+                "→ `formal_tests` / `simplify_interventions`"
+            )
+        else:
+            ab_choice = (
+                "\n\n**¿Qué hacemos?**\n\n"
+                "**A) Añadir intervención** — intervenciones ANTES de ARMA:\n"
+                f"→ `suggest_intervention_form(inp_path=\"{pre_path}\", "
+                "output_path=<próxima_versión.inp>, date=\"MM/YYYY\", form=\"auto\")`\n"
+                "   Repite hasta que los residuos estén limpios.\n\n"
+                "**B) Identificar ARMA** — si los residuos ya están limpios:\n"
+                f"→ `guided_identification(inp_path=\"{inp_path}\", "
+                f"lam={lam}, d={d}, D={D}, pre_path=\"{pre_path}\")`"
+            )
+        section = "\n\n---\n\n" + scan.summary + "\n\n" + scan.recommendation + ab_choice
+        return section, scan.figure_b64
+    except Exception:
+        return "", None
+
+
 def _param_names(model) -> list[str]:
     """Build human-readable parameter names for a fue model.
 
@@ -2046,11 +2088,17 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                 figure_b64=diag.figure_b64,
             )
 
+        scan_section, scan_b64 = _auto_scan_section(
+            ts, m, lam=lam, d=d, D=D, p=p, q=q, P=P, Q=Q,
+            inp_path=inp_path, pre_path=pre_path,
+        )
+
         text = (
             spec_line + "\n\n"
             + eq_text
             + "\n\n---\n\n"
             + diag.summary + "\n\n---\n" + diag.recommendation
+            + scan_section
             + pre_note
             + (f"\n\n{guion_note}" if guion_note else "")
         )
@@ -2060,6 +2108,9 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         if diag.figure_b64:
             items.append(ImageContent(type="image",
                                       data=diag.figure_b64, mimeType="image/png"))
+        if scan_b64:
+            items.append(ImageContent(type="image",
+                                      data=scan_b64, mimeType="image/png"))
         if include_histogram:
             hist_b64 = diag.data.get("hist_b64")
             if hist_b64:
@@ -2584,11 +2635,26 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                 figure_b64=diag.figure_b64,
             )
 
+        new_pre_path = os.path.splitext(output_path)[0] + ".pre"
+        lam_fit = float(getattr(m_fit, "boxlam", 0.0) or 0.0)
+        d_fit   = int(getattr(m_fit, "d", 0) or 0)
+        D_fit   = int(getattr(m_fit, "D", 0) or 0)
+        p_fit   = len(m_fit.ar)   if getattr(m_fit, "ar",   None) else 0
+        q_fit   = len(m_fit.ma)   if getattr(m_fit, "ma",   None) else 0
+        P_fit   = len(m_fit.ar_s) if getattr(m_fit, "ar_s", None) else 0
+        Q_fit   = len(m_fit.ma_s) if getattr(m_fit, "ma_s", None) else 0
+        scan_section, scan_b64 = _auto_scan_section(
+            ts, m_fit, lam=lam_fit, d=d_fit, D=D_fit,
+            p=p_fit, q=q_fit, P=P_fit, Q=Q_fit,
+            inp_path=inp_path, pre_path=new_pre_path,
+        )
+
         text = (
             f"**Intervención añadida:** {form.upper()}  {date_note}{context_str}\n\n"
             + eq_text
             + "\n\n---\n\n"
             + diag.summary + "\n\n---\n" + diag.recommendation
+            + scan_section
             + f"\n\n*Modelo actualizado en: {output_path}*"
             + (f"\n\n{guion_note}" if guion_note else "")
         )
@@ -2598,6 +2664,9 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         if diag.figure_b64:
             items.append(ImageContent(type="image",
                                       data=diag.figure_b64, mimeType="image/png"))
+        if scan_b64:
+            items.append(ImageContent(type="image",
+                                      data=scan_b64, mimeType="image/png"))
         if include_histogram:
             hist_b64 = diag.data.get("hist_b64")
             if hist_b64:
