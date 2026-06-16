@@ -2009,12 +2009,11 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         else:
             spec_str = f"ARIMA({p},{d},{q}) armónicos={n_harmonics}"
         spec_line = f"**{spec_str}  λ={lam}**  —  {ts.name or 'series'}"
-        param_md  = _param_table(m)
 
-        # Model equation (always shown, independent of diagnosis)
+        # Model equation replaces the parameter table
         try:
             from art.describe import model_equation as _model_eq
-            eq_text = _model_eq(ts, m) + "\n\n---\n\n"
+            eq_text = _model_eq(ts, m)
         except Exception:
             eq_text = ""
 
@@ -2026,9 +2025,9 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         try:
             from fue.report import write_pre
             write_pre(m, pre_path)
-            pre_note = f"\n\n*Parámetros estimados guardados en: {pre_path}*"
+            pre_note = f"\n\n*Modelo guardado en: {output_path}  |  parámetros en: {pre_path}*"
         except Exception:
-            pre_note = ""
+            pre_note = f"\n\n*Modelo guardado en: {output_path}*"
 
         # Optional guion recording
         guion_note = ""
@@ -2045,10 +2044,8 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         text = (
             spec_line + "\n\n"
             + eq_text
-            + "### Parámetros estimados\n\n" + param_md
             + "\n\n---\n\n"
             + diag.summary + "\n\n---\n" + diag.recommendation
-            + f"\n\n*Modelo guardado en: {output_path}*"
             + pre_note
             + (f"\n\n{guion_note}" if guion_note else "")
         )
