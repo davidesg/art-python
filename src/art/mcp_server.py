@@ -1743,6 +1743,24 @@ def guided_identification(inp_path: str, lam: float = -1.0,
         rec_Q = top.get("Q", 0)
         n_harm = max(ts.freq // 2 - 1, 0)
 
+        # ── Mean significance check ───────────────────────────────────────────
+        import numpy as _np
+        from art.identification import boxcox_transform as _bct, apply_differences as _adiff
+        _series_for_mu = (
+            _np.array(m_pre.residuals.data) if pre_path else
+            _np.array(_adiff(_bct(ts.data, lam), ts.freq, d, D))
+        )
+        _mu_bar = float(_np.mean(_series_for_mu))
+        _se_mu  = float(_np.std(_series_for_mu, ddof=1) / _np.sqrt(len(_series_for_mu)))
+        _t_mu   = _mu_bar / _se_mu if _se_mu > 0 else 0.0
+        _rec_mu = abs(_t_mu) > 2.0
+        mu_decision = (
+            f"\n\n**¿Incluir media (μ)?** μ̄={_mu_bar:.4f}, SE={_se_mu:.4f}, "
+            f"t={_t_mu:+.2f} → "
+            + ("**Sí, `estimate_mu=True`** (|t|>2)" if _rec_mu
+               else "**No, `estimate_mu=False`** (|t|≤2, media no significativa)")
+        )
+
         if D == 1:
             # B2: regular + seasonal ARMA — check lags s, 2s for P, Q
             seasonal_note = (
@@ -1750,33 +1768,32 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 f"- ACF en lag {ts.freq} significativo, PACF(lag {ts.freq}) decae → **Q=1** (SMA)\n"
                 f"- PACF en lag {ts.freq} significativo, ACF(lag {ts.freq}) decae → **P=1** (SAR)\n"
                 f"- Caso más común para mensuales con D=1: Q=1 → ARIMA×(0,1,1)_{ts.freq}\n"
+                + mu_decision
             )
             next_call = (
                 f"Llama a `confirm_and_estimate` con\n"
-                f"`lam={lam}, d={d}, D=1, p=<p>, q=<q>, P=<P>, Q=<Q>`\n"
+                f"`lam={lam}, d={d}, D=1, p=<p>, q=<q>, P=<P>, Q=<Q>"
+                f", estimate_mu={'True' if _rec_mu else 'False'}`\n"
                 f"*(Sugerencia: p={rec_p}, q={rec_q}, P={rec_P}, Q={rec_Q})*"
             )
         else:
-            seasonal_note = ""
-            mu_note = (
-                "\n\n**¿Media significativa?** Si μ̄/SE > 2, añade `estimate_mu=True` "
-                "a `confirm_and_estimate`."
-            )
             if pre_path:
                 next_call = (
                     f"Llama a `confirm_and_estimate` añadiendo el ARMA al modelo "
                     f"de `{os.path.basename(pre_path)}`:\n"
                     f"`inp_path=\"{pre_path}\", output_path=..._mFinal.inp, "
-                    f"lam={lam}, d={d}, D=0, p=<p>, q=<q>, n_harmonics={n_harm}`\n"
+                    f"lam={lam}, d={d}, D=0, p=<p>, q=<q>, n_harmonics={n_harm}"
+                    f", estimate_mu={'True' if _rec_mu else 'False'}`\n"
                     f"*(Sugerencia: p={rec_p}, q={rec_q})*"
                 )
             else:
                 next_call = (
                     f"Llama a `confirm_and_estimate` con\n"
-                    f"`lam={lam}, d={d}, D=0, p=<p>, q=<q>, n_harmonics={n_harm}`\n"
+                    f"`lam={lam}, d={d}, D=0, p=<p>, q=<q>, n_harmonics={n_harm}"
+                    f", estimate_mu={'True' if _rec_mu else 'False'}`\n"
                     f"*(Sugerencia: p={rec_p}, q={rec_q})*"
                 )
-            seasonal_note = mu_note
+            seasonal_note = mu_decision
 
         text = (
             f"## Paso 4 — Identificación ARMA  (sobre {data_label})\n\n"

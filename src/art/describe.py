@@ -1741,36 +1741,69 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         lines += [
             "",
             f"⚠ El outlier mayor explica aprox. **{var_max:.1f}%** de la varianza tipificada.",
-            "Esto distorsiona la ACF/PACF: los coeficientes de autocorrelación están",
-            "sesgados y la estructura ARMA real puede quedar enmascarada.",
         ]
 
+        max_acf_pct = 0.0
         if affected_lags:
             top = sorted(affected_lags, key=lambda r: -abs(r["contribution"]))[:6]
             lag_strs = []
             for r in top:
                 pct_str = f"{r['pct']:+.0f}%" if r["pct"] is not None else "n.a."
                 lag_strs.append(f"k={r['lag']} ({pct_str})")
+                if r["pct"] is not None:
+                    max_acf_pct = max(max_acf_pct, abs(r["pct"]))
             lines += [
                 "",
                 f"**Retardos ACF más afectados**: {', '.join(lag_strs)}.",
                 "(Porcentaje = contribución del outlier / ACF total en ese retardo.)",
             ]
 
-        lines += [
-            "",
-            "**Principio 'lo más obvio primero'**: añade las intervenciones sobre estos",
-            "puntos en el fichero .inp ANTES de identificar los órdenes ARMA.",
-        ]
+        # ── Criterion: should we intervene? ──────────────────────────────────
+        intervene_strong = var_max > 15.0 or max_acf_pct > 30.0
+        intervene_mild   = var_max > 5.0  or max_acf_pct > 10.0
+
+        if intervene_strong:
+            verdict = (
+                "**CRITERIO: Intervención recomendada** — "
+                f"la distorsión es significativa (var_outlier={var_max:.1f}%, "
+                f"ACF_max={max_acf_pct:.0f}%). "
+                "Añade la intervención antes de identificar ARMA."
+            )
+        elif intervene_mild:
+            verdict = (
+                "**CRITERIO: Distorsión moderada** — "
+                f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%). "
+                "Puedes añadir intervención o proceder con ARMA; "
+                "observa si las ACF/PACF muestran estructura clara."
+            )
+        else:
+            verdict = (
+                "**CRITERIO: Distorsión leve** — "
+                f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%). "
+                "No hay evidencia clara de que los outliers distorsionen la ACF/PACF. "
+                "Puedes proceder directamente con la especificación ARMA."
+            )
+
+        lines += ["", verdict]
 
         dates = [date for _, _, date in outliers]
-        rec = (
-            f"Hay {len(outliers)} outlier(s) en {', '.join(dates)} que distorsionan "
-            f"la ACF/PACF. Antes de identificar (p, q), añade una intervención "
-            f"(pulse o step) para cada fecha en el .inp y estima un modelo "
-            f"con solo armónicos + intervenciones. Luego examina la ACF/PACF de "
-            f"los residuos de ESE modelo para identificar la estructura ARMA."
-        )
+        if intervene_strong:
+            rec = (
+                f"Hay {len(outliers)} outlier(s) en {', '.join(dates)} con distorsión significativa. "
+                "Añade una intervención (pulse o step) para cada fecha y re-estima antes de "
+                "identificar (p, q)."
+            )
+        elif intervene_mild:
+            rec = (
+                f"Hay {len(outliers)} outlier(s) en {', '.join(dates)} con distorsión moderada. "
+                "Considera añadir intervención, pero también puedes proceder con ARMA y "
+                "ver si los residuos quedan limpios."
+            )
+        else:
+            rec = (
+                f"Los outliers en {', '.join(dates)} tienen impacto leve sobre la ACF/PACF. "
+                "Procede con la especificación ARMA directamente."
+            )
 
     return Description(
         summary="\n".join(lines),
