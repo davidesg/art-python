@@ -554,13 +554,15 @@ def preliminary_outlier_scan(inp_path: str, d: int, D: int,
         desc = describe_prelim_scan(ts, d=d, D=D, lam=lam, threshold=threshold)
 
         next_opts = (
-            "\n\n---\n\n**Opciones:**\n"
-            "- **A) Añadir intervenciones** (recomendado si hay outliers que distorsionan ACF/PACF):\n"
-            "  → `suggest_intervention_form` para cada fecha extrema\n"
-            "  → `confirm_and_estimate` → volver a `preliminary_outlier_scan`\n"
-            "- **B) Continuar con ARMA directamente** (si los outliers son leves o aceptables):\n"
+            "\n\n---\n\n**¿Qué hacemos?**\n\n"
+            "**A) Añadir intervención** → `suggest_intervention_form(date=\"MM/YYYY\", form=\"auto\")`\n"
+            "  Repite hasta que los residuos estén limpios, luego pasa a identificación ARMA.\n\n"
+            "**B) Continuar con ARMA sin intervenciones**\n"
             "  → `guided_identification(..., pre_path=\"<modelo_actual>.pre\")`\n"
-            "  ⚠ Las ACF/PACF pueden estar distorsionadas si quedan outliers significativos."
+            "  ⚠ Si hay outliers significativos, las ACF/PACF estarán distorsionadas.\n\n"
+            "**¿Dudas?** Para ver cuánto distorsiona cada outlier la ACF, llama a:\n"
+            "  `preliminary_outlier_scan(inp_path=\"<modelo_actual>.pre\", d=0, D=0, lam=1.0)`\n"
+            "  (muestra contribución de cada outlier a cada lag de la ACF)"
         )
 
         text = desc.summary + "\n\n---\n" + desc.recommendation + next_opts
@@ -1612,7 +1614,6 @@ def guided_identification(inp_path: str, lam: float = -1.0,
 
             urt       = describe_unit_root(ts, lam=lam, max_d=2)
             rec_d     = urt.data.get("recommended_d", 1)
-            _show_fig(urt.figure_b64, "unit_root")
 
             text = (
                 f"## Paso 2 — Serie transformada ({lam_str}), nivel d=0\n\n"
@@ -1964,6 +1965,13 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         spec_line = f"**{spec_str}  λ={lam}**  —  {ts.name or 'series'}"
         param_md  = _param_table(m)
 
+        # Model equation (always shown, independent of diagnosis)
+        try:
+            from art.describe import model_equation as _model_eq
+            eq_text = _model_eq(ts, m) + "\n\n---\n\n"
+        except Exception:
+            eq_text = ""
+
         # Diagnosis
         diag = describe_diagnosis(m)
 
@@ -1990,6 +1998,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
 
         text = (
             spec_line + "\n\n"
+            + eq_text
             + "### Parámetros estimados\n\n" + param_md
             + "\n\n---\n\n"
             + diag.summary + "\n\n---\n" + diag.recommendation
@@ -2374,7 +2383,7 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
 
 @mcp.tool()
 def suggest_intervention_form(inp_path: str, output_path: str,
-                               date: str,
+                               date: str = "",
                                form: str = "auto",
                                context_hint: str = "",
                                include_histogram: bool = False,
@@ -2395,7 +2404,8 @@ def suggest_intervention_form(inp_path: str, output_path: str,
     ----------
     inp_path          : current .inp/.pre (with any previous interventions)
     output_path       : path to write the updated .inp
-    date              : observation date "MM/YYYY" or "QN/YYYY" or "YYYY"
+    date              : observation date "MM/YYYY" or "QN/YYYY" or "YYYY".
+                        Leave empty ("") to auto-select the most extreme residual.
     form              : "pulse", "step", "ramp" or "auto" (heuristic)
     context_hint      : free-text note about the economic event (for logging)
     include_histogram : return histogram PNG (default False — saves tokens
@@ -2431,8 +2441,6 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                 return 1, int(m_yr.group(1))
             raise ValueError(f"Unrecognised date format: {d!r}. Use MM/YYYY, QN/YYYY or YYYY.")
 
-        period, year = _parse_date(date)
-
         # Load current model to inspect residuals and build the new spec
         ts, m_src = _load_fitted(inp_path)
 
@@ -2440,10 +2448,34 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         start = list(ts.start)
         s0y, s0p = start[0], (start[1] if freq > 1 else 1)
 
-        # Convert (period, year) → 0-based observation index
-        at_0 = (year - s0y) * freq + (period - s0p)
-        if at_0 < 0 or at_0 >= ts.nobs:
-            raise ValueError(f"Date {date} gives obs={at_0+1}, outside series range [1, {ts.nobs}].")
+        if not date.strip():
+            # Auto-select most extreme residual not already covered by an intervention
+            import numpy as np
+            from art.diagnosis import diagnose
+            diag_auto = diagnose(m_src, z_threshold=2.0)
+            existing_at = {itv.at for itv in (m_src.interventions or [])}
+            candidates = [(abs(z), obs) for obs, z in diag_auto.extreme
+                          if (obs - 1) not in existing_at]
+            if not candidates:
+                return _err("No se encontraron residuos extremos sin intervención asignada. "
+                            "Proporciona date manualmente.")
+            _, obs_1based = max(candidates)
+            at_0 = obs_1based - 1
+            # Convert obs index → calendar date string for the note
+            total = (s0p - 1) + at_0
+            if freq == 12:
+                auto_date = f"{total % 12 + 1:02d}/{s0y + total // 12}"
+            elif freq == 4:
+                auto_date = f"Q{total % 4 + 1}/{s0y + total // 4}"
+            else:
+                auto_date = str(s0y + total)
+            date_note = f"Fecha auto-detectada (residuo más extremo sin intervención): **{auto_date}**"
+        else:
+            period, year = _parse_date(date)
+            at_0 = (year - s0y) * freq + (period - s0p)
+            if at_0 < 0 or at_0 >= ts.nobs:
+                raise ValueError(f"Date {date} gives obs={at_0+1}, outside series range [1, {ts.nobs}].")
+            date_note = f"Fecha: **{date}**"
 
         if form == "auto":
             # Inspect residuals around that observation
@@ -2500,7 +2532,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             )
 
         text = (
-            f"**Intervención añadida:** {form.upper()} en {date}{context_str}\n\n"
+            f"**Intervención añadida:** {form.upper()}  {date_note}{context_str}\n\n"
             + "### Parámetros estimados\n\n" + param_md
             + "\n\n---\n\n"
             + diag.summary + "\n\n---\n" + diag.recommendation
