@@ -163,6 +163,51 @@ def _load_ts_model(path: str):
     return fue.inp.load(path)
 
 
+def _write_bare_inp(ts, path: str) -> None:
+    """Write a minimal fue .inp with only series data and no model spec."""
+    begyear, begtime = int(ts.start[0]), int(ts.start[1])
+    n_ifadf = ts.freq // 2 + 1 if ts.freq > 1 else 1
+    lines = [
+        "************************************************",
+        "*        Input file for program DRVUS          *",
+        "* Copyright (C) 1996 Jos? Alberto Mauricio     *",
+        "************************************************",
+        "",
+        "** Frequency of time series: either 1(A), 4(Q) or 12(M):",
+        f" {ts.freq}",
+        "** Number of observations and starting date of time series:",
+        f" {ts.nobs} {begtime:2d} {begyear} {ts.name}",
+        "** Number of deterministic variables (including seasonal components):",
+        " 0",
+        "**Number and orders of regular AR operators:",
+        " 0",
+        "** Number and orders of annual AR operators:",
+        " 0",
+        "** Number and orders of regular MA operators:",
+        " 0",
+        "** Number and orders of anual MA operators:",
+        " 0",
+        "** Number and frequencies of regular AR(2) operators with fixed frequency:",
+        " 0",
+        "** Number and frequencies of regular MA(2) operators with fixed frequency:",
+        " 0",
+        "** Mean parameter (mu):",
+        "0",
+        "** Box-Cox lambda, regular differences and complete annual differences:",
+        "1.00 0 0",
+        "** Individual factors of the annual difference (from freq 0.0): ",
+        " " + " ".join(["0"] * n_ifadf),
+        "** ACF/PACF bands (0 Automatic) and reescaling factor: ",
+        " 0.00 1.00",
+        "** Time series (stochastic and non-standard deterministic variables): ",
+    ]
+    for v in ts.data:
+        lines.append(f"{v:.10f} ")
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
 def _load_fitted(path: str):
     """Load and fit a model from .pre or .inp file."""
     import fue
@@ -3237,6 +3282,245 @@ def sps_dashboard(sps_dir: str, output_dir: str) -> list:
                 lines.append(f"- {e['name']}: ERROR — {e['error']}")
 
         return [TextContent(type="text", text="\n".join(lines))]
+
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
+# Tools: data ingestion (Excel / CSV → .inp)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def preview_data(source_path: str, sheet: str = "") -> list:
+    """
+    Preview the contents of an Excel or CSV file before loading.
+
+    Lists available sheets (Excel), column names, number of rows, detected
+    date range and frequency. Use this before load_data to choose the right
+    column and confirm that dates are parsed correctly.
+
+    Parameters
+    ----------
+    source_path : path to .xlsx, .xls, or .csv file
+    sheet       : sheet name (Excel only; default = first sheet)
+    """
+    try:
+        import pandas as pd
+        from mcp.types import TextContent
+
+        source_path = os.path.expanduser(source_path)
+        ext = os.path.splitext(source_path)[1].lower()
+
+        # ── Load ──────────────────────────────────────────────────────────────
+        if ext in (".xlsx", ".xls", ".ods"):
+            xl = pd.ExcelFile(source_path)
+            sheet_names = xl.sheet_names
+            sname = sheet if sheet in sheet_names else sheet_names[0]
+            df = xl.parse(sname, index_col=0, parse_dates=True)
+        elif ext == ".csv":
+            sheet_names = ["(CSV — sin hojas)"]
+            sname = sheet_names[0]
+            df = pd.read_csv(source_path, index_col=0, parse_dates=True)
+        else:
+            return _err(f"Formato no soportado: {ext}. Usa .xlsx, .xls, .ods o .csv")
+
+        # ── Date detection ────────────────────────────────────────────────────
+        idx = df.index
+        if isinstance(idx, (pd.DatetimeIndex, pd.PeriodIndex)):
+            date_ok = True
+            d0 = idx[0]
+            d1 = idx[-1]
+            # Infer freq
+            if hasattr(idx, "freqstr") and idx.freqstr:
+                fs = idx.freqstr.upper()
+                if fs.startswith(("A", "Y")):  freq_detected = 1
+                elif fs.startswith("Q"):        freq_detected = 4
+                elif fs.startswith("M"):        freq_detected = 12
+                else:                           freq_detected = None
+            else:
+                # Guess from gap between first two obs
+                freq_detected = None
+                if len(idx) >= 2:
+                    try:
+                        gap = (idx[1] - idx[0]).days
+                        if gap >= 340:  freq_detected = 1
+                        elif gap >= 85: freq_detected = 4
+                        elif gap >= 25: freq_detected = 12
+                    except Exception:
+                        pass
+            freq_str = {1: "anual", 4: "trimestral", 12: "mensual"}.get(
+                freq_detected, f"desconocida (gap≈{gap if len(idx)>=2 else '?'} días)"
+            )
+            date_info = (
+                f"Índice de fechas detectado ✓\n"
+                f"  Inicio : {d0}\n"
+                f"  Fin    : {d1}\n"
+                f"  Frecuencia inferida: {freq_str}"
+                + (f" (freq={freq_detected})" if freq_detected else "")
+            )
+        else:
+            date_ok = False
+            date_info = (
+                "⚠ El índice no contiene fechas reconocibles.\n"
+                "  → En load_data deberás indicar freq, start_year y start_period."
+            )
+
+        # ── Column summary ────────────────────────────────────────────────────
+        numeric_cols = df.select_dtypes(include="number").columns.tolist()
+        col_lines = []
+        for c in numeric_cols:
+            s = df[c].dropna()
+            col_lines.append(
+                f"  {str(c):<30}  n={len(s)}  "
+                f"rango=[{s.min():.4g}, {s.max():.4g}]"
+                + ("  ⚠ tiene NaN" if df[c].isna().any() else "")
+            )
+
+        sheets_info = (
+            f"Hojas disponibles: {', '.join(sheet_names)}\n"
+            f"Hoja activa: «{sname}»\n"
+        ) if ext != ".csv" else ""
+
+        text = (
+            f"## Preview: {os.path.basename(source_path)}\n\n"
+            + sheets_info
+            + f"Filas: {len(df)}   Columnas numéricas: {len(numeric_cols)}\n\n"
+            + date_info + "\n\n"
+            "**Columnas disponibles:**\n"
+            + "\n".join(col_lines)
+            + "\n\n---\n"
+            "**Próximo paso:** `load_data(source_path, output_inp, column=\"<nombre>\", ...)`"
+        )
+        return [TextContent(type="text", text=text)]
+
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+@mcp.tool()
+def load_data(
+    source_path: str,
+    output_inp: str,
+    column: str,
+    series_name: str = "",
+    sheet: str = "",
+    freq: int = 0,
+    start_year: int = 0,
+    start_period: int = 1,
+) -> list:
+    """
+    Load a time series from Excel or CSV and write a fue .inp file.
+
+    If the file has a date index (DatetimeIndex), freq and start are inferred
+    automatically. If not, you must provide freq, start_year and start_period.
+
+    Parameters
+    ----------
+    source_path  : path to .xlsx, .xls, .ods or .csv file
+    output_inp   : path for the output .inp file (e.g. "cases/IPC_ES/IPC_ES.inp")
+    column       : column name to extract (exact match or 0-based integer index)
+    series_name  : name for the series in the .inp (default: column name)
+    sheet        : sheet name for Excel (default: first sheet)
+    freq         : 1=annual, 4=quarterly, 12=monthly  (0 = auto-detect from dates)
+    start_year   : start year if no date index (0 = auto-detect)
+    start_period : start period within year if no date index (1-based)
+    """
+    try:
+        import pandas as pd
+        import fue
+        from mcp.types import TextContent
+
+        source_path = os.path.expanduser(source_path)
+        output_inp  = os.path.expanduser(output_inp)
+        if not output_inp.endswith(".inp") and not output_inp.endswith(".pre"):
+            output_inp += ".inp"
+
+        ext = os.path.splitext(source_path)[1].lower()
+
+        # ── Load dataframe ────────────────────────────────────────────────────
+        if ext in (".xlsx", ".xls", ".ods"):
+            xl = pd.ExcelFile(source_path)
+            sname = sheet if sheet in xl.sheet_names else xl.sheet_names[0]
+            df = xl.parse(sname, index_col=0, parse_dates=True)
+        elif ext == ".csv":
+            sname = "(CSV)"
+            df = pd.read_csv(source_path, index_col=0, parse_dates=True)
+        else:
+            return _err(f"Formato no soportado: {ext}")
+
+        # ── Select column ─────────────────────────────────────────────────────
+        numeric_cols = df.select_dtypes(include="number").columns.tolist()
+        if column.isdigit():
+            idx_col = int(column)
+            if idx_col >= len(numeric_cols):
+                return _err(f"Índice de columna {idx_col} fuera de rango "
+                            f"(hay {len(numeric_cols)} columnas numéricas)")
+            col_name = numeric_cols[idx_col]
+        elif column in df.columns:
+            col_name = column
+        else:
+            return _err(
+                f"Columna «{column}» no encontrada.\n"
+                f"Columnas disponibles: {', '.join(str(c) for c in numeric_cols)}"
+            )
+
+        series = df[col_name].dropna()
+        name   = series_name or str(col_name)
+
+        # ── Build TimeSeries ──────────────────────────────────────────────────
+        idx = series.index
+        has_dates = isinstance(idx, (pd.DatetimeIndex, pd.PeriodIndex))
+
+        if has_dates:
+            ts = fue.TimeSeries.from_pandas(series.rename(name),
+                                            freq=freq if freq > 0 else None)
+            if freq > 0:
+                ts = fue.TimeSeries(ts.data, freq=freq,
+                                    start=ts.start, name=name)
+            date_note = f"Fechas inferidas del índice."
+        else:
+            if freq <= 0 or start_year <= 0:
+                return _err(
+                    "El índice no contiene fechas. Proporciona:\n"
+                    "  freq (1/4/12), start_year, start_period"
+                )
+            ts = fue.TimeSeries(
+                series.to_numpy(dtype=float),
+                freq=freq, start=(start_year, start_period), name=name
+            )
+            date_note = f"Fechas asignadas manualmente: inicio {start_year}/{start_period}, freq={freq}."
+
+        # ── Write .inp ────────────────────────────────────────────────────────
+        _write_bare_inp(ts, output_inp)
+
+        freq_label = {1: "anual", 4: "trimestral", 12: "mensual"}.get(ts.freq, str(ts.freq))
+        begyear, begtime = ts.start
+        endtotal = (begtime - 1) + ts.nobs - 1
+        if ts.freq == 12:
+            end_str = f"{endtotal % 12 + 1:02d}/{begyear + endtotal // 12}"
+            start_str = f"{begtime:02d}/{begyear}"
+        elif ts.freq == 4:
+            end_str = f"Q{endtotal % 4 + 1}/{begyear + endtotal // 4}"
+            start_str = f"Q{begtime}/{begyear}"
+        else:
+            end_str = str(begyear + ts.nobs - 1)
+            start_str = str(begyear)
+
+        text = (
+            f"## Serie cargada: {name}\n\n"
+            f"Fuente : {os.path.basename(source_path)}"
+            + (f"  (hoja: {sname})" if ext != ".csv" else "") + "\n"
+            f"Columna: {col_name}\n"
+            f"Período: {start_str} → {end_str}  "
+            f"(n={ts.nobs}, {freq_label})\n"
+            f"{date_note}\n\n"
+            f"Archivo .inp: `{output_inp}`\n\n"
+            "---\n"
+            "**Próximo paso:**\n"
+            f"```\nguided_identification(inp_path=\"{output_inp}\")\n```"
+        )
+        return [TextContent(type="text", text=text)]
 
     except Exception:
         return _err(traceback.format_exc())
