@@ -1000,14 +1000,19 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
         from mcp.types import TextContent
         from art.interventions import simplify_interventions, simplify_summary
 
-        _, m = _load_fitted(inp_path)
+        ts, m = _load_fitted(inp_path)
         results = simplify_interventions(m, alpha=alpha)
 
         if not results:
             return [TextContent(type="text",
                                 text="*No hay intervenciones no-estructurales en el modelo.*")]
 
-        param_md  = _param_table(m)
+        try:
+            from art.describe import model_equation as _model_eq
+            eq_text = _model_eq(ts, m)
+        except Exception:
+            eq_text = ""
+
         summary   = simplify_summary(results, alpha=alpha)
         n_sig     = sum(1 for r in results if r.significant)
         n_nosig   = len(results) - n_sig
@@ -1016,7 +1021,7 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
             f"### Contraste de intervenciones — {m.series.name or 'modelo'}\n\n"
             + f"**{n_sig} significativas**, **{n_nosig} prescindibles**"
             + f" (α={alpha:.2f},  df={results[0].df})\n\n"
-            + "#### Parámetros del modelo actual\n\n" + param_md
+            + eq_text
             + "\n\n---\n\n" + summary
         )
         return [TextContent(type="text", text=text)]
@@ -2556,8 +2561,13 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         _write_inp(ts, m_new, output_path)
         _, m_fit = _load_fitted(output_path)
 
-        param_md = _param_table(m_fit)
-        diag     = describe_diagnosis(m_fit)
+        diag = describe_diagnosis(m_fit)
+
+        try:
+            from art.describe import model_equation as _model_eq
+            eq_text = _model_eq(ts, m_fit)
+        except Exception:
+            eq_text = ""
 
         context_str = f"  Contexto: {context_hint}" if context_hint else ""
 
@@ -2576,7 +2586,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
 
         text = (
             f"**Intervención añadida:** {form.upper()}  {date_note}{context_str}\n\n"
-            + "### Parámetros estimados\n\n" + param_md
+            + eq_text
             + "\n\n---\n\n"
             + diag.summary + "\n\n---\n" + diag.recommendation
             + f"\n\n*Modelo actualizado en: {output_path}*"
@@ -2844,12 +2854,17 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
                 except Exception:
                     pass
 
-        # ── Parameter table and final description ─────────────────────────
-        param_md  = _param_table(m_fit) if m_fit else "*Modelo no estimado.*"
+        # ── Model equation and final description ──────────────────────────
         if m_fit is not None:
+            try:
+                from art.describe import model_equation as _model_eq
+                eq_text = _model_eq(ts, m_fit)
+            except Exception:
+                eq_text = ""
             diag_desc = describe_diagnosis(m_fit)
             diag_text = diag_desc.summary + "\n\n---\n" + diag_desc.recommendation
         else:
+            eq_text   = "*Modelo no estimado.*"
             diag_text = "*Sin diagnosis disponible.*"
 
         formal_md = _format_dcd_meg(dcd_results, meg_results)
@@ -2867,7 +2882,7 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
 
         text = (
             "\n".join(log)
-            + "\n\n### Parámetros estimados\n\n" + param_md
+            + "\n\n" + eq_text
             + "\n\n---\n\n" + diag_text
             + "\n\n---\n\n### Contrastes formales\n\n" + formal_md
             + f"\n\n*Modelo guardado en: {output_path}*"
