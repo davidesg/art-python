@@ -1463,6 +1463,30 @@ def _param_names(model) -> list[str]:
     Follows the same ordering as fue's parameter vector:
     det-var omega coefs (free only), then ARMA coefs (free only).
     """
+    from math import gcd
+
+    ts    = model.series
+    freq  = ts.freq if ts and ts.freq > 0 else 1
+    start = ts.start if ts else (0, 1)
+    by, bp = int(start[0]), (int(start[1]) if freq > 1 else 1)
+
+    def _at_to_date(at_0based: int) -> str:
+        off = (bp - 1) + at_0based
+        p, y = off % freq + 1, by + off // freq
+        if freq == 1:
+            return str(y)
+        if freq == 4:
+            return f"Q{p}/{y}"
+        return f"{p}/{y}"
+
+    def _harm_frac(h: int) -> str:
+        half = freq // 2
+        g    = gcd(h, half)
+        num, den = h // g, half // g
+        if den == 1:
+            return "π" if num == 1 else f"{num}π"
+        return f"π/{den}" if num == 1 else f"{num}π/{den}"
+
     names = []
 
     for itv in (model.interventions or []):
@@ -1472,11 +1496,16 @@ def _param_names(model) -> list[str]:
         for i, (v, f) in enumerate(zip(om, om_free)):
             if f:
                 if t in ("cos", "sin"):
-                    h = int(itv.harmonic) if hasattr(itv, "harmonic") else 1
-                    label = f"{t}{h}" if i == 0 else f"{t}{h}[ω{i}]"
+                    h    = int(itv.harmonic) if hasattr(itv, "harmonic") else 1
+                    frac = _harm_frac(h)
+                    base = f"{t}({frac})"
+                    label = base if i == 0 else f"{base}[ω{i}]"
+                elif t == "alter":
+                    label = "alter" if i == 0 else f"alter[ω{i}]"
                 elif t in ("pulse", "impulse", "step", "ramp", "compimp"):
-                    obs1 = itv.at + 1
-                    label = f"{t}[{obs1}]" if i == 0 else f"{t}[{obs1}][ω{i}]"
+                    date = _at_to_date(itv.at)
+                    base = f"{t}[{date}]"
+                    label = base if i == 0 else f"{base}[ω{i}]"
                 else:
                     label = f"{t}" if i == 0 else f"{t}[ω{i}]"
                 names.append(label)
