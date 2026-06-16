@@ -503,9 +503,27 @@ def preliminary_outlier_scan(inp_path: str, d: int, D: int,
     threshold : |z| threshold for flagging extremes (default 3.5)
     """
     try:
+        from mcp.types import TextContent, ImageContent
         from art.describe import describe_prelim_scan
         ts, _ = _load_ts_model(inp_path)
-        return _result(describe_prelim_scan(ts, d=d, D=D, lam=lam, threshold=threshold))
+        desc = describe_prelim_scan(ts, d=d, D=D, lam=lam, threshold=threshold)
+
+        next_opts = (
+            "\n\n---\n\n**Opciones:**\n"
+            "- **A) Añadir intervenciones** (recomendado si hay outliers que distorsionan ACF/PACF):\n"
+            "  → `suggest_intervention_form` para cada fecha extrema\n"
+            "  → `confirm_and_estimate` → volver a `preliminary_outlier_scan`\n"
+            "- **B) Continuar con ARMA directamente** (si los outliers son leves o aceptables):\n"
+            "  → `guided_identification(..., pre_path=\"<modelo_actual>.pre\")`\n"
+            "  ⚠ Las ACF/PACF pueden estar distorsionadas si quedan outliers significativos."
+        )
+
+        text = desc.summary + "\n\n---\n" + desc.recommendation + next_opts
+        items = [TextContent(type="text", text=text)]
+        if desc.figure_b64:
+            items.append(ImageContent(type="image",
+                                      data=desc.figure_b64, mimeType="image/png"))
+        return items
     except Exception:
         return _err(traceback.format_exc())
 
@@ -1560,16 +1578,13 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 + urt.summary + "\n\n"
                 + f"**Recomendación ADF+KPSS:** d = {rec_d}. {urt.recommendation}\n\n"
                 "---\n\n"
-                "**Próximo paso:**\n"
-                f"- ¿Hay tendencia? → llama con `lam={lam}, d=1`\n"
-                f"- ¿Sin tendencia? → llama con `lam={lam}, d=0, D=0` (o D=1 si hay estacionalidad)"
+                "**Confirma d y llama al paso 3:**\n"
+                f"- ¿Hay tendencia? → `guided_identification(inp_path, lam={lam}, d=1)`\n"
+                f"- ¿Sin tendencia? → `guided_identification(inp_path, lam={lam}, d=0, D=0)`"
             )
             items = [TextContent(type="text", text=text)]
             if b64:
                 items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
-            if urt.figure_b64:
-                items.append(ImageContent(type="image",
-                                          data=urt.figure_b64, mimeType="image/png"))
             return items
 
         # ── Call 3: Series at level d, D not yet decided ──────────────────
@@ -1595,13 +1610,14 @@ def guided_identification(inp_path: str, lam: float = -1.0,
 
             # B1 path: estimate harmonics-only first, then outlier cycle, then ARMA
             b1_steps = (
-                "\n\n### Ruta B1 (Treadway, D=0 + armónicos)\n\n"
+                "\n\n### Ruta B1 (Treadway, D=0 + armónicos estacionales)\n\n"
                 "Secuencia obligatoria — **intervenciones ANTES de ARMA**:\n\n"
-                f"**1.** Estima m00 (armónicos, sin ARMA):\n"
+                f"**1.** Estima m00 (armónicos estacionales, sin ARMA):\n"
                 f"```\nconfirm_and_estimate(\n"
                 f"    inp_path=\"{inp_path}\",\n"
                 f"    output_path=\"cases/{sname}/{sname}_m00.inp\",\n"
-                f"    lam={lam}, d={d}, D=0, p=0, q=0, n_harmonics={n_harm}\n)\n```\n\n"
+                f"    lam={lam}, d={d}, D=0, p=0, q=0, n_harmonics={n_harm}\n)\n```\n"
+                f"*({n_harm} pares cos/sin + alter Nyquist = {n_harm + 1} componentes estacionales)*\n\n"
                 f"**2.** Escanea residuos de m00 (outliers > 2.5σ):\n"
                 f"```\npreliminary_outlier_scan(\n"
                 f"    inp_path=\"cases/{sname}/{sname}_m00.pre\",\n"
@@ -3222,6 +3238,36 @@ def sps_dashboard(sps_dir: str, output_dir: str) -> list:
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
+# Tool: fue .out ASCII report
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def get_out_report(inp_path: str) -> list:
+    """
+    Return the full fue .out ASCII report for an estimated model.
+
+    Produces the same output as the C 'fue' binary: parameter estimates with
+    standard errors, AR/MA polynomials, sigma, log-likelihood, AIC/BIC,
+    correlation matrix, residual statistics, outlier table, and ACF of residuals.
+
+    Useful for detailed review of the estimated model beyond what the diagnosis
+    summary shows.
+
+    Parameters
+    ----------
+    inp_path : path to the .inp or .pre file with the model specification
+    """
+    try:
+        from mcp.types import TextContent
+        ts, m = _load_ts_model(inp_path)
+        m.fit()
+        out_text = m.write_out()
+        return [TextContent(type="text", text=f"```\n{out_text}\n```")]
     except Exception:
         return _err(traceback.format_exc())
 
