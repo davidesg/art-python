@@ -789,7 +789,8 @@ def model_equation(ts, model) -> str:
 
     # ── Part 1: Deterministic component Dₜ ───────────────────────────────
 
-    det_rows: list[tuple[str, str]] = []   # (val_line, se_line)
+    harm_rows: list[tuple[str, str]] = []   # harmonics (cos/sin/alter)
+    itv_rows:  list[tuple[str, str]] = []   # interventions (step/pulse/...)
 
     # Collect harmonics to pair cos+sin on one row
     harm_buf: dict[int, dict] = {}   # h_idx → {type: (v, se, free)}
@@ -821,7 +822,7 @@ def model_equation(ts, model) -> str:
                 tl.add(f"  {_sign_det(v)} ")
                 tl.add(_fv(abs(v)), _fse(se) if om_f[0] else "")
                 tl.add(f" {xi_str}")
-                det_rows.append((tl.val(), tl.se_line()))
+                itv_rows.append((tl.val(), tl.se_line()))
             else:
                 tl = _TwoLine()
                 tl.add("  + (")
@@ -835,7 +836,7 @@ def model_equation(ts, model) -> str:
                         tl.add(_fv(abs(v)), _fse(se) if free else "")
                         tl.add(bpow)
                 tl.add(f") {xi_str}")
-                det_rows.append((tl.val(), tl.se_line()))
+                itv_rows.append((tl.val(), tl.se_line()))
 
     # Flush harmonics in sorted order (pairs cos+sin on one line)
     for h_idx in sorted(harm_buf.keys()):
@@ -853,7 +854,10 @@ def model_equation(ts, model) -> str:
             tl.add(_fv(abs(v)), _fse(se) if free else "")
             tl.add(f" {label}")
             first = False
-        det_rows.append((tl.val(), tl.se_line()))
+        harm_rows.append((tl.val(), tl.se_line()))
+
+    # Order: harmonics first (matching .inp order), then interventions
+    det_rows = harm_rows + itv_rows
 
     # ── Part 2: Noise model ───────────────────────────────────────────────
 
@@ -1158,12 +1162,6 @@ def describe_diagnosis(model) -> Description:
         fig = plot_diagnosis(result, model)
         b64 = _fig_b64(fig);  plt.close(fig)
 
-    # Prepend model equation (Bloque O) as the first block of the summary
-    try:
-        eq_text = model_equation(model.series, model)
-    except Exception:
-        eq_text = ""
-
     verdict = "**APROBADO ✓**" if result.clean else "**REVISAR ✗**"
     wn      = "✓" if result.white_noise else "✗"
     nm      = "✓" if result.normal else "✗"
@@ -1289,13 +1287,8 @@ def describe_diagnosis(model) -> Description:
         )
         rec = rec.rstrip(".") + "." + overpar_note
 
-    summary_parts = []
-    if eq_text:
-        summary_parts.append(eq_text)
-    summary_parts.append("\n".join(lines))
-
     return Description(
-        summary="\n\n".join(summary_parts),
+        summary="\n".join(lines),
         figure_b64=b64,
         recommendation=rec,
         data={
