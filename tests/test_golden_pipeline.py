@@ -211,3 +211,18 @@ def inp_to_ts(inp_path):
     import fue
     ts, _ = fue.inp.load(inp_path)
     return ts
+
+
+def test_build_model_guided_honours_confirmed_spec(synth_inp):
+    """build_model with analyst-confirmed overrides drives run_full through a
+    ClaudePolicy: the spec is honoured and the header reports guided mode."""
+    import os, re
+    from art.mcp_server import build_model
+
+    inp, tmp = synth_inp
+    result = build_model(inp, os.path.join(tmp, "guided.inp"),
+                         max_rounds=3, lam=0.0, q=2)
+    text = _text_of(result)
+    assert "guiado" in text.splitlines()[0]
+    assert re.search(r"λ=0", text)
+    assert "ARIMA(0,1,2)" in text   # q override honoured, p fell back to heuristic

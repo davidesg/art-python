@@ -48,6 +48,17 @@ CONSTRUCCIÓN DEL MODELO:
   de los parámetros confirmados (λ, d, D, p, q, n_harmonics). Nunca busques ni
   edites ficheros .inp de modelo manualmente.
 
+  build_model es el MISMO motor en ambos modos (autónomo y guiado), y solo
+  cambia quién decide:
+   • Autónomo: build_model(inp, out) sin spec → la heurística decide todo.
+   • Guiado (tras guided_identification): pasa la spec confirmada como
+     argumentos — build_model(inp, out, lam=…, d=…, D=…, p=…, q=…,
+     n_harmonics=…, decision=…). Lo que fijes se respeta; lo que omitas lo
+     completa la heurística, y el ciclo de outliers corre automáticamente.
+   Usa confirm_and_estimate + suggest_intervention_form si quieres confirmar
+   CADA outlier paso a paso; usa build_model con spec si ya tienes el criterio
+   y quieres que el ciclo se complete de una vez con tus decisiones fijadas.
+
 ══════════════════════════════════════════════════════
 PROTOCOLO GUIADO — 4 ETAPAS
 ══════════════════════════════════════════════════════
@@ -2261,17 +2272,30 @@ def _format_dcd_meg(dcd_results, meg_results) -> str:
 @mcp.tool()
 def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
                 run_meg: bool = False,
+                lam: float = -1.0, d: int = -1, D: int = -1,
+                p: int = -1, q: int = -1, n_harmonics: int = -1,
+                decision: str = "",
                 guion_path: str = "",
                 guion_name: str = "",
                 guion_decision: str = "",
                 guion_rationale: str = "") -> list:
     """
-    Autonomous Box-Jenkins-Treadway pipeline for a single series.
+    Box-Jenkins-Treadway pipeline for a single series — autonomous or guided.
 
-    Automatically selects lambda, d, D, p, q; estimates the model; adds
-    interventions for detected outliers and re-estimates until the diagnosis
-    is clean or max_rounds is reached. Always returns parameters + residual
-    diagnosis figure. Formal tests (DCD, MEG) are run at the end.
+    Runs ONE engine (pipeline.run_full): decides the spec, estimates, adds
+    interventions for detected outliers and re-estimates until the diagnosis is
+    clean or max_rounds. The only difference between modes is WHO supplies each
+    decision:
+
+      - Autonomous (all spec params left at their sentinel): the heuristic
+        DefaultPolicy decides λ, d, D, harmonics, p, q.
+      - Guided (any of lam/d/D/p/q/n_harmonics/decision provided): those
+        analyst/Claude-confirmed choices are honoured (ClaudePolicy) and the
+        heuristic fills only what was left unspecified. Use after
+        guided_identification to run the build with the confirmed spec while
+        the outlier cycle proceeds automatically.
+
+    Always returns parameters + residual diagnosis figure; DCD/MEG at the end.
 
     Parameters
     ----------
@@ -2279,10 +2303,15 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
     output_path   : path for the final estimated .inp
     max_rounds    : maximum intervention-addition rounds (default 5)
     run_meg       : run MEG stochastic seasonality test (slow; default False)
+    lam           : confirmed Box-Cox λ (0/0.5/1); -1 = let the heuristic decide
+    d, D          : confirmed differencing orders; -1 = heuristic
+    p, q          : confirmed ARMA orders; -1 = heuristic
+    n_harmonics   : confirmed cos/sin pairs (B1); -1 = heuristic
+    decision      : confirmed "A"/"B1"/"B2"; "" = heuristic
     guion_path    : (optional) path to guion.json — records the final model
     guion_name    : version name (e.g. "PC1"); auto-assigned if empty
     guion_decision: brief description of the model or pipeline result
-    guion_rationale: justification for the auto-selected spec
+    guion_rationale: justification for the spec
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -2297,13 +2326,27 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
         ts, _ = _load_ts_model(inp_path)
         name = ts.name or os.path.basename(inp_path)
 
-        # ── Run the autonomous pipeline (decisions + outlier loop) ─────────
-        result = run_full(ts, output_path, max_rounds=max_rounds)
+        # ── Build the decision policy from any analyst-confirmed choices ───
+        overrides = {}
+        if lam >= 0:         overrides["lam"] = lam
+        if d >= 0:           overrides["d"] = d
+        if D >= 0:           overrides["D"] = D
+        if p >= 0:           overrides["p"] = p
+        if q >= 0:           overrides["q"] = q
+        if n_harmonics >= 0: overrides["n_harmonics"] = n_harmonics
+        if decision:         overrides["decision"] = decision
+        guided = bool(overrides)
+        decision_policy = policy.ClaudePolicy(**overrides) if guided else None
+
+        # ── Run the pipeline (decisions + outlier loop) ────────────────────
+        result = run_full(ts, output_path, max_rounds=max_rounds,
+                          decision_policy=decision_policy)
         lam, d, D = result.lam, result.d, result.D
         m_fit, diag = result.final_model, result.final_diag
 
         # ── Reconstruct the rich text log from the structured rounds ──────
-        log = [f"### Pipeline autónomo — {name}"]
+        _mode = "guiado (spec confirmada)" if guided else "autónomo"
+        log = [f"### Pipeline {_mode} — {name}"]
         lam_str = "log (λ=0)" if lam == 0.0 else "identidad (λ=1)"
         log.append(f"**λ:** {lam_str}  (gap={result.boxcox_data.get('gap', 0):+.3f})")
         log.append(f"**Estacionalidad:** decisión={result.decision}  d={d}  D={D}  "
