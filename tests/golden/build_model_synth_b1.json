@@ -1,0 +1,27 @@
+{
+  "lambda": 1,
+  "decision": "B1",
+  "d": 1,
+  "D": 0,
+  "n_harmonics": 5,
+  "p": 0,
+  "q": 1,
+  "rounds": 2,
+  "interventions": [
+    [
+      "STEP",
+      60
+    ],
+    [
+      "STEP",
+      61
+    ],
+    [
+      "PULSE",
+      120
+    ]
+  ],
+  "verdict": "REVISAR",
+  "loglik": -1201.4,
+  "aic": 2432.8
+}
