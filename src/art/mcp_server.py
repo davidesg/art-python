@@ -149,77 +149,18 @@ REGLAS GENERALES
 
 mcp = FastMCP("ART — Box-Jenkins-Treadway Analysis", instructions=_INSTRUCTIONS)
 
+# Execution layer (model construction, .inp I/O, fit and the autonomous loop)
+# lives in art.pipeline; the MCP tools below import its primitives + entry points.
+from art.pipeline import (
+    _load_ts_model, _write_bare_inp, _load_fitted, _obs_to_date,
+    _write_inp, _build_arma_on_model, _make_model,
+    ModelSpec, FitResult, build_and_fit, run_full,
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _load_ts_model(path: str):
-    """Load (ts, model) from an .inp file."""
-    import fue
-    path = os.path.expanduser(path)
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"File not found: {path}")
-    return fue.inp.load(path)
-
-
-def _write_bare_inp(ts, path: str) -> None:
-    """Write a minimal fue .inp with only series data and no model spec."""
-    freq    = ts.freq
-    begyear = int(ts.start[0])
-    begtime = int(ts.start[1]) if freq > 1 else begyear  # annual: year repeated twice
-    n_ifadf = freq // 2 + 1 if freq > 1 else 1
-    lines = [
-        "************************************************",
-        "* Input file for program FUE                   *",
-        "* DOCTYPE ATSW-interface SYSTEM                *",
-        "************************************************",
-        "",
-        "** Frequency of time series: either 1(A), 4(Q) or 12(M):",
-        f" {freq}",
-        "** Number of observations and starting date of time series:",
-        f" {ts.nobs} {begtime:2d} {begyear} {ts.name}",
-        "** Number of deterministic variables (including seasonal components):",
-        " 0",
-        "**Number and orders of regular AR operators:",
-        " 0",
-        "** Number and orders of annual AR operators:",
-        " 0",
-        "** Number and orders of regular MA operators:",
-        " 0",
-        "** Number and orders of anual MA operators:",
-        " 0",
-        "** Number and frequencies of regular AR(2) operators with fixed frequency:",
-        " 0",
-        "** Number and frequencies of regular MA(2) operators with fixed frequency:",
-        " 0",
-        "** Mean parameter (mu):",
-        "0",
-        "** Box-Cox lambda, regular differences and complete annual differences:",
-        "1.00 0 0",
-        "** Individual factors of the annual difference (from freq 0.0): ",
-        " " + " ".join(["0"] * n_ifadf),
-        "** ACF/PACF bands (0 Automatic) and reescaling factor: ",
-        " 0 100.00",
-        "** Time series (stochastic and non-standard deterministic variables): ",
-    ]
-    for v in ts.data:
-        lines.append(f"{v:.10f} ")
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w") as fh:
-        fh.write("\n".join(lines) + "\n")
-
-
-def _load_fitted(path: str):
-    """Load and fit a model from .pre or .inp file."""
-    import fue
-    path = os.path.expanduser(path)
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"File not found: {path}")
-    ts, m = fue.load(path)
-    m.fit()
-    return ts, m
-
 
 def _result(desc) -> list:
     """Convert a Description to MCP content list (text + optional image)."""
@@ -1125,244 +1066,6 @@ def save_identification_report(inp_path: str, output_path: str,
 # ---------------------------------------------------------------------------
 # Helpers — guided workflow
 # ---------------------------------------------------------------------------
-
-def _obs_to_date(begyear, begtime, freq, at_0based):
-    """Convert 0-based obs index to (period, year) for writing .inp files."""
-    offset = begtime - 1 + at_0based
-    return offset % freq + 1, begyear + offset // freq
-
-
-def _write_inp(ts, model, output_path: str) -> None:
-    """
-    Write a fue .inp file from a (ts, model) pair.
-
-    Replicates the format produced by gtk_fue file_io.c:write_inp_file().
-    Handles cos/sin/alter/pulse/step/ramp deterministic variables and
-    AR/MA operators (regular and seasonal).
-    """
-    import numpy as np
-    freq = ts.freq
-    start = ts.start
-    start_list = list(start) if hasattr(start, '__iter__') else [int(start), 1]
-    beg_year   = start_list[0]
-    beg_period = start_list[1] if freq > 1 else 1
-    n    = ts.nobs
-    name = ts.name or "series"
-
-    itvs = list(model.interventions or [])
-    ndet = len(itvs)
-
-    def _itv_line(itv):
-        t = itv.type
-        if t in ("pulse", "impulse", "compimp"):
-            period, year = _obs_to_date(beg_year, beg_period, freq, itv.at)
-            c_type = "compimp" if t == "compimp" else "impulse"
-            return f"{c_type} {period} {year}" if freq > 1 else f"impulse {year}"
-        elif t in ("step", "ramp"):
-            period, year = _obs_to_date(beg_year, beg_period, freq, itv.at)
-            return f"{t} {period} {year}" if freq > 1 else f"{t} {year}"
-        elif t in ("cos", "sin"):
-            h = int(itv.harmonic) if hasattr(itv, "harmonic") else 1
-            return f"{t} {h}"
-        elif t == "alter":
-            return "alter"
-        elif t in ("trend", "easter"):
-            return t
-        else:
-            return t  # unknown: just emit the type name
-
-    lines = [
-        "************************************************",
-        "* Input file for program FUE                   *",
-        "* DOCTYPE ATSW-interface SYSTEM                *",
-        "************************************************",
-        "",
-        "** Frequency of time series: either 1(A), 4(Q) or 12(M):",
-        f" {freq}",
-        "** Number of observations and starting date of time series:",
-    ]
-    if freq > 1:
-        lines.append(f" {n}  {beg_period} {beg_year} {name}")
-    else:
-        lines.append(f" {n}  {beg_year} {beg_year} {name}")
-
-    lines += [
-        "** Number of deterministic variables (including seasonal components):",
-        f"{ndet}",
-    ]
-
-    if ndet > 0:
-        lines.append("**")
-        for itv in itvs:
-            lines.append(_itv_line(itv))
-        lines.append("**")
-
-        # Omega orders (MA order of each det var's transfer function)
-        omega_orders = []
-        for itv in itvs:
-            om = itv.omega if hasattr(itv, "omega") and itv.omega else [0.0]
-            omega_orders.append(len(om) - 1)
-        lines.append(" ".join(str(o) for o in omega_orders))
-
-        # Omega coefs per det var
-        for itv in itvs:
-            om   = itv.omega      if (hasattr(itv, "omega")      and itv.omega)      else [0.0]
-            omf  = itv.omega_free if (hasattr(itv, "omega_free") and itv.omega_free) else [True] * len(om)
-            lines.append("**")
-            for v, f in zip(om, omf):
-                lines.append(f"{v:.6f}  {1 if f else 0}")
-
-        # Delta orders
-        lines.append("**")
-        delta_orders = []
-        for itv in itvs:
-            dl = itv.delta if hasattr(itv, "delta") and itv.delta else []
-            delta_orders.append(len(dl))
-        lines.append(" ".join(str(o) for o in delta_orders))
-
-        # Delta coefs (only where delta_order > 0)
-        for itv, dord in zip(itvs, delta_orders):
-            if dord > 0:
-                dl  = itv.delta
-                dlf = itv.delta_free if (hasattr(itv, "delta_free") and itv.delta_free) else [True] * dord
-                lines.append("**")
-                for v, f in zip(dl, dlf):
-                    lines.append(f"{v:.6f}  {1 if f else 0}")
-
-    def _arma_block(factors, free_lists, orders, label):
-        n_ops = len(factors)
-        if n_ops == 0:
-            return [f"** {label}", "0"]
-        order_str = " ".join(str(o) for o in orders)
-        block = [f"** {label}", f"{n_ops} {order_str}"]
-        for coefs, frees in zip(factors, free_lists):
-            block.append("**")
-            for v, f in zip(coefs, frees):
-                block.append(f"{v:.6f}  {1 if f else 0}")
-        return block
-
-    def _free_or_default(factors, free_lists):
-        """Return free_lists if present, else list of all-True lists matching factors."""
-        if free_lists is None:
-            return [[True] * len(f) for f in factors]
-        return free_lists
-
-    ar   = model.ar   or []
-    ar_f = _free_or_default(ar,   model.ar_free)
-    ma   = model.ma   or []
-    ma_f = _free_or_default(ma,   model.ma_free)
-    ar_s = model.ar_s or []
-    ar_sf= _free_or_default(ar_s, model.ar_s_free if hasattr(model, "ar_s_free") else None)
-    ma_s = model.ma_s or []
-    ma_sf= _free_or_default(ma_s, model.ma_s_free if hasattr(model, "ma_s_free") else None)
-
-    def _orders(factors):
-        return [len(f) for f in factors]
-
-    lines += _arma_block(ar,   ar_f,  _orders(ar),  "Number and orders of regular AR operators:")
-    lines += _arma_block(ar_s, ar_sf, _orders(ar_s), "Number and orders of annual AR operators:")
-    lines += _arma_block(ma,   ma_f,  _orders(ma),  "Number and orders of regular MA operators:")
-    lines += _arma_block(ma_s, ma_sf, _orders(ma_s), "Number and orders of anual MA operators:")
-
-    # Fixed-frequency AR2/MA2
-    ar2f = getattr(model, "ar_f", None) or []
-    ma2f = getattr(model, "ma_f", None) or []
-
-    def _ffixed_block(factors, label):
-        if not factors:
-            return [f"** {label}", "0"]
-        freqs_str = " ".join(str(int(f.freq)) for f in factors)
-        block = [f"** {label}", f"{len(factors)} {freqs_str}"]
-        for f in factors:
-            block.append("**")
-            block.append(f"{f.coef:.6f}  {1 if f.free else 0}")
-        return block
-
-    lines += _ffixed_block(ar2f, "Number and frequencies of regular AR(2) operators with fixed frequency:")
-    lines += _ffixed_block(ma2f, "Number and frequencies of regular MA(2) operators with fixed frequency:")
-
-    # Mean
-    mu      = float(getattr(model, "mu0", 0.0) or 0.0)
-    mu_free = bool(getattr(model, "estimate_mu", False) or False)
-    lines += ["** Mean parameter (mu):"]
-    if mu_free:
-        lines.append(f"{mu:.6f} 1")
-    else:
-        lines.append("0")
-
-    # Box-Cox and differences
-    lam = model.boxlam if model.boxlam is not None else 1.0
-    d   = model.d   or 0
-    D   = model.D   or 0
-    lines += [
-        "** Box-Cox lambda, m. Regular differences and complete annual differences:",
-        f" {lam:.2f}  {d}  {D}",
-        "** Individual factors of the annual difference (starting at freq 0.0):",
-    ]
-    if freq > 1:
-        ifadf = getattr(model, "ifadf", None)
-        if ifadf is None:
-            ifadf = [0] * (freq // 2 + 1)
-        lines.append(" ".join(str(v) for v in ifadf))
-    else:
-        lines.append(" 0")
-
-    lines += [
-        "** ACF/PACF bands (0 Automatic) and reescaling factor:",
-        " 0 100.00",
-        "** Time series (stochastic and non-standard deterministic variables):",
-    ]
-    for v in np.asarray(ts.data, dtype=float):
-        lines.append(f"{v:.6f} ")
-
-    with open(output_path, "w") as fh:
-        fh.write("\n".join(lines) + "\n")
-
-
-def _build_arma_on_model(m_base, p: int, q: int,
-                         P: int = 0, Q: int = 0,
-                         estimate_mu: bool = False):
-    """
-    Return a new unfitted fue.Model that keeps all interventions and harmonics
-    from m_base but replaces the ARMA specification with (p, q, P, Q).
-
-    Used by confirm_and_estimate(base_pre_path=...) to add ARMA to a model
-    that already has its outlier interventions estimated.
-    """
-    import fue
-
-    if p > 0:
-        ar   = [[0.0] * p]
-        ar_f = [[True] * p]
-    elif q == 0 and P == 0 and Q == 0:
-        # Keep the p=0,q=0 workaround only when there is truly no ARMA at all
-        ar   = m_base.ar or [[0.0]]
-        ar_f = m_base.ar_free or [[False]]
-    else:
-        ar   = []
-        ar_f = []
-
-    ma   = [[-0.3] * q] if q > 0 else []
-    ma_f = [[True]  * q] if q > 0 else []
-
-    ar_s_val  = [[0.0]  * P] if P > 0 else []
-    ar_sf_val = [[True] * P] if P > 0 else []
-    ma_s_val  = [[-0.3] * Q] if Q > 0 else []
-    ma_sf_val = [[True] * Q] if Q > 0 else []
-
-    return fue.Model(
-        m_base.series,
-        d=m_base.d, D=m_base.D, boxlam=m_base.boxlam,
-        ar=ar,       ar_free=ar_f       if ar   else None,
-        ma=ma,       ma_free=ma_f       if ma   else None,
-        ar_s=ar_s_val,  ar_s_free=ar_sf_val if ar_s_val  else None,
-        ma_s=ma_s_val,  ma_s_free=ma_sf_val if ma_s_val  else None,
-        interventions=list(m_base.interventions or []),
-        ifadf=list(m_base.ifadf or []),
-        mu=0.0, estimate_mu=estimate_mu,
-        refactor=m_base.refactor,
-    )
-
 
 def _param_table(model) -> str:
     """Return a markdown table of estimated parameters with SE and t-stat."""
@@ -2643,73 +2346,6 @@ def suggest_intervention_form(inp_path: str, output_path: str,
 # Helpers for autonomous pipeline (Block C)
 # ---------------------------------------------------------------------------
 
-def _make_model(ts, lam: float, d: int, D: int,
-                p: int, q: int, n_harmonics: int,
-                extra_itvs: list | None = None,
-                P: int = 0, Q: int = 0,
-                estimate_mu: bool = False):
-    """
-    Build a fue.Model from SARIMA(p,d,q)(P,D,Q)_s spec.
-
-    When D=0: harmonic det-vars (cos/sin + alter) + optional extra interventions.
-    When D=1: seasonal AR/MA operators; no harmonics added.
-    extra_itvs : list of (at_0based, form_str) tuples for pulse/step/ramp
-
-    Known fue C backend bug: combining ar_s (P≥1) AND ma_s (Q≥1) simultaneously
-    crashes the C estimator (Aborted/segfault — see fue/TODO.md, AR_s+MA_s entry).
-    Only P=0,Q≥1 or P≥1,Q=0 are safe.  Use estimate_py() as workaround if needed.
-    """
-    import fue
-    freq = ts.freq
-
-    # Workaround for fue C crash when nar=0 AND nma=0: add AR(1) phi=0 fixed.
-    if p > 0:
-        ar   = [[0.0] * p]
-        ar_f = [[True] * p]
-    elif q == 0:
-        ar   = [[0.0]]
-        ar_f = [[False]]
-    else:
-        ar   = []
-        ar_f = []
-    ma   = [[-0.3] * q] if q > 0 else []
-    ma_f = [[True]  * q] if q > 0 else []
-
-    if D == 0:
-        # Deterministic seasonality: pairs 1..freq//2-1 + alter (Nyquist harmonic).
-        max_pairs = max(freq // 2 - 1, 0)
-        n_harm    = min(n_harmonics, max_pairs)
-        itvs = []
-        for k in range(1, n_harm + 1):
-            itvs.append(fue.Intervention("cos", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
-            itvs.append(fue.Intervention("sin", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
-        itvs.append(fue.Intervention("alter", at=0, omega=[0.0], omega_free=[True]))
-        ar_s_val = []; ar_sf_val = []
-        ma_s_val = []; ma_sf_val = []
-    else:
-        itvs = []
-        ar_s_val  = [[0.0]  * P] if P > 0 else []
-        ar_sf_val = [[True] * P] if P > 0 else []
-        ma_s_val  = [[-0.3] * Q] if Q > 0 else []
-        ma_sf_val = [[True] * Q]  if Q > 0 else []
-
-    if extra_itvs:
-        for at_0, form in extra_itvs:
-            itvs.append(fue.Intervention(form, at=int(at_0), omega=[0.0], omega_free=[True]))
-
-    return fue.Model(
-        ts,
-        d=d, D=D, boxlam=lam,
-        ar=ar, ar_free=ar_f,
-        ma=ma, ma_free=ma_f,
-        ar_s=ar_s_val, ar_s_free=ar_sf_val if ar_sf_val else None,
-        ma_s=ma_s_val, ma_s_free=ma_sf_val if ma_sf_val else None,
-        interventions=itvs,
-        ifadf=[0] * (freq // 2 + 1),
-        mu=0.0, estimate_mu=estimate_mu,
-    )
-
-
 def _format_dcd_meg(dcd_results, meg_results) -> str:
     """Short text summary of DCD and MEG results for use in build_model output."""
     lines = []
@@ -2760,12 +2396,9 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
     """
     try:
         from mcp.types import TextContent, ImageContent
-        from art.describe import (describe_boxcox, describe_seasonality,
-                                  describe_diagnosis, describe_unit_root)
-        from art.model_detection import suggest_orders
-        from art.diagnosis import diagnose, plot_diagnosis
+        from art.describe import describe_diagnosis
+        from art.diagnosis import plot_diagnosis
         from art.formal_tests import dcd as _dcd
-        from art import policy
         import io, base64
         import matplotlib.pyplot as plt
 
@@ -2773,33 +2406,20 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
         output_path = os.path.expanduser(output_path)
         ts, _ = _load_ts_model(inp_path)
         name = ts.name or os.path.basename(inp_path)
+
+        # ── Run the autonomous pipeline (decisions + outlier loop) ─────────
+        result = run_full(ts, output_path, max_rounds=max_rounds)
+        lam, d, D = result.lam, result.d, result.D
+        m_fit, diag = result.final_model, result.final_diag
+
+        # ── Reconstruct the rich text log from the structured rounds ──────
         log = [f"### Pipeline autónomo — {name}"]
-
-        # ── 1. Box-Cox ────────────────────────────────────────────────────
-        bc  = describe_boxcox(ts)
-        lam = policy.decide_lambda(bc.data)
         lam_str = "log (λ=0)" if lam == 0.0 else "identidad (λ=1)"
-        log.append(f"**λ:** {lam_str}  (gap={bc.data.get('gap', 0):+.3f})")
-
-        # ── 2. Seasonality / d / D ────────────────────────────────────────
-        seas = describe_seasonality(ts)
-        D, decision, n_harmonics = policy.decide_seasonal_structure(seas.data, ts.freq)
-        urt = describe_unit_root(ts, lam=lam)
-        d   = policy.decide_d(urt.data)
-        log.append(f"**Estacionalidad:** decisión={decision}  d={d}  D={D}  armónicos={n_harmonics}")
-
-        # ── 3. ARMA orders ────────────────────────────────────────────────
-        specs = suggest_orders(ts, d=d, D=D, lam=lam, top_n=5)
-        p, q  = policy.decide_orders(specs)
-        sim_str = f"{specs[0].similarity:.3f}" if specs else "N/A"
-        log.append(f"**Órdenes:** ARIMA({p},{d},{q})  similitud={sim_str}")
-
-        # ── Main loop ─────────────────────────────────────────────────────
-        extra_itvs: list[tuple[int, str]] = []
-        m_fit = None
-        diag  = None
-        round_num = 0
-        round_figures: list[str] = []   # base64 PNG per round (Block D)
+        log.append(f"**λ:** {lam_str}  (gap={result.boxcox_data.get('gap', 0):+.3f})")
+        log.append(f"**Estacionalidad:** decisión={result.decision}  d={d}  D={D}  "
+                   f"armónicos={result.n_harmonics}")
+        sim_str = f"{result.orders_specs[0].similarity:.3f}" if result.orders_specs else "N/A"
+        log.append(f"**Órdenes:** ARIMA({result.p},{d},{result.q})  similitud={sim_str}")
 
         def _round_fig_b64(diag_result, model, label: str) -> str:
             """Render a diagnosis figure and return as base64 PNG."""
@@ -2811,46 +2431,34 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
             buf.seek(0)
             return base64.b64encode(buf.read()).decode()
 
-        for round_num in range(1, max_rounds + 1):
-            m = _make_model(ts, lam, d, D, p, q, n_harmonics, extra_itvs)
-            _write_inp(ts, m, output_path)
-            _, m_fit = _load_fitted(output_path)
-            diag = diagnose(m_fit, z_threshold=policy.THRESHOLDS["outlier_autonomous"])
-
-            # ── Per-round rich log (Block D) ──────────────────────────────
-            q_fail = [str(l) for l, pv in zip(diag.q_lags, diag.q_pvalues) if pv < 0.05]
-            q_str  = "✓" if diag.white_noise else f"✗ lags {', '.join(q_fail)}"
-            jb_str = "✓" if diag.normal else f"✗ JB={diag.jb_stat:.1f}"
-            n_ext  = len(diag.extreme)
+        round_figures: list[str] = []   # base64 PNG per round (Block D)
+        for rd in result.rounds:
+            rdiag = rd.diag
+            q_fail = [str(l) for l, pv in zip(rdiag.q_lags, rdiag.q_pvalues) if pv < 0.05]
+            q_str  = "✓" if rdiag.white_noise else f"✗ lags {', '.join(q_fail)}"
+            jb_str = "✓" if rdiag.normal else f"✗ JB={rdiag.jb_stat:.1f}"
+            n_ext  = len(rdiag.extreme)
             ext_str = (
-                "  ".join(f"obs {obs} (z={z:+.2f})" for obs, z in diag.extreme[:4])
-                if diag.extreme else "—"
+                "  ".join(f"obs {obs} (z={z:+.2f})" for obs, z in rdiag.extreme[:4])
+                if rdiag.extreme else "—"
             )
             log.append(
-                f"\n**Ronda {round_num}:**  Q: {q_str}  JB: {jb_str}  "
+                f"\n**Ronda {rd.round_num}:**  Q: {q_str}  JB: {jb_str}  "
                 f"extremos: {n_ext}"
             )
-            if diag.extreme:
+            if rdiag.extreme:
                 log.append(f"  {ext_str}" + (" …" if n_ext > 4 else ""))
 
-            # ── Figure for this round ──────────────────────────────────────
-            fig_label = f"Ronda {round_num} — {name}"
-            round_figures.append(_round_fig_b64(diag, m_fit, fig_label))
+            round_figures.append(
+                _round_fig_b64(rdiag, rd.model, f"Ronda {rd.round_num} — {name}"))
 
-            if policy.should_stop(diag.clean, len(diag.extreme)):
-                break
-
-            # ── Intervention selection ─────────────────────────────────────
-            new_itvs = policy.decide_interventions(
-                diag.extreme, [at for at, _ in extra_itvs])
-
-            if not new_itvs:
+            if rd.stop_reason == "no_new":
                 log.append("  Sin nuevas intervenciones que añadir.")
-                break
-            extra_itvs.extend(new_itvs)
-            itv_labels = ", ".join(f"{f.upper()} obs {at+1}" for at, f in new_itvs[:5])
-            log.append(f"  → Añadidas: {itv_labels}")
+            elif rd.added:
+                itv_labels = ", ".join(f"{f.upper()} obs {at+1}" for at, f in rd.added[:5])
+                log.append(f"  → Añadidas: {itv_labels}")
 
+        round_num = result.rounds[-1].round_num if result.rounds else 0
         log.append(f"\n**Rondas totales:** {round_num}")
         log.append(f"**Diagnosis final:** {'APROBADA ✓' if diag and diag.clean else 'REVISAR ✗'}")
 
@@ -2937,12 +2545,8 @@ def batch_build(inp_paths: list[str], output_dir: str,
     """
     try:
         from mcp.types import TextContent, ImageContent
-        from art.describe import (describe_boxcox, describe_seasonality,
-                                  describe_diagnosis, describe_unit_root)
-        from art.model_detection import suggest_orders
-        from art.diagnosis import diagnose
+        from art.describe import describe_diagnosis
         from art.formal_tests import dcd as _dcd
-        from art import policy
 
         output_dir = os.path.expanduser(output_dir)
         os.makedirs(output_dir, exist_ok=True)
@@ -2960,41 +2564,15 @@ def batch_build(inp_paths: list[str], output_dir: str,
             try:
                 ts, _ = _load_ts_model(inp)
                 name  = ts.name or os.path.splitext(os.path.basename(inp))[0]
-
-                # ── 1. λ ──────────────────────────────────────────────────
-                bc  = describe_boxcox(ts)
-                lam = policy.decide_lambda(bc.data)
-
-                # ── 2. d / D ──────────────────────────────────────────────
-                seas = describe_seasonality(ts)
-                D, decision, n_harm = policy.decide_seasonal_structure(seas.data, ts.freq)
-                urt = describe_unit_root(ts, lam=lam)
-                d   = policy.decide_d(urt.data)
-
-                # ── 3. ARMA orders ────────────────────────────────────────
-                specs = suggest_orders(ts, d=d, D=D, lam=lam, top_n=3)
-                p, q  = policy.decide_orders(specs)
-
-                # ── Main loop ─────────────────────────────────────────────
-                extra_itvs: list[tuple[int, str]] = []
-                m_fit = None
-                diag  = None
                 out_inp = os.path.join(output_dir, f"{name}_auto.inp")
 
-                for round_num in range(1, max_rounds + 1):
-                    m = _make_model(ts, lam, d, D, p, q, n_harm, extra_itvs)
-                    _write_inp(ts, m, out_inp)
-                    _, m_fit = _load_fitted(out_inp)
-                    diag = diagnose(m_fit, z_threshold=policy.THRESHOLDS["outlier_autonomous"])
-
-                    if policy.should_stop(diag.clean, len(diag.extreme)):
-                        break
-
-                    new_itvs = policy.decide_interventions(
-                        diag.extreme, [at for at, _ in extra_itvs])
-                    if not new_itvs:
-                        break
-                    extra_itvs.extend(new_itvs)
+                # Same autonomous pipeline as build_model (single source of truth)
+                result = run_full(ts, out_inp, max_rounds=max_rounds)
+                lam, d, D     = result.lam, result.d, result.D
+                p, q, n_harm  = result.p, result.q, result.n_harmonics
+                m_fit, diag   = result.final_model, result.final_diag
+                extra_itvs    = result.interventions
+                round_num     = result.rounds[-1].round_num if result.rounds else 0
 
                 # ── Formal tests ──────────────────────────────────────────
                 dcd_results = []
