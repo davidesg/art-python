@@ -89,6 +89,21 @@ def decide_orders(specs) -> tuple[int, int]:
     return 0, 1
 
 
+def decide_form(target_obs: int, extreme_obs) -> str:
+    """Choose the intervention form for an outlier at *target_obs* (1-based).
+
+    "step" if an adjacent observation is also extreme — a consecutive run of
+    extremes signals a permanent level shift — otherwise an isolated "pulse".
+    *extreme_obs* is the set/iterable of 1-based observations flagged extreme.
+
+    Single source of truth shared by the autonomous loop (decide_interventions)
+    and the guided tool (suggest_intervention_form).
+    """
+    ext = set(extreme_obs)
+    has_consec = (target_obs - 1 in ext) or (target_obs + 1 in ext)
+    return "step" if has_consec else "pulse"
+
+
 def decide_interventions(extreme, existing_ats) -> list[tuple[int, str]]:
     """Which interventions to add this round, given the residual diagnosis.
 
@@ -97,9 +112,8 @@ def decide_interventions(extreme, existing_ats) -> list[tuple[int, str]]:
     extreme       list of (obs_1based, z) extreme residuals (diag.extreme)
     existing_ats  iterable of 0-based positions already covered by interventions
 
-    Returns a list of (at_0based, form) where form is "step" if the extreme has
-    an adjacent extreme (a consecutive run signals a level shift) else "pulse".
-    Ordered by descending |z|; positions already covered are skipped.
+    Returns a list of (at_0based, form) — form chosen by decide_form — ordered
+    by descending |z|; positions already covered are skipped.
     """
     ext_obs = {obs for obs, _ in extreme}
     already = set(existing_ats)
@@ -108,8 +122,7 @@ def decide_interventions(extreme, existing_ats) -> list[tuple[int, str]]:
         at_0 = obs - 1
         if at_0 in already:
             continue
-        has_consec = (obs - 1) in ext_obs or (obs + 1) in ext_obs
-        new.append((at_0, "step" if has_consec else "pulse"))
+        new.append((at_0, decide_form(obs, ext_obs)))
     return new
 
 

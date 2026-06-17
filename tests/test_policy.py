@@ -68,6 +68,22 @@ def test_decide_orders_empty_fallback():
     assert policy.decide_orders([]) == (0, 1)
 
 
+# ── decide_form ────────────────────────────────────────────────────────────
+
+def test_decide_form_isolated_is_pulse():
+    assert policy.decide_form(60, {60}) == "pulse"
+
+
+def test_decide_form_consecutive_is_step():
+    assert policy.decide_form(60, {60, 61}) == "step"
+    assert policy.decide_form(61, {60, 61}) == "step"
+
+
+def test_decide_form_gap_is_pulse():
+    # 60 and 62 are not adjacent
+    assert policy.decide_form(60, {60, 62}) == "pulse"
+
+
 # ── decide_interventions ───────────────────────────────────────────────────
 
 def test_intervention_pulse_isolated():

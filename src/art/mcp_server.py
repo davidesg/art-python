@@ -1115,6 +1115,7 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
     try:
         import fue as _fue
         from art.describe import describe_prelim_scan as _prelim_scan, _resid_start
+        from art import policy
         if m.residuals is None:
             return "", None
         # m.residuals.start is unreliable (fue sets it to 1900); recompute it
@@ -1123,9 +1124,10 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
             m.residuals.data, freq=ts.freq,
             start=_rstart, name=f"Resid {ts.name or ''}",
         )
-        # 2.5 (more sensitive than the user-facing 3.5) so that marginal outliers
-        # are flagged during the modeling cycle rather than after formal diagnosis.
-        scan = _prelim_scan(_res_ts, d=0, D=0, lam=1.0, threshold=2.5)
+        # outlier_autoscan (2.5): more sensitive than the user-facing 3.5 so that
+        # marginal outliers are flagged during the cycle, not after formal diagnosis.
+        _autoscan_z = policy.THRESHOLDS["outlier_autoscan"]
+        scan = _prelim_scan(_res_ts, d=0, D=0, lam=1.0, threshold=_autoscan_z)
         # Count only FREE (estimated) ARMA parameters to distinguish m00 from final
         def _n_free(vals, free):
             if not vals:
@@ -1390,6 +1392,8 @@ def guided_identification(inp_path: str, lam: float = -1.0,
 
             n_harm = max(ts.freq // 2 - 1, 0)
             sname  = ts.name or "SERIE"
+            from art import policy as _pol
+            _az = _pol.THRESHOLDS["outlier_autoscan"]
 
             # B1 path: estimate harmonics-only first, then outlier cycle, then ARMA
             b1_steps = (
@@ -1401,10 +1405,10 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 f"    output_path=\"cases/{sname}/{sname}_m00.inp\",\n"
                 f"    lam={lam}, d={d}, D=0, p=0, q=0, n_harmonics={n_harm}\n)\n```\n"
                 f"*({n_harm} pares cos/sin + alter Nyquist = {n_harm + 1} componentes estacionales)*\n\n"
-                f"**2.** Escanea residuos de m00 (outliers > 2.5σ):\n"
+                f"**2.** Escanea residuos de m00 (outliers > {_az}σ):\n"
                 f"```\npreliminary_outlier_scan(\n"
                 f"    inp_path=\"cases/{sname}/{sname}_m00.pre\",\n"
-                f"    d=0, D=0, lam=1.0, threshold=2.5\n)\n```\n\n"
+                f"    d=0, D=0, lam=1.0, threshold={_az}\n)\n```\n\n"
                 "**3.** [Ciclo hasta residuos limpios]:\n"
                 "    `suggest_intervention_form` → `confirm_and_estimate` → "
                 "`preliminary_outlier_scan`\n"
@@ -2213,8 +2217,8 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             # Auto-select most extreme residual not already covered by an intervention
             import numpy as np
             from art.diagnosis import diagnose
-            # 2.0: wide net for auto-selection so marginal extremes are candidates
-            diag_auto = diagnose(m_src, z_threshold=2.0)
+            from art import policy
+            diag_auto = diagnose(m_src, z_threshold=policy.THRESHOLDS["intervention_autoselect"])
             existing_at = {itv.at for itv in (m_src.interventions or [])}
             candidates = [(abs(z), obs) for obs, z in diag_auto.extreme
                           if (obs - 1) not in existing_at]
@@ -2240,14 +2244,12 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             date_note = f"Fecha: **{date}**"
 
         if form == "auto":
-            # Inspect residuals around that observation
+            # Same step/pulse rule as the autonomous loop (policy.decide_form)
             from art.diagnosis import diagnose
-            # 2.5: moderate threshold to detect consecutive extremes that signal a step
-            diag_tmp = diagnose(m_src, z_threshold=2.5)
+            from art import policy
+            diag_tmp = diagnose(m_src, z_threshold=policy.THRESHOLDS["intervention_form"])
             extreme_obs = {obs for obs, _ in diag_tmp.extreme}
-            obs_1 = at_0 + 1
-            has_consec = (obs_1 - 1 in extreme_obs) or (obs_1 + 1 in extreme_obs)
-            form = "step" if has_consec else "pulse"
+            form = policy.decide_form(at_0 + 1, extreme_obs)
 
         # Create new Intervention with correct at= (0-based index)
         itv = fue.Intervention(
