@@ -239,4 +239,7 @@ def test_build_inp_pq0_with_harmonics_no_crash(tmp_path):
     _, model = _load_fitted(path)
     r = model._result
     assert r.loglik < 0
-    assert r.npar == 5   # 4 harmonic coefs + alter
+    # PCE is quarterly (freq=4): cos/sin pairs cap at freq//2-1 = 1, so the full
+    # deterministic spec is 1 pair + alter = 3 (the AR(1) phi=0 workaround is
+    # fixed, not estimated). n_harmonics=2 is clamped to 1 pair.
+    assert r.npar == 3
