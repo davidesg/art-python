@@ -130,3 +130,108 @@ def should_stop(clean: bool, n_extreme: int) -> bool:
     """Stop the outlier-addition cycle when the diagnosis is clean or there are
     no extreme residuals left to model."""
     return bool(clean or n_extreme == 0)
+
+
+# ---------------------------------------------------------------------------
+# Swappable policy objects
+# ---------------------------------------------------------------------------
+# The module-level functions above are the canonical heuristic implementation.
+# The classes below wrap them so the execution engine (pipeline.run_full) can
+# take a *policy object* and the philosophy becomes explicit in code:
+#
+#   autonomous mode → DefaultPolicy   (the heuristic decides)
+#   guided mode     → ClaudePolicy    (the analyst / Claude decides; heuristic
+#                                       fills any choice not explicitly given)
+#
+# Only *who supplies each decision* differs — both run through the same engine.
+
+class Policy:
+    """Interface for the per-stage Box-Jenkins-Treadway decisions."""
+
+    def decide_lambda(self, boxcox_data: dict) -> float:
+        raise NotImplementedError
+
+    def decide_d(self, unit_root_data: dict) -> int:
+        raise NotImplementedError
+
+    def decide_seasonal_structure(self, seasonality_data: dict, freq: int) -> tuple[int, str, int]:
+        raise NotImplementedError
+
+    def decide_orders(self, specs) -> tuple[int, int]:
+        raise NotImplementedError
+
+    def decide_form(self, target_obs: int, extreme_obs) -> str:
+        raise NotImplementedError
+
+    def decide_interventions(self, extreme, existing_ats) -> list:
+        raise NotImplementedError
+
+    def should_stop(self, clean: bool, n_extreme: int) -> bool:
+        raise NotImplementedError
+
+
+class DefaultPolicy(Policy):
+    """The default heuristic policy — delegates to the module-level rules.
+
+    This is the policy the autonomous pipeline (build_model / batch_build) runs:
+    every decision is taken by the BJT heuristics defined in this module.
+    """
+
+    def decide_lambda(self, boxcox_data):
+        return decide_lambda(boxcox_data)
+
+    def decide_d(self, unit_root_data):
+        return decide_d(unit_root_data)
+
+    def decide_seasonal_structure(self, seasonality_data, freq):
+        return decide_seasonal_structure(seasonality_data, freq)
+
+    def decide_orders(self, specs):
+        return decide_orders(specs)
+
+    def decide_form(self, target_obs, extreme_obs):
+        return decide_form(target_obs, extreme_obs)
+
+    def decide_interventions(self, extreme, existing_ats):
+        return decide_interventions(extreme, existing_ats)
+
+    def should_stop(self, clean, n_extreme):
+        return should_stop(clean, n_extreme)
+
+
+class ClaudePolicy(DefaultPolicy):
+    """Policy seeded with analyst/Claude-confirmed choices.
+
+    Any spec-level decision passed at construction (λ, d, D, decision,
+    n_harmonics, p, q) is returned as given; everything else — and the
+    per-round loop decisions (form, interventions, stopping) — falls back to
+    the DefaultPolicy heuristic. This lets the guided path reuse the same
+    execution engine as the autonomous one, differing only in who decided.
+    """
+
+    def __init__(self, lam=None, d=None, D=None, decision=None,
+                 n_harmonics=None, p=None, q=None):
+        self.lam = lam
+        self.d = d
+        self.D = D
+        self.decision = decision
+        self.n_harmonics = n_harmonics
+        self.p = p
+        self.q = q
+
+    def decide_lambda(self, boxcox_data):
+        return super().decide_lambda(boxcox_data) if self.lam is None else float(self.lam)
+
+    def decide_d(self, unit_root_data):
+        return super().decide_d(unit_root_data) if self.d is None else int(self.d)
+
+    def decide_seasonal_structure(self, seasonality_data, freq):
+        D, decision, n_harm = super().decide_seasonal_structure(seasonality_data, freq)
+        return (D if self.D is None else int(self.D),
+                decision if self.decision is None else self.decision,
+                n_harm if self.n_harmonics is None else int(self.n_harmonics))
+
+    def decide_orders(self, specs):
+        p, q = super().decide_orders(specs)
+        return (p if self.p is None else int(self.p),
+                q if self.q is None else int(self.q))

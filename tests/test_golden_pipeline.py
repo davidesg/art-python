@@ -187,3 +187,27 @@ def test_confirm_and_estimate_golden(synth_inp):
     decisions = _extract_estimate(text)
     assert decisions.get("loglik") is not None
     _assert_matches_golden("confirm_and_estimate_synth_b1", decisions)
+
+
+def test_run_full_policy_swappable(synth_inp):
+    """run_full honours a ClaudePolicy override and falls back to the heuristic
+    for unspecified choices (Fase 4 — swappable policy)."""
+    import os
+    from art.pipeline import run_full
+    from art import policy
+
+    inp, tmp = synth_inp
+    r_default = run_full(inp_to_ts(inp), os.path.join(tmp, "rf_def.inp"), max_rounds=3)
+    r_claude  = run_full(inp_to_ts(inp), os.path.join(tmp, "rf_cla.inp"), max_rounds=3,
+                         decision_policy=policy.ClaudePolicy(lam=0.0, q=2))
+    # Default matches the autonomous golden (λ=1, q=1)
+    assert r_default.lam == 1.0 and r_default.q == 1
+    # Overrides flow through; p unspecified → heuristic (same as default)
+    assert r_claude.lam == 0.0 and r_claude.q == 2
+    assert r_claude.p == r_default.p
+
+
+def inp_to_ts(inp_path):
+    import fue
+    ts, _ = fue.inp.load(inp_path)
+    return ts

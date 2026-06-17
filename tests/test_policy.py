@@ -127,3 +127,40 @@ def test_thresholds_present():
     for k in ("outlier_user", "outlier_autonomous", "outlier_autoscan",
               "intervention_form", "intervention_autoselect"):
         assert k in policy.THRESHOLDS
+
+
+# ── Policy objects (DefaultPolicy / ClaudePolicy) ──────────────────────────
+
+def test_default_policy_matches_module_functions():
+    p = policy.DefaultPolicy()
+    assert p.decide_lambda({"gap": -0.3}) == policy.decide_lambda({"gap": -0.3})
+    assert p.decide_d({"recommended_d": 2}) == 2
+    assert p.decide_seasonal_structure({"decision": "B1", "recommended_D": 0}, 12) == (0, "B1", 5)
+    assert p.decide_orders([_Spec(2, 1)]) == (2, 1)
+    assert p.decide_form(60, {60, 61}) == "step"
+    assert p.should_stop(True, 5) is True
+
+
+def test_claude_policy_overrides_provided_choices():
+    p = policy.ClaudePolicy(lam=0.0, d=1, p=2, q=0)
+    # provided → returned regardless of evidence
+    assert p.decide_lambda({"gap": -5.0}) == 0.0     # evidence says identity, override wins
+    assert p.decide_d({"recommended_d": 9}) == 1
+    assert p.decide_orders([_Spec(0, 1)]) == (2, 0)
+
+
+def test_claude_policy_falls_back_to_heuristic():
+    p = policy.ClaudePolicy(lam=0.0)   # only λ fixed
+    # d, orders, seasonal not provided → heuristic
+    assert p.decide_d({"recommended_d": 2}) == 2
+    assert p.decide_orders([_Spec(3, 1)]) == (3, 1)
+    D, dec, nh = p.decide_seasonal_structure({"decision": "B1", "recommended_D": 0}, 4)
+    assert (D, dec, nh) == (0, "B1", 1)
+
+
+def test_claude_policy_partial_seasonal_override():
+    p = policy.ClaudePolicy(decision="A")   # force no seasonality
+    D, dec, nh = p.decide_seasonal_structure({"decision": "B1", "recommended_D": 0}, 12)
+    assert dec == "A"
+    # D and n_harmonics fall back to heuristic computed from the evidence/freq
+    assert D == 0

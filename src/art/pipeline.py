@@ -468,12 +468,18 @@ def build_and_fit(ts, spec: ModelSpec, output_path: str,
 
 
 def run_full(ts, output_path: str, max_rounds: int = 5,
-             z_threshold: float | None = None) -> PipelineResult:
-    """Autonomous Box-Jenkins-Treadway pipeline.
+             z_threshold: float | None = None,
+             decision_policy=None) -> PipelineResult:
+    """Box-Jenkins-Treadway pipeline driven by a decision policy.
 
-    Decides (λ, d, D, harmonics, p, q) via the default policy on the evidence
-    produced by describe_*, then runs the outlier-addition loop until the
-    diagnosis is clean, no new interventions are found, or max_rounds.
+    *decision_policy* is a policy.Policy instance:
+      - DefaultPolicy() (the default) → fully autonomous: the heuristic decides.
+      - ClaudePolicy(lam=…, d=…, …)  → guided: uses the analyst/Claude-confirmed
+        choices, falling back to the heuristic for anything not provided.
+    Both run the SAME engine; only who supplies each decision differs.
+
+    Decides (λ, d, D, harmonics, p, q), then runs the outlier-addition loop
+    until the diagnosis is clean, no new interventions are found, or max_rounds.
 
     Returns a PipelineResult; rendering (text log, figures) is the caller's
     responsibility — this function performs no I/O beyond writing output_path.
@@ -481,20 +487,21 @@ def run_full(ts, output_path: str, max_rounds: int = 5,
     from art.describe import (describe_boxcox, describe_seasonality,
                               describe_unit_root)
     from art.model_detection import suggest_orders
-    from art import policy
+    from art import policy as _policymod
 
+    pol = decision_policy if decision_policy is not None else _policymod.DefaultPolicy()
     if z_threshold is None:
-        z_threshold = policy.THRESHOLDS["outlier_autonomous"]
+        z_threshold = _policymod.THRESHOLDS["outlier_autonomous"]
 
     # ── Decisions (evidence → policy) ─────────────────────────────────────
     bc   = describe_boxcox(ts)
-    lam  = policy.decide_lambda(bc.data)
+    lam  = pol.decide_lambda(bc.data)
     seas = describe_seasonality(ts)
-    D, decision, n_harmonics = policy.decide_seasonal_structure(seas.data, ts.freq)
+    D, decision, n_harmonics = pol.decide_seasonal_structure(seas.data, ts.freq)
     urt  = describe_unit_root(ts, lam=lam)
-    d    = policy.decide_d(urt.data)
+    d    = pol.decide_d(urt.data)
     specs = suggest_orders(ts, d=d, D=D, lam=lam, top_n=5)
-    p, q = policy.decide_orders(specs)
+    p, q = pol.decide_orders(specs)
 
     # ── Outlier-addition loop ─────────────────────────────────────────────
     extra_itvs: list = []
@@ -507,11 +514,11 @@ def run_full(ts, output_path: str, max_rounds: int = 5,
         fr = build_and_fit(ts, spec, output_path, z_threshold)
         m_fit, diag = fr.model, fr.diag
 
-        if policy.should_stop(diag.clean, len(diag.extreme)):
+        if pol.should_stop(diag.clean, len(diag.extreme)):
             rounds.append(RoundResult(round_num, m_fit, diag, [], "clean"))
             break
 
-        new_itvs = policy.decide_interventions(
+        new_itvs = pol.decide_interventions(
             diag.extreme, [at for at, _ in extra_itvs])
         if not new_itvs:
             rounds.append(RoundResult(round_num, m_fit, diag, [], "no_new"))
