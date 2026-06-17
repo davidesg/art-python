@@ -156,6 +156,10 @@ from art.pipeline import (
     _write_inp, _build_arma_on_model, _make_model,
     ModelSpec, FitResult, build_and_fit, run_full,
 )
+# Decision rules + centralised thresholds (single source of truth).
+from art import policy
+
+_Z_USER = policy.THRESHOLDS["outlier_user"]  # user-facing scan default (3.5)
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +476,7 @@ def identification_analysis(inp_path: str, d: int = 2, D: int = 0,
 @mcp.tool()
 def preliminary_outlier_scan(inp_path: str, d: int, D: int,
                               lam: float = 0.0,
-                              threshold: float = 3.5) -> list:
+                              threshold: float = _Z_USER) -> list:
     """
     Scan the differenced series for extreme observations BEFORE choosing ARMA orders.
 
@@ -898,7 +902,7 @@ def test_seasonal_simplification(inp_path: str,
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def intervention_analysis(inp_path: str, threshold: float = 3.5) -> list:
+def intervention_analysis(inp_path: str, threshold: float = _Z_USER) -> list:
     """
     Detect extreme residuals and assess their impact on ACF/PACF and tests.
 
@@ -984,7 +988,7 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
 @mcp.tool()
 def full_report(inp_path: str, output_path: str,
                 run_meg: bool = True,
-                intervention_threshold: float = 3.5) -> str:
+                intervention_threshold: float = _Z_USER) -> str:
     """
     Generate a complete HTML report for a fitted model and save it to disk.
 
@@ -1067,41 +1071,6 @@ def save_identification_report(inp_path: str, output_path: str,
 # Helpers — guided workflow
 # ---------------------------------------------------------------------------
 
-def _param_table(model) -> str:
-    """Return a markdown table of estimated parameters with SE and t-stat."""
-    import numpy as np
-    r = model._result
-    if r is None:
-        return "*Modelo no estimado.*"
-
-    params = np.asarray(r.params)
-    se_raw = r.std_errors if hasattr(r, "std_errors") else (r.se if hasattr(r, "se") else None)
-    se     = np.asarray(se_raw) if se_raw is not None else np.full_like(params, float("nan"))
-    with np.errstate(divide='ignore', invalid='ignore'):
-        tstat = np.where(se != 0, params / se, float("nan"))
-
-    # Parameter names from model structure
-    names = _param_names(model)
-    if len(names) < len(params):
-        names += [f"param_{i}" for i in range(len(names), len(params))]
-
-    rows = ["| Parámetro | Estimación | SE | t |",
-            "|-----------|------------|-----|---|"]
-    for nm, v, s, t in zip(names, params, se, tstat):
-        rows.append(f"| {nm} | {v:+.4f} | {s:.4f} | {t:+.2f} |")
-
-    loglik = getattr(r, "loglik", None)
-    n      = model.series.nobs if model.series else "?"
-    footer = []
-    if loglik is not None:
-        k = len(params)
-        aic = -2 * loglik + 2 * k
-        bic = -2 * loglik + k * (float(np.log(n)) if isinstance(n, int) else float("nan"))
-        footer.append(f"loglik={loglik:.3f}  AIC={aic:.2f}  BIC={bic:.2f}  n={n}")
-
-    return "\n".join(rows) + ("\n\n" + "  ".join(footer) if footer else "")
-
-
 def _auto_scan_section(ts, m, lam: float, d: int, D: int,
                         p: int, q: int, P: int, Q: int,
                         inp_path: str, pre_path: str
@@ -1165,87 +1134,6 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
         return section, scan.figure_b64
     except Exception:
         return "", None
-
-
-def _param_names(model) -> list[str]:
-    """Build human-readable parameter names for a fue model.
-
-    Follows the same ordering as fue's parameter vector:
-    det-var omega coefs (free only), then ARMA coefs (free only).
-    """
-    from math import gcd
-
-    ts    = model.series
-    freq  = ts.freq if ts and ts.freq > 0 else 1
-    start = ts.start if ts else (0, 1)
-    by, bp = int(start[0]), (int(start[1]) if freq > 1 else 1)
-
-    def _at_to_date(at_0based: int) -> str:
-        off = (bp - 1) + at_0based
-        p, y = off % freq + 1, by + off // freq
-        if freq == 1:
-            return str(y)
-        if freq == 4:
-            return f"Q{p}/{y}"
-        return f"{p}/{y}"
-
-    def _harm_frac(h: int) -> str:
-        half = freq // 2
-        g    = gcd(h, half)
-        num, den = h // g, half // g
-        if den == 1:
-            return "π" if num == 1 else f"{num}π"
-        return f"π/{den}" if num == 1 else f"{num}π/{den}"
-
-    names = []
-
-    for itv in (model.interventions or []):
-        t = itv.type
-        om_free = itv.omega_free if (hasattr(itv, "omega_free") and itv.omega_free) else [True]
-        om      = itv.omega      if (hasattr(itv, "omega")      and itv.omega)      else [0.0]
-        for i, (v, f) in enumerate(zip(om, om_free)):
-            if f:
-                if t in ("cos", "sin"):
-                    h    = int(itv.harmonic) if hasattr(itv, "harmonic") else 1
-                    frac = _harm_frac(h)
-                    base = f"{t}({frac})"
-                    label = base if i == 0 else f"{base}[ω{i}]"
-                elif t == "alter":
-                    label = "alter" if i == 0 else f"alter[ω{i}]"
-                elif t in ("pulse", "impulse", "step", "ramp", "compimp"):
-                    date = _at_to_date(itv.at)
-                    base = f"{t}[{date}]"
-                    label = base if i == 0 else f"{base}[ω{i}]"
-                else:
-                    label = f"{t}" if i == 0 else f"{t}[ω{i}]"
-                names.append(label)
-
-        dl_free = itv.delta_free if (hasattr(itv, "delta_free") and itv.delta_free) else []
-        dl      = itv.delta      if (hasattr(itv, "delta")      and itv.delta)      else []
-        for i, (v, f) in enumerate(zip(dl, dl_free)):
-            if f:
-                names.append(f"{t}[δ{i+1}]")
-
-    def _arma_names(factors, free_lists, prefix):
-        out = []
-        if not factors:
-            return out
-        frees = free_lists if free_lists is not None else [[True] * len(f) for f in factors]
-        for factor, freel in zip(factors, frees):
-            for lag_idx, (v, f) in enumerate(zip(factor, freel)):
-                if f:
-                    out.append(f"{prefix}({lag_idx+1})")
-        return out
-
-    names += _arma_names(model.ar,   model.ar_free,   "AR")
-    names += _arma_names(model.ar_s, model.ar_s_free if hasattr(model, "ar_s_free") else None, "AR_S")
-    names += _arma_names(model.ma,   model.ma_free,   "MA")
-    names += _arma_names(model.ma_s, model.ma_s_free if hasattr(model, "ma_s_free") else None, "MA_S")
-
-    if model.estimate_mu:
-        names.append("mu")
-
-    return names
 
 
 # ---------------------------------------------------------------------------

@@ -192,6 +192,28 @@ de Claude realimenten como política.
 Borrar duplicación muerta, alinear umbrales a `policy.THRESHOLDS`, retirar los
 caminos divergentes.
 
+### Estado de implementación (jun-2026)
+
+| Fase | Estado | Resultado |
+|------|--------|-----------|
+| 0 | ✅ | `tests/test_golden_pipeline.py` + fixture congelada; red de seguridad |
+| 1 | ✅ | `art/policy.py` — funciones puras de decisión + `THRESHOLDS` |
+| 2 | ✅ | `art/pipeline.py` — primitivos de ejecución + `build_and_fit` + `run_full`; `build_model`/`batch_build` comparten el lazo |
+| 3 | ✅ | `policy.decide_form` único; umbrales de intervención desde `THRESHOLDS` |
+| 4 | ✅ | `Policy`/`DefaultPolicy`/`ClaudePolicy`; `run_full(decision_policy=…)` |
+| 5 | ✅ | umbrales user-facing → `THRESHOLDS["outlier_user"]`; eliminados `_param_table`/`_param_names` muertos |
+
+Comportamiento preservado en todas las fases (golden verde). Cero regresiones
+netas frente al baseline `af2ba9b` (los fallos restantes del suite son
+pre-existentes: nlags en series cortas, tolerancias Chile, npar trimestral).
+
+**Cierre pendiente de la unificación:** la swappability está probada de extremo
+a extremo, pero todavía **no hay un tool MCP que conduzca el camino guiado vía
+`run_full(decision_policy=ClaudePolicy(...))`**. `ClaudePolicy` es infraestructura
+lista; cablear el guiado para que reutilice el motor (analista confirma, mismo
+`run_full`) es el último paso para que «autónomo» y «guiado» sean literalmente el
+mismo camino con distinto «quién confirma».
+
 ### Riesgo y verificación
 
 - **Riesgo principal:** la salida de `build_model` puede cambiar si una decisión
