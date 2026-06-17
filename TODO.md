@@ -1,5 +1,15 @@
 # art-python — TODO
 
+## Bugs conocidos
+
+- [ ] **nlags en series cortas**: `describe_diagnosis` → pyfug pide
+      `nlags = 3·s + 3` (39 mensual, 15 trimestral; convención J-T = 3 ciclos
+      estacionales + 3). statsmodels `pacf` exige `nlags < n/2`, así que con
+      muestras cortas (p.ej. n=72 mensual → 39 ≥ 36) lanza ValueError y
+      `build_model`/diagnosis fallan. Fix: capar `nlags = min(3·s+3, (n-d-D·s)//2 - 1)`
+      donde se solicita el ACF/PACF de residuos. No cambiar la convención, solo
+      el límite superior. (Descubierto en Fase 0 del refactor de orquestación.)
+
 ## Filosofía: ART simple + Claude como analista BJ
 
 ### Modelo de colaboración (documentado en sesión jun-2026)

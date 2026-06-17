@@ -20,6 +20,13 @@ def _load_ts(inp_path):
     return ts
 
 
+def _build_inp(ts, lam, d, D, p, q, n_harmonics, output_path, P=0, Q=0):
+    """Test shim: _build_inp was replaced by _make_model + _write_inp."""
+    from art.mcp_server import _make_model, _write_inp
+    m = _make_model(ts, lam, d, D, p, q, n_harmonics, P=P, Q=Q)
+    _write_inp(ts, m, output_path)
+
+
 # ---------------------------------------------------------------------------
 # _make_model: D=0 vs D=1 structure
 # ---------------------------------------------------------------------------
@@ -86,7 +93,6 @@ class TestBuildInpD1:
         self.out = str(tmp_path / "test_d1.inp")
 
     def test_d1_writes_and_loads(self):
-        from art.mcp_server import _build_inp
         _build_inp(self.ts, lam=0.0, d=1, D=1, p=0, q=1,
                    n_harmonics=0, output_path=self.out, Q=1)
         assert os.path.exists(self.out)
@@ -94,7 +100,6 @@ class TestBuildInpD1:
         assert m2.D == 1
 
     def test_d1_fits_and_has_params(self):
-        from art.mcp_server import _build_inp
         _build_inp(self.ts, lam=0.0, d=1, D=1, p=0, q=1,
                    n_harmonics=0, output_path=self.out, Q=1)
         ts2, m2 = fue.inp.load(self.out)
@@ -103,7 +108,6 @@ class TestBuildInpD1:
         assert len(m2.params) == 2   # MA(1) + MA_S(1)
 
     def test_d0_writes_harmonics(self):
-        from art.mcp_server import _build_inp
         _build_inp(self.ts, lam=0.0, d=1, D=0, p=0, q=1,
                    n_harmonics=2, output_path=self.out)
         ts2, m2 = fue.inp.load(self.out)

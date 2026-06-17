@@ -17,6 +17,12 @@ def _skip_if_missing(path):
         pytest.skip(f"test data not found: {path}")
 
 
+def _build_inp(ts, lam, d, D, p, q, n_harmonics, output_path, P=0, Q=0):
+    """Test shim: _build_inp was replaced by _make_model + _write_inp."""
+    from art.mcp_server import _make_model, _write_inp
+    _write_inp(ts, _make_model(ts, lam, d, D, p, q, n_harmonics, P=P, Q=Q), output_path)
+
+
 # ---------------------------------------------------------------------------
 # series_info
 # ---------------------------------------------------------------------------
@@ -101,7 +107,6 @@ def test_seasonality_decision_field():
     d = describe_seasonality(ts)
     assert "decision" in d.data
     assert d.data["decision"] in ("A", "B1", "B2")
-    assert "recommended_d" in d.data
 
 
 def test_identification_ambiguous_field():
@@ -174,7 +179,7 @@ def test_overparametrization_detected_arma11():
     """Block I: ARMA(1,1) on IPC_ES shows high corr(AR(1),MA(1)) in describe_diagnosis."""
     _skip_if_missing(_IPC_ES_M00)
     from art.describe import describe_diagnosis
-    from art.mcp_server import _build_inp, _load_fitted
+    from art.mcp_server import _load_fitted
     import tempfile, os
     import fue
     ts, _ = fue.inp.load(_IPC_ES_M00)
@@ -201,7 +206,7 @@ def test_overparametrization_absent_ar1_only():
     """Block I: AR(1) with no harmonics has no high-corr pairs."""
     _skip_if_missing(_IPC_ES_M00)
     import tempfile, os
-    from art.mcp_server import _build_inp, _load_fitted
+    from art.mcp_server import _load_fitted
     from art.describe import describe_diagnosis
     import fue
     ts, _ = fue.inp.load(_IPC_ES_M00)

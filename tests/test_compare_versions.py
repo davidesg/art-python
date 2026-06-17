@@ -15,6 +15,12 @@ def _skip_if_missing(path=_PCE_INP):
         pytest.skip(f"test data not found: {path}")
 
 
+def _build_inp(ts, lam, d, D, p, q, n_harmonics, output_path, P=0, Q=0):
+    """Test shim: _build_inp was replaced by _make_model + _write_inp."""
+    from art.mcp_server import _make_model, _write_inp
+    _write_inp(ts, _make_model(ts, lam, d, D, p, q, n_harmonics, P=P, Q=Q), output_path)
+
+
 # ---------------------------------------------------------------------------
 # _spec_diff
 # ---------------------------------------------------------------------------
@@ -130,7 +136,6 @@ def two_models(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("cmpv")
     ts, _ = fue.inp.load(_PCE_INP)
 
-    from art.mcp_server import _build_inp
     path_a = str(tmp / "m_a.inp")
     path_b = str(tmp / "m_b.inp")
     # A: MA(1) only → 2 harmonics + MA(1)
@@ -196,7 +201,7 @@ def test_compare_figure_returned(two_models):
 def test_compare_same_model_no_diff(tmp_path):
     """Comparing a model to itself: no spec changes."""
     _skip_if_missing()
-    from art.mcp_server import compare_versions, _build_inp
+    from art.mcp_server import compare_versions
     import fue
     ts, _ = fue.inp.load(_PCE_INP)
     path = str(tmp_path / "same.inp")
@@ -210,7 +215,7 @@ def test_compare_same_model_no_diff(tmp_path):
 def test_compare_non_nested_no_lr(tmp_path):
     """AR(1) vs MA(1): non-nested (same npar), LR test should say 'no aplicable'."""
     _skip_if_missing()
-    from art.mcp_server import compare_versions, _build_inp
+    from art.mcp_server import compare_versions
     import fue
     ts, _ = fue.inp.load(_PCE_INP)
     path_ar = str(tmp_path / "ar1.inp")
@@ -226,7 +231,7 @@ def test_compare_non_nested_no_lr(tmp_path):
 def test_build_inp_pq0_with_harmonics_no_crash(tmp_path):
     """p=0, q=0 with harmonics must not crash (workaround: AR(1) phi=0 fixed)."""
     _skip_if_missing()
-    from art.mcp_server import _build_inp, _load_fitted
+    from art.mcp_server import _load_fitted
     import fue
     ts, _ = fue.inp.load(_PCE_INP)
     path = str(tmp_path / "pq0.inp")

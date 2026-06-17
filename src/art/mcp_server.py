@@ -2760,10 +2760,12 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
     """
     try:
         from mcp.types import TextContent, ImageContent
-        from art.describe import describe_boxcox, describe_seasonality, describe_diagnosis
+        from art.describe import (describe_boxcox, describe_seasonality,
+                                  describe_diagnosis, describe_unit_root)
         from art.model_detection import suggest_orders
         from art.diagnosis import diagnose, plot_diagnosis
         from art.formal_tests import dcd as _dcd
+        from art import policy
         import io, base64
         import matplotlib.pyplot as plt
 
@@ -2775,31 +2777,21 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
 
         # ── 1. Box-Cox ────────────────────────────────────────────────────
         bc  = describe_boxcox(ts)
-        lam = 0.0 if bc.data.get("gap", 0.0) >= 0 else 1.0
+        lam = policy.decide_lambda(bc.data)
         lam_str = "log (λ=0)" if lam == 0.0 else "identidad (λ=1)"
         log.append(f"**λ:** {lam_str}  (gap={bc.data.get('gap', 0):+.3f})")
 
         # ── 2. Seasonality / d / D ────────────────────────────────────────
-        seas     = describe_seasonality(ts)
-        D        = seas.data.get("recommended_D", 0)
-        decision = seas.data.get("decision", "B1")
-        # freq//2-1 pairs + alter = full deterministic spec (Nyquist covered by alter)
-        n_harmonics = max(ts.freq // 2 - 1, 0) if decision != "A" else 0
-        # Use unit root tests (Bloque L) to determine d
-        from art.describe import describe_unit_root
+        seas = describe_seasonality(ts)
+        D, decision, n_harmonics = policy.decide_seasonal_structure(seas.data, ts.freq)
         urt = describe_unit_root(ts, lam=lam)
-        d   = urt.data.get("recommended_d", 1)
+        d   = policy.decide_d(urt.data)
         log.append(f"**Estacionalidad:** decisión={decision}  d={d}  D={D}  armónicos={n_harmonics}")
 
         # ── 3. ARMA orders ────────────────────────────────────────────────
         specs = suggest_orders(ts, d=d, D=D, lam=lam, top_n=5)
-        top   = specs[0] if specs else None
-        if top is not None:
-            p, q = top.p, top.q
-            sim_str = f"{top.similarity:.3f}"
-        else:
-            p, q = 0, 1
-            sim_str = "N/A"
+        p, q  = policy.decide_orders(specs)
+        sim_str = f"{specs[0].similarity:.3f}" if specs else "N/A"
         log.append(f"**Órdenes:** ARIMA({p},{d},{q})  similitud={sim_str}")
 
         # ── Main loop ─────────────────────────────────────────────────────
@@ -2823,9 +2815,7 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
             m = _make_model(ts, lam, d, D, p, q, n_harmonics, extra_itvs)
             _write_inp(ts, m, output_path)
             _, m_fit = _load_fitted(output_path)
-            # 3.0: autonomous pipeline uses a tighter threshold than user-facing 3.5
-            # to avoid leaving marginal outliers unmodelled in the automated cycle.
-            diag = diagnose(m_fit, z_threshold=3.0)
+            diag = diagnose(m_fit, z_threshold=policy.THRESHOLDS["outlier_autonomous"])
 
             # ── Per-round rich log (Block D) ──────────────────────────────
             q_fail = [str(l) for l, pv in zip(diag.q_lags, diag.q_pvalues) if pv < 0.05]
@@ -2847,20 +2837,12 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
             fig_label = f"Ronda {round_num} — {name}"
             round_figures.append(_round_fig_b64(diag, m_fit, fig_label))
 
-            if diag.clean or not diag.extreme:
+            if policy.should_stop(diag.clean, len(diag.extreme)):
                 break
 
             # ── Intervention selection ─────────────────────────────────────
-            ext_obs = {obs for obs, _ in diag.extreme}
-            already = {at for at, _ in extra_itvs}
-            new_itvs = []
-            for obs, z in sorted(diag.extreme, key=lambda x: -abs(x[1])):
-                at_0 = obs - 1
-                if at_0 in already:
-                    continue
-                has_consec = (obs - 1) in ext_obs or (obs + 1) in ext_obs
-                form = "step" if has_consec else "pulse"
-                new_itvs.append((at_0, form))
+            new_itvs = policy.decide_interventions(
+                diag.extreme, [at for at, _ in extra_itvs])
 
             if not new_itvs:
                 log.append("  Sin nuevas intervenciones que añadir.")
@@ -2955,10 +2937,12 @@ def batch_build(inp_paths: list[str], output_dir: str,
     """
     try:
         from mcp.types import TextContent, ImageContent
-        from art.describe import describe_boxcox, describe_seasonality, describe_diagnosis
+        from art.describe import (describe_boxcox, describe_seasonality,
+                                  describe_diagnosis, describe_unit_root)
         from art.model_detection import suggest_orders
         from art.diagnosis import diagnose
         from art.formal_tests import dcd as _dcd
+        from art import policy
 
         output_dir = os.path.expanduser(output_dir)
         os.makedirs(output_dir, exist_ok=True)
@@ -2979,21 +2963,17 @@ def batch_build(inp_paths: list[str], output_dir: str,
 
                 # ── 1. λ ──────────────────────────────────────────────────
                 bc  = describe_boxcox(ts)
-                lam = 0.0 if bc.data.get("gap", 0.0) >= 0 else 1.0
+                lam = policy.decide_lambda(bc.data)
 
                 # ── 2. d / D ──────────────────────────────────────────────
-                seas     = describe_seasonality(ts)
-                D        = seas.data.get("recommended_D", 0)
-                decision = seas.data.get("decision", "B1")
-                n_harm   = max(ts.freq // 2 - 1, 0) if decision != "A" else 0
-                from art.describe import describe_unit_root as _durt
-                urt = _durt(ts, lam=lam)
-                d   = urt.data.get("recommended_d", 1)
+                seas = describe_seasonality(ts)
+                D, decision, n_harm = policy.decide_seasonal_structure(seas.data, ts.freq)
+                urt = describe_unit_root(ts, lam=lam)
+                d   = policy.decide_d(urt.data)
 
                 # ── 3. ARMA orders ────────────────────────────────────────
                 specs = suggest_orders(ts, d=d, D=D, lam=lam, top_n=3)
-                top   = specs[0] if specs else None
-                p, q  = (top.p, top.q) if top else (0, 1)
+                p, q  = policy.decide_orders(specs)
 
                 # ── Main loop ─────────────────────────────────────────────
                 extra_itvs: list[tuple[int, str]] = []
@@ -3005,21 +2985,13 @@ def batch_build(inp_paths: list[str], output_dir: str,
                     m = _make_model(ts, lam, d, D, p, q, n_harm, extra_itvs)
                     _write_inp(ts, m, out_inp)
                     _, m_fit = _load_fitted(out_inp)
-                    # 3.0: tighter than user-facing 3.5 to catch marginal outliers in automated cycle
-                    diag = diagnose(m_fit, z_threshold=3.0)
+                    diag = diagnose(m_fit, z_threshold=policy.THRESHOLDS["outlier_autonomous"])
 
-                    if diag.clean or not diag.extreme:
+                    if policy.should_stop(diag.clean, len(diag.extreme)):
                         break
 
-                    ext_obs = {obs for obs, _ in diag.extreme}
-                    already  = {at for at, _ in extra_itvs}
-                    new_itvs = []
-                    for obs, z in sorted(diag.extreme, key=lambda x: -abs(x[1])):
-                        at_0 = obs - 1
-                        if at_0 in already:
-                            continue
-                        form = "step" if ((obs - 1) in ext_obs or (obs + 1) in ext_obs) else "pulse"
-                        new_itvs.append((at_0, form))
+                    new_itvs = policy.decide_interventions(
+                        diag.extreme, [at for at, _ in extra_itvs])
                     if not new_itvs:
                         break
                     extra_itvs.extend(new_itvs)
