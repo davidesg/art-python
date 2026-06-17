@@ -24,7 +24,11 @@ from fue.diagnostics import (
     ljung_box,
     jarque_bera,
 )
-from fue.plots import _draw_acf_panel, _snap_cmax, _tj_spines
+try:
+    from fue.plots import _draw_acf_panel, _snap_cmax, _tj_spines
+    _FUE_PLOTS = True
+except ImportError:
+    _FUE_PLOTS = False
 
 from .identification import _default_lags_fug
 from .seasonal_detection import detect_seasonality, SeasonalDetectionResult
@@ -381,6 +385,9 @@ def plot_diagnosis(result: DiagnosisResult, model=None) -> plt.Figure:
     stacked ACF/PACF (right).  This is the basic diagnostic module; the
     histogram is a separate optional figure (see plot_diagnosis_histogram).
     """
+    if not _FUE_PLOTS:
+        raise ImportError("fue.plots is not available; diagnosis graphics require the fue package with plots support")
+
     if model is not None and getattr(model, "_result", None) is not None:
         from fue.plots import plot_model_diagnostics
         fig, _ = plot_model_diagnostics(model)
@@ -431,6 +438,8 @@ def plot_diagnosis(result: DiagnosisResult, model=None) -> plt.Figure:
 def plot_diagnosis_histogram(model) -> plt.Figure:
     """Residuals histogram with normal overlay (optional complement to
     plot_diagnosis).  Delegates to fue.plots.plot_model_diagnostics fig2."""
+    if not _FUE_PLOTS:
+        raise ImportError("fue.plots is not available; diagnosis graphics require the fue package with plots support")
     from fue.plots import plot_model_diagnostics
     _, fig_hist = plot_model_diagnostics(model)
     return fig_hist

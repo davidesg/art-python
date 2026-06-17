@@ -200,7 +200,7 @@ def _write_bare_inp(ts, path: str) -> None:
         "** Individual factors of the annual difference (from freq 0.0): ",
         " " + " ".join(["0"] * n_ifadf),
         "** ACF/PACF bands (0 Automatic) and reescaling factor: ",
-        " 0.00 1.00",
+        " 0 100.00",
         "** Time series (stochastic and non-standard deterministic variables): ",
     ]
     for v in ts.data:
@@ -3258,10 +3258,7 @@ def update_and_forecast(fuf_path: str,
             mu=m_old.mu0, estimate_mu=m_old.estimate_mu,
             boxlam=m_old.boxlam,
         )
-        m_new._fuf_sigma2  = sig2
-        m_new._fuf_horizon = L_old
-
-        fr_new = m_new.forecast_fuf()
+        fr_new = m_new.forecast_fuf(horizon=L_old, sigma2=sig2)
 
         out_path = _fuf_path(os.path.expanduser(output_fuf_path or fuf_path))
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
