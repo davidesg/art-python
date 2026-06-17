@@ -109,8 +109,8 @@ ETAPA 2 — ESTIMACIÓN DEL MODELO ARMA ELEGIDO
 ─────────────────────────────────────────────────────
   → Llama confirm_and_estimate con (λ, d, D, p, q, n_harmonics=freq//2-1) confirmados
     output_path: usa /tmp/<serie>_v1.inp o la ruta que el usuario indique
-    Este tool construye el INP — nunca busques ficheros .inp en el disco.
-  → Llama model_equation_display para mostrar la ecuación del modelo estimado
+    Este tool construye el INP, estima y devuelve la ecuación + diagnosis en una sola respuesta.
+    NO llames model_equation_display por separado — la ecuación ya viene incluida.
   → MUESTRA el gráfico diagnóstico Treadway
   → Discute: ¿parámetros significativos (|t|>2)? ¿Q-test pasa? ¿JB pasa?
 
@@ -290,6 +290,7 @@ def _plot_series_at_d(ts, lam: float, d: int) -> str | None:
     except Exception:
         return None
 
+@mcp.tool()
 def create_inp(
     data: list[float],
     output_path: str,
@@ -630,10 +631,15 @@ def estimate_and_diagnose(inp_path: str) -> list:
         from art.describe import describe_diagnosis
         ts, m = _load_ts_model(inp_path)
         m.fit()
+        try:
+            from art.describe import model_equation as _model_eq
+            eq_text = _model_eq(ts, m)
+        except Exception as _eq_exc:
+            eq_text = f"⚠ *[model_equation error: {_eq_exc}]*"
         desc = describe_diagnosis(m)
         _show_fig(desc.figure_b64, "diagnosis")
-        items = [TextContent(type="text",
-                             text=desc.summary + "\n\n---\n" + desc.recommendation)]
+        text = eq_text + "\n\n---\n\n" + desc.summary + "\n\n---\n" + desc.recommendation
+        items = [TextContent(type="text", text=text)]
         if desc.figure_b64:
             items.append(ImageContent(type="image",
                                       data=desc.figure_b64, mimeType="image/png"))
@@ -1010,8 +1016,8 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
         try:
             from art.describe import model_equation as _model_eq
             eq_text = _model_eq(ts, m)
-        except Exception:
-            eq_text = ""
+        except Exception as _eq_exc:
+            eq_text = f"⚠ *[model_equation error: {_eq_exc}]*"
 
         summary   = simplify_summary(results, alpha=alpha)
         n_sig     = sum(1 for r in results if r.significant)
@@ -1483,6 +1489,8 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
             m.residuals.data, freq=ts.freq,
             start=_rstart, name=f"Resid {ts.name or ''}",
         )
+        # 2.5 (more sensitive than the user-facing 3.5) so that marginal outliers
+        # are flagged during the modeling cycle rather than after formal diagnosis.
         scan = _prelim_scan(_res_ts, d=0, D=0, lam=1.0, threshold=2.5)
         # Count only FREE (estimated) ARMA parameters to distinguish m00 from final
         def _n_free(vals, free):
@@ -1813,13 +1821,9 @@ def guided_identification(inp_path: str, lam: float = -1.0,
         # B2 or no-outlier B1: identify directly on transformed series
         if pre_path:
             import fue as _fue
+            from art.describe import _resid_start as _rs
             _, m_pre = _load_fitted(pre_path)
-            # Compute correct calendar start for residuals
-            s0     = m_pre.series.start
-            freq_p = m_pre.series.freq if m_pre.series.freq > 0 else 1
-            n_skip = m_pre.d + m_pre.D * freq_p
-            off    = (int(s0[1]) - 1) + n_skip
-            res_start = (int(s0[0]) + off // freq_p, off % freq_p + 1)
+            res_start = _rs(m_pre)
             res_ts = _fue.TimeSeries(
                 m_pre.residuals.data, freq=ts.freq,
                 start=res_start, name=f"Resid {ts.name or ''}"
@@ -2053,6 +2057,12 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             # Incremental: preserve interventions + harmonics from .pre; replace ARMA
             base_pre_path = os.path.expanduser(base_pre_path)
             _, m_base = _load_ts_model(base_pre_path)
+            ts_b = m_base.series
+            if ts.nobs != ts_b.nobs or ts.freq != ts_b.freq:
+                raise ValueError(
+                    f"Series mismatch between inp_path and base_pre_path: "
+                    f"nobs {ts.nobs} vs {ts_b.nobs}, freq {ts.freq} vs {ts_b.freq}"
+                )
             m = _build_arma_on_model(m_base, p=p, q=q, P=P, Q=Q,
                                      estimate_mu=estimate_mu)
             _write_inp(ts, m, output_path)
@@ -2080,8 +2090,8 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         try:
             from art.describe import model_equation as _model_eq
             eq_text = _model_eq(ts, m)
-        except Exception:
-            eq_text = ""
+        except Exception as _eq_exc:
+            eq_text = f"⚠ *[model_equation error: {_eq_exc}]*"
 
         # Diagnosis
         diag = describe_diagnosis(m)
@@ -2089,8 +2099,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         # Auto-save fitted model as .pre (same name as .inp but .pre extension)
         pre_path = os.path.splitext(output_path)[0] + ".pre"
         try:
-            from fue.report import write_pre
-            write_pre(m, pre_path)
+            m.write_pre(pre_path)
             pre_note = f"\n\n*Modelo guardado en: {output_path}  |  parámetros en: {pre_path}*"
         except Exception:
             pre_note = f"\n\n*Modelo guardado en: {output_path}*"
@@ -2187,8 +2196,7 @@ def record_version(inp_path: str,
         except Exception:
             b64 = None
 
-        # Try to infer lam from ts (fue stores it as None usually)
-        lam = float(getattr(m.series, "lam", 0.0) or 0.0)
+        lam = float(getattr(m, "boxlam", 0.0) or 0.0)
 
         note = _record_to_guion(
             model=m, inp_path=inp_path, lam=lam,
@@ -2570,6 +2578,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             # Auto-select most extreme residual not already covered by an intervention
             import numpy as np
             from art.diagnosis import diagnose
+            # 2.0: wide net for auto-selection so marginal extremes are candidates
             diag_auto = diagnose(m_src, z_threshold=2.0)
             existing_at = {itv.at for itv in (m_src.interventions or [])}
             candidates = [(abs(z), obs) for obs, z in diag_auto.extreme
@@ -2598,6 +2607,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         if form == "auto":
             # Inspect residuals around that observation
             from art.diagnosis import diagnose
+            # 2.5: moderate threshold to detect consecutive extremes that signal a step
             diag_tmp = diagnose(m_src, z_threshold=2.5)
             extreme_obs = {obs for obs, _ in diag_tmp.extreme}
             obs_1 = at_0 + 1
@@ -2636,8 +2646,8 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         try:
             from art.describe import model_equation as _model_eq
             eq_text = _model_eq(ts, m_fit)
-        except Exception:
-            eq_text = ""
+        except Exception as _eq_exc:
+            eq_text = f"⚠ *[model_equation error: {_eq_exc}]*"
 
         context_str = f"  Contexto: {context_hint}" if context_hint else ""
 
@@ -2880,6 +2890,8 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
             m = _make_model(ts, lam, d, D, p, q, n_harmonics, extra_itvs)
             _write_inp(ts, m, output_path)
             _, m_fit = _load_fitted(output_path)
+            # 3.0: autonomous pipeline uses a tighter threshold than user-facing 3.5
+            # to avoid leaving marginal outliers unmodelled in the automated cycle.
             diag = diagnose(m_fit, z_threshold=3.0)
 
             # ── Per-round rich log (Block D) ──────────────────────────────
@@ -2947,8 +2959,8 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
             try:
                 from art.describe import model_equation as _model_eq
                 eq_text = _model_eq(ts, m_fit)
-            except Exception:
-                eq_text = ""
+            except Exception as _eq_exc:
+                eq_text = f"⚠ *[model_equation error: {_eq_exc}]*"
             diag_desc = describe_diagnosis(m_fit)
             diag_text = diag_desc.summary + "\n\n---\n" + diag_desc.recommendation
         else:
@@ -3038,10 +3050,12 @@ def batch_build(inp_paths: list[str], output_dir: str,
 
                 # ── 2. d / D ──────────────────────────────────────────────
                 seas     = describe_seasonality(ts)
-                d        = seas.data.get("recommended_d", 1)
                 D        = seas.data.get("recommended_D", 0)
                 decision = seas.data.get("decision", "B1")
                 n_harm   = max(ts.freq // 2 - 1, 0) if decision != "A" else 0
+                from art.describe import describe_unit_root as _durt
+                urt = _durt(ts, lam=lam)
+                d   = urt.data.get("recommended_d", 1)
 
                 # ── 3. ARMA orders ────────────────────────────────────────
                 specs = suggest_orders(ts, d=d, D=D, lam=lam, top_n=3)
@@ -3058,6 +3072,7 @@ def batch_build(inp_paths: list[str], output_dir: str,
                     m = _make_model(ts, lam, d, D, p, q, n_harm, extra_itvs)
                     _write_inp(ts, m, out_inp)
                     _, m_fit = _load_fitted(out_inp)
+                    # 3.0: tighter than user-facing 3.5 to catch marginal outliers in automated cycle
                     diag = diagnose(m_fit, z_threshold=3.0)
 
                     if diag.clean or not diag.extreme:
@@ -3519,6 +3534,7 @@ def preview_data(source_path: str, sheet: str = "") -> list:
             else:
                 # Guess from gap between first two obs
                 freq_detected = None
+                gap = None
                 if len(idx) >= 2:
                     try:
                         gap = (idx[1] - idx[0]).days
@@ -3528,7 +3544,7 @@ def preview_data(source_path: str, sheet: str = "") -> list:
                     except Exception:
                         pass
             freq_str = {1: "anual", 4: "trimestral", 12: "mensual"}.get(
-                freq_detected, f"desconocida (gap≈{gap if len(idx)>=2 else '?'} días)"
+                freq_detected, f"desconocida (gap≈{gap if gap is not None else '?'} días)"
             )
             date_info = (
                 f"Índice de fechas detectado ✓\n"

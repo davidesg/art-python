@@ -310,7 +310,6 @@ def describe_seasonality(ts) -> Description:
             "decision": decision,
             "f_stat": result.f_stat,
             "p_value": result.p_value,
-            "recommended_d": 1,
             "recommended_D": 0,
             "multiplicative_available": det,
             "d_stationary": d_ok,
@@ -816,11 +815,22 @@ def model_equation(ts, model) -> str:
                         "ramp": "R", "compimp": "CI"}.get(t, "?")
             xi_str   = f"ξₜ^{{{xi_sup},{date_str}}}"
 
+            dlt   = list(itv.delta) if itv.delta else []
+            dlt_f = (list(itv.delta_free)
+                     if (hasattr(itv, "delta_free") and itv.delta_free)
+                     else [True] * len(dlt))
+
             if len(om) == 1:
                 v, se = (pi.pop() if om_f[0] else (om[0], 0.0))
                 tl = _TwoLine()
                 tl.add(f"  {_sign_det(v)} ")
                 tl.add(_fv(abs(v)), _fse(se) if om_f[0] else "")
+                if dlt:
+                    # Transfer function: ω / δ(B) · ξₜ
+                    # _fmt_poly advances pi past the delta params (keeping alignment)
+                    den_val, den_se = _fmt_poly(dlt, dlt_f)
+                    tl.add(" / ")
+                    tl.add(den_val, den_se)
                 tl.add(f" {xi_str}")
                 itv_rows.append((tl.val(), tl.se_line()))
             else:
@@ -835,7 +845,13 @@ def model_equation(ts, model) -> str:
                         tl.add(f"  {_sign_det(v)} ")
                         tl.add(_fv(abs(v)), _fse(se) if free else "")
                         tl.add(bpow)
-                tl.add(f") {xi_str}")
+                if dlt:
+                    den_val, den_se = _fmt_poly(dlt, dlt_f)
+                    tl.add(") / ")
+                    tl.add(den_val, den_se)
+                    tl.add(f" {xi_str}")
+                else:
+                    tl.add(f") {xi_str}")
                 itv_rows.append((tl.val(), tl.se_line()))
 
     # Flush harmonics in sorted order (pairs cos+sin on one line)
