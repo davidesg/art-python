@@ -2,13 +2,13 @@
 
 ## Bugs conocidos
 
-- [ ] **nlags en series cortas**: `describe_diagnosis` → pyfug pide
-      `nlags = 3·s + 3` (39 mensual, 15 trimestral; convención J-T = 3 ciclos
-      estacionales + 3). statsmodels `pacf` exige `nlags < n/2`, así que con
-      muestras cortas (p.ej. n=72 mensual → 39 ≥ 36) lanza ValueError y
-      `build_model`/diagnosis fallan. Fix: capar `nlags = min(3·s+3, (n-d-D·s)//2 - 1)`
-      donde se solicita el ACF/PACF de residuos. No cambiar la convención, solo
-      el límite superior. (Descubierto en Fase 0 del refactor de orquestación.)
+- [x] **nlags en series cortas** (RESUELTO): pyfug `plot_combined` pedía
+      `nlags = 3·(f+1)` (convención J-T) y solo capaba a `n−1`, pero statsmodels
+      `pacf` exige `nlags < n/2` → ValueError con muestras cortas (n=72 mensual).
+      Fix en pyfug: `plot_combined` capa `nlags = min(…, n//2−1)` (ambos paneles
+      consistentes, convención preservada cuando n>6·(f+1)) y `statistics.pacf`
+      capa defensivamente a `len//2−1`. Test de regresión:
+      `tests/test_golden_pipeline.py::test_diagnosis_short_series_no_crash`.
 
 ## Filosofía: ART simple + Claude como analista BJ
 

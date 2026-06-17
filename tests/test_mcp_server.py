@@ -66,7 +66,8 @@ def test_estimate_and_diagnose_returns_text_and_figure():
     _skip_if_missing(_RIPC1)
     from art.mcp_server import estimate_and_diagnose
     result = estimate_and_diagnose(_RIPC1)
-    assert len(result) == 2
+    # text + diagnosis figure (+ optional auto-scan figure)
+    assert len(result) >= 2
     assert result[0].type == "text"
     assert "Diagnosis" in result[0].text
     assert result[1].type == "image"

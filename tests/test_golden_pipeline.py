@@ -213,6 +213,25 @@ def inp_to_ts(inp_path):
     return ts
 
 
+def test_diagnosis_short_series_no_crash():
+    """Regression: short monthly series (n=72) where the J-T nlags convention
+    (3·(f+1)=39) exceeds the PACF 50%-of-sample limit must not crash."""
+    import fue
+    from art.describe import describe_diagnosis
+    from art.pipeline import _make_model
+
+    ts = fue.datasets.ripc()           # n=72, freq=12
+    assert ts.nobs == 72
+    m = _make_model(ts, lam=0.0, d=1, D=0, p=0, q=1, n_harmonics=5)
+    import tempfile, os
+    from art.pipeline import _write_inp, _load_fitted
+    tmp = os.path.join(tempfile.mkdtemp(), "ripc.inp")
+    _write_inp(ts, m, tmp)
+    _, m_fit = _load_fitted(tmp)
+    desc = describe_diagnosis(m_fit)   # would raise ValueError before the fix
+    assert desc.figure_b64 is not None
+
+
 def test_build_model_guided_honours_confirmed_spec(synth_inp):
     """build_model with analyst-confirmed overrides drives run_full through a
     ClaudePolicy: the spec is honoured and the header reports guided mode."""
