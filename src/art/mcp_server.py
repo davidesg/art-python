@@ -165,16 +165,18 @@ def _load_ts_model(path: str):
 
 def _write_bare_inp(ts, path: str) -> None:
     """Write a minimal fue .inp with only series data and no model spec."""
-    begyear, begtime = int(ts.start[0]), int(ts.start[1])
-    n_ifadf = ts.freq // 2 + 1 if ts.freq > 1 else 1
+    freq    = ts.freq
+    begyear = int(ts.start[0])
+    begtime = int(ts.start[1]) if freq > 1 else begyear  # annual: year repeated twice
+    n_ifadf = freq // 2 + 1 if freq > 1 else 1
     lines = [
         "************************************************",
-        "*        Input file for program DRVUS          *",
-        "* Copyright (C) 1996 Jos? Alberto Mauricio     *",
+        "* Input file for program FUE                   *",
+        "* DOCTYPE ATSW-interface SYSTEM                *",
         "************************************************",
         "",
         "** Frequency of time series: either 1(A), 4(Q) or 12(M):",
-        f" {ts.freq}",
+        f" {freq}",
         "** Number of observations and starting date of time series:",
         f" {ts.nobs} {begtime:2d} {begyear} {ts.name}",
         "** Number of deterministic variables (including seasonal components):",
@@ -1362,77 +1364,6 @@ def _build_arma_on_model(m_base, p: int, q: int,
     )
 
 
-def _build_inp(ts, lam: float, d: int, D: int,
-               p: int, q: int,
-               n_harmonics: int,
-               output_path: str,
-               P: int = 0, Q: int = 0) -> None:
-    """
-    Build a fresh .inp for a SARIMA(p,d,q)(P,D,Q)_s spec.
-
-    When D=0: adds deterministic harmonics (cos/sin pairs + alter).
-    When D=1: uses seasonal AR/MA (ar_s, ma_s); no harmonics added.
-    """
-    import fue
-    freq = ts.freq
-
-    # Regular AR and MA.
-    # Workaround for fue C backend crash when nar=0 AND nma=0 with interventions:
-    # add AR(1) with phi=0 fixed (mathematically equivalent to white noise AR
-    # polynomial = 1, but gives the C estimator a non-trivial AR block to process).
-    if p > 0:
-        ar   = [[0.0] * p]
-        ar_f = [[True] * p]
-    elif q == 0:
-        ar   = [[0.0]]
-        ar_f = [[False]]   # phi=0 fixed — not estimated
-    else:
-        ar   = []
-        ar_f = []
-    ma   = [[-0.3] * q] if q > 0 else []
-    ma_f = [[True]  * q] if q > 0 else []
-
-    if D == 0:
-        # Deterministic seasonality: cos/sin pairs k=1..freq//2-1, plus alter.
-        # alter covers the Nyquist harmonic k=freq//2 (cos only; sin=0 there).
-        # For s=12: 5 pairs (cos1..cos5, sin1..sin5) + alter = 11 params.
-        # For s=4:  1 pair  (cos1, sin1) + alter = 3 params.
-        max_pairs    = max(freq // 2 - 1, 0)
-        n_harm_pairs = min(n_harmonics, max_pairs)
-        itvs = []
-        for k in range(1, n_harm_pairs + 1):
-            itvs.append(fue.Intervention("cos", at=0,
-                        omega=[0.0], omega_free=[True], harmonic=float(k)))
-            itvs.append(fue.Intervention("sin", at=0,
-                        omega=[0.0], omega_free=[True], harmonic=float(k)))
-        itvs.append(fue.Intervention("alter", at=0,
-                    omega=[0.0], omega_free=[True]))
-        ar_s_val  = []; ar_sf_val  = []
-        ma_s_val  = []; ma_sf_val  = []
-    else:
-        # Multiplicative seasonality: seasonal AR/MA operators (Box-Jenkins B2)
-        itvs = []
-        ar_s_val  = [[0.0]  * P] if P > 0 else []
-        ar_sf_val = [[True] * P] if P > 0 else []
-        ma_s_val  = [[-0.3] * Q] if Q > 0 else []
-        ma_sf_val = [[True] * Q]  if Q > 0 else []
-
-    ifadf = [0] * (freq // 2 + 1)
-
-    m = fue.Model(
-        ts,
-        d=d, D=D, boxlam=lam,
-        ar=ar, ar_free=ar_f,
-        ma=ma, ma_free=ma_f,
-        ar_s=ar_s_val, ar_s_free=ar_sf_val if ar_sf_val else None,
-        ma_s=ma_s_val, ma_s_free=ma_sf_val if ma_sf_val else None,
-        interventions=itvs,
-        ifadf=ifadf,
-        mu=0.0, estimate_mu=False,
-    )
-    _write_inp(ts, m, output_path)
-
-
 def _param_table(model) -> str:
     """Return a markdown table of estimated parameters with SE and t-stat."""
     import numpy as np
@@ -2067,9 +1998,10 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                                      estimate_mu=estimate_mu)
             _write_inp(ts, m, output_path)
         else:
-            _build_inp(ts, lam=lam, d=d, D=D, p=p, q=q,
-                       n_harmonics=n_harmonics, output_path=output_path,
-                       P=P, Q=Q)
+            m_fresh = _make_model(ts, lam=lam, d=d, D=D, p=p, q=q,
+                                  n_harmonics=n_harmonics, P=P, Q=Q,
+                                  estimate_mu=estimate_mu)
+            _write_inp(ts, m_fresh, output_path)
 
         _, m = _load_fitted(output_path)
 
@@ -2714,7 +2646,8 @@ def suggest_intervention_form(inp_path: str, output_path: str,
 def _make_model(ts, lam: float, d: int, D: int,
                 p: int, q: int, n_harmonics: int,
                 extra_itvs: list | None = None,
-                P: int = 0, Q: int = 0):
+                P: int = 0, Q: int = 0,
+                estimate_mu: bool = False):
     """
     Build a fue.Model from SARIMA(p,d,q)(P,D,Q)_s spec.
 
@@ -2729,7 +2662,7 @@ def _make_model(ts, lam: float, d: int, D: int,
     import fue
     freq = ts.freq
 
-    # Same p=0,q=0 workaround as _build_inp: AR(1) phi=0 fixed avoids C crash.
+    # Workaround for fue C crash when nar=0 AND nma=0: add AR(1) phi=0 fixed.
     if p > 0:
         ar   = [[0.0] * p]
         ar_f = [[True] * p]
@@ -2743,7 +2676,7 @@ def _make_model(ts, lam: float, d: int, D: int,
     ma_f = [[True]  * q] if q > 0 else []
 
     if D == 0:
-        # Same Nyquist correction as _build_inp: pairs 1..freq//2-1 + alter.
+        # Deterministic seasonality: pairs 1..freq//2-1 + alter (Nyquist harmonic).
         max_pairs = max(freq // 2 - 1, 0)
         n_harm    = min(n_harmonics, max_pairs)
         itvs = []
@@ -2773,7 +2706,7 @@ def _make_model(ts, lam: float, d: int, D: int,
         ma_s=ma_s_val, ma_s_free=ma_sf_val if ma_sf_val else None,
         interventions=itvs,
         ifadf=[0] * (freq // 2 + 1),
-        mu=0.0, estimate_mu=False,
+        mu=0.0, estimate_mu=estimate_mu,
     )
 
 
