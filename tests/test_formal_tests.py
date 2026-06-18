@@ -511,12 +511,15 @@ class TestDCDF_ChilePC7:
     def test_dcd_f_lr_near_398(self):
         """LR ≈ 3.98: between 5% (2.02) and 1% (4.52) critical values.
 
-        The constrained model re-estimates ALL parameters with MA_f fixed at -1
-        (the correct DCD null). The thesis tabulated 4.316 corresponds to
-        EVALUATING at the free MLE without re-estimating, which is not the
-        constrained MLE; the re-estimated optimum gives L_const=-127.575, LR=3.98.
-        Qualitative verdict is unchanged (reject 5%, not 1%). Do not "restore"
-        4.316 — that would be the non-re-estimated value.
+        Thesis §2.4 defines DCD = 2[l(θ_f) − l(θ_f=−1)] where BOTH terms come
+        from an ESTIMATED model ("modelo estimado con restricción θ_f=−1"), i.e.
+        the constrained model re-estimates all parameters with MA_f fixed at −1.
+        The suite does exactly this (mc.fit), giving L_const=−127.575, LR=3.984.
+        The thesis tabulated 4.316 corresponds to NOT re-estimating (evaluating
+        at the free MLE); this is the "flat likelihood / ill-defined estimation"
+        situation the thesis itself flags for short, near-non-invertible cases
+        like PC7. Qualitative verdict is unchanged (reject 5%, not 1%). Do not
+        "restore" 4.316 — it contradicts the thesis's own DCD definition.
         """
         assert abs(self.dcd_f_results[0].lr - 3.984) < 0.05
 
@@ -524,8 +527,9 @@ class TestDCDF_ChilePC7:
         assert abs(self.dcd_f_results[0].loglik_free - (-125.584)) < 0.01
 
     def test_dcd_f_loglik_constrained(self):
-        # Re-estimated constrained MLE (MA_f=-1, all else free), not the
-        # evaluate-at-free-MLE value (-127.742) tabulated in the thesis.
+        # Re-estimated constrained MLE (MA_f=−1, all else free) per thesis §2.4
+        # ("modelo estimado con restricción"), not the evaluate-at-free-MLE
+        # value (−127.742) the thesis tabulated under flat-likelihood conditions.
         assert abs(self.dcd_f_results[0].loglik_constrained - (-127.575)) < 0.01
 
     def test_dcd_f_rejects_5pct(self):
@@ -754,8 +758,9 @@ class TestMEG_ChilePC6_Freq1:
 
     def test_lr_near_398(self):
         """LR ≈ 3.98 (same as PC7 DCD_f): re-estimated constrained MLE with
-        MA_f=-1, not the evaluate-at-free-MLE value (4.316) tabulated in the
-        thesis. Between 5% (2.02) and 1% (4.52) critical values."""
+        MA_f=−1 per thesis §2.4 ("modelo estimado con restricción"), not the
+        evaluate-at-free-MLE value (4.316) tabulated under flat-likelihood
+        conditions. Between 5% (2.02) and 1% (4.52) critical values."""
         assert abs(self.results[0].dcd_result.lr - 3.984) < 0.1
 
     def test_dcd_rejects_5pct(self):
