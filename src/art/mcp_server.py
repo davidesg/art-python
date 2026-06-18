@@ -128,9 +128,17 @@ ETAPA 2 — ESTIMACIÓN DEL MODELO ARMA ELEGIDO
 ─────────────────────────────────────────────────────
 ETAPA 3 — DIAGNOSIS E INTERVENCIONES
 ─────────────────────────────────────────────────────
-  → Si hay residuos extremos (|z|>3.5): llama intervention_analysis
-  → Discute impacto en ACF/PACF y tipo probable (pulse/step/ramp)
-  → ESPERA confirmación del usuario antes de añadir cada intervención
+  ⚠ TRATAR ANÓMALOS ES UN PUNTO DE DECISIÓN DEL ANALISTA, no algo que ART decida.
+    En B1, esta decisión surge tras m00 (antes de ARMA): el escaneo de anómalos
+    NO obliga a intervenir.
+  → Si hay residuos extremos: menciónalos SIEMPRE y CALIBRA su distorsión sobre la
+    ACF/PACF con preliminary_outlier_scan (da var_outlier %, ACF_max % y los
+    retardos afectados; el gráfico muestra la contribución de cada anómalo a la ACF).
+  → Con esa calibración, SUGIERE: si los anómalos son grandes y están "matando"
+    (distorsionando fuertemente) la ACF/PACF → sugiere añadir intervenciones ANTES
+    de ARMA; si la distorsión es leve → sugiere pasar a ARMA. Razona la sugerencia.
+  → La decisión la toma el ANALISTA: ESPERA su confirmación antes de añadir cada
+    intervención.
   → Añade una a una con suggest_intervention_form → MUESTRA diagnosis actualizada
   → Cuando el modelo parezca limpio: llama test_interventions para verificar
     que todas las intervenciones son significativas
@@ -1123,8 +1131,10 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
         ])
         if has_arma:
             ab_choice = (
-                "\n\n**¿Qué hacemos?**\n\n"
-                "**A) Añadir intervención** (si aún hay anomalías significativas):\n"
+                "\n\n**PUNTO DE DECISIÓN (analista).** Claude: calibra la distorsión "
+                "(var_outlier, ACF_max, retardos afectados del escaneo) y SUGIERE, pero la "
+                "decisión la confirma el analista.\n\n"
+                "**A) Añadir intervención** (si aún hay anomalías que distorsionan):\n"
                 f"→ `suggest_intervention_form(inp_path=\"{pre_path}\", "
                 "output_path=<próxima_versión.inp>, date=\"MM/YYYY\", form=\"auto\")`\n\n"
                 "**B) Contrastes formales** (si los residuos están limpios):\n"
@@ -1132,12 +1142,16 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
             )
         else:
             ab_choice = (
-                "\n\n**¿Qué hacemos?**\n\n"
+                "\n\n**PUNTO DE DECISIÓN (analista): ¿tratar los anómalos ANTES de ARMA?**\n"
+                "Claude: calibra la distorsión sobre la ACF/PACF (var_outlier, ACF_max y "
+                "retardos afectados, arriba) y SUGIERE intervenir si los anómalos son grandes "
+                "y la están distorsionando con fuerza; si la distorsión es leve, sugiere pasar "
+                "a ARMA. En ambos casos la decisión la confirma el analista.\n\n"
                 "**A) Añadir intervención** — intervenciones ANTES de ARMA:\n"
                 f"→ `suggest_intervention_form(inp_path=\"{pre_path}\", "
                 "output_path=<próxima_versión.inp>, date=\"MM/YYYY\", form=\"auto\")`\n"
                 "   Repite hasta que los residuos estén limpios.\n\n"
-                "**B) Identificar ARMA** — si los residuos ya están limpios:\n"
+                "**B) Identificar ARMA** — si la distorsión es leve o los residuos ya limpios:\n"
                 f"→ `guided_identification(inp_path=\"{inp_path}\", "
                 f"lam={lam}, d={d}, D={D}, pre_path=\"{pre_path}\")`"
             )

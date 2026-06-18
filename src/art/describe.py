@@ -1733,6 +1733,9 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         f"- Umbral: |z| > {threshold}",
     ]
 
+    var_max = 0.0
+    max_acf_pct = 0.0
+    distortion_level = "none"
     if not outliers:
         lines.append("- **Sin observaciones extremas.** Las ACF/PACF reflejan fielmente la estructura ARMA.")
         rec = (
@@ -1773,26 +1776,39 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         intervene_strong = var_max > 15.0 or max_acf_pct > 30.0
         intervene_mild   = var_max > 5.0  or max_acf_pct > 10.0
 
+        distortion_level = ("strong" if intervene_strong
+                            else "moderate" if intervene_mild else "light")
+
+        # Tratar los anómalos ANTES de ARMA es un PUNTO DE DECISIÓN del analista.
+        # ART calibra la distorsión y SUGIERE; la decisión es del analista.
         if intervene_strong:
             verdict = (
-                "**CRITERIO: Intervención recomendada** — "
-                f"la distorsión es significativa (var_outlier={var_max:.1f}%, "
-                f"ACF_max={max_acf_pct:.0f}%). "
-                "Añade la intervención antes de identificar ARMA."
+                "**Distorsión fuerte sobre la ACF/PACF** "
+                f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%): los anómalos "
+                "están distorsionando con fuerza la identificación, y las ACF/PACF no son "
+                "robustas a outliers.\n"
+                "→ **Sugerencia:** tratar los anómalos con intervenciones antes de "
+                "especificar ARMA.\n"
+                "→ **Punto de decisión del analista:** confirma si intervenir ahora o "
+                "pasar directamente a ARMA."
             )
         elif intervene_mild:
             verdict = (
-                "**CRITERIO: Distorsión moderada** — "
-                f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%). "
-                "Puedes añadir intervención o proceder con ARMA; "
-                "observa si las ACF/PACF muestran estructura clara."
+                "**Distorsión moderada sobre la ACF/PACF** "
+                f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%).\n"
+                "→ **Sugerencia:** puede merecer la pena intervenir, pero también es "
+                "razonable pasar a ARMA y revisar los residuos.\n"
+                "→ **Punto de decisión del analista:** observa si las ACF/PACF muestran "
+                "estructura clara y decide."
             )
         else:
             verdict = (
-                "**CRITERIO: Distorsión leve** — "
-                f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%). "
-                "No hay evidencia clara de que los outliers distorsionen la ACF/PACF. "
-                "Puedes proceder directamente con la especificación ARMA."
+                "**Distorsión leve sobre la ACF/PACF** "
+                f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%).\n"
+                "→ **Sugerencia:** no hay evidencia clara de distorsión; razonable pasar a "
+                "ARMA.\n"
+                "→ **Punto de decisión del analista:** la decisión de intervenir sigue "
+                "siendo tuya."
             )
 
         lines += ["", verdict]
@@ -1800,20 +1816,24 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         dates = [date for _, _, date in outliers]
         if intervene_strong:
             rec = (
-                f"Hay {len(outliers)} outlier(s) en {', '.join(dates)} con distorsión significativa. "
-                "Añade una intervención (pulse o step) para cada fecha y re-estima antes de "
-                "identificar (p, q)."
+                f"PUNTO DE DECISIÓN (analista): {len(outliers)} anómalo(s) grande(s) en "
+                f"{', '.join(dates)} distorsionan FUERTEMENTE la ACF/PACF "
+                f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%). "
+                "Claude debe SUGERIR tratarlos con intervenciones (pulse/step) antes de "
+                "identificar (p, q), explicando la distorsión calibrada — pero la decisión "
+                "de intervenir ahora vs. pasar a ARMA la confirma el analista."
             )
         elif intervene_mild:
             rec = (
-                f"Hay {len(outliers)} outlier(s) en {', '.join(dates)} con distorsión moderada. "
-                "Considera añadir intervención, pero también puedes proceder con ARMA y "
-                "ver si los residuos quedan limpios."
+                f"PUNTO DE DECISIÓN (analista): {len(outliers)} anómalo(s) en "
+                f"{', '.join(dates)} con distorsión moderada. "
+                "Claude puede sugerir intervenir, pero también es válido pasar a ARMA y ver "
+                "si los residuos quedan limpios. Decide el analista."
             )
         else:
             rec = (
-                f"Los outliers en {', '.join(dates)} tienen impacto leve sobre la ACF/PACF. "
-                "Procede con la especificación ARMA directamente."
+                f"Los anómalos en {', '.join(dates)} tienen impacto leve sobre la ACF/PACF. "
+                "Razonable pasar a ARMA; la decisión de intervenir es del analista."
             )
 
     return Description(
@@ -1827,6 +1847,9 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
                          for i, z_i, date in outliers],
             "has_distortion": len(outliers) > 0,
             "acf_contributions": affected_lags,
+            "var_outlier_pct": var_max,        # % varianza del mayor anómalo
+            "acf_max_pct": max_acf_pct,         # % distorsión ACF en el retardo más afectado
+            "distortion_level": distortion_level,  # none|light|moderate|strong
         },
     )
 
