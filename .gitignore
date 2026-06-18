@@ -5,3 +5,7 @@ __pycache__/
 dist/
 build/
 .claude/
+
+# Live analysis outputs go to cases/<serie>/work/ (not versioned).
+# Committed case-study artifacts + test fixtures stay at cases/<serie>/ root.
+cases/**/work/

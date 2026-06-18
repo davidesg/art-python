@@ -43,10 +43,19 @@ CASO 1 — El usuario proporciona datos (Excel, CSV, lista de números):
 CASO 2 — El usuario ya tiene un fichero .inp:
   → Úsalo directamente como inp_path en los tools de análisis.
 
+RUTAS DE SALIDA (output_path):
+  Dirige TODA salida de análisis en vivo (.inp/.pre/.out/.fuf/.html que generan
+  confirm_and_estimate, suggest_intervention_form, build_model, generate_forecast)
+  a `cases/<serie>/work/...`. Ese directorio NO se versiona. NUNCA escribas en
+  `cases/<serie>/` raíz: ahí viven los artefactos del caso de estudio y los
+  fixtures de test versionados, y los pisarías.
+
 CONSTRUCCIÓN DEL MODELO:
   confirm_and_estimate construye el fichero .inp del modelo desde cero a partir
   de los parámetros confirmados (λ, d, D, p, q, n_harmonics). Nunca busques ni
-  edites ficheros .inp de modelo manualmente.
+  edites ficheros .inp de modelo manualmente. Cada estimación produce además un
+  .pre (parámetros estimados, punto de partida del siguiente paso) y un .out
+  (resultados), como hace fue.
 
   build_model es el MISMO motor en ambos modos (autónomo y guiado), y solo
   cambia quién decide:
