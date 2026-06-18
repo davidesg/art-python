@@ -1,0 +1,37 @@
+# ATWS — Box-Jenkins-Treadway time series suite
+
+> A four-part Python suite for univariate time series modelling following the
+> Box-Jenkins-Treadway methodology, with an MCP server so an LLM can operate it.
+> Components: fue (estimation + FUF forecasting), pyfug (graphics), art-tseries
+> (model building + MCP). The method is iterative and decision-driven: the suite
+> supplies evidence (graphs, tests, numbers); the agent/analyst supplies criterion.
+
+## Operating the suite (read these first)
+
+- [AGENTS.md](AGENTS.md): how an AI agent drives the suite — modes, non-negotiable
+  rules (always present the model; anomalies are the analyst's decision; sequential
+  construction from the previous optimum), and the .inp/.pre/.out/.fuf I/O conventions.
+- [docs/TOOLS.md](docs/TOOLS.md): the 32 MCP tools, grouped by Box-Jenkins-Treadway stage.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): suite architecture, the
+  evidence-vs-criterion philosophy, guided vs autonomous, the policy/pipeline design.
+
+## Install and connect
+
+- `pip install atws` installs the whole suite + the `art-mcp` MCP server.
+- `claude mcp add art -- art-mcp` connects it to Claude Code.
+
+## Packages
+
+- [README.md](README.md): ART overview, install, MCP usage, library usage.
+- fue (PyPI): exact ML estimation engine + FUF forecasting (C engine + pure-Python fallback).
+- pyfug (PyPI): Jenkins-Treadway high-definition graphics.
+
+## Key concepts
+
+- Guided mode: analyst decides at each node, agent advises. Autonomous mode:
+  build_model decides and presents a final model (same engine, different "who confirms").
+- Every estimation presents: the model equation (parameters + SE) and the residual
+  diagnostics (residuals + ACF/PACF), titled with the model name.
+- DCD = non-invertibility test (Davis-Chen-Dunsmuir); MEG = stochastic seasonality
+  evaluation frequency by frequency, including the Nyquist; Shin-Fuller = formal
+  non-stationarity test.
