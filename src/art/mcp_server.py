@@ -270,7 +270,7 @@ def _plot_series_at_d(ts, lam: float, d: int) -> str | None:
 
         off       = (int(start[1]) - 1) + d
         new_start = (int(start[0]) + off // freq, off % freq + 1)
-        title     = transform_label(lam, d, 0, freq)
+        title     = transform_label(lam, d, 0, freq, name=ts.name or "")
 
         pf  = _pyfug_ts(w, freq, new_start, name=title)
         fig = _pyfug_combined(pf, title=title)
@@ -1353,29 +1353,28 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             from art import policy as _pol
             _az = _pol.THRESHOLDS["outlier_autoscan"]
 
-            # B1 path: estimate harmonics-only first, then outlier cycle, then ARMA
+            # B1 path: estimate harmonics-only first; treating anomalies is the
+            # analyst's OPTION (never required), then ARMA identification.
             b1_steps = (
                 "\n\n### Ruta B1 (Treadway, D=0 + armónicos estacionales)\n\n"
-                "Secuencia obligatoria — **intervenciones ANTES de ARMA**:\n\n"
+                "Secuencia (tratar anómalos es OPCIONAL — lo decide el analista, "
+                "nunca es obligatorio):\n\n"
                 f"**1.** Estima m00 (armónicos estacionales, sin ARMA):\n"
                 f"```\nconfirm_and_estimate(\n"
                 f"    inp_path=\"{inp_path}\",\n"
-                f"    output_path=\"cases/{sname}/{sname}_m00.inp\",\n"
+                f"    output_path=\"cases/{sname}/work/{sname}_m00.inp\",\n"
                 f"    lam={lam}, d={d}, D=0, p=0, q=0, n_harmonics={n_harm}\n)\n```\n"
                 f"*({n_harm} pares cos/sin + alter Nyquist = {n_harm + 1} componentes estacionales)*\n\n"
-                f"**2.** Escanea residuos de m00 (outliers > {_az}σ):\n"
-                f"```\npreliminary_outlier_scan(\n"
-                f"    inp_path=\"cases/{sname}/{sname}_m00.pre\",\n"
-                f"    d=0, D=0, lam=1.0, threshold={_az}\n)\n```\n\n"
-                "**3.** [Ciclo hasta residuos limpios]:\n"
-                "    `suggest_intervention_form` → `confirm_and_estimate` → "
-                "`preliminary_outlier_scan`\n"
-                "    Cada estimación guarda el `.pre` automáticamente.\n\n"
-                "**4.** Cuando los residuos estén limpios, identifica ARMA sobre ellos:\n"
+                f"**2.** El escaneo de anómalos viene LATENTE en la salida de m00. "
+                f"Solo si hay anómalos grandes que distorsionan FUERTEMENTE la ACF/PACF, "
+                f"SUGIERE intervenir (`suggest_intervention_form`, una a una) — pero la "
+                f"decisión es del analista. Si la distorsión es leve, ve directo a ARMA.\n\n"
+                "**3.** Identifica ARMA sobre los residuos del modelo actual "
+                "(m00, o el último `.pre` si el analista decidió intervenir):\n"
                 f"```\nguided_identification(\n"
                 f"    inp_path=\"{inp_path}\",\n"
                 f"    lam={lam}, d={d}, D=0,\n"
-                f"    pre_path=\"cases/{sname}/{sname}_mNN.pre\"\n)\n```"
+                f"    pre_path=\"cases/{sname}/work/{sname}_<modelo>.pre\"\n)\n```"
             )
 
             # B2 path: go directly to ARMA identification on ∇∇_s series

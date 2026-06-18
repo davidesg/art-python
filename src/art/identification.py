@@ -99,8 +99,13 @@ _SUB = str.maketrans("0123456789", "₀₁₂₃₄₅₆₇₈₉")
 _SUP = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
 
 
-def transform_label(lam: float, nrdiff: int, nadiff: int, freq: int) -> str:
-    """Human-readable label for the transformed series, e.g. '∇²∇₁₂ ln P'."""
+def transform_label(lam: float, nrdiff: int, nadiff: int, freq: int,
+                    name: str = "") -> str:
+    """Human-readable label for the transformed series, e.g. '∇²∇₁₂ ln IPC_ES'.
+
+    *name* is the series name (the variable being transformed); when given it is
+    appended so titles read e.g. '∇ ln IPC_ES' instead of a generic '∇ ln'.
+    """
     bc = boxcox_label(lam)
     diff = ""
     if nrdiff == 1:
@@ -112,7 +117,11 @@ def transform_label(lam: float, nrdiff: int, nadiff: int, freq: int) -> str:
         sdiff = f"∇{str(freq).translate(_SUB)}"
     elif nadiff > 1:
         sdiff = f"∇{str(freq).translate(_SUB)}{str(nadiff).translate(_SUP)}"
-    return f"{diff}{sdiff}{bc}"
+    op = f"{diff}{sdiff}{bc}"
+    if name:
+        sep = " " if op else ""
+        return f"{op}{sep}{name}"
+    return op
 
 
 # ---------------------------------------------------------------------------
