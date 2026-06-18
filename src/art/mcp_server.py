@@ -72,17 +72,20 @@ CONSTRUCCIÓN DEL MODELO:
 REGLA GENERAL — PRESENTAR SIEMPRE EL MODELO ESTIMADO
 ══════════════════════════════════════════════════════
 CADA vez que estimas un modelo (confirm_and_estimate, suggest_intervention_form,
-build_model, estimate_and_diagnose), la respuesta del tool incluye el bloque
-"MODELO ESTIMADO" (la ECUACIÓN con parámetros y errores estándar) + la diagnosis.
-DEBES presentarlos al analista en ESTE ORDEN, sin resumir ni omitir:
-  1º PRIMERO la ECUACIÓN: pega el bloque "MODELO ESTIMADO: <modelo>" tal cual en
-     un bloque de código monospace (```), verbatim. Es LA presentación del modelo.
+build_model, estimate_and_diagnose), la respuesta del tool trae la ECUACIÓN del
+modelo dentro de un bloque de código (```), precedida de una marca
+"[Claude: muestra ... TAL CUAL ...]", y la diagnosis. Preséntalos en ESTE ORDEN:
+  1º PRIMERO la ECUACIÓN: copia el bloque de código ``` con "MODELO ESTIMADO:
+     <modelo>" EXACTAMENTE como viene, verbatim. Es LA presentación autoritativa
+     del modelo.
   2º LUEGO la IMAGEN del gráfico de residuos (titulado "A.<modelo>").
   3º comenta significatividad (|t|>2), Q-test, JB y el veredicto.
+PROHIBIDO: NUNCA construyas tu propia tabla o ecuación de parámetros — puede
+tener errores (signos, SE, convención). La del tool es la única autoritativa.
 El título de la ecuación ("MODELO ESTIMADO: IPC_ES_m00") y el del gráfico
 ("A.IPC_ES_m00") comparten el nombre del modelo: así el analista asocia ecuación
-y gráfico. En modo guiado el analista SOLO ve lo que tú muestras; sin la ecuación
-no puede decidir. Esquema (tesis): estimar → ECUACIÓN → gráfico residuos → decisión.
+y gráfico. En guiado el analista SOLO ve lo que muestras; sin la ecuación no
+decide. Esquema (tesis): estimar → ECUACIÓN (verbatim) → gráfico → decisión.
 
 ══════════════════════════════════════════════════════
 PROTOCOLO GUIADO — 4 ETAPAS
@@ -223,6 +226,26 @@ def _result(desc) -> list:
 def _err(msg: str) -> list:
     from mcp.types import TextContent
     return [TextContent(type="text", text=f"❌ Error: {msg}")]
+
+
+def _equation_for_prompt(ts, model) -> str:
+    """The estimated-model equation wrapped for the prompt: a meta-directive to
+    Claude + the authoritative equation in a code fence to be shown VERBATIM.
+
+    model_equation is the authoritative presentation of the model; Claude must
+    show this block as-is and must NOT rebuild its own parameter table (which can
+    be wrong). The fences preserve the monospace decimal alignment.
+    """
+    try:
+        from art.describe import model_equation as _model_eq
+        eq = _model_eq(ts, model)
+    except Exception as _eq_exc:
+        return f"⚠ *[model_equation error: {_eq_exc}]*"
+    return (
+        "_[Claude: muestra al analista el bloque siguiente TAL CUAL; NO construyas "
+        "tu propia tabla/ecuación de parámetros]_\n\n"
+        "```\n" + eq + "\n```"
+    )
 
 
 def _show_fig(b64: str | None, label: str = "art") -> None:
@@ -591,11 +614,10 @@ def model_equation_display(inp_path: str) -> list:
     inp_path : path to the .inp or .pre file with the estimated model
     """
     try:
-        from art.describe import model_equation
         from mcp.types import TextContent
         ts, m = _load_ts_model(inp_path)
         m.fit()
-        eq_text = model_equation(ts, m)
+        eq_text = _equation_for_prompt(ts, m)
         return [TextContent(type="text", text=eq_text)]
     except Exception:
         return _err(traceback.format_exc())
@@ -624,8 +646,7 @@ def estimate_and_diagnose(inp_path: str) -> list:
         ts, m = _load_ts_model(inp_path)
         m.fit()
         try:
-            from art.describe import model_equation as _model_eq
-            eq_text = _model_eq(ts, m)
+            eq_text = _equation_for_prompt(ts, m)
         except Exception as _eq_exc:
             eq_text = f"⚠ *[model_equation error: {_eq_exc}]*"
         desc = describe_diagnosis(m)
@@ -1006,8 +1027,7 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
                                 text="*No hay intervenciones no-estructurales en el modelo.*")]
 
         try:
-            from art.describe import model_equation as _model_eq
-            eq_text = _model_eq(ts, m)
+            eq_text = _equation_for_prompt(ts, m)
         except Exception as _eq_exc:
             eq_text = f"⚠ *[model_equation error: {_eq_exc}]*"
 
@@ -1686,8 +1706,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
 
         # Model equation replaces the parameter table
         try:
-            from art.describe import model_equation as _model_eq
-            eq_text = _model_eq(ts, m)
+            eq_text = _equation_for_prompt(ts, m)
         except Exception as _eq_exc:
             eq_text = f"⚠ *[model_equation error: {_eq_exc}]*"
 
@@ -2250,8 +2269,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         diag = describe_diagnosis(m_fit)
 
         try:
-            from art.describe import model_equation as _model_eq
-            eq_text = _model_eq(ts, m_fit)
+            eq_text = _equation_for_prompt(ts, m_fit)
         except Exception as _eq_exc:
             eq_text = f"⚠ *[model_equation error: {_eq_exc}]*"
 
@@ -2499,8 +2517,7 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
         # ── Model equation and final description ──────────────────────────
         if m_fit is not None:
             try:
-                from art.describe import model_equation as _model_eq
-                eq_text = _model_eq(ts, m_fit)
+                eq_text = _equation_for_prompt(ts, m_fit)
             except Exception as _eq_exc:
                 eq_text = f"⚠ *[model_equation error: {_eq_exc}]*"
             diag_desc = describe_diagnosis(m_fit)
