@@ -1648,11 +1648,21 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         # Diagnosis
         diag = describe_diagnosis(m)
 
-        # Auto-save fitted model as .pre (same name as .inp but .pre extension)
-        pre_path = os.path.splitext(output_path)[0] + ".pre"
+        # Mirror fue's estimate→outputs convention: a .pre (=.inp with the
+        # estimated parameters as initial values, so the next step starts from
+        # this optimum) and a .out (the ASCII results report).
+        base     = os.path.splitext(output_path)[0]
+        pre_path = base + ".pre"
+        out_path = base + ".out"
         try:
             m.write_pre(pre_path)
-            pre_note = f"\n\n*Modelo guardado en: {output_path}  |  parámetros en: {pre_path}*"
+            try:
+                m.write_out(out_path)
+                pre_note = (f"\n\n*Modelo guardado en: {output_path}  |  "
+                            f"parámetros: {pre_path}  |  resultados: {out_path}*")
+            except Exception:
+                pre_note = (f"\n\n*Modelo guardado en: {output_path}  |  "
+                            f"parámetros: {pre_path}*")
         except Exception:
             pre_note = f"\n\n*Modelo guardado en: {output_path}*"
 
@@ -2214,7 +2224,23 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                 figure_b64=diag.figure_b64,
             )
 
-        new_pre_path = os.path.splitext(output_path)[0] + ".pre"
+        # Persist the fitted model as .pre so the NEXT step starts from this
+        # optimum (sequential construction: each estimate begins at the previous
+        # likelihood optimum, not from scratch). The .pre stores estimated
+        # parameters as initial values.
+        _base = os.path.splitext(output_path)[0]
+        new_pre_path = _base + ".pre"
+        new_out_path = _base + ".out"
+        try:
+            m_fit.write_pre(new_pre_path)
+            try:
+                m_fit.write_out(new_out_path)
+                pre_note = (f"  |  pre-estimaciones: {new_pre_path}  |  "
+                            f"resultados: {new_out_path}")
+            except Exception:
+                pre_note = f"  |  pre-estimaciones: {new_pre_path}"
+        except Exception:
+            pre_note = ""
         lam_fit = float(getattr(m_fit, "boxlam", 0.0) or 0.0)
         d_fit   = int(getattr(m_fit, "d", 0) or 0)
         D_fit   = int(getattr(m_fit, "D", 0) or 0)
@@ -2234,7 +2260,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             + "\n\n---\n\n"
             + diag.summary + "\n\n---\n" + diag.recommendation
             + scan_section
-            + f"\n\n*Modelo actualizado en: {output_path}*"
+            + f"\n\n*Modelo actualizado en: {output_path}{pre_note}*"
             + (f"\n\n{guion_note}" if guion_note else "")
         )
 
