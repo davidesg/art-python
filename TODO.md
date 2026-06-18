@@ -2,6 +2,25 @@
 
 ## Bugs conocidos
 
+- [ ] **MEG no evalúa la frecuencia de Nyquist (bienal, f=s/2)**: `meg`
+      (`art/formal_tests.py`) por defecto contrasta solo `f=1…s/2−1` (5 en
+      mensual), pero la tesis (chap2.4) y Abraham & Box (1978, Tabla A1)
+      especifican `f=1…s/2` (6 en mensual), incluyendo el Nyquist.
+      **NO es limitación del motor** — la nota del docstring de `meg`
+      ("requires first-order MA handling not yet implemented") es incorrecta:
+      el factor de Nyquist es de primer orden `(1+B)` (raíz −1), un MA con
+      parámetro negativo que fue estima sin problema, y el AR_f en f=6 ya está
+      implementado. Para evaluar f=6 basta extender `meg`:
+        • eliminar el término determinista `alter` (=(−1)ᵗ) en f=s/2 (no cos/sin),
+        • añadir la diferencia con raíz unitaria en Nyquist (AR_f homogéneamente
+          no estacionario / `ifadf[s/2]=1` → `(1+B)`),
+        • añadir el MA_f testigo con preestimación −0.8/−0.9,
+        • aplicar DCD_f como en el resto de frecuencias.
+      Actualizar `frequencies = range(1, s//2+1)`, el removal de `alter`, y el
+      test `test_meg_returns_five_results` (5→6). Ref: Abraham-Box Tabla A1
+      (`literature/Abraham-DeterministicForecastAdaptiveTimeDependent-1978.pdf`).
+      Corregir también la nota errónea del docstring de `meg`.
+
 - [x] **nlags en series cortas** (RESUELTO): pyfug `plot_combined` pedía
       `nlags = 3·(f+1)` (convención J-T) y solo capaba a `n−1`, pero statsmodels
       `pacf` exige `nlags < n/2` → ValueError con muestras cortas (n=72 mensual).
