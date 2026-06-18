@@ -69,6 +69,20 @@ CONSTRUCCIÓN DEL MODELO:
    y quieres que el ciclo se complete de una vez con tus decisiones fijadas.
 
 ══════════════════════════════════════════════════════
+REGLA GENERAL — PRESENTAR SIEMPRE EL MODELO ESTIMADO
+══════════════════════════════════════════════════════
+CADA vez que estimas un modelo (confirm_and_estimate, suggest_intervention_form,
+build_model, estimate_and_diagnose), la respuesta del tool incluye el bloque
+"MODELO ESTIMADO" (la ECUACIÓN con parámetros y errores estándar) + la diagnosis.
+DEBES PRESENTARLOS al analista VERBATIM, no resumirlos ni omitirlos:
+  1) muestra el bloque de ecuación tal cual (en bloque de código monospace),
+  2) muestra el gráfico de diagnosis,
+  3) comenta significatividad (|t|>2), Q-test, JB, y el veredicto.
+En modo guiado el analista SOLO ve lo que tú muestras; sin la ecuación no puede
+decidir. Estimar sin presentar el modelo = análisis caótico. Esquema obligatorio
+(como en la tesis): estimar → PRESENTAR modelo (ecuación) → diagnosis → decisión.
+
+══════════════════════════════════════════════════════
 PROTOCOLO GUIADO — 4 ETAPAS
 ══════════════════════════════════════════════════════
 
@@ -118,8 +132,9 @@ LLAMADA 4 — guided_identification(inp_path, lam=X, d=<confirmado>, D=<confirma
 
 DESPUÉS DE LLAMADA 4 — Modelo de referencia (si D=0):
   → confirm_and_estimate con p=0, q=0, n_harmonics=<freq//2-1>,
-    output_path=/tmp/<serie>_ref.inp
-  → model_equation_display con ese output_path
+    output_path=cases/<serie>/work/<serie>_ref.inp
+    (incluye ya la ecuación + diagnosis: PRESÉNTALAS — no llames
+     model_equation_display por separado)
   → Evalúa ACF/PACF del modelo de referencia:
     1. Lags s, 2s, 3s limpios → representación armónica adecuada
     2. Lags 1,2,3 con estructura → ajusta p, q
@@ -128,10 +143,10 @@ DESPUÉS DE LLAMADA 4 — Modelo de referencia (si D=0):
 ETAPA 2 — ESTIMACIÓN DEL MODELO ARMA ELEGIDO
 ─────────────────────────────────────────────────────
   → Llama confirm_and_estimate con (λ, d, D, p, q, n_harmonics=freq//2-1) confirmados
-    output_path: usa /tmp/<serie>_v1.inp o la ruta que el usuario indique
-    Este tool construye el INP, estima y devuelve la ecuación + diagnosis en una sola respuesta.
+    output_path: cases/<serie>/work/<serie>_v1.inp (NUNCA la raíz cases/<serie>/)
+    Este tool construye el INP, estima y devuelve la ECUACIÓN + diagnosis en una sola respuesta.
     NO llames model_equation_display por separado — la ecuación ya viene incluida.
-  → MUESTRA el gráfico diagnóstico Treadway
+  → PRESENTA la ecuación del modelo (verbatim) y MUESTRA el gráfico diagnóstico Treadway
   → Discute: ¿parámetros significativos (|t|>2)? ¿Q-test pasa? ¿JB pasa?
 
 ─────────────────────────────────────────────────────
@@ -1138,11 +1153,33 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
             _n_free(m.ar_s, m.ar_s_free) > 0,
             _n_free(m.ma_s, m.ma_s_free) > 0,
         ])
+        level = scan.data.get("distortion_level", "none")
+        n_out = scan.data.get("n_outliers", 0)
+        var_o = scan.data.get("var_outlier_pct", 0.0)
+        acf_o = scan.data.get("acf_max_pct", 0.0)
+
+        # LATENT scan: it always runs, but only SURFACES a decision node when the
+        # anomalies are large AND strongly distorting the ACF/PACF. Otherwise a
+        # one-line mention and proceed (no figure) — keeps the flow uncluttered.
+        if level != "strong":
+            if n_out == 0:
+                note = "anómalos revisados, ninguno significativo"
+            else:
+                lvl = "moderada" if level == "moderate" else "leve"
+                note = (f"anómalos revisados ({n_out}): distorsión {lvl} "
+                        f"(var_outlier={var_o:.1f}%, ACF_max={acf_o:.0f}%), no distorsionan "
+                        "la ACF/PACF")
+            nxt = ("procede a la identificación ARMA" if not has_arma
+                   else "procede a contrastes formales")
+            return ("\n\n---\n\n*✓ Escaneo de anómalos (latente): " + note + " → " + nxt
+                    + ". Intervenir sigue siendo opción del analista.*"), None
+
+        # Distortion STRONG → surface the decision node (calibration + A/B + figure).
         if has_arma:
             ab_choice = (
-                "\n\n**PUNTO DE DECISIÓN (analista).** Claude: calibra la distorsión "
-                "(var_outlier, ACF_max, retardos afectados del escaneo) y SUGIERE, pero la "
-                "decisión la confirma el analista.\n\n"
+                "\n\n**PUNTO DE DECISIÓN (analista).** Anómalos grandes distorsionan con "
+                "fuerza la ACF/PACF. Claude: presenta la distorsión calibrada y SUGIERE; "
+                "decide el analista.\n\n"
                 "**A) Añadir intervención** (si aún hay anomalías que distorsionan):\n"
                 f"→ `suggest_intervention_form(inp_path=\"{pre_path}\", "
                 "output_path=<próxima_versión.inp>, date=\"MM/YYYY\", form=\"auto\")`\n\n"
@@ -1152,15 +1189,14 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
         else:
             ab_choice = (
                 "\n\n**PUNTO DE DECISIÓN (analista): ¿tratar los anómalos ANTES de ARMA?**\n"
-                "Claude: calibra la distorsión sobre la ACF/PACF (var_outlier, ACF_max y "
-                "retardos afectados, arriba) y SUGIERE intervenir si los anómalos son grandes "
-                "y la están distorsionando con fuerza; si la distorsión es leve, sugiere pasar "
-                "a ARMA. En ambos casos la decisión la confirma el analista.\n\n"
+                "Anómalos grandes están distorsionando con fuerza la ACF/PACF. Claude: "
+                "presenta la distorsión calibrada (var_outlier, ACF_max, retardos) y SUGIERE "
+                "intervenir antes de ARMA; decide el analista.\n\n"
                 "**A) Añadir intervención** — intervenciones ANTES de ARMA:\n"
                 f"→ `suggest_intervention_form(inp_path=\"{pre_path}\", "
                 "output_path=<próxima_versión.inp>, date=\"MM/YYYY\", form=\"auto\")`\n"
                 "   Repite hasta que los residuos estén limpios.\n\n"
-                "**B) Identificar ARMA** — si la distorsión es leve o los residuos ya limpios:\n"
+                "**B) Identificar ARMA** — si decides no intervenir:\n"
                 f"→ `guided_identification(inp_path=\"{inp_path}\", "
                 f"lam={lam}, d={d}, D={D}, pre_path=\"{pre_path}\")`"
             )
