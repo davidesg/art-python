@@ -315,7 +315,7 @@ def shin_fuller(model) -> ShinFullerResult:
 
 
 # ---------------------------------------------------------------------------
-# DCD (Durbin-Cantrell-Davidson) non-invertibility test
+# DCD (Davis-Chen-Dunsmuir) non-invertibility test
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -430,7 +430,7 @@ def _extract_ma_param(model, factor_index: int) -> float:
 
 def dcd(model) -> list[DCDResult]:
     """
-    DCD (Durbin-Cantrell-Davidson) non-invertibility test for regular MA factors.
+    DCD (Davis-Chen-Dunsmuir) non-invertibility test for regular MA factors.
 
     Tests H₀: θ = 1 (unit root in the MA polynomial) for each free regular MA(1)
     factor.  Under H₀ the MA factor is at its non-invertibility boundary and the

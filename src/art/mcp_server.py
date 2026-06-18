@@ -2623,6 +2623,31 @@ def _fuf_path(path: str) -> str:
     return path
 
 
+def _forecast_table(ts, fr, horizon: int) -> str:
+    """Markdown table of the forecast values so the LLM can read them directly.
+
+    fr is a fue.ForecastResult: .level (point forecast, original scale),
+    .level_std (s.e.), .seasonal_diff (year-on-year %).  95% band = level ± 1.96·se.
+    """
+    yoy = getattr(fr, "seasonal_diff", None)
+    has_yoy = yoy is not None and len(yoy) == len(fr.level)
+    header = ("| # | Fecha | Previsión | IC 95% (±1.96·s.e.) "
+              + ("| Δ% interanual " if has_yoy else "") + "|")
+    sep    = ("|---|-------|-----------|---------------------"
+              + ("|---------------" if has_yoy else "") + "|")
+    rows = [header, sep]
+    for h in range(horizon):
+        date = _forecast_date(ts.start, ts.nobs + 1, ts.freq, h)
+        lvl  = float(fr.level[h])
+        se   = float(fr.level_std[h])
+        lo, hi = lvl - 1.96 * se, lvl + 1.96 * se
+        row = f"| {h+1} | {date} | {lvl:.4f} | [{lo:.4f}, {hi:.4f}] "
+        if has_yoy:
+            row += f"| {float(yoy[h]):+.2f}% "
+        rows.append(row + "|")
+    return "\n".join(rows)
+
+
 # ---------------------------------------------------------------------------
 # Tool: generate_forecast — fuf previsión desde modelo estimado  (Bloque R)
 # ---------------------------------------------------------------------------
@@ -2671,10 +2696,13 @@ def generate_forecast(inp_path: str,
         last_date = _forecast_date(ts_fuf.start, ts_fuf.nobs, ts_fuf.freq, 0)
         end_date  = _forecast_date(ts_fuf.start, ts_fuf.nobs + 1, ts_fuf.freq, horizon - 1)
 
+        table = _forecast_table(ts_fuf, fr, horizon)
+
         text = (
             f"## Previsiones — {ts_fuf.name or 'Serie'} "
             f"({last_date} → {end_date}, horizonte={horizon})\n\n"
             f"σ̂_a = {fr.sigma2**0.5:.6f}\n\n"
+            + table + "\n\n"
             f"Archivo fuf: {output_fuf_path}\n"
             f"Informe HTML: {output_html}"
         )
@@ -2773,11 +2801,14 @@ def update_and_forecast(fuf_path: str,
         if track_lines:
             track_block = "\nSeguimiento (actual vs. previsión anterior):\n" + "\n".join(track_lines) + "\n"
 
+        table = _forecast_table(ts_new, fr_new, L_old)
+
         text = (
             f"## Previsiones actualizadas — {ts_new.name or 'Serie'} "
             f"(+{n_new} obs → {end_date})\n"
             + track_block
-            + f"\nσ̂_a = {sig2**0.5:.6f}\n"
+            + f"\nσ̂_a = {sig2**0.5:.6f}\n\n"
+            + table + "\n\n"
             + f"Archivo fuf actualizado: {out_path}\n"
             + f"Informe HTML: {output_html}"
         )
