@@ -738,11 +738,13 @@ def model_equation(ts, model) -> str:
             self.v = []   # chars for value line
             self.s = []   # chars for SE line (may be longer than v)
 
-        def add(self, text: str, se: str = ""):
+        def add(self, text: str, se: str = "", align_dot: bool = False):
             """
             Append text to value line.
-            If se given, write it into se line starting at the current column
-            (where this text begins), without padding the value line.
+            If se given, write it into se line. By default it starts at the
+            column where this text begins; with align_dot=True the SE is shifted
+            so its decimal point sits directly under the coefficient's decimal
+            point (both value and se must contain a '.').
             """
             col = len(self.v)   # current position in value line
             self.v += list(text)
@@ -750,8 +752,13 @@ def model_equation(ts, model) -> str:
             while len(self.s) < col + len(text):
                 self.s.append(" ")
             if se:
+                se_col = col
+                if align_dot and "." in text and "." in se:
+                    se_col = col + text.index(".") - se.index(".")
+                    if se_col < 0:
+                        se_col = 0
                 for i, c in enumerate(se):
-                    pos = col + i
+                    pos = se_col + i
                     while pos >= len(self.s):
                         self.s.append(" ")
                     self.s[pos] = c
@@ -781,7 +788,7 @@ def model_equation(ts, model) -> str:
             sign  = _sign_arma(v)
             v_str = _fv(abs(v))
             tl.add(f" {sign} ")          # " − " separator (no SE)
-            tl.add(v_str, _fse(se))      # coefficient with SE below it
+            tl.add(v_str, _fse(se), align_dot=True)  # coef + SE (dots aligned)
             tl.add(bpow)                 # B^k (no SE)
         tl.add(")")
         return tl.val(), tl.se_line()
@@ -824,7 +831,7 @@ def model_equation(ts, model) -> str:
                 v, se = (pi.pop() if om_f[0] else (om[0], 0.0))
                 tl = _TwoLine()
                 tl.add(f"  {_sign_det(v)} ")
-                tl.add(_fv(abs(v)), _fse(se) if om_f[0] else "")
+                tl.add(_fv(abs(v)), _fse(se) if om_f[0] else "", align_dot=True)
                 if dlt:
                     # Transfer function: ω / δ(B) · ξₜ
                     # _fmt_poly advances pi past the delta params (keeping alignment)
@@ -839,11 +846,11 @@ def model_equation(ts, model) -> str:
                 for i, (v0, free) in enumerate(zip(om, om_f)):
                     v, se = (pi.pop() if free else (v0, 0.0))
                     if i == 0:
-                        tl.add(_fv(v), _fse(se) if free else "")
+                        tl.add(_fv(v), _fse(se) if free else "", align_dot=True)
                     else:
                         bpow = "·B" if i == 1 else f"·B{_sup(i)}"
                         tl.add(f"  {_sign_det(v)} ")
-                        tl.add(_fv(abs(v)), _fse(se) if free else "")
+                        tl.add(_fv(abs(v)), _fse(se) if free else "", align_dot=True)
                         tl.add(bpow)
                 if dlt:
                     den_val, den_se = _fmt_poly(dlt, dlt_f)
@@ -867,7 +874,7 @@ def model_equation(ts, model) -> str:
             if not first:
                 tl.add("   ")
             tl.add(f"  {_sign_det(v)} ")
-            tl.add(_fv(abs(v)), _fse(se) if free else "")
+            tl.add(_fv(abs(v)), _fse(se) if free else "", align_dot=True)
             tl.add(f" {label}")
             first = False
         harm_rows.append((tl.val(), tl.se_line()))
@@ -983,8 +990,13 @@ def model_equation(ts, model) -> str:
         mu_pfx_len = 0
 
     # Each item is (val_str, se_str) where se_str is pre-padded relative to
-    # the block's own start (matching _TwoLine.add semantics).
-    nt_se     = (" " * mu_pfx_len + mu_se_str) if (mu_se_str and mu_pfx_len) else ""
+    # the block's own start. Align the SE decimal point under the μ decimal point.
+    if mu_se_str and mu_pfx_len:
+        _dot_shift = ((mu_val_str.index(".") - mu_se_str.index("."))
+                      if ("." in mu_val_str and "." in mu_se_str) else 0)
+        nt_se = " " * max(0, mu_pfx_len + _dot_shift) + mu_se_str
+    else:
+        nt_se = ""
     lhs_items = []
     lhs_items.extend(left_blocks)
     lhs_items.append((nt_label, nt_se))
