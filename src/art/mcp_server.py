@@ -74,13 +74,15 @@ REGLA GENERAL — PRESENTAR SIEMPRE EL MODELO ESTIMADO
 CADA vez que estimas un modelo (confirm_and_estimate, suggest_intervention_form,
 build_model, estimate_and_diagnose), la respuesta del tool incluye el bloque
 "MODELO ESTIMADO" (la ECUACIÓN con parámetros y errores estándar) + la diagnosis.
-DEBES PRESENTARLOS al analista VERBATIM, no resumirlos ni omitirlos:
-  1) muestra el bloque de ecuación tal cual (en bloque de código monospace),
-  2) muestra el gráfico de diagnosis,
-  3) comenta significatividad (|t|>2), Q-test, JB, y el veredicto.
-En modo guiado el analista SOLO ve lo que tú muestras; sin la ecuación no puede
-decidir. Estimar sin presentar el modelo = análisis caótico. Esquema obligatorio
-(como en la tesis): estimar → PRESENTAR modelo (ecuación) → diagnosis → decisión.
+DEBES presentarlos al analista en ESTE ORDEN, sin resumir ni omitir:
+  1º PRIMERO la ECUACIÓN: pega el bloque "MODELO ESTIMADO: <modelo>" tal cual en
+     un bloque de código monospace (```), verbatim. Es LA presentación del modelo.
+  2º LUEGO la IMAGEN del gráfico de residuos (titulado "A.<modelo>").
+  3º comenta significatividad (|t|>2), Q-test, JB y el veredicto.
+El título de la ecuación ("MODELO ESTIMADO: IPC_ES_m00") y el del gráfico
+("A.IPC_ES_m00") comparten el nombre del modelo: así el analista asocia ecuación
+y gráfico. En modo guiado el analista SOLO ve lo que tú muestras; sin la ecuación
+no puede decidir. Esquema (tesis): estimar → ECUACIÓN → gráfico residuos → decisión.
 
 ══════════════════════════════════════════════════════
 PROTOCOLO GUIADO — 4 ETAPAS

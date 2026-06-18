@@ -1116,9 +1116,14 @@ def model_equation(ts, model) -> str:
     freq_lbl    = freq_labels.get(freq, f"freq={freq}")
     sep = "─" * 64
 
+    # Title uses the MODEL name (file stem, e.g. IPC_ES_m00) so the equation and
+    # its residual graph "A.<model>" share the same identifier; the equation body
+    # keeps the series name as the variable (e.g. "ln IPC_ESₜ").
+    mname = getattr(model, "_inp_stem", None) or ts_name
+
     lines = [
         sep,
-        f"  MODELO ESTIMADO: {ts_name}   (n={ts.nobs}, {freq_lbl})",
+        f"  MODELO ESTIMADO: {mname}   (n={ts.nobs}, {freq_lbl})",
         sep,
         "",
         f"  (1)  {_transform_label()} = Dₜ + Nₜ",
