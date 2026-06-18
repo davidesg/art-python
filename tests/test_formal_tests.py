@@ -783,18 +783,34 @@ class TestMEG_ChilePC6_Freq1:
 # ---------------------------------------------------------------------------
 
 def test_meg_all_harmonics_chile_pc6():
-    """meg(freq=None) returns s//2-1=5 results for monthly PC6."""
+    """meg(freq=None) returns s//2=6 results for monthly PC6 (incl. Nyquist)."""
     _skip_if_no_chile()
     ts, m = fue.inp.load(_PC6_INP)
     _force_fit_py(m)
     results = meg(m)
     s = m.series.freq
-    assert len(results) == s // 2 - 1          # 5 for monthly
-    assert [r.freq for r in results] == list(range(1, s // 2))
+    assert len(results) == s // 2              # 6 for monthly (includes f=6)
+    assert [r.freq for r in results] == list(range(1, s // 2 + 1))
     # freq=1 must be stochastic (confirmed by PC7)
     assert results[0].status == 'stochastic'
     # all results must not be ambiguous
     assert all(r.status != 'ambiguous' for r in results)
+
+
+def test_meg_nyquist_chile_pc6_deterministic():
+    """The Nyquist (biannual) frequency f=s/2 on PC6 is deterministic: the
+    first-order regular MA witness estimates ≈ −1 (non-invertible), so DCD does
+    not reject the unit root (Abraham & Box 1978, Table A1 factor 6 = (1+B))."""
+    _skip_if_no_chile()
+    ts, m = fue.inp.load(_PC6_INP)
+    _force_fit_py(m)
+    s = m.series.freq
+    res = meg(m, frequencies=[s // 2])
+    assert len(res) == 1
+    r = res[0]
+    assert r.freq == s // 2
+    assert r.status == 'deterministic'
+    assert r.dcd_result is not None and r.dcd_result.coef_free < -0.9
 
 
 # ---------------------------------------------------------------------------

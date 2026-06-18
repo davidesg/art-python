@@ -672,6 +672,34 @@ def dcd_f(model) -> list[DCDResult]:
     return results
 
 
+def _dcd_nyquist_ma(model, ma_index: int, freq: float) -> DCDResult:
+    """DCD non-invertibility test for the biannual (Nyquist) frequency f=s/2.
+
+    The seasonal factor at the Nyquist is the FIRST-order (1+B) (Abraham & Box
+    1978, Table A1, factor 6), so its overdifferencing witness is a regular
+    first-order MA (1+θ·B) tested against the non-invertible null θ=−1 (root −1),
+    not the second-order FixedFreqFactor used at f=1…s/2−1.
+
+    *model* must be the already-fitted augmented model whose regular MA factor
+    *ma_index* is the witness.  The constrained model fixes that factor at −1 and
+    re-estimates everything else (thesis §2.4: "modelo estimado con restricción").
+    """
+    L_free = float(model._result.loglik)
+    coef_free = _extract_ma_param(model, ma_index)
+
+    mc = copy.deepcopy(model)
+    mc._result = None
+    mc.ma[ma_index] = [-1.0]
+    mc.ma_free[ma_index] = [False]
+    mc.fit()
+    L_const = float(mc._result.loglik)
+
+    return DCDResult(
+        factor_index=ma_index, freq=freq, coef_free=coef_free, coef_null=-1.0,
+        loglik_free=L_free, loglik_constrained=L_const, lr=2.0 * (L_free - L_const),
+    )
+
+
 # ---------------------------------------------------------------------------
 # RV fixed-frequency test for AR(2) factors with complex roots
 # ---------------------------------------------------------------------------
@@ -920,27 +948,31 @@ def meg(model, frequencies=None) -> list[MEGResult]:
     """
     MEG stochastic seasonality evaluation.
 
-    For each seasonal harmonic frequency f, augments the model with:
-    - Individual annual difference factor (ifadf[f] = 1)
-    - Free MA_f testigo at f (initial coef = −0.9)
-    - Deterministic harmonics (cos/sin) at f are removed from interventions
-      because they are absorbed by the unit-root filter.
-
-    Then applies DCD_f on the MA_f testigo:
-    - MA_f invertible  (DCD_f rejects H₀: λ₂=−1) → genuine unit root
+    For each seasonal frequency f, augments the model with the homogeneously
+    non-stationary AR_f operator + a free MA_f testigo de sobrediferenciación,
+    then applies the DCD non-invertibility test on the witness:
+    - witness invertible  (DCD rejects H₀: unit root) → genuine unit root
       → **stochastic** seasonality at f.
-    - MA_f non-invertible (DCD_f does not reject) → unit root and testigo
-      cancel → **deterministic** seasonality at f.
+    - witness non-invertible (DCD does not reject) → AR_f and witness cancel
+      → **deterministic** seasonality at f.
     - Estimation failure → **ambiguous**.
+
+    Two regimes, per Abraham & Box (1978, Table A1):
+    - f = 1 … s/2 − 1 (regular harmonics): the seasonal factor is second-order
+      (1 − 2cos·B + B²) → ifadf[f]=1, the deterministic cos/sin at f are removed
+      (absorbed by the filter), and the witness is a second-order MA_f
+      (FixedFreqFactor, coef −0.9) tested via dcd_f.
+    - f = s/2 (Nyquist / biannual): the seasonal factor is first-order (1+B) →
+      ifadf[s/2]=1, the deterministic ``alter`` (−1)ᵗ term is removed, and the
+      witness is a regular first-order MA (1+θB, coef −0.9) tested via
+      _dcd_nyquist_ma at the null θ=−1.
 
     Parameters
     ----------
     model : fue.Model, already fitted (.fit() called)
     frequencies : list[int] or None
-        Harmonics to test (1-indexed).  None → all f = 1 … s//2 − 1.
-        The biannual frequency f = s//2 corresponds to the ``alter``
-        intervention and is excluded by default (requires first-order MA
-        handling not yet implemented).
+        Frequencies to test (1-indexed).  None → all f = 1 … s//2, including the
+        Nyquist (biannual) frequency f = s//2.
 
     Returns
     -------
@@ -957,7 +989,7 @@ def meg(model, frequencies=None) -> list[MEGResult]:
 
     s = model.series.freq
     if frequencies is None:
-        frequencies = list(range(1, s // 2))
+        frequencies = list(range(1, s // 2 + 1))   # includes the Nyquist f=s/2
 
     for f in frequencies:
         if not (1 <= f <= s // 2):
@@ -976,24 +1008,37 @@ def meg(model, frequencies=None) -> list[MEGResult]:
     for f in frequencies:
         mc = copy.deepcopy(model)
         mc._result = None
+        is_nyquist = (f == s // 2)
 
-        # Remove deterministic harmonics at f (they cancel with the unit root)
-        mc.interventions = [
-            itv for itv in mc.interventions
-            if not (itv.type in ('cos', 'sin') and itv.harmonic == float(f))
-        ]
+        if is_nyquist:
+            # Nyquist (biannual): the deterministic term is ``alter`` = (−1)ᵗ.
+            mc.interventions = [itv for itv in mc.interventions
+                                if itv.type != 'alter']
+        else:
+            # Regular harmonic: remove the cos/sin at f (absorbed by the filter).
+            mc.interventions = [
+                itv for itv in mc.interventions
+                if not (itv.type in ('cos', 'sin') and itv.harmonic == float(f))
+            ]
 
-        # Activate individual annual difference at f
+        # Activate the individual annual difference at f (homogeneously
+        # non-stationary AR_f: (1−2cos·B+B²) for regular f, (1+B) for Nyquist).
         n_slots = s // 2 + 1
         if len(mc.ifadf) < n_slots:
             mc.ifadf = mc.ifadf + [0] * (n_slots - len(mc.ifadf))
         mc.ifadf[f] = 1
 
-        # Append MA_f testigo (always last in the list)
-        testigo_idx = len(mc.ma_f)
-        mc.ma_f = list(mc.ma_f) + [FixedFreqFactor(freq=float(f), coef=-0.9, free=True)]
+        if is_nyquist:
+            # Witness = regular first-order MA (1+θB), matching the (1+B) factor.
+            witness_idx = len(mc.ma or [])
+            mc.ma = list(mc.ma or []) + [[-0.9]]
+            mc.ma_free = list(mc.ma_free or []) + [[True]]
+        else:
+            # Witness = second-order MA_f testigo (always last in the list).
+            witness_idx = len(mc.ma_f)
+            mc.ma_f = list(mc.ma_f) + [FixedFreqFactor(freq=float(f), coef=-0.9,
+                                                       free=True)]
 
-        # Estimate augmented model (C backend, now supports AR+MA_f)
         try:
             mc.fit()
         except Exception:
@@ -1001,10 +1046,13 @@ def meg(model, frequencies=None) -> list[MEGResult]:
                                      status='ambiguous'))
             continue
 
-        # Apply DCD_f; pick only the result for the testigo we added
         try:
-            dcd_results = dcd_f(mc)
-            r = next((r for r in dcd_results if r.factor_index == testigo_idx), None)
+            if is_nyquist:
+                r = _dcd_nyquist_ma(mc, witness_idx, float(f))
+            else:
+                dcd_results = dcd_f(mc)
+                r = next((r for r in dcd_results
+                          if r.factor_index == witness_idx), None)
             if r is None:
                 results.append(MEGResult(freq=f, coef_ma_f=None, dcd_result=None,
                                          status='ambiguous'))
