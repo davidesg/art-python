@@ -5,13 +5,26 @@ build-backend = "setuptools.build_meta"
 [project]
 name            = "art-tseries"
 version         = "0.1.0"
-description     = "A time series identification and model-building toolkit (uses fue)"
+description     = "Box-Jenkins-Treadway time series model-building toolkit + MCP server (uses fue and pyfug)"
+readme          = "README.md"
+license         = { text = "GPL-2.0-or-later" }
 requires-python = ">=3.10"
 authors         = [
     { name = "David E. Guerrero", email = "davidesg@ucm.es" },
 ]
+keywords        = ["time series", "ARIMA", "Box-Jenkins", "Treadway", "MCP", "forecasting"]
+classifiers     = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 dependencies = [
-    "fue>=0.1.2",
+    "fue>=0.1.3",
+    "pyfug>=2.0",
     "numpy>=1.24",
     "matplotlib>=3.7",
     "scipy>=1.10",
