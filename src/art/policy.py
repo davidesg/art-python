@@ -82,6 +82,32 @@ def decide_orders(specs) -> tuple[int, int]:
     *specs* is the ordered list returned by art.model_detection.suggest_orders;
     each element has .p and .q.  Falls back to (0, 1) — a plain MA(1) — when no
     suggestion is available.
+
+    Heuristic — PRICE/INDEX series, AR(1) vs MA(1) tie-break
+    -------------------------------------------------------
+    On a price/index series (CPI/IPC, modelled in logs with d=1, i.e. the
+    differenced series is monthly inflation), identification often ties between
+    AR(1) and MA(1): a single dominant spike at lag 1 in both ACF and PACF, and
+    the two candidates only separated by a sliver of ACF/PACF similarity. When
+    the *fit* also fails to discriminate — ΔAIC < 2, equal parsimony, both pass
+    Q-test and Jarque-Bera, near-identical residual ACF/PACF — break the tie in
+    favour of **AR(1)** (p=1, q=0).
+
+    Rationale: in a statistical tie, economic theory should decide. AR(1) on
+    inflation (π̃ₜ = φ·π̃ₜ₋₁ + aₜ) has a positive, geometrically decaying impulse
+    response — i.e. *inflation persistence / inertia*, a robust, theoretically
+    grounded regularity (staggered Calvo/Taylor pricing, indexation, adaptive
+    expectations; Fuhrer, Stock-Watson, Pivetta-Reis). φ is a directly
+    interpretable measure of that inertia. MA(1) implies only ~1 month of memory
+    and, in AR(∞) form, sign-alternating coefficients with no clean structural
+    story. Confirmed on the IPC_ES case (2002:01–2019:12): AR(1) φ≈0.40 chosen
+    over MA(1) θ≈0.43 despite ΔAIC=1.12 nominally favouring MA(1).
+
+    Scope: applies only to price/index series and only under a genuine tie; when
+    the statistics *do* discriminate, fit wins. Currently a documented guided-mode
+    rule (the analyst, with Claude, applies it); not yet auto-applied here because
+    decide_orders does not receive the series-domain flag or the candidate fit
+    stats needed to detect the tie safely.
     """
     if specs:
         top = specs[0]
