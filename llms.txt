@@ -1,4 +1,4 @@
-# ATWS — Box-Jenkins-Treadway time series suite
+# ATSW — Box-Jenkins-Treadway time series suite
 
 > A four-part Python suite for univariate time series modelling following the
 > Box-Jenkins-Treadway methodology, with an MCP server so an LLM can operate it.
@@ -17,7 +17,7 @@
 
 ## Install and connect
 
-- `pip install atws` installs the whole suite + the `art-mcp` MCP server.
+- `pip install atsw` installs the whole suite + the `art-mcp` MCP server.
 - `claude mcp add art -- art-mcp` connects it to Claude Code.
 
 ## Packages

@@ -1,4 +1,4 @@
-# AGENTS.md — operating the ATWS suite as an AI agent
+# AGENTS.md — operating the ATSW suite as an AI agent
 
 This file tells an LLM agent how to drive the **Box-Jenkins-Treadway** time
 series suite (fue + pyfug + ART) through the ART MCP server. It complements the

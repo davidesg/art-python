@@ -1,6 +1,6 @@
-# Publicación de la suite ATWS en PyPI
+# Publicación de la suite ATSW en PyPI
 
-Orden de publicación (respeta dependencias): **fue → pyfug → art-tseries → atws**.
+Orden de publicación (respeta dependencias): **fue → pyfug → art-tseries → atsw**.
 Validar siempre primero en TestPyPI.
 
 ## 0. Requisitos
@@ -44,14 +44,14 @@ pip install -i https://test.pypi.org/simple/ \
 art-mcp --help   # comprobar que el script existe
 ```
 
-## 4. atws 1.0.0 (meta-paquete)
+## 4. atsw 1.0.0 (meta-paquete)
 
 ```bash
-cd ART/art-python/atws-suite
+cd ART/art-python/atsw-suite
 python -m build
 twine upload --repository testpypi dist/*
 pip install -i https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ atws
+  --extra-index-url https://pypi.org/simple/ atsw
 ```
 
 ## 5. Promoción a PyPI

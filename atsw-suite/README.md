@@ -1,10 +1,10 @@
-# ATWS — Box-Jenkins-Treadway time series suite
+# ATSW — Box-Jenkins-Treadway time series suite
 
-`atws` is an **umbrella package**: installing it pulls the complete Box-Jenkins-
+`atsw` is an **umbrella package**: installing it pulls the complete Box-Jenkins-
 Treadway time series suite plus the MCP server, in one step.
 
 ```bash
-pip install atws
+pip install atsw
 ```
 
 This installs:
@@ -26,7 +26,7 @@ Claude advises) or **autonomous** (Claude decides) Box-Jenkins-Treadway workflow
 
 ## Components on PyPI
 
-Each component is also installable on its own — `atws` just fixes a compatible
+Each component is also installable on its own — `atsw` just fixes a compatible
 set. See each package's README and `art-tseries`'s `docs/ARCHITECTURE.md` for the
 full design.
 
