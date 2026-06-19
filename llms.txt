@@ -24,7 +24,7 @@
 
 - [README.md](README.md): ART overview, install, MCP usage, library usage.
 - fue (PyPI): exact ML estimation engine + FUF forecasting (C engine + pure-Python fallback).
-- pyfug (PyPI): Jenkins-Treadway high-definition graphics.
+- pyfug (PyPI): high-definition graphics for time series analysis.
 
 ## Key concepts
 

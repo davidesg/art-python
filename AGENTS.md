@@ -9,7 +9,7 @@ server's own `_INSTRUCTIONS` (loaded at runtime) and `docs/TOOLS.md`.
 | Component | Package | What it gives the agent |
 |-----------|---------|--------------------------|
 | FUE (+FUF) | `fue` | exact ML estimation, residuals, forecasting (`.inp`/`.pre`/`.out`/`.fuf`) |
-| FUG | `pyfug` | Jenkins-Treadway graphics |
+| FUG | `pyfug` | high-definition graphics for time series analysis |
 | ART | `art-tseries` | the 32 MCP tools + the guided/autonomous protocol |
 
 Connect: `claude mcp add art -- art-mcp`. Tools are documented in `docs/TOOLS.md`.

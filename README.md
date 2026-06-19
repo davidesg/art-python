@@ -10,7 +10,7 @@ ART is the orchestration layer of a four-part suite:
 | Package | Role |
 |---------|------|
 | **[fue](https://pypi.org/project/fue/)** | Exact maximum-likelihood estimation (ARMAX + transfer functions) and **FUF** forecasting. C engine with a pure-Python fallback. |
-| **pyfug** | Jenkins-Treadway high-definition time series graphics. |
+| **pyfug** | High-definition graphics for time series analysis. |
 | **ART** (`art-tseries`) | Identification, model building, diagnosis, formal tests, versioning — and an **MCP server** that exposes all of this to an LLM. |
 
 The Box-Jenkins-Treadway loop needs *judgement* at each decision node. ART

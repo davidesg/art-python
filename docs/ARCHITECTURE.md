@@ -26,7 +26,7 @@ es **Claude**, alimentado por la evidencia que produce la suite.
 | Componente | Rol | Naturaleza |
 |------------|-----|-----------|
 | **FUE** (`atws/fue`) | Estimación ML exacta + **forecasting (FUF)** + diagnósticos de bajo nivel | Python sobre `_fue_engine.so` (C) |
-| **FUG / pyfug** (`atws/fug/pyfug`) | Gráficos Jenkins-Treadway de alta definición | Python + matplotlib |
+| **FUG / pyfug** (`atws/fug/pyfug`) | Gráficos de alta definición para análisis de series temporales | Python + matplotlib |
 | **ART** (`art-python/src/art`) | Orquestación + adaptación semántica + audit trail | Python |
 | **ART MCP** (`mcp_server.py`) | Superficie de 32 herramientas hacia Claude | FastMCP |
 | **Claude** | **Criterio**: identificación, interpretación, decisiones | LLM |

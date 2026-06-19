@@ -12,7 +12,7 @@ This installs:
 | Component | Package | Role |
 |-----------|---------|------|
 | **FUE** (+ FUF) | `fue` | Exact ML estimation (ARMAX + transfer functions) and forecasting |
-| **FUG** | `pyfug` | Jenkins-Treadway high-definition graphics |
+| **FUG** | `pyfug` | High-definition graphics for time series analysis |
 | **ART** | `art-tseries` | Model building, diagnosis, formal tests + **MCP server** (`art-mcp`) |
 
 ## Use with an LLM (MCP)
