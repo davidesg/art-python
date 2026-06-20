@@ -2,8 +2,9 @@
 
 **ATSW = A Time Series Workshop / ART Time Series Workshop.**
 Suite Box-Jenkins-Treadway para series temporales univariantes, con servidor MCP
-para operarla con un LLM. Estado a jun-2026: **v1 funcional, publicada y validada
-en TestPyPI**. Todo en commits locales (sin push a GitHub, por preferencia).
+para operarla con un LLM. Estado a jun-2026: **v1 publicada en PyPI producción**
+(`pip install atsw` funciona end-to-end) y validada previamente en TestPyPI.
+Todo en commits locales (sin push a GitHub, por preferencia).
 
 ## Componentes y versiones
 
@@ -20,16 +21,20 @@ FUF vive dentro de `fue` (`load_fuf`/`forecast_fuf`/`write_fuf`, script `fuf`).
 
 ## Hecho
 
-- **TestPyPI:** los 4 paquetes subidos
-  (fue 0.1.3, pyfug 2.0.0, art-tseries 0.1.0, atsw 1.0.0).
-- **Validación en venv limpio** (`pip install atsw` desde TestPyPI): instala toda
-  la suite + dependencias; `art-mcp` arranca con 32 tools; smoke funcional
-  (estimación + `model_equation`) OK.
+- **PyPI producción (20-jun-2026):** los 4 paquetes publicados —
+  fue 0.1.3 (solo sdist; el wheel `linux_x86_64` lo rechaza PyPI),
+  pyfug 2.0.0, art-tseries 0.1.0, atsw 1.0.0. Subida en orden de dependencias
+  con `twine` (`[pypi]` de `~/.pypirc`). `twine check` PASSED en los cuatro.
+  - https://pypi.org/project/fue/0.1.3/ · /pyfug/2.0.0/ · /art-tseries/0.1.0/ · /atsw/1.0.0/
+  - **Validación en venv limpio (índice solo-producción):** `pip install atsw`
+    resuelve e instala la suite + deps, compila `fue` desde sdist,
+    `import fue, pyfug, art` OK, entry point `art-mcp` (`art.mcp_server:main`)
+    carga el server FastMCP.
+- **TestPyPI:** los 4 paquetes subidos y validados previamente (paso intermedio).
 - Empaquetado coherente (deps, licencia GPL-2.0, READMEs); docs IA-friendly
   (`AGENTS.md`, `llms.txt`, `docs/TOOLS.md`, `docs/ARCHITECTURE.md`,
   `docs/PUBLISHING.md`).
 - Suite de tests: 408 passed.
-- Nombre `atsw` libre también en **PyPI producción** (reservable al promocionar).
 
 ## Próximos pasos (roadmap)
 
@@ -38,16 +43,17 @@ FUF vive dentro de `fue` (`load_fuf`/`forecast_fuf`/`write_fuf`, script `fuf`).
    crea uno nuevo (en `~/.pypirc` `[testpypi]`, en una sola línea). Bajo riesgo
    (TestPyPI), pero higiene. El token de PyPI producción no se tocó ni expuso.
 
-2. **Wheels manylinux para fue (CI).** `fue` tiene extensión C; en local solo se
-   genera un wheel `linux_x86_64` no portable (lo rechaza PyPI). Para producción
-   hacen falta wheels multiplataforma vía **GitHub Actions + cibuildwheel**
-   (`[tool.cibuildwheel]` ya está en `fue/pyproject.toml`). Mientras tanto el
-   sdist funciona (compila en instalación si hay GSL, o usa el fallback puro-Python).
+2. **Wheels manylinux para fue (CI).** `fue` tiene extensión C; en producción
+   solo hay **sdist** (compila en instalación si hay GSL, o usa el fallback
+   puro-Python). Para wheels binarios multiplataforma (instalación sin compilar)
+   hace falta **GitHub Actions + cibuildwheel** (`[tool.cibuildwheel]` ya está en
+   `fue/pyproject.toml`). No bloquea la difusión; es optimización de instalación.
 
-3. **Promoción a PyPI producción** (`docs/PUBLISHING.md`, orden
-   fue→pyfug→art-tseries→atsw). Producción es **irreversible** por versión;
-   validar primero en TestPyPI (hecho). Subir fue 0.1.3 a producción (allí está
-   0.1.2) para que `art-tseries` (que exige `fue>=0.1.3`) resuelva.
+3. **Difusión entre colegas.** Ya instalable con `pip install atsw`. Pendiente:
+   quickstart en español (instalar → `claude mcp add art -- art-mcp` → analizar
+   una serie), demo reproducible (`demo_chile_ipc.py`, `CASE_STUDIES.md`) y
+   mensaje de anuncio. Comunicar los dos modos de uso: con Claude (MCP) y como
+   librería/CLI Python pura.
 
 4. **Validación en venv 100% nativo.** Requiere `apt install python3.12-venv`
    (no instalado; se usó `virtualenv` para la validación, que pasó).

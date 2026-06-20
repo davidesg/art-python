@@ -19,6 +19,22 @@ La limitación intrínseca del proceso BJT es que **requiere criterio**: las
 decisiones (empíricas o teóricas) no son arbitrarias. Quien aporta ese criterio
 es **Claude**, alimentado por la evidencia que produce la suite.
 
+Esto es el núcleo de una **falsa simplicidad**: los modelos ARMA son simples,
+pero el proceso iterativo de construcción funcionaba muy bien sobre todo si eras
+Box, Jenkins o uno de sus discípulos. La dificultad real es entrenar al analista
+en unas decisiones muchas veces heurísticas; la IA hace aquí el papel de ese
+analista entrenado. Nótese además que el análisis **no es el canónico de Box y
+Jenkins**, sino la versión con extensiones de **Arthur B. Treadway** (discípulo
+de Gwilym Jenkins), con elementos y heurísticos procedentes de su trabajo en los
+Servicios de Previsión y Seguimiento (SPS) de la economía española.
+
+**Principio de diseño (regla de medida):** la previsión es uno de los objetivos
+del modelo ARMAX —quizá imbatible en previsión—, pero el modelo univariante es
+además la base de un análisis de relaciones más sofisticado. Por eso estos
+modelos univariantes deben ser la **regla de medida** de modelos más complejos:
+si un modelo sofisticado no mejora sus previsiones, tiene algún problema y debe
+repensarse.
+
 ---
 
 ## 2. Componentes y fronteras
