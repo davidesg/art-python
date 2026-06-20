@@ -13,7 +13,7 @@ Todo en commits locales (sin push a GitHub, por preferencia).
 | `fue`         | 0.1.3 | `atws/fue/fue`     | estimación ML exacta (ARMAX + funciones de transferencia) + FUF (previsión); motor C (cffi) + fallback puro-Python |
 | `pyfug`       | 2.0.0 | `atws/fug/pyfug`  | gráficos de alta definición para análisis de series temporales |
 | `art-tseries` | 0.1.0 | `ART/art-python`  | construcción de modelos, diagnosis, contrastes + **servidor MCP** (`art-mcp`) |
-| `atsw`        | 1.0.0 | `ART/art-python/atsw-suite` | meta-paquete paraguas (sin código): `pip install atsw` → toda la suite |
+| `atsw`        | 1.0.1 | `ART/art-python/atsw-suite` | meta-paquete paraguas (sin código): `pip install atsw` → toda la suite |
 
 Grafo: `atsw` → `fue>=0.1.3` + `pyfug>=2.0` + `art-tseries>=0.1.0`;
 `art-tseries` → `fue` + `pyfug` + numpy/scipy/matplotlib/statsmodels/mcp.
@@ -23,9 +23,11 @@ FUF vive dentro de `fue` (`load_fuf`/`forecast_fuf`/`write_fuf`, script `fuf`).
 
 - **PyPI producción (20-jun-2026):** los 4 paquetes publicados —
   fue 0.1.3 (solo sdist; el wheel `linux_x86_64` lo rechaza PyPI),
-  pyfug 2.0.0, art-tseries 0.1.0, atsw 1.0.0. Subida en orden de dependencias
-  con `twine` (`[pypi]` de `~/.pypirc`). `twine check` PASSED en los cuatro.
-  - https://pypi.org/project/fue/0.1.3/ · /pyfug/2.0.0/ · /art-tseries/0.1.0/ · /atsw/1.0.0/
+  pyfug 2.0.0, art-tseries 0.1.0, atsw 1.0.1 (1.0.0 inicial; 1.0.1 re-publicado
+  con el README de difusión = quickstart + Background en la página de PyPI).
+  Subida en orden de dependencias con `twine` (`[pypi]` de `~/.pypirc`);
+  `twine check` PASSED en todos.
+  - https://pypi.org/project/fue/0.1.3/ · /pyfug/2.0.0/ · /art-tseries/0.1.0/ · /atsw/
   - **Validación en venv limpio (índice solo-producción):** `pip install atsw`
     resuelve e instala la suite + deps, compila `fue` desde sdist,
     `import fue, pyfug, art` OK, entry point `art-mcp` (`art.mcp_server:main`)
