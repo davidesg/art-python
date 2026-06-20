@@ -20,10 +20,11 @@ decisiones (empíricas o teóricas) no son arbitrarias. Quien aporta ese criteri
 es **Claude**, alimentado por la evidencia que produce la suite.
 
 Esto es el núcleo de una **falsa simplicidad**: los modelos ARMA son simples,
-pero el proceso iterativo de construcción funcionaba muy bien sobre todo si eras
-Box, Jenkins o uno de sus discípulos. La dificultad real es entrenar al analista
-en unas decisiones muchas veces heurísticas; la IA hace aquí el papel de ese
-analista entrenado. Nótese además que el análisis **no es el canónico de Box y
+pero el proceso iterativo de construcción funcionaba de maravilla sobre todo si
+eras Box, Jenkins o uno de sus discípulos. La dificultad real es entrenar al
+analista en unas decisiones muchas veces heurísticas; la IA hace aquí, con sus
+limitaciones, el papel de ese analista entrenado. Nótese además que el análisis
+**no es el canónico de Box y
 Jenkins**, sino la versión con extensiones de **Arthur B. Treadway** (discípulo
 de Gwilym Jenkins), con elementos y heurísticos procedentes de su trabajo en los
 Servicios de Previsión y Seguimiento (SPS) de la economía española.

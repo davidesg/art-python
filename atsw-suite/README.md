@@ -47,27 +47,27 @@ an estimated model.
 
 ## Background — a modern Box-Jenkins-Treadway
 
-The Box-Jenkins analysis was enormously popular at its launch as a process for
+The Box-Jenkins analysis was tremendously popular at its launch as a process for
 building ARMA models (with extensions). The models themselves are simple, but the
 iterative building process is a case of *false simplicity*: in practice the method
-worked beautifully **if you were Box, Jenkins, or one of their disciples**. Its
-main difficulty has always been training analysts to make the decisions the
-process demands — decisions often guided by heuristics.
+worked wonderfully **if you were Box, Jenkins, or one of their disciples**. The
+real obstacle is training the analyst to make the decisions the process demands —
+decisions often guided by heuristics.
 
 ATSW combines that *criterion* with statistical methods to build the models in a
-modern form. AI — with its limitations — supplies the criterion and the
-suggestions a well-trained time series analyst would offer.
+modern form: AI — with its limitations — supplies the criterion and the
+suggestions a trained time series analyst would offer.
 
-The analysis presented here is **not** the canonical Box-Jenkins. It follows the
-extended version of **Arthur B. Treadway** (a disciple of Gwilym Jenkins), which
-adds elements and heuristics drawn from his experience producing the Forecasting
-and Monitoring Services (SPS) of the Spanish economy.
+The analysis presented here is **not** the canonical Box-Jenkins, but the extended
+version of **Arthur B. Treadway** (a disciple of Gwilym Jenkins), which adds
+elements and heuristics drawn from his experience producing the Forecasting and
+Monitoring Services (SPS) of the Spanish economy.
 
-Forecasting is one of the goals of building an ARMAX model — and arguably an
+Forecasting is one of the goals of building an ARMAX model — and perhaps an
 unbeatable one — but univariate analysis is also the foundation of more
 sophisticated relational analysis. These univariate forecasting models should be
-the **measuring stick** for more sophisticated models: if you cannot beat their
-forecasts, your model has a problem and you should rethink it.
+the **measuring stick** for more complex ones: if you cannot beat their forecasts,
+your model has a problem and you should rethink it.
 
 ## Components on PyPI
 

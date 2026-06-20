@@ -55,23 +55,27 @@ from an estimated model. See `docs/TOOLS.md` for the full API surface.
 
 ### Background — a modern Box-Jenkins-Treadway
 
-The Box-Jenkins analysis was enormously popular at its launch as a process for
+The Box-Jenkins analysis was tremendously popular at its launch as a process for
 building ARMA models (with extensions). The models themselves are simple, but the
-iterative building process is a case of *false simplicity*: in practice it worked
-beautifully **if you were Box, Jenkins, or one of their disciples**. Its main
-difficulty has always been training analysts to make the decisions the process
-demands — decisions often guided by heuristics. ATSW combines that *criterion*
-with statistical methods in a modern form; AI — with its limitations — supplies
-the criterion and suggestions a well-trained analyst would offer.
+iterative building process is a case of *false simplicity*: in practice the method
+worked wonderfully **if you were Box, Jenkins, or one of their disciples**. The
+real obstacle is training the analyst to make the decisions the process demands —
+decisions often guided by heuristics.
 
-The analysis here is **not** the canonical Box-Jenkins: it follows the extended
+ATSW combines that *criterion* with statistical methods to build the models in a
+modern form: AI — with its limitations — supplies the criterion and the
+suggestions a trained time series analyst would offer.
+
+The analysis presented here is **not** the canonical Box-Jenkins, but the extended
 version of **Arthur B. Treadway** (a disciple of Gwilym Jenkins), which adds
-elements and heuristics drawn from his work on the Forecasting and Monitoring
-Services (SPS) of the Spanish economy. Forecasting is one goal of an ARMAX model
-— arguably an unbeatable one — but univariate analysis is also the foundation of
-more sophisticated relational analysis. These univariate forecasting models
-should be the **measuring stick** for more sophisticated ones: if you cannot beat
-their forecasts, your model has a problem and you should rethink it.
+elements and heuristics drawn from his experience producing the Forecasting and
+Monitoring Services (SPS) of the Spanish economy.
+
+Forecasting is one of the goals of building an ARMAX model — and perhaps an
+unbeatable one — but univariate analysis is also the foundation of more
+sophisticated relational analysis. These univariate forecasting models should be
+the **measuring stick** for more complex ones: if you cannot beat their forecasts,
+your model has a problem and you should rethink it.
 
 ### 3. Where to go next
 
@@ -133,25 +137,27 @@ previsiones desde un modelo estimado. La superficie completa del API está en
 
 ### Contexto — un Box-Jenkins-Treadway moderno
 
-El análisis de Box-Jenkins fue enormemente popular en su lanzamiento como proceso
-de construcción de modelos ARMA (con extensiones). Aunque los modelos son
+El análisis de Box-Jenkins fue tremendamente popular en su lanzamiento como
+proceso de construcción de modelos ARMA (con extensiones). Aunque los modelos son
 simples, el proceso iterativo de construcción es un caso de *falsa simplicidad*:
-en la práctica funcionaba muy bien **si eras Box, Jenkins o uno de sus
-discípulos**. Su principal dificultad siempre ha sido el entrenamiento de los
-analistas en la toma de decisiones que el proceso exige, muchas veces guiada por
-heurísticos. ATSW combina ese *criterio* con métodos estadísticos en una versión
-moderna; la IA —con sus limitaciones— aporta el criterio y las sugerencias que
-proporcionaría un analista entrenado.
+en la práctica, el método funcionaba de maravilla **si eras Box, Jenkins o uno de
+sus discípulos**. El verdadero obstáculo es el entrenamiento del analista en la
+toma de decisiones, guiada muchas veces por heurísticos.
 
-El análisis que se presenta aquí **no** es el canónico de Box y Jenkins: sigue la
+ATSW combina ese *criterio* con métodos estadísticos para construir los modelos en
+una versión moderna: la IA —con sus limitaciones— aporta el criterio y las
+sugerencias que daría un analista entrenado en series temporales.
+
+El análisis que se presenta aquí **no** es el canónico de Box y Jenkins, sino la
 versión con extensiones de **Arthur B. Treadway** (discípulo de Gwilym Jenkins),
-que añade elementos y heurísticos producto de su experiencia en la producción de
-los Servicios de Previsión y Seguimiento (SPS) de la economía española. La
-previsión es uno de los objetivos al construir un modelo ARMAX —quizá imbatible
+que añade elementos y heurísticos fruto de su experiencia en la producción de los
+Servicios de Previsión y Seguimiento (SPS) de la economía española.
+
+La previsión es uno de los objetivos al construir un modelo ARMAX —quizá imbatible
 en previsión—, pero el análisis univariante es además la base de un análisis de
 relaciones más sofisticado. Estos modelos univariantes deberían ser la **regla de
-medida** de modelos más sofisticados: si no puedes mejorar sus previsiones, tu
-modelo tiene algún problema y deberías repensarlo.
+medida** de modelos más complejos: si no puedes mejorar sus previsiones, tu modelo
+tiene algún problema y deberías repensarlo.
 
 ### 3. Para seguir
 

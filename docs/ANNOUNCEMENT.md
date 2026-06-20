@@ -23,14 +23,15 @@ node — guided step by step, or fully autonomous. It also works as a plain Pyth
 library if you don't use Claude.
 
 A bit of background. Box-Jenkins is a case of *false simplicity*: the ARMA models
-are simple, but the iterative building process worked beautifully mainly if you
+are simple, but the iterative building process worked wonderfully mainly if you
 were Box, Jenkins, or one of their disciples — the hard part is training analysts
 in the (often heuristic) decisions. ATSW pairs that criterion with statistical
-methods; the AI plays the role of a well-trained analyst. The methodology here is
-not the canonical one but the extended version of **Arthur B. Treadway** (a
-disciple of Gwilym Jenkins), shaped by his work on the Forecasting and Monitoring
-Services of the Spanish economy. And a useful rule of thumb: these univariate
-forecasts are a *measuring stick* — if a fancier model can't beat them, rethink it.
+methods, and AI — with its limitations — supplies the criterion and suggestions a
+trained analyst would offer. The methodology here is not the canonical one but the
+extended version of **Arthur B. Treadway** (a disciple of Gwilym Jenkins), shaped
+by his work on the Forecasting and Monitoring Services of the Spanish economy. A
+useful rule of thumb: these univariate forecasts are a *measuring stick* — if a
+fancier model can't beat them, rethink it.
 
 Get started in two minutes:
 
@@ -68,15 +69,16 @@ decisión — guiado paso a paso, o totalmente autónomo. También funciona como
 librería Python normal si no usas Claude.
 
 Un poco de contexto. Box-Jenkins es un caso de *falsa simplicidad*: los modelos
-ARMA son simples, pero el proceso iterativo de construcción funcionaba muy bien
+ARMA son simples, pero el proceso iterativo de construcción funcionaba de maravilla
 sobre todo si eras Box, Jenkins o uno de sus discípulos — lo difícil es entrenar
 a los analistas en unas decisiones muchas veces heurísticas. ATSW combina ese
-criterio con métodos estadísticos; la IA hace el papel de un analista entrenado.
-La metodología no es la canónica sino la versión con extensiones de **Arthur B.
-Treadway** (discípulo de Gwilym Jenkins), fruto de su trabajo en los Servicios de
-Previsión y Seguimiento de la economía española. Y una regla útil: estas
-previsiones univariantes son una *regla de medida* — si un modelo más sofisticado
-no las mejora, repiénsalo.
+criterio con métodos estadísticos, y la IA —con sus limitaciones— aporta el
+criterio y las sugerencias que daría un analista entrenado. La metodología no es
+la canónica sino la versión con extensiones de **Arthur B. Treadway** (discípulo
+de Gwilym Jenkins), fruto de su trabajo en los Servicios de Previsión y
+Seguimiento de la economía española. Y una regla útil: estas previsiones
+univariantes son una *regla de medida* — si un modelo más sofisticado no las
+mejora, repiénsalo.
 
 Empezar lleva dos minutos:
 
