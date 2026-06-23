@@ -523,3 +523,33 @@ Impacto menor pero documentar.
       `describe_diagnosis` dispara F≈82 de estacionalidad residual aun con Q ✓ —
       revisar si el test es válido/coherente bajo `ifadf>0` o si indica media
       estacional determinista no absorbida.
+
+---
+
+## Revisar el test de detección de estacionalidad (HAC F) — posible inflación de F
+
+- [ ] **Discrepancia ART vs drvarma en la detección de estacionalidad determinista.**
+      Mismo método nominal (regresión armónica en base diferenciada d=1 + F-test HAC),
+      resultados muy distintos en magnitud y, en el caso límite, en conclusión:
+
+      | serie  | ART (`detect_seasonality`/Call 3) | drvarma (`deseasonalize_raw`) | conclusión |
+      |--------|-----------------------------------|-------------------------------|-----------|
+      | WTI    | **F=272.2, p=0.000 → SÍ**         | **F=1.44, p=0.157 → NO**      | **CHOCAN** |
+      | IPC_ES | F=19372                           | F=64.6                        | ambos SÍ  |
+      | IPC_FR | F=7169                            | F=32.2                        | ambos SÍ  |
+      | IPC_DE | F=7423                            | F=21.96                       | ambos SÍ  |
+
+      El F de ART es ~**100–300× el de drvarma** de forma sistemática. En series
+      fuertemente estacionales (IPC) ambos rechazan y no se nota; en una serie
+      débil/no estacional (**WTI**, ≈paseo aleatorio) ART da un **falso positivo**
+      (detecta estacionalidad) mientras drvarma concluye correctamente que **no la hay**.
+      Económicamente el crudo no tiene estacionalidad determinista robusta (el patrón
+      Ene/Feb/Nov/Dic recoge desplomes de otoño 2008/2014, no un ciclo repetible) →
+      la conclusión sensata es la de drvarma.
+
+      → Revisar el cálculo del estadístico F-HAC en ART (`detect_seasonality` /
+        `harmonic_regression_*` / `diagnostic_hac_f_test`): la inflación sistemática
+        sugiere un error de **normalización/escala** (¿χ² en vez de F?, ¿gl mal?,
+        ¿matriz HAC sin escalar por n o por el factor correcto?). Contrastar contra
+        la implementación de drvarma (`deseason.c` + `harmonic_regression_differenced_basis`),
+        que parece la referencia correcta, y unificar para evitar falsos positivos.
