@@ -495,3 +495,31 @@ Impacto menor pero documentar.
       `guided_identification` call 3 como parámetro explícito (no solo texto)
 - [ ] **Pruebas de raíz unitaria**: integrar ADF/KPSS/Shin-Fuller en el flujo
 - [ ] **Notebook de demostración**: flujo completo IPC_DE con pyfug + fue
+
+---
+
+## Revisar problemas de MEG  (detectados en el caso IPC_DE, 2026-06)
+
+- [ ] **Bug round-trip de factores de frecuencia fija (`ma_f`/`ar_f`)** — bloquea
+      el propio flujo que recomienda el MEG (activar `ifadf[f]=1` + MA_f testigo).
+      El escritor (`fue.report._ffixed_body`, usado por `write_pre`/`write_fuf`)
+      emite `count\n**\nfreq phi2 flag`, pero el lector
+      (`fue.inp._read_ffixed_section`) espera `count freq1 freq2…\n**\ncoef flag`
+      → `IndexError` al recargar cualquier modelo con `ma_f`. Cualquier modelo
+      MEG-driven con raíces estacionales no sobrevive a `load`/`load_fuf`.
+      Workaround actual: post-procesar el fuf al formato del lector
+      (ver `drvarma .../cases/IPC_DE/work/make_uf_fuf.py`). **Unificar writer/reader.**
+- [ ] **No exponer `ifadf`/`ma_f` en `confirm_and_estimate`** — el flujo guiado no
+      puede construir el modelo que el MEG recomienda sin editar el .inp/.pre a mano.
+      Añadir parámetros (p.ej. `ifadf: list`, `ma_f_freqs: list`) o un helper.
+- [ ] **Falso positivo del MEG por cuasi-cancelación** — en IPC_DE el MEG marcó
+      freq 1,2 estocásticas (LR 13.9/4.0) pero, al ajustar ifadf+MA_f, θ²→≈0.90/0.93
+      (cerca del círculo unidad) ⇒ las raíces se cancelan casi con su MA_f testigo:
+      la frecuencia es *efectivamente determinista*. La previsión out-of-sample lo
+      confirmó (el determinista batió al estocástico a h=1/12/24).
+      → Avisar de cuasi-cancelación (DCD_f en la frontera de invertibilidad) en la
+      salida de `formal_tests`/MEG y NO recomendar `ifadf` automáticamente cuando θ²→1.
+- [ ] **Estacionalidad residual con ifadf**: tras activar raíces estacionales,
+      `describe_diagnosis` dispara F≈82 de estacionalidad residual aun con Q ✓ —
+      revisar si el test es válido/coherente bajo `ifadf>0` o si indica media
+      estacional determinista no absorbida.
