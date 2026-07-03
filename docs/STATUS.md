@@ -64,6 +64,23 @@ FUF vive dentro de `fue` (`load_fuf`/`forecast_fuf`/`write_fuf`, script `fuf`).
    pruebas en otras series; decidir si se curan como casos de estudio versionados
    o se mueven a `cases/<serie>/work/` (gitignored).
 
+6. **Release de los fixes del motor C y del writer (jul-2026).** Se corrigieron
+   bugs que rompían los modelos MEG híbridos con testigo `ma_f`: (a) `tensor()`
+   de-NR en `fue-1.13.1` y `fuf-1.08.1` había perdido el offset `t -= nrl` →
+   double-free con índice de fila negativo (`gamwa = tensor(-q+1,0,…)`, q>0);
+   (b) doble `fclose(inputv)` en el `fue-1.12.03` antiguo; (c) `report.py`
+   `_ffixed_body` escribía las secciones f-fixed en un formato que el reader C no
+   acepta (→ previsión corrupta) y además rompía el round-trip del parser fuf.
+   Commiteados **en local**: `fue-1.13.1` `b3e7dfd`, `fuf-1.08.1` `6f4c35d`, `fue`
+   `6f0a4f0`. **Pendiente de publicar cuando se libere versión estable:**
+   - **PyPI:** nueva versión del paquete `fue` (lleva el fix de `report.py`
+     `_ffixed_body`); revisar si `atsw`/`art-tseries` necesitan bump por dependencia.
+   - **GitHub:** actualizar los **programas C** (`fue`, `fuf`) con los parches del
+     `tensor()` (y el del `fclose`) al hacer el push a la versión estable.
+   Verificado: C y Python coinciden al dígito en estimación (logelf −11.9928042176)
+   y previsión (`[82.1212, 82.2543, 82.8643, 83.9145]`); binarios parcheados ya
+   instalados en `/usr/local/bin`.
+
 ## Deuda / pendientes funcionales conocidos
 
 - **Entrega de la ecuación en el prompt:** Claude tiende a reformatear la ecuación
