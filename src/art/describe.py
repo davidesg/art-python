@@ -616,20 +616,62 @@ def model_equation(ts, model) -> str:
     """
     import numpy as np
     from math import gcd
+    from fue.forecast import _reconstruct_params
 
-    params   = list(model.params)
-    ses      = list(model.std_errors)
-    n_params = len(params)
+    # Estimated point values and standard errors, unpacked by the SINGLE canonical
+    # unpacker (fue._reconstruct_params) — once for model.params, once for
+    # model.std_errors — then laid out in the exact order the display consumes them.
+    # So the (value, SE) rendered under each term is aligned by construction and never
+    # depends on the flat-vector packing order matching the render order (the old
+    # positional cursor desynced e.g. AR_f-before-MA, or omega/delta interleaving).
+    # See ART_MCP_REVIEW.md §1.
+    vals = _reconstruct_params(model, list(model.params))
+    sers = _reconstruct_params(model, list(model.std_errors))
+
+    def _flags(obj, attr, n):
+        fl = getattr(obj, attr, None)
+        return list(fl) if fl else [True] * n
+
+    _seq = []   # (value, se) pairs in render order (interventions → AR/AR_f → MA/MA_f → mu)
+    for j, itv in enumerate(model.interventions or []):
+        om = list(itv.omega) if itv.omega else []
+        for pos, fr in enumerate(_flags(itv, "omega_free", len(om))):
+            if fr:
+                _seq.append((vals[0][j][pos], sers[0][j][pos]))
+        dl = list(itv.delta) if itv.delta else []
+        for pos, fr in enumerate(_flags(itv, "delta_free", len(dl))):
+            if fr:
+                _seq.append((vals[1][j][pos], sers[1][j][pos]))
+
+    def _push_factors(cv, cs, factors, free_lists):
+        for i, fac in enumerate(factors or []):
+            fl = free_lists[i] if free_lists and i < len(free_lists) else [True] * len(fac)
+            for pos in range(len(fac)):
+                if fl[pos]:
+                    _seq.append((cv[i][pos], cs[i][pos]))
+
+    _push_factors(vals[2], sers[2], model.ar,   model.ar_free)
+    _push_factors(vals[3], sers[3], model.ar_s, model.ar_s_free)
+    for i, ff in enumerate(model.ar_f or []):
+        if ff.free:
+            _seq.append((vals[6][i], sers[6][i]))
+    _push_factors(vals[4], sers[4], model.ma,   model.ma_free)
+    _push_factors(vals[5], sers[5], model.ma_s, model.ma_s_free)
+    for i, ff in enumerate(model.ma_f or []):
+        if ff.free:
+            _seq.append((vals[7][i], sers[7][i]))
+    if model.estimate_mu:
+        _seq.append((vals[8], sers[8]))
 
     class _PI:
         def __init__(self):
             self.i = 0
         def pop(self):
-            if self.i >= n_params:
+            if self.i >= len(_seq):
                 return 0.0, 0.0
-            v, se = params[self.i], ses[self.i]
+            vse = _seq[self.i]
             self.i += 1
-            return v, se
+            return vse
 
     pi = _PI()
 

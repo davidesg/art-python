@@ -144,3 +144,24 @@ def test_make_model_d0_pure_harmonics_has_no_seasonal_ar():
     ts = _syn_ts()
     m = _make_model(ts, lam=0.0, d=1, D=0, p=0, q=0, n_harmonics=6, P=0)
     assert not m.ar_s
+
+
+def test_model_equation_reads_coefs_from_canonical_component():
+    """§1-remaining: model_equation must source each coef from its named component,
+    not a global positional cursor. Regression for the AR_f-before-MA desync: the flat
+    vector packs (…MA, MA_s, AR_f, MA_f…) but the display renders AR_f before MA, so the
+    old cursor read AR_f's value from MA's slot (and vice-versa)."""
+    import fue
+    from fue.model import Model, FixedFreqFactor
+    from art.describe import model_equation
+    ts = _syn_ts(n=160, seed=1)
+    m = _fit(Model(ts, d=1, D=0,
+                   ar_f=[FixedFreqFactor(freq=3.0, coef=-0.5, free=True)],
+                   ma=[[-0.3]], ma_free=[[True]]))
+    rc = _reconstruct_params(m, m.params)
+    ar_f_s = f"{abs(rc[6][0]):.4f}"       # AR_f magnitude, rendered on the LHS (AR side)
+    ma_s   = f"{abs(rc[4][0][0]):.4f}"    # MA magnitude, rendered on the RHS (MA side)
+    eq = model_equation(ts, m)
+    assert ar_f_s in eq and ma_s in eq and ar_f_s != ma_s
+    # AR_f block precedes the MA block; under the old cursor the values were swapped.
+    assert eq.index(ar_f_s) < eq.index(ma_s)
