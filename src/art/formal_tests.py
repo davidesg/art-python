@@ -20,7 +20,10 @@ dcd         : DCD non-invertibility test for regular MA(1) factors.
               1 % = 4.41.
 dcd_f       : DCD non-invertibility test for fixed-frequency MA_f factors.
               H₀: λ₂ = −1 (seasonal integration at frequency f).
-              Critical values: 10 % = 1.07, 5 % = 2.02, 1 % = 4.52.
+              Interior frequencies are a complex-conjugate pair (s=2 law):
+              critical values ≈ 1.11/2.04/4.52 (asymptotic), with mild
+              finite-sample n-dependence (see _dcd_crit).  Derived by Monte Carlo
+              (paper SF_MEG), superseding the interpolated 1.07/2.02/4.52.
               Uses the pure-Python estimator for both models to work around
               the nlatools.c tensor() bug that crashes the C backend when
               combining AR + MA_f (see fue/TODO.md).
@@ -34,14 +37,14 @@ meg         : MEG stochastic seasonality evaluation.
               harmonics at f, and applies DCD_f on the testigo.
               MA_f invertible → stochastic; non-invertible → deterministic.
 
-Critical values (Treadway tradition)
--------------------------------------
-DCD regular MA (thesis Cuadro 2.2):
-    10 % = 1.00,  5 % = 1.94,  1 % = 4.41
-DCD fixed-frequency MA_f (DCD_f):
-    10 % = 1.07,  5 % = 2.02,  1 % = 4.52
-Both sets are from Treadway (thesis), obtained by simulation.
-Monte Carlo verification of the exact distribution is pending (see TODO T1).
+Critical values
+---------------
+Real-root regime (regular MA, trend, Nyquist) — s=1 Davis-Dunsmuir MA(1) law:
+    10 % = 1.00,  5 % = 1.94,  1 % = 4.41   (≈ n-invariant)
+Complex-pair regime (interior frequencies f=1…s/2−1) — s=2 law:
+    10 % ≈ 1.11,  5 % ≈ 2.04,  1 % ≈ 4.52   (asymptotic; finite-sample by n)
+Derived by Monte Carlo (paper SF_MEG, ~/Dropbox/SF_MEG; research/sf_meg/),
+superseding the interpolated thesis values (1.07/2.02/4.52).  See _dcd_crit.
 
 MEG strategy
 ------------
@@ -92,12 +95,74 @@ import scipy.stats as sp_stats
 
 
 # ---------------------------------------------------------------------------
-# Critical values for DCD test (thesis Table 2.2)
-# Non-standard distribution; values valid for n ≥ 50.
+# Critical values for the DCD / MEG boundary LR test.
+#
+# Derived by Monte Carlo (paper SF_MEG, ~/Dropbox/SF_MEG; scripts in
+# research/sf_meg/), superseding the interpolated thesis values (1.07/2.02/4.52).
+# The law is governed by the ORDER of the seasonal factor, not by which frequency:
+#   * REAL-ROOT frequencies (regular MA, trend f=0, Nyquist f=s/2) -- first-order,
+#     ONE degree of freedom -- follow the Davis-Dunsmuir MA(1) law (s=1),
+#     pile-up 0.6575, critical values 1.00/1.94/4.41 (≈ n-invariant).
+#   * INTERIOR frequencies (complex-conjugate pair) -- second-order, TWO degrees of
+#     freedom -- follow the s=2 law, pile-up 0.616, with mild finite-sample
+#     n-dependence (below).  These are the values the MEG must use for f=1..s/2-1.
+#
+# NB (production): the DCD/MEG LR must be computed with the EXACT boundary
+# likelihood (profiling over a fixed grid), NOT fue's free MA optimiser, which is
+# biased at the second-order non-invertibility boundary (spurious pile-up ~0.82 vs
+# 0.62).  And in realistic models carrying a mean + deterministic harmonics the
+# correct critical values are HIGHER in finite samples (n=120: 1.63/2.87/5.81 at
+# 10/5/1%), an effect that vanishes as n grows.
 # ---------------------------------------------------------------------------
 
-_DCD_CRIT_MA   = {'10%': 1.00, '5%': 1.94, '1%': 4.41}
-_DCD_CRIT_MA_F = {'10%': 1.07, '5%': 2.02, '1%': 4.52}
+# Real-root regime (s = 1): the regular MA(1) boundary law (Davis-Dunsmuir).
+_DCD_CRIT_MA = {'10%': 1.00, '5%': 1.94, '1%': 4.41}
+
+# Complex-pair regime (s = 2): bare critical values by sample size n (paper Table 1,
+# five interior frequencies pooled).  n -> (10%, 5%, 1%).
+_DCD_CRIT_MA_F_TABLE = {
+    120: (1.12, 2.06, 4.64),
+    240: (1.13, 2.07, 4.52),
+    480: (1.10, 2.04, 4.53),
+    960: (1.11, 2.03, 4.52),
+}
+_DCD_CRIT_MA_F_ASYMP = (1.11, 2.04, 4.52)
+
+
+def _dcd_crit(n: int | None, complex_pair: bool) -> dict:
+    """Critical values for the DCD/MEG LR: real-root (s=1) or complex-pair (s=2)."""
+    if not complex_pair:
+        return dict(_DCD_CRIT_MA)
+    if n is None:
+        c = _DCD_CRIT_MA_F_ASYMP
+    else:
+        ns = sorted(_DCD_CRIT_MA_F_TABLE)
+        if n <= ns[0]:
+            c = _DCD_CRIT_MA_F_TABLE[ns[0]]
+        elif n >= ns[-1]:
+            c = _DCD_CRIT_MA_F_ASYMP
+        else:
+            lo = max(k for k in ns if k <= n)
+            hi = min(k for k in ns if k >= n)
+            w = (n - lo) / (hi - lo) if hi > lo else 0.0
+            c = tuple((1 - w) * a + w * b
+                      for a, b in zip(_DCD_CRIT_MA_F_TABLE[lo], _DCD_CRIT_MA_F_TABLE[hi]))
+    return {'10%': c[0], '5%': c[1], '1%': c[2]}
+
+
+# Backward-compatible alias (asymptotic complex values).
+_DCD_CRIT_MA_F = _dcd_crit(None, complex_pair=True)
+
+
+def _model_n(model) -> int | None:
+    """Effective sample size for the finite-sample critical values."""
+    try:
+        return int(len(model.residuals.data))
+    except Exception:
+        try:
+            return int(len(model.series.data))
+        except Exception:
+            return None
 
 
 # ---------------------------------------------------------------------------
@@ -328,10 +393,14 @@ class DCDResult:
     loglik_free: float
     loglik_constrained: float
     lr: float                 # 2·(L_free − L_constrained)
+    n: int | None = None      # sample size (for the finite-sample complex crit)
+    complex_pair: bool = False  # True for interior frequencies (s=2 law)
 
     @property
     def _crit(self) -> dict:
-        return _DCD_CRIT_MA if self.freq is None else _DCD_CRIT_MA_F
+        # freq is None (regular MA) is always a real root (s=1); otherwise the
+        # regime is set by complex_pair (interior s=2 vs Nyquist/trend s=1).
+        return _dcd_crit(self.n, self.complex_pair and self.freq is not None)
 
     @property
     def rejects_10pct(self) -> bool:
@@ -566,7 +635,14 @@ def _extract_ma_f_param(model, factor_index: int) -> float:
         if i == factor_index:
             if not ff.free:
                 raise ValueError(f"MA_f factor {factor_index} is not free")
-            return float(params[idx])
+            # Report the INVERTIBLE estimate. The engine flips a non-invertible
+            # fixed-freq MA (|θ₂|>1 ⇔ coef<−1) to its invertible reciprocal 1/coef
+            # inside the likelihood (cast_us [4]: `if c2 < -1.0: c2 = 1.0/c2`), so
+            # the raw optimum x may sit on the non-invertible root. Mirror that flip
+            # here so the reported/tested coef is the invertible one (matches fue-C's
+            # "constrained search for invertibility").
+            c = float(params[idx])
+            return 1.0 / c if c < -1.0 else c
         if ff.free:
             idx += 1
 
@@ -603,8 +679,8 @@ def dcd_f(model) -> list[DCDResult]:
 
     LR = 2·[logL(free) − logL(λ₂=−1)]
 
-    The distribution is non-standard.  Critical values from thesis Table 2.2:
-      10 % = 1.07,  5 % = 2.02,  1 % = 4.52.
+    The distribution is non-standard (s=2 law for the complex pair).  Critical
+    values ≈ 1.11/2.04/4.52 (asymptotic), finite-sample by n; see _dcd_crit.
 
     Implementation note
     -------------------
@@ -667,6 +743,8 @@ def dcd_f(model) -> list[DCDResult]:
             loglik_free=L_free,
             loglik_constrained=L_const,
             lr=lr,
+            n=_model_n(model),
+            complex_pair=True,   # interior frequency: second-order factor, s=2 law
         ))
 
     return results
@@ -697,12 +775,65 @@ def _dcd_nyquist_ma(model, ma_index: int, freq: float) -> DCDResult:
     return DCDResult(
         factor_index=ma_index, freq=freq, coef_free=coef_free, coef_null=-1.0,
         loglik_free=L_free, loglik_constrained=L_const, lr=2.0 * (L_free - L_const),
+        n=_model_n(model), complex_pair=False,  # Nyquist: first-order real root, s=1 law
     )
 
 
 # ---------------------------------------------------------------------------
 # RV fixed-frequency test for AR(2) factors with complex roots
 # ---------------------------------------------------------------------------
+
+def reformulate_stochastic(model, freq: int, s: int, with_witness: bool = True):
+    """Reformulate a deterministic-seasonality model for STOCHASTIC seasonality at
+    frequency *freq*, after the MEG (DCD_f / Shin-Fuller AR_f) has concluded so.
+
+    Activates the homogeneously non-stationary seasonal AR_f (``ifadf[freq]=1``: the
+    unit-root operator 1−2cos(ω)B+B² for an interior frequency, 1+B at the Nyquist)
+    and removes the deterministic harmonics at *freq* (the cos/sin pair, or the
+    ``alter``=(−1)ᵗ term at the Nyquist), which the filter annihilates. Returns a
+    NEW, unfitted deepcopy; re-fit it and continue the Box-Jenkins cycle.
+    ``ifadf`` is a list of 0/1 flags and round-trips through the .pre.
+
+    If *with_witness* is True (default), ALSO appends the free MA_f testigo — the
+    invertible second-order fixed-frequency MA ``(1−2λcos(ω)B+λ²B²)`` for an interior
+    frequency, or a first-order ``(1+θB)`` at the Nyquist — so the reformulated model
+    is EXACTLY the one the MEG/DCD_f contrasts: the AR_f unit root AND the MA_f witness
+    together. This is the correct stochastic model S. Without the witness the AR_f alone
+    OVER-DIFFERENCES the seasonal (inflated σ, exploded Q) — that AR-only form is only a
+    diagnostic subproduct, not S. After fitting, read λ² and its DCD_f via formal_tests;
+    λ→boundary ⇒ quasi-cancellation (frontier), λ off-boundary ⇒ genuine stochastic.
+    """
+    mc = copy.deepcopy(model)
+    mc._result = None
+    is_nyquist = (freq == s // 2)
+    if is_nyquist:
+        mc.interventions = [itv for itv in (mc.interventions or [])
+                            if getattr(itv, 'type', None) != 'alter']
+    else:
+        mc.interventions = [
+            itv for itv in (mc.interventions or [])
+            if not (getattr(itv, 'type', None) in ('cos', 'sin')
+                    and float(getattr(itv, 'harmonic', -1)) == float(freq))]
+    n_slots = s // 2 + 1
+    mc.ifadf = list(mc.ifadf or [])
+    if len(mc.ifadf) < n_slots:
+        mc.ifadf = mc.ifadf + [0] * (n_slots - len(mc.ifadf))
+    mc.ifadf[freq] = 1
+    if with_witness:
+        # Same construction as the MEG test (`_meg_frequencies`): the invertible MA_f
+        # testigo the DCD_f contrasts, so the reformulated model IS the stochastic S.
+        if is_nyquist:
+            # Nyquist witness = regular first-order MA (1+θB), matching the (1+B) factor.
+            if mc.ma and not mc.ma_free:
+                mc.ma_free = [[True] for _ in mc.ma]
+            mc.ma = list(mc.ma or []) + [[-0.9]]
+            mc.ma_free = list(mc.ma_free or []) + [[True]]
+        else:
+            from fue.model import FixedFreqFactor
+            mc.ma_f = list(mc.ma_f or []) + [
+                FixedFreqFactor(freq=float(freq), coef=-0.9, free=True)]
+    return mc
+
 
 def _extract_ar_factor_coefs(model, ar_factor_index: int) -> tuple[float, ...]:
     """

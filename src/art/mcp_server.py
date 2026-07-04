@@ -899,6 +899,246 @@ def formal_tests(inp_path: str, run_meg: bool = True) -> list:
         return _err(traceback.format_exc())
 
 
+@mcp.tool()
+def ar_factorization(inp_path: str, sper: int = 0) -> list:
+    """
+    Factorize the estimated AR operator(s) of a fitted model and identify
+    candidate seasonal AR_f factors.
+
+    Each regular AR factor P(B) = 1 - c1 B - ... - cp B^p is factored (via
+    numpy.roots) and characterized in the original ``Root`` format: the roots
+    table and the real factors (1 - a[1] B) and complex factors
+    (1 - a[1] B - a[2] B^2), each complex factor given its damping factor d, its
+    frequency freq (cycles/obs) and its period per (obs/cycle).
+
+    INTERPRETATION IS LEFT TO THE ASSISTANT: a complex factor whose period matches
+    a seasonal cycle (per = s/k for an integer harmonic k) and whose damping d is
+    near 1 is a candidate seasonal AR_f operator -- a stochastic-seasonal factor
+    hidden inside an un-factored AR(p) -- to feed the MEG (DCD_f) and the dual
+    Shin-Fuller AR_f test (paper SF_MEG, confirmatory pair). Because fue can
+    estimate the AR operator factored or un-factored, factoring a freely estimated
+    AR(p) exposes such factors.
+
+    Parameters
+    ----------
+    inp_path : path to .inp or .pre file (fitted model)
+    sper     : seasonal period; 0 (default) uses the series frequency
+    """
+    try:
+        import numpy as np
+        from art.roots import factor_ar, describe
+        ts, m = _load_fitted(inp_path)
+        s = int(sper) or int(getattr(ts, "freq", 12))
+        factors = m.ar or []
+        if not factors:
+            return _result("The model has no regular AR operator to factorize.")
+        # Reconstruct the fitted coefficients per AR factor: free values come from
+        # model.params (ordering: omega, delta, AR regular, ...), fixed from model.ar.
+        n_omega = sum(sum(itv.omega_free) for itv in (m.interventions or []))
+        n_delta = sum(sum(itv.delta_free) for itv in (m.interventions or []))
+        params = np.asarray(m.params, dtype=float)
+        idx = n_omega + n_delta
+        blocks = []
+        for k, factor in enumerate(factors):
+            free = (m.ar_free[k] if m.ar_free and k < len(m.ar_free)
+                    else [True] * len(factor))
+            coefs = []
+            for j in range(len(factor)):
+                if free[j]:
+                    coefs.append(float(params[idx])); idx += 1
+                else:
+                    coefs.append(float(factor[j]))
+            if len(coefs) < 2:
+                blocks.append(f"AR factor #{k}: first-order (1 - {coefs[0]:.5f} B) "
+                              f"-- real root, no seasonal factor.")
+                continue
+            fac = factor_ar(coefs, sper=s)
+            blocks.append(f"AR factor #{k} (order {len(coefs)}):\n" + describe(fac))
+        from mcp.types import TextContent
+        return [TextContent(type="text", text="\n\n".join(blocks))]
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+@mcp.tool()
+def meg_reformulate(inp_path: str, freq: int, output_path: str,
+                    base_pre_path: str = "", with_witness: bool = True) -> list:
+    """
+    Reformulate the model for STOCHASTIC seasonality at frequency `freq`, after the
+    MEG (DCD_f / Shin-Fuller AR_f) has concluded stochastic there.
+
+    Builds the model the MEG recommends, FROM THE LAST .pre, without editing files by
+    hand. It loads the last fitted model (base_pre_path if given, else inp_path),
+    activates the seasonal AR_f unit root at `freq` (ifadf[freq]=1: the operator
+    1-2cos(w)B+B^2 for an interior frequency, or 1+B at the Nyquist f=s/2), removes the
+    now-annihilated deterministic harmonics at `freq`, re-estimates, writes the
+    reformulated .pre/.out to output_path and shows the model equation + diagnosis.
+
+    with_witness=True (DEFAULT) also adds the free invertible MA_f testigo
+    (1-2λcos(w)B+λ²B²), so the reformulated model is EXACTLY what the MEG/DCD_f
+    contrasts — the AR_f unit root AND the MA_f witness together. This is the correct
+    stochastic model S. After fitting, run `formal_tests` to read the witness DCD_f:
+    LR>crit ⇒ genuine stochastic; λ→boundary (−1) ⇒ quasi-cancellation (frontier).
+
+    with_witness=False gives the AR-only form (no witness): this OVER-DIFFERENCES the
+    seasonal (inflated σ, exploded Q-test) and is only a diagnostic subproduct, NOT S.
+    Use it only to inspect the bare over-differenced residuals.
+
+    Multiple stochastic frequencies: call iteratively (strongest first), passing the
+    previous output's .pre as base_pre_path, re-running formal_tests after each — the
+    per-frequency MEG on the all-deterministic model has cross-frequency contamination.
+
+    Parameters
+    ----------
+    inp_path      : source .inp/.pre (series data; also the model if base_pre_path="")
+    freq          : seasonal frequency to make stochastic (1..s/2)
+    output_path   : path to write the reformulated model (.pre/.out alongside)
+    base_pre_path : the last .pre (the deterministic model); if empty, uses inp_path
+    with_witness  : add the free MA_f testigo (default True → the correct S model)
+    """
+    try:
+        from art.formal_tests import reformulate_stochastic
+        from art.describe import describe_diagnosis
+        src = base_pre_path or inp_path
+        ts, m = _load_fitted(src)
+        s = int(getattr(ts, "freq", 12))
+        f = int(freq)
+        if not (1 <= f <= s // 2):
+            return _err(f"freq must be in 1..{s // 2} (got {freq})")
+        mc = reformulate_stochastic(m, f, s, with_witness=with_witness)
+        try:
+            mc.fit()
+        except Exception:
+            return _err("Re-estimation of the reformulated model failed:\n"
+                        + traceback.format_exc())
+        base = os.path.splitext(output_path)[0]
+        pre_path = base + ".pre"
+        try:
+            mc.write_pre(pre_path)
+            try:
+                mc.write_out(base + ".out")
+            except Exception:
+                pass
+        except Exception:
+            pre_path = output_path
+        eq = _equation_for_prompt(ts, mc)
+        diag = describe_diagnosis(mc)
+        kind = "(1 + B) [Nyquist]" if f == s // 2 else "(1 − 2cos·B + B²)"
+        if with_witness:
+            wit = ("(1 + θB)" if f == s // 2 else "(1 − 2λcos·B + λ²B²)")
+            witness_line = (f" + testigo MA_f libre {wit} (modelo S completo que "
+                            f"contrasta el MEG). Lee su DCD_f con `formal_tests`.")
+        else:
+            witness_line = (" SIN testigo MA_f → modelo AR-only SOBRE-DIFERENCIADO "
+                            "(subproducto diagnóstico, NO es S; usa with_witness=True).")
+        header = (f"## Reformulación MEG — estacionalidad ESTOCÁSTICA en f={f}\n\n"
+                  f"Activado el AR_f de raíz unitaria `ifadf[{f}]=1` {kind}"
+                  f"{witness_line} Eliminados los armónicos deterministas en f={f}. "
+                  f"Re-estimado desde `{os.path.basename(src)}`.\n\n{eq}\n\n")
+        diag.summary = header + diag.summary + f"\n\n*Parámetros: {pre_path}*"
+        return _result(diag)
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+@mcp.tool()
+def meg_frequency(inp_path: str, freq: int, base_pre_path: str = "") -> list:
+    """
+    MEG for ONE given seasonal frequency, evaluated on the CHAINED baseline.
+
+    Unlike `formal_tests` (which sweeps all frequencies), this runs the MEG /
+    DCD_f contrast for exactly one frequency `freq`, ON TOP of the supplied
+    baseline model — its AR/AR_s, μ, interventions and the OTHER harmonics are
+    all kept. This is the correct chained MEG: from the baseline (e.g. harmonics
+    + seasonal AR(1) + μ) it reformulates only f as stochastic (ifadf[freq]=1:
+    the AR_f unit root 1−2cos(ω)B+B² for an interior f, or 1+B at the Nyquist;
+    removes f's cos/sin harmonics; adds the free invertible MA_f testigo), then
+    fits the free and the constrained (λ₂=−1) models and reports the DCD_f LR:
+
+      LR = 2·[logL(free) − logL(λ₂=−1)]
+      LR > crit  ⇒ witness invertible, seasonal unit root genuine ⇒ STOCHASTIC.
+      LR ≤ crit  ⇒ witness at −1, cancels the AR_f unit root       ⇒ DETERMINISTIC.
+
+    The witness coef is reported as the INVERTIBLE estimate (the engine flips
+    |θ₂|>1 → 1/θ₂ inside the likelihood). If STOCHASTIC, adopt the form with
+    `meg_reformulate(freq=…, base_pre_path=<this baseline>)`.
+
+    Parameters
+    ----------
+    inp_path      : source .inp/.pre (series data; also the model if base_pre_path="")
+    freq          : the single seasonal frequency to test (1..s/2)
+    base_pre_path : the baseline .pre (AR_s+μ+harmonics); if empty, uses inp_path
+    """
+    try:
+        from art.formal_tests import meg as _meg
+        from art.describe import Description
+        src = base_pre_path or inp_path
+        ts, m = _load_fitted(src)
+        s = int(getattr(ts, "freq", 12))
+        f = int(freq)
+        if not (1 <= f <= s // 2):
+            return _err(f"freq must be in 1..{s // 2} (got {freq})")
+        if getattr(m, "ifadf", None) and len(m.ifadf) > f and m.ifadf[f] == 1:
+            return _err(f"freq={f} ya es estocástica (ifadf[{f}]=1) en el baseline "
+                        f"`{os.path.basename(src)}` — no se puede re-testear.")
+        results = _meg(m, frequencies=[f])
+        r = results[0]
+
+        is_nyquist = (f == s // 2)
+        kind = "(1 + B) [Nyquist]" if is_nyquist else "(1 − 2cos·B + B²)"
+        head = (f"## MEG en f={f}  (una frecuencia, encadenado sobre "
+                f"`{os.path.basename(src)}`)\n\n"
+                f"Reformula solo f={f} como estocástica (AR_f raíz unitaria "
+                f"`ifadf[{f}]=1` {kind} + testigo MA_f libre), conservando "
+                f"AR/AR_s, μ, intervenciones y los demás armónicos. Contrasta el "
+                f"testigo con DCD_f (H₀: λ₂=−1, raíz unitaria estacional).\n")
+
+        d = r.dcd_result
+        if d is None:
+            body = ("\n**Resultado: AMBIGUO** — la re-estimación del modelo "
+                    "reformulado falló (no convergió). Revisa el baseline.")
+            rec = "MEG f={0}: ambiguo (fallo de estimación).".format(f)
+            return _result(Description(summary=head + body, figure_b64=None,
+                                       recommendation=rec))
+
+        crit = d._crit
+        pct = ("*** (1%)" if d.rejects_1pct else "** (5%)" if d.rejects_5pct
+               else "* (10%)" if d.rejects_10pct else "(no rechaza)")
+        verdict = ("**ESTOCÁSTICA**" if r.stochastic
+                   else "**DETERMINISTA**")
+        body = (
+            f"\n| | valor |\n|---|---|\n"
+            f"| MA_f testigo λ₂ (invertible) | {r.coef_ma_f:.6f} |\n"
+            f"| H₀ (raíz unitaria) | λ₂ = −1 |\n"
+            f"| logL(libre) | {d.loglik_free:.4f} |\n"
+            f"| logL(λ₂=−1) | {d.loglik_constrained:.4f} |\n"
+            f"| **LR = 2·Δ** | **{d.lr:.4f}** {pct} |\n"
+            f"| crít DCD_f (n={d.n}, s={'2' if d.complex_pair and not is_nyquist else '1'}) "
+            f"| 10%={crit['10%']}, 5%={crit['5%']}, 1%={crit['1%']} |\n\n"
+            f"### Veredicto f={f}: {verdict}\n"
+        )
+        if r.stochastic:
+            body += (f"\nLR={d.lr:.2f} > crít 5%={crit['5%']}: el testigo es invertible "
+                     f"(λ₂ lejos de −1), la raíz unitaria estacional NO se cancela ⇒ "
+                     f"**estacionalidad estocástica genuina en f={f}** (AR_f no "
+                     f"estacionario).")
+            rec = (f"f={f} ESTOCÁSTICA (MEG LR={d.lr:.2f} > {crit['5%']}). Adopta la "
+                   f"forma con `meg_reformulate(freq={f}, base_pre_path=\"{src}\", "
+                   f"output_path=…)` y reestima; después re-testea las demás "
+                   f"frecuencias sobre el nuevo baseline.")
+        else:
+            body += (f"\nLR={d.lr:.2f} ≤ crít 5%={crit['5%']}: no se rechaza λ₂=−1; el "
+                     f"testigo MA_f cuasi-cancela la raíz unitaria del AR_f ⇒ **f={f} "
+                     f"determinista** (los armónicos cos/sin actuales son la "
+                     f"especificación correcta).")
+            rec = (f"f={f} DETERMINISTA (MEG LR={d.lr:.2f} ≤ {crit['5%']}). Mantén los "
+                   f"armónicos cos/sin en f={f}; no reformules.")
+        return _result(Description(summary=head + body, figure_b64=None,
+                                   recommendation=rec))
+    except Exception:
+        return _err(traceback.format_exc())
+
+
 # ---------------------------------------------------------------------------
 # Tool: Seasonal parameters (Bloque G)
 # ---------------------------------------------------------------------------

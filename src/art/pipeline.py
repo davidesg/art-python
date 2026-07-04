@@ -282,6 +282,106 @@ def _write_inp(ts, model, output_path: str) -> None:
         fh.write("\n".join(lines) + "\n")
 
 
+# ── ARMA starting values: Yule-Walker (AR) + Hannan-Rissanen (MA) ───────────
+# New AR/MA parameters are initialised from data-driven pre-estimations instead
+# of crude constants (old: AR 0.0, MA -0.3), so each iterative step starts near
+# the optimum. fue stores MA in the Box-Jenkins convention N_t = (1 - θB) a_t
+# (θ>0), so Hannan-Rissanen returns θ = -b (b = regression coef on the innovation
+# proxy). The MEG over-differencing witness keeps its own rule (coef=-0.9) and is
+# NOT touched here.
+
+def _autocov(x, maxlag):
+    import numpy as np
+    x = np.asarray(x, float)
+    x = x[np.isfinite(x)]
+    x = x - x.mean()
+    n = len(x)
+    if n <= maxlag + 1:
+        maxlag = max(0, n - 2)
+    return np.array([float(np.dot(x[: n - k], x[k:])) / n for k in range(maxlag + 1)])
+
+
+def _shrink_stationary(coef):
+    """Shrink coef geometrically until 1 - Σ coef_k z^k has all roots strictly
+    outside the unit circle (stationary AR / invertible MA in fue's convention)."""
+    import numpy as np
+    coef = np.asarray(coef, float)
+    if coef.size == 0 or not np.all(np.isfinite(coef)):
+        return np.zeros(coef.shape)
+    for c in (1.0, 0.9, 0.8, 0.6, 0.4, 0.2):
+        test = coef * (c ** np.arange(1, coef.size + 1))
+        # characteristic polynomial 1 - Σ test_k z^k, highest degree first for
+        # np.roots; stationary/invertible ⟺ all roots strictly outside unit circle.
+        roots = np.roots(np.concatenate([-test[::-1], [1.0]]))
+        if roots.size == 0 or np.min(np.abs(roots)) > 1.001:
+            return test
+    return np.zeros(coef.shape)
+
+
+def _yw_ar(x, p, s=1):
+    """Yule-Walker AR(p) at lag spacing s (s=1 regular, s=freq seasonal).
+    Returns φ in (1 - φ₁B^s - … - φ_pB^{ps}); stationary."""
+    import numpy as np
+    if p <= 0:
+        return []
+    ac = _autocov(x, p * s)
+    g = ac[0::s][: p + 1]
+    if g.size < p + 1 or g[0] <= 0:
+        return [0.0] * p
+    R = np.array([[g[abs(i - j)] for j in range(p)] for i in range(p)])
+    try:
+        phi = np.linalg.solve(R, g[1: p + 1])
+    except np.linalg.LinAlgError:
+        return [0.0] * p
+    return [float(v) for v in _shrink_stationary(phi)]
+
+
+def _hr_ma(x, q, s=1):
+    """Hannan-Rissanen MA(q) at lag spacing s. Returns θ in fue's Box-Jenkins
+    convention (1 - θ₁B^s - …), i.e. θ = -b; invertible."""
+    import numpy as np
+    if q <= 0:
+        return []
+    x = np.asarray(x, float)
+    x = x[np.isfinite(x)]
+    x = x - x.mean()
+    n = len(x)
+    k = int(min(max(10, 3 * q * s), max(1, n // 4)))
+    phi = np.asarray(_yw_ar(x, k), float)
+    if phi.size < k:
+        phi = np.concatenate([phi, np.zeros(k - phi.size)])
+    e = np.zeros(n)
+    for t in range(k, n):
+        e[t] = x[t] - float(np.dot(phi, x[t - 1:: -1][:k]))
+    lags = [j * s for j in range(1, q + 1)]
+    maxlag = k + max(lags)
+    if n - maxlag < q + 2:
+        return [-0.3] * q
+    Y = x[maxlag:]
+    X = np.column_stack([e[maxlag - L: n - L] for L in lags])
+    try:
+        b, *_ = np.linalg.lstsq(X, Y, rcond=None)
+    except Exception:
+        return [-0.3] * q
+    return [float(v) for v in _shrink_stationary(-np.asarray(b, float))]
+
+
+def _arma_starts(resid, p, q, P, Q, s):
+    """(ar, ma, ar_s, ma_s) initial-value lists from a residual/differenced series,
+    Yule-Walker for AR/AR_s and Hannan-Rissanen for MA/MA_s. Falls back to the old
+    constants (AR 0.0, MA -0.3) if resid is unusable."""
+    import numpy as np
+    ok = (resid is not None and np.size(resid) > 8
+          and np.all(np.isfinite(np.asarray(resid, float))))
+    if not ok:
+        return ([0.0] * p, [-0.3] * q, [0.0] * P, [-0.3] * Q)
+    ar   = (_yw_ar(resid, p)      if p > 0 else []) or [0.0] * p
+    ma   = (_hr_ma(resid, q)      if q > 0 else []) or [-0.3] * q
+    ar_s = (_yw_ar(resid, P, s=s) if P > 0 else []) or [0.0] * P
+    ma_s = (_hr_ma(resid, Q, s=s) if Q > 0 else []) or [-0.3] * Q
+    return (ar, ma, ar_s, ma_s)
+
+
 def _build_arma_on_model(m_base, p: int, q: int,
                          P: int = 0, Q: int = 0,
                          estimate_mu: bool = False):
@@ -293,9 +393,23 @@ def _build_arma_on_model(m_base, p: int, q: int,
     that already has its outlier interventions estimated.
     """
     import fue
+    import numpy as np
+
+    # Data-driven starting values for the NEW ARMA parameters, from the residuals
+    # of the (fitted) base model — Yule-Walker (AR/AR_s), Hannan-Rissanen (MA/MA_s).
+    resid = None
+    try:
+        if getattr(m_base, "_result", None) is None:
+            m_base.fit()
+        r = m_base.residuals
+        resid = np.asarray(getattr(r, "data", getattr(r, "values", r)), float)
+    except Exception:
+        resid = None
+    s_freq = int(getattr(m_base.series, "freq", 12))
+    ar_i, ma_i, ars_i, mas_i = _arma_starts(resid, p, q, P, Q, s_freq)
 
     if p > 0:
-        ar   = [[0.0] * p]
+        ar   = [ar_i]
         ar_f = [[True] * p]
     elif q == 0 and P == 0 and Q == 0:
         # Keep the p=0,q=0 workaround only when there is truly no ARMA at all
@@ -305,12 +419,12 @@ def _build_arma_on_model(m_base, p: int, q: int,
         ar   = []
         ar_f = []
 
-    ma   = [[-0.3] * q] if q > 0 else []
+    ma   = [ma_i] if q > 0 else []
     ma_f = [[True]  * q] if q > 0 else []
 
-    ar_s_val  = [[0.0]  * P] if P > 0 else []
+    ar_s_val  = [ars_i] if P > 0 else []
     ar_sf_val = [[True] * P] if P > 0 else []
-    ma_s_val  = [[-0.3] * Q] if Q > 0 else []
+    ma_s_val  = [mas_i] if Q > 0 else []
     ma_sf_val = [[True] * Q] if Q > 0 else []
 
     return fue.Model(
@@ -344,11 +458,30 @@ def _make_model(ts, lam: float, d: int, D: int,
     Only P=0,Q≥1 or P≥1,Q=0 are safe.  Use estimate_py() as workaround if needed.
     """
     import fue
+    import numpy as np
     freq = ts.freq
+
+    # Data-driven ARMA starting values (Yule-Walker AR / Hannan-Rissanen MA) from
+    # the differenced Box-Cox series. For D=1 (no harmonics) this is the clean
+    # ∇^d∇_s series; for D=0 the harmonics are not yet removed, so it is a rough
+    # start for the regular AR/MA (still better than the old constants).
+    resid_ref = None
+    try:
+        yv = np.asarray(getattr(ts, "data", getattr(ts, "values", None)), float)
+        yv = np.log(yv) if abs(lam) < 1e-8 else np.sign(yv) * np.abs(yv) ** lam
+        w = yv
+        for _ in range(int(d)):
+            w = np.diff(w)
+        for _ in range(int(D)):
+            w = w[freq:] - w[:-freq]
+        resid_ref = w
+    except Exception:
+        resid_ref = None
+    ar_i, ma_i, ars_i, mas_i = _arma_starts(resid_ref, p, q, P, Q, freq)
 
     # Workaround for fue C crash when nar=0 AND nma=0: add AR(1) phi=0 fixed.
     if p > 0:
-        ar   = [[0.0] * p]
+        ar   = [ar_i]
         ar_f = [[True] * p]
     elif q == 0:
         ar   = [[0.0]]
@@ -356,7 +489,7 @@ def _make_model(ts, lam: float, d: int, D: int,
     else:
         ar   = []
         ar_f = []
-    ma   = [[-0.3] * q] if q > 0 else []
+    ma   = [ma_i] if q > 0 else []
     ma_f = [[True]  * q] if q > 0 else []
 
     if D == 0:
@@ -368,13 +501,17 @@ def _make_model(ts, lam: float, d: int, D: int,
             itvs.append(fue.Intervention("cos", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
             itvs.append(fue.Intervention("sin", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
         itvs.append(fue.Intervention("alter", at=0, omega=[0.0], omega_free=[True]))
-        ar_s_val = []; ar_sf_val = []
-        ma_s_val = []; ma_sf_val = []
+        # Stationary stochastic seasonality on top of the deterministic harmonics:
+        # a free annual AR/MA operator (no seasonal differencing). YW/HR-initialised.
+        ar_s_val  = [ars_i] if P > 0 else []
+        ar_sf_val = [[True] * P] if P > 0 else []
+        ma_s_val  = [mas_i] if Q > 0 else []
+        ma_sf_val = [[True] * Q] if Q > 0 else []
     else:
         itvs = []
-        ar_s_val  = [[0.0]  * P] if P > 0 else []
+        ar_s_val  = [ars_i] if P > 0 else []
         ar_sf_val = [[True] * P] if P > 0 else []
-        ma_s_val  = [[-0.3] * Q] if Q > 0 else []
+        ma_s_val  = [mas_i] if Q > 0 else []
         ma_sf_val = [[True] * Q]  if Q > 0 else []
 
     if extra_itvs:

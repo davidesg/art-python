@@ -121,9 +121,23 @@ class TestBuildInpD1:
 # ---------------------------------------------------------------------------
 
 def test_seasonality_mentions_b2():
-    ts = _load_ts(os.path.join(_PCE_MOD, "R.1.inp"))
+    # The B2 (multiplicative) option is offered only when seasonality is DETECTED.
+    # The former PCE fixture (R.1.inp) is the implicit consumption deflator, a
+    # seasonally-adjusted index -> not seasonal (F~1; the OLS and the correctly
+    # scaled HAC F agree), so after the HAC scaling fix it no longer exercises this
+    # path (it used to, spuriously, via the 1/n-inflated F). Use a clearly seasonal
+    # synthetic series instead.
+    import numpy as np
+    from fue import TimeSeries
     from art.describe import describe_seasonality
+    rng = np.random.default_rng(0)
+    t = np.arange(240)
+    level = np.cumsum(0.2 * rng.standard_normal(240)) + 100.0
+    seas = (5 * np.cos(2 * np.pi * t / 12) + 4 * np.sin(2 * np.pi * t / 12)
+            + 2 * np.cos(2 * np.pi * 2 * t / 12))
+    ts = TimeSeries.from_array(level + seas, freq=12, start=(2000, 1), name="seas")
     desc = describe_seasonality(ts)
+    assert desc.data.get("seasonal_detected") is True
     # B2 option should be mentioned in summary
     assert "B2" in desc.summary or "multiplicat" in desc.summary.lower()
 
