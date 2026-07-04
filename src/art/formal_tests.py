@@ -261,40 +261,36 @@ def _count_free_ar(model) -> int:
     return n
 
 
+# ---------------------------------------------------------------------------
+# Canonical parameter unpacking
+# ---------------------------------------------------------------------------
+# Every ART parameter extractor delegates to fue's SINGLE canonical unpacker
+# (fue.forecast._reconstruct_params, which mirrors the C count_npar_build_par),
+# so the flat-vector packing convention lives in exactly one place. Four
+# hand-rolled index walks used to duplicate it and were the root cause of the
+# jul-2026 defects (dropped P, root-vs-parameter, misaligned SE). See
+# ART_MCP_REVIEW.md §1.
+
+def _unpack(model):
+    """Estimated parameters as the named 9-tuple
+    (itv_omega, itv_delta, ar, ar_s, ma, ma_s, ar_f, ma_f, mu); each factor list
+    has its free coefs filled from the estimate and fixed coefs kept."""
+    from fue.forecast import _reconstruct_params
+    return _reconstruct_params(model, model.params)
+
+
+def _free_scalars(component, free_lists) -> list[float]:
+    """Flat list of the FREE scalars of a factor-list component (default: all free)."""
+    out = []
+    for i, fac in enumerate(component or []):
+        fl = free_lists[i] if free_lists and i < len(free_lists) else None
+        out += [float(fac[j]) for j in range(len(fac)) if fl is None or fl[j]]
+    return out
+
+
 def _extract_ar_params(model) -> list[float]:
-    """
-    Extract estimated values of free regular AR coefficients from model.params.
-
-    Parameter ordering (from cast_us._build_initial_x):
-      1. omega_free per intervention
-      2. delta_free per intervention
-      3. AR regular
-      4. AR seasonal
-      5. MA regular  ...
-    """
-    # Count intervention free params that come before AR
-    n_omega = sum(
-        sum(itv.omega_free)
-        for itv in (model.interventions or [])
-    )
-    n_delta = sum(
-        sum(itv.delta_free)
-        for itv in (model.interventions or [])
-    )
-    start = n_omega + n_delta
-
-    params = np.asarray(model.params, dtype=float)
-    values = []
-    idx = start
-    for i, factor in enumerate(model.ar or []):
-        free = (model.ar_free[i]
-                if model.ar_free and i < len(model.ar_free)
-                else [True] * len(factor))
-        for j in range(len(factor)):
-            if free[j]:
-                values.append(float(params[idx]))
-                idx += 1
-    return values
+    """Estimated free regular AR coefficients (flat), via the canonical unpacker."""
+    return _free_scalars(_unpack(model)[2], model.ar_free)
 
 
 def shin_fuller(model) -> ShinFullerResult:
@@ -443,58 +439,17 @@ class DCDResult:
 
 
 def _extract_ma_param(model, factor_index: int) -> float:
-    """
-    Extract estimated value of the first free coefficient of MA factor factor_index
-    from model.params.
-
-    Parameter ordering (cast_us._build_initial_x):
-      1. omega_free per intervention
-      2. delta_free per intervention
-      3. AR regular (free)
-      4. AR seasonal (free)
-      5. MA regular (free)  ← we want this
-      ...
-    """
-    n_omega = sum(
-        sum(itv.omega_free)
-        for itv in (model.interventions or [])
-    )
-    n_delta = sum(
-        sum(itv.delta_free)
-        for itv in (model.interventions or [])
-    )
-
-    def _count_free(factors, free_lists):
-        total = 0
-        for i, fac in enumerate(factors or []):
-            free = (free_lists[i]
-                    if free_lists and i < len(free_lists)
-                    else None)
-            total += sum(1 for j in range(len(fac))
-                         if free is None or free[j])
-        return total
-
-    n_ar   = _count_free(model.ar,   model.ar_free)
-    n_ar_s = _count_free(model.ar_s, model.ar_s_free)
-
-    params = np.asarray(model.params, dtype=float)
-    idx = n_omega + n_delta + n_ar + n_ar_s
-
-    for i, fac in enumerate(model.ma or []):
-        free = (model.ma_free[i]
-                if model.ma_free and i < len(model.ma_free)
-                else None)
-        if i == factor_index:
-            for j in range(len(fac)):
-                if free is None or free[j]:
-                    return float(params[idx])
-            raise ValueError(
-                f"MA factor {factor_index} has no free coefficients"
-            )
-        idx += sum(1 for j in range(len(fac))
-                   if free is None or free[j])
-
-    raise IndexError(f"MA factor index {factor_index} out of range")
+    """Estimated first free coefficient of regular MA factor `factor_index`."""
+    ma = _unpack(model)[4]
+    if not (0 <= factor_index < len(ma or [])):
+        raise IndexError(f"MA factor index {factor_index} out of range")
+    fac = ma[factor_index]
+    fl = (model.ma_free[factor_index]
+          if model.ma_free and factor_index < len(model.ma_free) else None)
+    for j in range(len(fac)):
+        if fl is None or fl[j]:
+            return float(fac[j])
+    raise ValueError(f"MA factor {factor_index} has no free coefficients")
 
 
 def dcd(model) -> list[DCDResult]:
@@ -590,63 +545,20 @@ def dcd(model) -> list[DCDResult]:
 # ---------------------------------------------------------------------------
 
 def _extract_ma_f_param(model, factor_index: int) -> float:
-    """
-    Extract estimated coef of MA_f factor at factor_index from model.params.
+    """Estimated fixed-frequency MA_f coefficient of factor `factor_index`, reported in
+    the INVERTIBLE representation.
 
-    Parameter ordering (cast_us._build_initial_x):
-      1. omega_free per intervention
-      2. delta_free per intervention
-      3. AR regular (free)
-      4. AR seasonal (free)
-      5. MA regular (free)
-      6. MA seasonal (free)
-      7. AR_f free coefs  ← one scalar per free AR_f
-      8. MA_f free coefs  ← we want this
-    """
-    n_omega = sum(
-        sum(itv.omega_free)
-        for itv in (model.interventions or [])
-    )
-    n_delta = sum(
-        sum(itv.delta_free)
-        for itv in (model.interventions or [])
-    )
-
-    def _count_free(factors, free_lists):
-        total = 0
-        for i, fac in enumerate(factors or []):
-            free = (free_lists[i]
-                    if free_lists and i < len(free_lists)
-                    else None)
-            total += sum(1 for j in range(len(fac))
-                         if free is None or free[j])
-        return total
-
-    n_ar   = _count_free(model.ar,   model.ar_free)
-    n_ar_s = _count_free(model.ar_s, model.ar_s_free)
-    n_ma   = _count_free(model.ma,   model.ma_free)
-    n_ma_s = _count_free(model.ma_s, model.ma_s_free)
-    n_ar_f = sum(1 for ff in (model.ar_f or []) if ff.free)
-
-    params = np.asarray(model.params, dtype=float)
-    idx = n_omega + n_delta + n_ar + n_ar_s + n_ma + n_ma_s + n_ar_f
-
-    for i, ff in enumerate(model.ma_f or []):
-        if i == factor_index:
-            if not ff.free:
-                raise ValueError(f"MA_f factor {factor_index} is not free")
-            # Report the INVERTIBLE estimate. The engine flips a non-invertible
-            # fixed-freq MA (|θ₂|>1 ⇔ coef<−1) to its invertible reciprocal 1/coef
-            # inside the likelihood (cast_us [4]: `if c2 < -1.0: c2 = 1.0/c2`), so
-            # the raw optimum x may sit on the non-invertible root. Mirror that flip
-            # here so the reported/tested coef is the invertible one (matches fue-C's
-            # "constrained search for invertibility").
-            c = float(params[idx])
-            return 1.0 / c if c < -1.0 else c
-        if ff.free:
-            idx += 1
-
-    raise IndexError(f"MA_f factor index {factor_index} out of range")
+    The engine flips a non-invertible fixed-freq MA (|θ₂|>1 ⇔ coef<−1) to its invertible
+    reciprocal 1/coef inside the likelihood (cast_us [4]: `if c2 < -1.0: c2 = 1.0/c2`), so
+    the raw optimum may sit on the non-invertible root. Mirror that flip so the reported
+    /tested coef is the invertible one (matches fue-C's constrained invertibility search)."""
+    mf = model.ma_f or []
+    if not (0 <= factor_index < len(mf)):
+        raise IndexError(f"MA_f factor index {factor_index} out of range")
+    if not mf[factor_index].free:
+        raise ValueError(f"MA_f factor {factor_index} is not free")
+    c = _unpack(model)[7][factor_index]
+    return 1.0 / c if c < -1.0 else c
 
 
 def _fit_py(mc) -> None:
@@ -836,36 +748,13 @@ def reformulate_stochastic(model, freq: int, s: int, with_witness: bool = True):
 
 
 def _extract_ar_factor_coefs(model, ar_factor_index: int) -> tuple[float, ...]:
-    """
-    Extract estimated values of free coefficients for AR factor ar_factor_index.
-
-    Parameter ordering (cast_us._build_initial_x):
-      1. omega_free per intervention
-      2. delta_free per intervention
-      3. AR regular (free)  ← target
-      ...
-    """
-    n_omega = sum(sum(itv.omega_free) for itv in (model.interventions or []))
-    n_delta = sum(sum(itv.delta_free) for itv in (model.interventions or []))
-    params = np.asarray(model.params, dtype=float)
-    idx = n_omega + n_delta
-
-    for i, factor in enumerate(model.ar or []):
-        free = (model.ar_free[i]
-                if model.ar_free and i < len(model.ar_free)
-                else [True] * len(factor))
-        if i == ar_factor_index:
-            coefs = []
-            for j in range(len(factor)):
-                if free[j]:
-                    coefs.append(float(params[idx]))
-                    idx += 1
-            return tuple(coefs)
-        for j in range(len(factor)):
-            if free[j]:
-                idx += 1
-
-    raise IndexError(f"AR factor index {ar_factor_index} out of range")
+    """Estimated free coefficients of regular AR factor `ar_factor_index`."""
+    ar = _unpack(model)[2]
+    if not (0 <= ar_factor_index < len(ar or [])):
+        raise IndexError(f"AR factor index {ar_factor_index} out of range")
+    fl = (model.ar_free[ar_factor_index]
+          if model.ar_free and ar_factor_index < len(model.ar_free) else None)
+    return tuple(_free_scalars([ar[ar_factor_index]], None if fl is None else [fl]))
 
 
 @dataclass
