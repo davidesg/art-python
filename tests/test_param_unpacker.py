@@ -110,16 +110,19 @@ def _reformulated_witness_model(freq=3):
     return _fit(mS)
 
 
-def test_extract_ma_f_param_is_invertible_flip_of_fue_raw():
-    """ART's _extract_ma_f_param == invertible( fue raw ma_f coef ), and |·| ≤ 1."""
+def test_fit_normalizes_ma_f_to_invertible():
+    """§C: fue.Model.fit stores the MA_f witness in the INVERTIBLE root (|·| ≤ 1),
+    so the reflection lives in one place (fue) — ART reads it without a flip."""
     m = _reformulated_witness_model(freq=3)
-    rc = _reconstruct_params(m, m.params)          # rc[7] = ma_f_coefs (raw)
+    rc = _reconstruct_params(m, m.params)          # rc[7] = ma_f_coefs, already invertible
     free_idx = [i for i, ff in enumerate(m.ma_f) if ff.free]
     assert free_idx, "expected a free MA_f witness"
     i = free_idx[0]
+    assert abs(rc[7][i]) <= 1.0 + 1e-9, "fit must store the invertible MA_f root"
     got = _extract_ma_f_param(m, i)
-    assert got == pytest.approx(_inv(rc[7][i]), abs=1e-12)
-    assert abs(got) <= 1.0 + 1e-9, "reported witness must be the invertible parameter"
+    assert got == pytest.approx(rc[7][i], abs=1e-12)   # ART reads it straight, no flip
+    assert got == pytest.approx(_inv(rc[7][i]), abs=1e-12)  # flip is a no-op now
+    assert abs(got) <= 1.0 + 1e-9
 
 
 # --------------------------------------------------------------------------- #

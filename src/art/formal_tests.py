@@ -545,20 +545,17 @@ def dcd(model) -> list[DCDResult]:
 # ---------------------------------------------------------------------------
 
 def _extract_ma_f_param(model, factor_index: int) -> float:
-    """Estimated fixed-frequency MA_f coefficient of factor `factor_index`, reported in
-    the INVERTIBLE representation.
+    """Estimated fixed-frequency MA_f coefficient of factor `factor_index`.
 
-    The engine flips a non-invertible fixed-freq MA (|θ₂|>1 ⇔ coef<−1) to its invertible
-    reciprocal 1/coef inside the likelihood (cast_us [4]: `if c2 < -1.0: c2 = 1.0/c2`), so
-    the raw optimum may sit on the non-invertible root. Mirror that flip so the reported
-    /tested coef is the invertible one (matches fue-C's constrained invertibility search)."""
+    Reported in the INVERTIBLE representation — the reflection now lives in a single
+    place, `fue.cast_us.normalize_ma_invertibility` (run by Model.fit), so a fitted
+    model already stores the invertible root here. See ART_MCP_REVIEW.md §1/§C."""
     mf = model.ma_f or []
     if not (0 <= factor_index < len(mf)):
         raise IndexError(f"MA_f factor index {factor_index} out of range")
     if not mf[factor_index].free:
         raise ValueError(f"MA_f factor {factor_index} is not free")
-    c = _unpack(model)[7][factor_index]
-    return 1.0 / c if c < -1.0 else c
+    return float(_unpack(model)[7][factor_index])
 
 
 def _fit_py(mc) -> None:

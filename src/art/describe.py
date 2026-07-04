@@ -895,14 +895,10 @@ def model_equation(ts, model) -> str:
         for factor, freel in zip(factors, frees):
             target.append(_fmt_poly(factor, freel, lag_mult))
 
-    def _add_fixed_freq(target, ff_list, flip_noninvertible=False):
-        """AR_f / MA_f fixed-frequency quadratic factors.
-
-        flip_noninvertible: for MA_f witnesses, report the invertible estimate.
-        The engine flips |θ₂|>1 (coef<−1) to 1/coef inside the likelihood
-        (cast_us [4]), so the raw optimum can land on the non-invertible root;
-        mirror that flip so the shown coef is the invertible one (matches fue-C).
-        """
+    def _add_fixed_freq(target, ff_list):
+        """AR_f / MA_f fixed-frequency quadratic factors. A fitted model already
+        stores the invertible MA_f root (normalize_ma_invertibility in fue.Model.fit),
+        so the shown coef is invertible without a report-time flip."""
         for ff in (ff_list or []):
             f_idx   = int(round(ff.freq))
             tc_val, tc_lbl = _two_cos(f_idx, freq)
@@ -920,8 +916,6 @@ def model_equation(ts, model) -> str:
             # Free coefficient: always show numeric value (never hide near-unit-root)
             if ff.free:
                 v, se = pi.pop()
-                if flip_noninvertible and v < -1.0:
-                    v = 1.0 / v      # non-invertible root → invertible equivalent
                 c_str = f"{_fv(abs(v))}·B²"
                 f_v   = f"(1{b_term} + {c_str})_f={f_idx}"
                 se_offset = len(f"(1{b_term} + ")
@@ -968,7 +962,7 @@ def model_equation(ts, model) -> str:
     if model.ma_s:
         ma_sf = model.ma_s_free if hasattr(model, "ma_s_free") else None
         _add_arma_blocks(right_blocks, model.ma_s, ma_sf, lag_mult=freq)
-    _add_fixed_freq(right_blocks, model.ma_f, flip_noninvertible=True)
+    _add_fixed_freq(right_blocks, model.ma_f)
 
     # ── mu: show value on eq line, SE below (like other params) ──────────
     mu_val_str = ""
