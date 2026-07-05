@@ -9,3 +9,6 @@ build/
 # Live analysis outputs go to cases/<serie>/work/ (not versioned).
 # Committed case-study artifacts + test fixtures stay at cases/<serie>/ root.
 cases/**/work/
+
+# Monte-Carlo draws for the DCD_f crits (regenerable; see research/sf_meg/README.md)
+research/sf_meg/out/
