@@ -132,7 +132,7 @@ _DCD_CRIT_MA_F_ASYMP = (1.11, 2.04, 4.52)
 def _dcd_crit(n: int | None, complex_pair: bool) -> dict:
     """Critical values for the DCD/MEG LR: real-root (s=1) or complex-pair (s=2)."""
     if not complex_pair:
-        return dict(_DCD_CRIT_MA)
+        return {k: round(v, 3) for k, v in dict(_DCD_CRIT_MA).items()}
     if n is None:
         c = _DCD_CRIT_MA_F_ASYMP
     else:
@@ -147,7 +147,7 @@ def _dcd_crit(n: int | None, complex_pair: bool) -> dict:
             w = (n - lo) / (hi - lo) if hi > lo else 0.0
             c = tuple((1 - w) * a + w * b
                       for a, b in zip(_DCD_CRIT_MA_F_TABLE[lo], _DCD_CRIT_MA_F_TABLE[hi]))
-    return {'10%': c[0], '5%': c[1], '1%': c[2]}
+    return {'10%': round(c[0], 3), '5%': round(c[1], 3), '1%': round(c[2], 3)}
 
 
 # Backward-compatible alias (asymptotic complex values).

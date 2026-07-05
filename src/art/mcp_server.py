@@ -228,6 +228,17 @@ def _err(msg: str) -> list:
     return [TextContent(type="text", text=f"❌ Error: {msg}")]
 
 
+def _warn(context: str, exc: "Exception | None" = None) -> None:
+    """Log a non-fatal failure to stderr instead of swallowing it silently (§4).
+
+    Used where a step degrades gracefully (an optional figure, a secondary .out,
+    a formal test that does not apply) but the reason should still be visible in
+    the server log rather than disappearing into a bare `except: pass`."""
+    import sys
+    detail = f": {type(exc).__name__}: {exc}" if exc is not None else ""
+    print(f"⚠ [art] {context}{detail}", file=sys.stderr)
+
+
 def _equation_for_prompt(ts, model) -> str:
     """The estimated-model equation wrapped for the prompt: a meta-directive to
     Claude + the authoritative equation in a code fence to be shown VERBATIM.
@@ -302,7 +313,8 @@ def _plot_series_at_d(ts, lam: float, d: int) -> str | None:
         b64 = _fig_b64(fig)
         plt.close(fig)
         return b64
-    except Exception:
+    except Exception as e:
+        _warn("figure encoding failed", e)
         return None
 
 @mcp.tool()
@@ -1017,8 +1029,8 @@ def meg_reformulate(inp_path: str, freq: int, output_path: str,
             mc.write_pre(pre_path)
             try:
                 mc.write_out(base + ".out")
-            except Exception:
-                pass
+            except Exception as e:
+                _warn(f"write_out({base}.out) failed", e)
         except Exception:
             pre_path = output_path
         eq = _equation_for_prompt(ts, mc)
@@ -2076,7 +2088,8 @@ def record_version(inp_path: str,
             fig = plot_diagnosis(diag_result, m)
             b64 = _fig_b64(fig)
             plt.close(fig)
-        except Exception:
+        except Exception as e:
+            _warn("diagnosis figure failed", e)
             b64 = None
 
         lam = float(getattr(m, "boxlam", 0.0) or 0.0)
@@ -2761,14 +2774,14 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
         if m_fit is not None:
             try:
                 dcd_results = _dcd(m_fit)
-            except Exception:
-                pass
+            except Exception as e:
+                _warn("DCD test not applicable / failed", e)
             if run_meg and m_fit.D == 0:
                 try:
                     from art.formal_tests import meg as _meg
                     meg_results = _meg(m_fit)
-                except Exception:
-                    pass
+                except Exception as e:
+                    _warn("MEG test not applicable / failed", e)
 
         # ── Model equation and final description ──────────────────────────
         if m_fit is not None:
@@ -2871,14 +2884,14 @@ def batch_build(inp_paths: list[str], output_dir: str,
                 if m_fit is not None:
                     try:
                         dcd_results = _dcd(m_fit)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _warn("DCD test not applicable / failed", e)
                     if run_meg and m_fit.D == 0:
                         try:
                             from art.formal_tests import meg as _meg
                             _meg(m_fit)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            _warn("MEG test not applicable / failed", e)
 
                 # ── HTML report ───────────────────────────────────────────
                 html_path = os.path.join(output_dir, f"{name}_auto_report.html")
@@ -3344,8 +3357,8 @@ def preview_data(source_path: str, sheet: str = "") -> list:
                         if gap >= 340:  freq_detected = 1
                         elif gap >= 85: freq_detected = 4
                         elif gap >= 25: freq_detected = 12
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _warn("seasonal frequency detection failed", e)
             freq_str = {1: "anual", 4: "trimestral", 12: "mensual"}.get(
                 freq_detected, f"desconocida (gap≈{gap if gap is not None else '?'} días)"
             )
