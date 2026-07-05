@@ -25,6 +25,7 @@ from art.formal_tests import (
     _extract_ma_f_param,
     _extract_ar_factor_coefs,
     reformulate_stochastic,
+    _check_reformulable,
 )
 
 
@@ -165,3 +166,41 @@ def test_model_equation_reads_coefs_from_canonical_component():
     assert ar_f_s in eq and ma_s in eq and ar_f_s != ma_s
     # AR_f block precedes the MA block; under the old cursor the values were swapped.
     assert eq.index(ar_f_s) < eq.index(ma_s)
+
+
+# --------------------------------------------------------------------------- #
+# Baseline guards (§3) — reformulation/MEG entry points
+# --------------------------------------------------------------------------- #
+
+def _harmonic_baseline(n_harmonics=6):
+    ts = _syn_ts()
+    return _fit(_make_model(ts, lam=0.0, d=1, D=0, p=0, q=0,
+                            n_harmonics=n_harmonics, estimate_mu=True))
+
+
+def test_guard_rejects_out_of_range_freq():
+    m = _harmonic_baseline()
+    with pytest.raises(ValueError, match="out of range"):
+        _check_reformulable(m, 7, 12)
+    with pytest.raises(ValueError):
+        _check_reformulable(m, 0, 12)
+
+
+def test_guard_rejects_already_stochastic():
+    m = _harmonic_baseline()
+    m.ifadf = list(m.ifadf or [0] * 7)
+    m.ifadf[5] = 1
+    with pytest.raises(ValueError, match="already stochastic"):
+        _check_reformulable(m, 5, 12)
+
+
+def test_guard_rejects_freq_without_harmonic():
+    m = _harmonic_baseline(n_harmonics=2)   # only f=1,2 (+ alter at Nyquist f=6)
+    with pytest.raises(ValueError, match="no cos/sin"):
+        _check_reformulable(m, 3, 12)
+
+
+def test_guard_passes_valid_baseline():
+    m = _harmonic_baseline()
+    _check_reformulable(m, 5, 12)   # interior f=5: cos/sin present, deterministic
+    _check_reformulable(m, 6, 12)   # Nyquist: alter present

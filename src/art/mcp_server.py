@@ -1081,13 +1081,29 @@ def meg_frequency(inp_path: str, freq: int, base_pre_path: str = "") -> list:
         if getattr(m, "ifadf", None) and len(m.ifadf) > f and m.ifadf[f] == 1:
             return _err(f"freq={f} ya es estocástica (ifadf[{f}]=1) en el baseline "
                         f"`{os.path.basename(src)}` — no se puede re-testear.")
-        results = _meg(m, frequencies=[f])
+        try:
+            results = _meg(m, frequencies=[f])
+        except ValueError as _ve:      # baseline guard (_check_reformulable)
+            return _err(str(_ve))
         r = results[0]
+
+        # Surface the baseline's noise structure so the analyst confirms it is the
+        # intended pre-MEG model — a baseline missing μ silently changes the verdict
+        # (the μ=0 pitfall). The reformulation preserves whatever the baseline carries.
+        from fue.forecast import _reconstruct_params as _rp
+        mu_txt = ("**sin media μ** ⚠" if not getattr(m, "estimate_mu", False)
+                  else f"μ={_rp(m, m.params)[8]:.4f}")
+        n_arr  = sum(len(fac) for fac in (m.ar or []))
+        n_ars  = sum(len(fac) for fac in (m.ar_s or []))
+        n_harm = sum(1 for itv in (m.interventions or [])
+                     if getattr(itv, "type", None) in ("cos", "sin", "alter"))
 
         is_nyquist = (f == s // 2)
         kind = "(1 + B) [Nyquist]" if is_nyquist else "(1 − 2cos·B + B²)"
         head = (f"## MEG en f={f}  (una frecuencia, encadenado sobre "
                 f"`{os.path.basename(src)}`)\n\n"
+                f"**Baseline:** {mu_txt} · AR({n_arr}) · AR_s({n_ars}) · {n_harm} armónicos "
+                f"— el veredicto depende del ruido del baseline; usa el pre-MEG.\n\n"
                 f"Reformula solo f={f} como estocástica (AR_f raíz unitaria "
                 f"`ifadf[{f}]=1` {kind} + testigo MA_f libre), conservando "
                 f"AR/AR_s, μ, intervenciones y los demás armónicos. Contrasta el "

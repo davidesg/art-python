@@ -689,6 +689,51 @@ def _dcd_nyquist_ma(model, ma_index: int, freq: float) -> DCDResult:
 
 
 # ---------------------------------------------------------------------------
+# Baseline guards for the MEG / reformulation entry points
+# ---------------------------------------------------------------------------
+
+def _seasonal_harmonics_at(model, freq: int, s: int) -> list:
+    """The deterministic seasonal interventions a reformulation at `freq` would remove:
+    the cos/sin pair at that harmonic (interior f), or the `alter` (−1)ᵗ term (Nyquist)."""
+    is_nyquist = (freq == s // 2)
+    hits = []
+    for itv in (model.interventions or []):
+        t = getattr(itv, "type", None)
+        if is_nyquist:
+            if t == "alter":
+                hits.append(itv)
+        elif t in ("cos", "sin") and float(getattr(itv, "harmonic", -1)) == float(freq):
+            hits.append(itv)
+    return hits
+
+
+def _check_reformulable(model, freq: int, s: int) -> None:
+    """Guard the MEG / reformulation baseline. Raise ValueError with an actionable
+    message if `freq` cannot be reformulated to stochastic on this model.
+
+    The MEG contrasts the DETERMINISTIC harmonic at `freq` against its stochastic
+    (unit-root AR_f + witness) form, so the baseline must be the pre-MEG model: the
+    target frequency still deterministic (a cos/sin — or alter at the Nyquist — present,
+    ifadf[freq]=0) and the noise model (AR/AR_s/μ) already in place. Running it on a
+    baseline that dropped those — e.g. μ removed — silently changes the verdict."""
+    if not (1 <= freq <= s // 2):
+        raise ValueError(f"freq={freq} out of range [1, {s // 2}] for s={s}.")
+    ifadf = getattr(model, "ifadf", None) or []
+    if len(ifadf) > freq and ifadf[freq] == 1:
+        raise ValueError(
+            f"freq={freq} is already stochastic (ifadf[{freq}]=1) in the baseline — "
+            "reformulate/test it on the DETERMINISTIC pre-MEG baseline, not one where "
+            f"f={freq} is already integrated.")
+    if not _seasonal_harmonics_at(model, freq, s):
+        kind = "the alter (−1)ᵗ term" if freq == s // 2 else f"cos/sin harmonics at f={freq}"
+        raise ValueError(
+            f"the baseline has no {kind} to reformulate. The MEG contrasts the "
+            f"deterministic harmonic at f={freq} against its stochastic form, so that "
+            "harmonic must be present. Pass the pre-MEG baseline (all seasonal "
+            "frequencies deterministic + the noise model AR/AR_s/μ intact).")
+
+
+# ---------------------------------------------------------------------------
 # RV fixed-frequency test for AR(2) factors with complex roots
 # ---------------------------------------------------------------------------
 
@@ -712,6 +757,7 @@ def reformulate_stochastic(model, freq: int, s: int, with_witness: bool = True):
     diagnostic subproduct, not S. After fitting, read λ² and its DCD_f via formal_tests;
     λ→boundary ⇒ quasi-cancellation (frontier), λ off-boundary ⇒ genuine stochastic.
     """
+    _check_reformulable(model, freq, s)
     mc = copy.deepcopy(model)
     mc._result = None
     is_nyquist = (freq == s // 2)
@@ -1009,15 +1055,7 @@ def meg(model, frequencies=None) -> list[MEGResult]:
         frequencies = list(range(1, s // 2 + 1))   # includes the Nyquist f=s/2
 
     for f in frequencies:
-        if not (1 <= f <= s // 2):
-            raise ValueError(
-                f"freq={f} out of range [1, {s // 2}] for s={s}."
-            )
-        if len(model.ifadf) > f and model.ifadf[f] == 1:
-            raise ValueError(
-                f"freq={f} is already stochastic (ifadf[{f}]=1) in the "
-                "base model — remove it from the frequencies list."
-            )
+        _check_reformulable(model, f, s)
 
     from fue.model import FixedFreqFactor
 
