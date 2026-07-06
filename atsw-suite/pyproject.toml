@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "1.0.1"
+version         = "1.0.2"
 description     = "ATSW — Box-Jenkins-Treadway time series suite (fue + pyfug + ART/MCP)"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -23,9 +23,9 @@ classifiers     = [
 # Umbrella meta-package: no code of its own, just a compatible set of the suite
 # components. `pip install atsw` installs the whole suite + the MCP server.
 dependencies = [
-    "fue>=0.1.3",          # estimation engine + FUF forecasting
+    "fue>=0.1.4",          # estimation engine + FUF forecasting
     "pyfug>=2.0",          # Jenkins-Treadway graphics
-    "art-tseries>=0.1.0",  # model building + MCP server (art-mcp)
+    "art-tseries>=0.1.1",  # model building + MCP server (art-mcp)
 ]
 
 [tool.setuptools]
