@@ -106,15 +106,23 @@ def _build_differenced_harmonic_matrix(n: int, d: int, s: int) -> np.ndarray:
 
 
 def _newey_west_hac(X: np.ndarray, u: np.ndarray, max_lags: int) -> np.ndarray:
-    """Newey-West HAC sandwich covariance (Bartlett kernel)."""
+    """Newey-West HAC sandwich covariance of the OLS coefficients (Bartlett kernel).
+
+    Cov(beta_hat) = (X'X)^{-1} S (X'X)^{-1}, with the "meat" S the HAC estimator of
+    X'Omega X = sum_t x_t x_t' u_t^2 + lagged Bartlett terms -- a SUM over t, not an
+    average.  (Earlier this divided the meat by n, making the covariance n times too
+    small and the HAC F-statistic n times too large -- e.g. WTI F=256 instead of
+    ~1, a spurious seasonality verdict.  The White L=0 special case, sum x x' u^2
+    ~= sigma^2 X'X giving sigma^2 (X'X)^{-1}, pins the correct normalization.)
+    """
     n, p = X.shape
     xu = X * u[:, None]          # score matrix (n, p)
 
-    # Meat S (lag 0 + lagged terms with Bartlett weights)
-    S = (xu.T @ xu) / n
+    # Meat S as a SUM over t (lag 0 + lagged terms with Bartlett weights).
+    S = xu.T @ xu
     for lag in range(1, max_lags + 1):
         w = 1.0 - lag / (max_lags + 1.0)
-        cross = (xu[lag:].T @ xu[:-lag]) / n
+        cross = xu[lag:].T @ xu[:-lag]
         S += w * (cross + cross.T)
 
     try:

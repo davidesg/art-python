@@ -509,9 +509,18 @@ Impacto menor pero documentar.
       MEG-driven con raíces estacionales no sobrevive a `load`/`load_fuf`.
       Workaround actual: post-procesar el fuf al formato del lector
       (ver `drvarma .../cases/IPC_DE/work/make_uf_fuf.py`). **Unificar writer/reader.**
-- [ ] **No exponer `ifadf`/`ma_f` en `confirm_and_estimate`** — el flujo guiado no
-      puede construir el modelo que el MEG recomienda sin editar el .inp/.pre a mano.
-      Añadir parámetros (p.ej. `ifadf: list`, `ma_f_freqs: list`) o un helper.
+- [x] **Reformular el modelo tras MEG estocástico (RESUELTO)** — antes no había
+      forma de construir, desde el último `.pre`, el modelo que el MEG recomienda al
+      concluir estacionalidad estocástica en f. Ahora:
+      helper `art.formal_tests.reformulate_stochastic(model, freq, s)` (activa
+      `ifadf[freq]=1` — 1−2cos·B+B² interior, 1+B Nyquist — y elimina los armónicos
+      deterministas en f; sin testigo) + tool MCP
+      `meg_reformulate(inp_path, freq, output_path, base_pre_path)` que carga el
+      `.pre`, reformula, re-estima, escribe `.pre/.out` y muestra ecuación+diagnosis.
+      `ifadf` es lista de flags 0/1 → round-trip OK (no sufre el bug de `ma_f`).
+      Verificado: reformula f=1 (ifadf[1]=1, quita armónicos de f=1, re-ajusta).
+      Pendiente aún: exponer también `ma_f`/AR_f estacionario de sobreajuste si se
+      quiere estructura AR/MA estacional adicional tras la raíz unitaria.
 - [ ] **Falso positivo del MEG por cuasi-cancelación** — en IPC_DE el MEG marcó
       freq 1,2 estocásticas (LR 13.9/4.0) pero, al ajustar ifadf+MA_f, θ²→≈0.90/0.93
       (cerca del círculo unidad) ⇒ las raíces se cancelan casi con su MA_f testigo:
@@ -519,14 +528,34 @@ Impacto menor pero documentar.
       confirmó (el determinista batió al estocástico a h=1/12/24).
       → Avisar de cuasi-cancelación (DCD_f en la frontera de invertibilidad) en la
       salida de `formal_tests`/MEG y NO recomendar `ifadf` automáticamente cuando θ²→1.
-- [ ] **Estacionalidad residual con ifadf**: tras activar raíces estacionales,
-      `describe_diagnosis` dispara F≈82 de estacionalidad residual aun con Q ✓ —
-      revisar si el test es válido/coherente bajo `ifadf>0` o si indica media
-      estacional determinista no absorbida.
+- [~] **Estacionalidad residual con ifadf**: el F≈82 se debía al bug de escala del
+      HAC (mismo `_newey_west_hac`), ya CORREGIDO (ver sección "Detección de
+      estacionalidad (HAC F)"). Reverificar sobre un caso con `ifadf>0` que el F
+      residual ahora es razonable; si aún dispara, sería media estacional
+      determinista no absorbida (test válido).
 
 ---
 
-## Revisar el test de detección de estacionalidad (HAC F) — posible inflación de F
+## Detección de estacionalidad (HAC F) — RESUELTO (jul-2026)
+
+- [x] **Bug de escala en el HAC (RESUELTO).** El F de ART estaba inflado ~n
+      (100–300×) → falso positivo del WTI. Causa: en
+      `seasonal_detection._newey_west_hac`, la "carne" S se dividía por n
+      (`S=(xu.T@xu)/n`), pero la varianza sandwich de β̂ es
+      `(X'X)⁻¹·[Σ xₜxₜ'uₜ²]·(X'X)⁻¹` con la SUMA, no el promedio →
+      `cov_hac = Var(β̂)/n` → F ×n. Comprobado con el caso White (L=0, iid →
+      debe dar σ²(X'X)⁻¹). FIX: quitar el `/n` (S y cross como sumas). Verificado
+      con datos reales (`Data/IPC.xlsx`, n=262): WTI pasa de F=255.9 [SÍ✗] a
+      **F=0.98 [no] ✓** (drvarma OLS=0.94); IPC_ES 24.2, IPC_DE 17.5, CPI 11.5 →
+      siguen SÍ. **REVISIÓN DE AMBOS:** el HAC bien escalado ≈ el OLS de drvarma en
+      las 5 series (drvarma NO es inferior; ART tenía el bug). El HAC es el método
+      más principled (robusto a autocorrelación) y coincide con drvarma. Un test
+      (`test_seasonality_mentions_b2`) validaba el falso positivo sobre el PCE
+      (deflactor de consumo, DESESTACIONALIZADO → F~1 correcto); actualizado a usar
+      una serie sintética estacional. 63 tests de estacionalidad pasan. También
+      corrige (misma función) el F≈82 espurio de estacionalidad residual con ifadf.
+
+<details><summary>Diagnóstico original (histórico)</summary>
 
 - [ ] **Discrepancia ART vs drvarma en la detección de estacionalidad determinista.**
       Mismo método nominal (regresión armónica en base diferenciada d=1 + F-test HAC),
@@ -553,3 +582,53 @@ Impacto menor pero documentar.
         ¿matriz HAC sin escalar por n o por el factor correcto?). Contrastar contra
         la implementación de drvarma (`deseason.c` + `harmonic_regression_differenced_basis`),
         que parece la referencia correcta, y unificar para evitar falsos positivos.
+
+</details>
+
+---
+
+## SPS zona euro — aplicación empírica del paper SF_MEG (jul-2026)
+
+Objetivo: construir un **Sistema de Predicción y Seguimiento (SPS)** para la zona
+euro con modelos univariantes ARIMA-HSM de **todos los IPC de la zona euro**, como
+aplicación empírica del artículo SF_MEG (`~/Dropbox/SF_MEG/Borrador/SF_MEG.tex`,
+Hybrid Seasonal Models). ART articula la parte MEG. Casos previos en `cases/`
+(IPC_ES/DE/FR). Identificación **frecuencia por frecuencia** con el **par
+confirmatorio**: DCD/MEG (lado MA, nula determinista) + Shin–Fuller AR_f (lado AR,
+nula raíz unitaria estacional).
+
+### Tarea 1 — Actualizar los valores críticos del MEG (no interpolados)
+- [ ] En `src/art/formal_tests.py`, sustituir el `_DCD_CRIT_MA_F` **interpolado**
+      (complejo 1.07/2.02/4.52) por los **derivados por Monte Carlo** del paper
+      (ley s=2). Bare complejo, finito por n (interpolar en n):
+      n=120 → 1.12/2.06/4.64; n=240 → 1.13/2.07/4.52; n=480 → 1.10/2.04/4.53;
+      n=960 → 1.11/2.03/4.52; asintótico 1.11/2.04/4.52. Frecuencias de raíz real
+      (tendencia f=0, Nyquist f=s/2) mantienen la ley MA(1) s=1 = 1.00/1.94/4.41.
+      Documentar que los críticos **realistas** (con deterministas) son bastante
+      mayores en n pequeño (n=120: 1.63/2.87/5.81 al 10/5/1%) y que el estimador
+      libre de fue **está sesgado** en la frontera de 2º orden (usar perfilado, no
+      el optimizador libre). Ref: `research/sf_meg/final_table.py`.
+
+### Tarea 2 — Factorizar AR(p) e identificar AR_f (migrar Root a Python)
+- [ ] Migrar `/home/david/Dropbox/SRC/Root/**Root-1.01**` (la versión BUENA;
+      `root-1.02` tiene `malloc(orden-1)` → overflow = segfault en orden alto) a
+      `src/art/roots.py`. Usar `np.roots` (robusto). Factorizar el AR(p) normalizado
+      `1−c₁B−…−cₚBᵖ` en factores reales `(1−a₁B)` y complejos `(1−a₁B−a₂B²)`.
+      Para cada par complejo (raíz z): `r=1/|z|`, `ω=|arg(z)|` (CORREGIR la fórmula
+      buggy `atan(...)/(2π)` de la versión C), armónico `k=ω·s/(2π)`, periodo
+      `2π/ω`. **Identificar AR_f candidatos**: par complejo con ω≈ armónico
+      estacional y módulo r≈1. **Oro puro**: fue puede estimar el AR factorizado o
+      SIN factorizar → factorizar el AR(p) libre estimado revela AR_f ocultos.
+- [x] Integrado como tool MCP `ar_factorization(inp_path, sper)` en
+      `src/art/mcp_server.py`: carga el modelo ajustado, reconstruye los coeficientes
+      AR estimados (libres de `model.params`, fijos de `model.ar`), factoriza cada
+      factor AR con `art.roots.factor_ar` y reporta factores + candidatos AR_f.
+      Verificado end-to-end (revela AR_f oculto k≈3, r≈0.9 en un AR(3) libre).
+      33 tools registradas.
+
+### Tarea 3 — Diseño del caso empírico (tras 1 y 2)
+- [ ] Recopilar los IPC de la zona euro (fuente: Eurostat HICP). Construir modelos
+      univariantes ARIMA-HSM (λ, d, D/armónicos, intervenciones, ARMA) por país.
+- [ ] Aplicar el par confirmatorio frecuencia por frecuencia (DCD + SF AR_f);
+      documentar los casos de cuasi-cancelación (desacuerdo del par).
+- [ ] Redactar la sección de aplicación empírica del paper con los resultados.
