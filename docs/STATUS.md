@@ -10,17 +10,28 @@ Todo en commits locales (sin push a GitHub, por preferencia).
 
 | Paquete | Versión | Repo | Rol |
 |---------|---------|------|-----|
-| `fue`         | 0.1.3 | `atws/fue/fue`     | estimación ML exacta (ARMAX + funciones de transferencia) + FUF (previsión); motor C (cffi) + fallback puro-Python |
+| `fue`         | 0.1.4 | `atws/fue/fue`     | estimación ML exacta (ARMAX + funciones de transferencia) + FUF (previsión); motor C (cffi) + fallback puro-Python |
 | `pyfug`       | 2.0.0 | `atws/fug/pyfug`  | gráficos de alta definición para análisis de series temporales |
-| `art-tseries` | 0.1.0 | `ART/art-python`  | construcción de modelos, diagnosis, contrastes + **servidor MCP** (`art-mcp`) |
-| `atsw`        | 1.0.1 | `ART/art-python/atsw-suite` | meta-paquete paraguas (sin código): `pip install atsw` → toda la suite |
+| `art-tseries` | 0.1.1 | `ART/art-python`  | construcción de modelos, diagnosis, contrastes + **servidor MCP** (`art-mcp`) |
+| `atsw`        | 1.0.2 | `ART/art-python/atsw-suite` | meta-paquete paraguas (sin código): `pip install atsw` → toda la suite |
 
-Grafo: `atsw` → `fue>=0.1.3` + `pyfug>=2.0` + `art-tseries>=0.1.0`;
+Grafo: `atsw` → `fue>=0.1.4` + `pyfug>=2.0` + `art-tseries>=0.1.1`;
 `art-tseries` → `fue` + `pyfug` + numpy/scipy/matplotlib/statsmodels/mcp.
 FUF vive dentro de `fue` (`load_fuf`/`forecast_fuf`/`write_fuf`, script `fuf`).
 
 ## Hecho
 
+- **PyPI producción — release de bugfix (06-jul-2026):** **fue 0.1.4**, **art-tseries 0.1.1**,
+  **atsw 1.0.2** (pyfug 2.0.0 sin cambios). Correcciones acumuladas: normalización de
+  invertibilidad del MA (fue `cast_us.normalize_ma_invertibility` en `fit()`), writer de secciones
+  f-fixed en formato del lector C, y el workflow de **estacionalidad estocástica** de ART
+  (`meg_frequency`, reformulación con testigo `with_witness`, arranques YW/HR, factorización AR
+  `roots.py`, guards de baseline, criticos DCD_f). Ramas `fue/ma-invertibility-normalization` y
+  `art/meg-stochastic-seasonality` **mergeadas a master**. Orden fue → art-tseries → atsw.
+  - Validado en **TestPyPI** (venv limpio, resolución de deps, `art-mcp` OK) y en **producción**
+    (`pip install --no-cache-dir atsw==1.0.2` → fue 0.1.4 compila wheel, `import fue,pyfug,art` +
+    entry point OK). Suite ART: **435 passed, 21 skipped**.
+  - https://pypi.org/project/fue/0.1.4/ · /art-tseries/0.1.1/ · /atsw/1.0.2/
 - **PyPI producción (20-jun-2026):** los 4 paquetes publicados —
   fue 0.1.3 (solo sdist; el wheel `linux_x86_64` lo rechaza PyPI),
   pyfug 2.0.0, art-tseries 0.1.0, atsw 1.0.1 (1.0.0 inicial; 1.0.1 re-publicado
