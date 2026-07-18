@@ -68,7 +68,7 @@ def _write_bare_inp(ts, path: str) -> None:
         "** Individual factors of the annual difference (from freq 0.0): ",
         " " + " ".join(["0"] * n_ifadf),
         "** ACF/PACF bands (0 Automatic) and reescaling factor: ",
-        " 0 100.00",
+        f" 0 {_RESCALE_FACTOR:.2f}",
         "** Time series (stochastic and non-standard deterministic variables): ",
     ]
     for v in ts.data:
@@ -147,7 +147,7 @@ def _write_inp(ts, model, output_path: str) -> None:
     if freq > 1:
         lines.append(f" {n}  {beg_period} {beg_year} {name}")
     else:
-        lines.append(f" {n}  {beg_year} {beg_year} {name}")
+        lines.append(f" {n}  1 {beg_year} {name}")
 
     lines += [
         "** Number of deterministic variables (including seasonal components):",
@@ -272,7 +272,7 @@ def _write_inp(ts, model, output_path: str) -> None:
 
     lines += [
         "** ACF/PACF bands (0 Automatic) and reescaling factor:",
-        " 0 100.00",
+        f" 0 {_RESCALE_FACTOR:.2f}",
         "** Time series (stochastic and non-standard deterministic variables):",
     ]
     for v in np.asarray(ts.data, dtype=float):
@@ -382,6 +382,42 @@ def _arma_starts(resid, p, q, P, Q, s):
     return (ar, ma, ar_s, ma_s)
 
 
+# Rescaling factor written into every .inp (see _write_inp / the minimal writer).
+# fue estimates on  refactor * BoxCox_lam(data)  (fue_api.c: DataMat = refactor *
+# transform(data)), so mu lives in this rescaled space and its seed must too.
+_RESCALE_FACTOR = 100.0
+
+
+def _mu_seed(ts, lam, d, D, estimate_mu):
+    """Pre-estimate of mu for the .inp: the sample mean of the *transformed,
+    differenced* series, in the rescaled space fue estimates in.
+
+    fue estimates mu on ``refactor * BoxCox_lam(data)`` after ``d`` regular and
+    ``D`` seasonal differences.  For d=0 this is the level mean (e.g. ~126 for an
+    untransformed series, ~6.76 for log CPI); for d>=1 it is ~0 (a drift).
+    Seeding mu at 0 while the (rescaled) data sit far from 0 strands the exact-ML
+    optimiser in a degenerate optimum where a near-unit AR root absorbs the level
+    (BUG-0001).  Returns 0.0 when mu is not estimated or the series is unusable.
+    """
+    if not estimate_mu:
+        return 0.0
+    import numpy as np
+    try:
+        yv = np.asarray(getattr(ts, "data", getattr(ts, "values", None)), float)
+        yv = np.log(yv) if abs(lam) < 1e-8 else np.sign(yv) * np.abs(yv) ** lam
+        w = yv
+        freq = int(getattr(ts, "freq", 1) or 1)
+        for _ in range(int(d or 0)):
+            w = np.diff(w)
+        for _ in range(int(D or 0)):
+            w = w[freq:] - w[:-freq]
+        if w.size == 0 or not np.all(np.isfinite(w)):
+            return 0.0
+        return _RESCALE_FACTOR * float(np.mean(w))
+    except Exception:
+        return 0.0
+
+
 def _build_arma_on_model(m_base, p: int, q: int,
                          P: int = 0, Q: int = 0,
                          estimate_mu: bool = False):
@@ -436,7 +472,8 @@ def _build_arma_on_model(m_base, p: int, q: int,
         ma_s=ma_s_val,  ma_s_free=ma_sf_val if ma_s_val  else None,
         interventions=list(m_base.interventions or []),
         ifadf=list(m_base.ifadf or []),
-        mu=0.0, estimate_mu=estimate_mu,
+        mu=_mu_seed(m_base.series, m_base.boxlam, m_base.d, m_base.D, estimate_mu),
+        estimate_mu=estimate_mu,
         refactor=m_base.refactor,
     )
 
@@ -500,7 +537,11 @@ def _make_model(ts, lam: float, d: int, D: int,
         for k in range(1, n_harm + 1):
             itvs.append(fue.Intervention("cos", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
             itvs.append(fue.Intervention("sin", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
-        itvs.append(fue.Intervention("alter", at=0, omega=[0.0], omega_free=[True]))
+        # The Nyquist harmonic `alter`=(−1)ᵗ only exists for a seasonal period
+        # s>=2; for annual series (freq=1) there is no seasonality, so adding it
+        # injects a spurious deterministic biannual oscillation (see TODO.md).
+        if freq >= 2:
+            itvs.append(fue.Intervention("alter", at=0, omega=[0.0], omega_free=[True]))
         # Stationary stochastic seasonality on top of the deterministic harmonics:
         # a free annual AR/MA operator (no seasonal differencing). YW/HR-initialised.
         ar_s_val  = [ars_i] if P > 0 else []
@@ -527,7 +568,7 @@ def _make_model(ts, lam: float, d: int, D: int,
         ma_s=ma_s_val, ma_s_free=ma_sf_val if ma_sf_val else None,
         interventions=itvs,
         ifadf=[0] * (freq // 2 + 1),
-        mu=0.0, estimate_mu=estimate_mu,
+        mu=_mu_seed(ts, lam, d, D, estimate_mu), estimate_mu=estimate_mu,
     )
 
 

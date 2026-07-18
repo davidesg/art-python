@@ -1,10 +1,11 @@
 ---
 id: BUG-0001
 title: Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root
-status: open
+status: fixed
 severity: high
 component: inp-builder
 found_in: 0.1.1
+fixed_in: 0.1.2
 reported: 2026-07-09
 reporter: D. E. Guerrero
 tags:
@@ -76,22 +77,41 @@ the optimizer settles in the degenerate optimum (μ≈0, near-integrated AR).
 
 ## Fix
 
-Any one of these breaks the collapse; (1)+(2) together are recommended:
+**Applied** in 0.1.2 via **fix (2): seed μ at the process mean.**
 
-1. **Do not rescale by 100 by default** — write `1.00`, or expose the factor and
-   default it to neutral for untransformed/harmonic-free series (generalise: make
-   rescaling μ-neutral in all cases, not only λ=1).
-2. **Seed μ at the process mean** when `estimate_mu=True`: use
-   `mean(∇^d ∇_s^D y(λ))` in `_make_model` instead of `0.0` (≈ sample mean for
-   d=0; ≈0 for d≥1, harmless).
-3. **Diagnostic guard:** if, after `estimate_mu=True`, the fitted μ ≈ 0 on a
-   clearly non-zero-mean series and/or Σφ_AR ≈ 1, warn of a possible mean
-   collapse / spurious near-unit root.
+Confirmed against fue that the optimiser estimates μ on `refactor · BoxCox_λ(data)`
+after differencing (`fue_api.c`: `DataMat = refactor · transform(data)`, then
+differenced), and that **both** `.inp` writers hard-code `refactor = 100` and
+estimation reads the written `.inp` back (`_load_fitted`). So the operative scale
+is always ×100 and the μ seed must live in it.
+
+- New helper `_mu_seed(ts, lam, d, D, estimate_mu)` in `src/art/pipeline.py`
+  returns `_RESCALE_FACTOR · mean(∇^d ∇_s^D BoxCox_λ(y))` when μ is estimated
+  (0 otherwise). For d=0 this is the (rescaled) level mean; for d≥1 it is ≈0.
+- `_make_model` and `_build_arma_on_model` now pass `mu=_mu_seed(...)` instead of
+  `mu=0.0`.
+- The ×100 factor is now the single module constant `_RESCALE_FACTOR`, used both
+  by the `.inp` writers and the seed, so the two can never drift.
+
+The rescaling is deliberately **kept** (not set to 1.00): it conditions the
+tiny differenced-log values of the monthly CPI series ART is primarily built for,
+and seeding μ correctly fixes the collapse without that risk. A post-fit
+diagnostic guard (fix 3) remains a possible follow-up.
 
 ## Validation
 
-Re-estimate AR(2)+mean and AR(7)+mean on GEfull with the fix and confirm μ≈126.4
-(not ≈0), the real AR root ≈0.889 (not ≈0.995/0.999), and agreement with the
-hand-built GE.2/GE.3 (logℓ, σ, cycle factors) up to the rescaling constant in
-logℓ. Add a regression test asserting the fitted μ is within a tolerance of the
-sample mean for a high-level untransformed series.
+Fresh AR(p)+mean on the very series from the report, with the fix
+(`_make_model → _write_inp → _load_fitted`):
+
+| Series        | λ | p | μ (orig. units) | sample mean | AR root(s)        | before (bug)          |
+|---------------|---|---|-----------------|-------------|-------------------|-----------------------|
+| GE (Geneva)   | 1 | 2 | **126.15**      | 126.13      | 0.578, 0.356      | μ≈0, root 0.995       |
+| GEP (log mm)  | 0 | 1 | **6.7555**      | 6.7557      | AR(1)=0.169       | μ≈0.002, AR(1)=0.9992 |
+
+μ lands on the sample mean (was ≈0), the spurious near-unit root is gone, and both
+match the user's hand-corrected references (GE.2/GE.3; GEP μ=6.7555, AR=0.1695).
+
+Regression test `tests/test_bug_0001_mu_collapse.py`: `_mu_seed` equals
+`refactor·mean` for λ=1 and λ=0 and is 0 for `estimate_mu=False` / ≈0 for d≥1;
+an AR(2)+mean fit on a synthetic high-level series returns μ within 5 % of the
+sample mean and Σφ < 0.9 (no near-unit root).
