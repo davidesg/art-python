@@ -37,6 +37,7 @@ dev  = ["pytest>=7"]
 
 [project.scripts]
 art-mcp = "art.mcp_server:main"
+art-bug = "art.bug_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
