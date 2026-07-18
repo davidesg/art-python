@@ -41,7 +41,7 @@ from .describe import (
     _sample_acf_raw, _acf_outlier_contributions,
 )
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __all__ = [
     "IdentificationListing", "identification_listing",
     "BoxCoxSelection", "boxcox_selection",

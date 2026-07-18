@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "art-tseries"
-version         = "0.1.1"
+version         = "0.1.2"
 description     = "Box-Jenkins-Treadway time series model-building toolkit + MCP server (uses fue and pyfug)"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
