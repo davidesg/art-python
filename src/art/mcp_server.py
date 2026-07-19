@@ -950,7 +950,10 @@ def ar_factorization(inp_path: str, sper: int = 0) -> list:
     numpy.roots) and characterized in the original ``Root`` format: the roots
     table and the real factors (1 - a[1] B) and complex factors
     (1 - a[1] B - a[2] B^2), each complex factor given its damping factor d, its
-    frequency freq (cycles/obs) and its period per (obs/cycle).
+    frequency freq (cycles/obs) and its period per (obs/cycle).  For a
+    directly-estimated AR(2) factor (both coefficients free), d and per carry
+    delta-method standard errors (``d ± SE``, ``per ± SE``) from the factor's 2x2
+    coefficient covariance — matching ABTreadway-Dperar2.xls / caracterizar_operadores.py.
 
     INTERPRETATION IS LEFT TO THE ASSISTANT: a complex factor whose period matches
     a seasonal cycle (per = s/k for an integer harmonic k) and whose damping d is
@@ -978,22 +981,39 @@ def ar_factorization(inp_path: str, sper: int = 0) -> list:
         n_omega = sum(sum(itv.omega_free) for itv in (m.interventions or []))
         n_delta = sum(sum(itv.delta_free) for itv in (m.interventions or []))
         params = np.asarray(m.params, dtype=float)
+        # Full parameter covariance (npar x npar, aligned with m.params), used to
+        # attach delta-method SEs to directly-estimated AR(2) factors (BUG-0004).
+        cov_full = None
+        try:
+            cov_full = np.asarray(m._result.cov_matrix, dtype=float)
+            if cov_full.ndim == 1:
+                kk = int(round(cov_full.size ** 0.5))
+                cov_full = cov_full.reshape(kk, kk)
+        except Exception:
+            cov_full = None
         idx = n_omega + n_delta
         blocks = []
         for k, factor in enumerate(factors):
             free = (m.ar_free[k] if m.ar_free and k < len(m.ar_free)
                     else [True] * len(factor))
-            coefs = []
+            coefs, coef_idx = [], []
             for j in range(len(factor)):
                 if free[j]:
-                    coefs.append(float(params[idx])); idx += 1
+                    coefs.append(float(params[idx])); coef_idx.append(idx); idx += 1
                 else:
-                    coefs.append(float(factor[j]))
+                    coefs.append(float(factor[j])); coef_idx.append(None)
             if len(coefs) < 2:
                 blocks.append(f"AR factor #{k}: first-order (1 - {coefs[0]:.5f} B) "
                               f"-- real root, no seasonal factor.")
                 continue
-            fac = factor_ar(coefs, sper=s)
+            # 2x2 coefficient covariance for a directly-estimated AR(2) whose two
+            # coefs are both free — enables d ± SE and per ± SE via the delta method.
+            fcov = None
+            if (len(coefs) == 2 and cov_full is not None
+                    and coef_idx[0] is not None and coef_idx[1] is not None
+                    and max(coef_idx) < cov_full.shape[0]):
+                fcov = cov_full[np.ix_(coef_idx, coef_idx)]
+            fac = factor_ar(coefs, sper=s, cov=fcov)
             blocks.append(f"AR factor #{k} (order {len(coefs)}):\n" + describe(fac))
         from mcp.types import TextContent
         return [TextContent(type="text", text="\n\n".join(blocks))]

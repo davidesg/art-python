@@ -51,6 +51,50 @@ class ComplexFactor:
     root_modulus: float  # |z|; >1 stationary
     is_arf_candidate: bool  # harmonic near an integer seasonal frequency
     near_unit_root: bool    # r near 1 (candidate stochastic seasonality)
+    # Delta-method standard errors (set only when the factor's 2x2 coefficient
+    # covariance is supplied — i.e. a directly-estimated AR(2) factor).
+    se_r: float | None = None        # SE of the damping d = sqrt(-a2)
+    se_period: float | None = None   # SE of the period
+    half_life: float = float("inf")  # ln(0.5)/ln(r): obs for the amplitude to halve
+
+
+def complex_factor_se(a1: float, a2: float, cov, excel_compat: bool = False) -> dict:
+    """Delta-method SEs for a complex AR(2) factor ``1 - a1 B - a2 B^2``.
+
+    Ports the validated ``caracterizar_operadores.car_ar2`` (checked against
+    ABTreadway-Dperar2.xls): damping ``d = sqrt(-a2)`` and period
+    ``per = 2*pi / arccos(a1/(2d))``, with variances propagated from the 2x2
+    coefficient covariance ``cov = [[var(a1), c],[c, var(a2)]]``:
+
+        var(d)   = var(a2) / (4*(-a2))
+        d per/da1 = (2*pi / (w^2 * sqrt(1-t^2))) * 1/(2d),   t = a1/(2d)
+        d per/da2 = (2*pi / (w^2 * sqrt(1-t^2))) * a1/(4 d^3)
+        var(per) = (dper/da1)^2 var(a1) + (dper/da2)^2 var(a2)
+                   + 2 (dper/da1)(dper/da2) cov(a1,a2)
+
+    ``excel_compat=True`` reproduces the Excel's ``arccos(|t|)`` in the period
+    derivative (sign-inconsistent); the default uses the consistent ``w``.
+    Returns a dict with se_r, se_period, var_r, var_period and corr.
+    """
+    cov = np.asarray(cov, dtype=float)
+    var1, var2, c12 = cov[0, 0], cov[1, 1], cov[0, 1]
+    d = np.sqrt(-a2)
+    t = a1 / (2 * d)
+    w = np.arccos(t)
+
+    var_d = (1.0 / (2 * d)) ** 2 * var2               # var2 / (4*(-a2))
+    w_der = np.arccos(abs(t)) if excel_compat else w
+    dper_dt = 2 * np.pi / (w_der ** 2 * np.sqrt(1 - t ** 2))
+    fx = dper_dt * (1.0 / (2 * d))                     # dper/da1
+    fy = dper_dt * (a1 / (4 * d ** 3))                 # dper/da2
+    var_per = fx ** 2 * var1 + fy ** 2 * var2 + 2 * fx * fy * c12
+
+    denom = np.sqrt(var1 * var2)
+    return dict(
+        se_r=float(np.sqrt(var_d)), se_period=float(np.sqrt(var_per)),
+        var_r=float(var_d), var_period=float(var_per),
+        corr=float(c12 / denom) if denom > 0 else float("nan"),
+    )
 
 
 @dataclass
@@ -67,7 +111,8 @@ class Factorization:
 
 
 def factor_ar(coefs, sper: int = 12, imag_tol: float = 1e-6,
-              harmonic_tol: float = 0.15, unit_root_tol: float = 0.05) -> Factorization:
+              harmonic_tol: float = 0.15, unit_root_tol: float = 0.05,
+              cov=None) -> Factorization:
     """Factorize the normalized AR polynomial 1 - c[1]B - ... - c[N]B^N.
 
     Parameters
@@ -77,6 +122,11 @@ def factor_ar(coefs, sper: int = 12, imag_tol: float = 1e-6,
     harmonic_tol : a complex factor is flagged AR_f if its harmonic is within this
                    of an integer 1..sper//2.
     unit_root_tol: a complex factor is flagged near-unit-root if 1 - r < this.
+    cov   : optional 2x2 covariance of (c[1], c[2]) for a *directly-estimated*
+            AR(2) factor (len(coefs) == 2).  When given and the factor is complex,
+            attaches delta-method SEs (se_r, se_period) via complex_factor_se.
+            Ignored for higher orders, where the sub-factors are derived from the
+            polynomial roots and have no single coefficient covariance.
     """
     coefs = [float(c) for c in coefs]
     n = len(coefs)
@@ -109,11 +159,19 @@ def factor_ar(coefs, sper: int = 12, imag_tol: float = 1e-6,
             k = omega * sper / (2 * np.pi)
             per = 2 * np.pi / omega if omega > 0 else np.inf
             near_h = abs(k - round(k)) <= harmonic_tol and 1 <= round(k) <= sper // 2
-            comp.append(ComplexFactor(
+            hl = float(np.log(0.5) / np.log(r)) if 0 < r < 1 else float("inf")
+            cf = ComplexFactor(
                 a1=a1, a2=a2, r=float(r), omega=float(omega), harmonic=float(k),
                 period=float(per), root_modulus=float(np.sqrt(mod2)),
                 is_arf_candidate=bool(near_h),
-                near_unit_root=bool(1.0 - r < unit_root_tol)))
+                near_unit_root=bool(1.0 - r < unit_root_tol),
+                half_life=hl)
+            # Delta-method SEs only for a single, directly-estimated AR(2) factor,
+            # where (a1, a2) == (c[1], c[2]) and cov is their coefficient covariance.
+            if cov is not None and n == 2 and len(comp) == 0:
+                se = complex_factor_se(a1, a2, cov)
+                cf.se_r, cf.se_period = se["se_r"], se["se_period"]
+            comp.append(cf)
     return Factorization(order=n, sper=sper, roots=list(roots), real=real, complex=comp)
 
 
@@ -139,9 +197,13 @@ def describe(fac: Factorization) -> str:
         lines.append(f"\n    FACTORES COMPLEJOS (1 - a[1] B - a[2] B^2): {len(fac.complex)}")
         for i, cf in enumerate(fac.complex, 1):
             freq = cf.omega / (2 * np.pi)
+            d_str = (f"{cf.r:.2f} ± {cf.se_r:.2f}" if cf.se_r is not None
+                     else f"{cf.r:.2f}")
+            per_str = (f"{cf.period:.2f} ± {cf.se_period:.2f}"
+                       if cf.se_period is not None else f"{cf.period:.2f}")
             lines.append(
                 f"    ** FACTOR {i}: a[1] = {cf.a1:12.5f}   a[2] = {cf.a2:12.5f}"
-                f"   d = {cf.r:.2f}   freq = {freq:.2f}   per = {cf.period:.2f}")
+                f"   d = {d_str}   freq = {freq:.2f}   per = {per_str}")
     lines.append("------------")
     return "\n".join(lines)
 
