@@ -343,11 +343,34 @@ def unit_root_tests(ts: "TimeSeries",
 
 
 def recommended_d(results: list[UnitRootResult]) -> int:
-    """Smallest d with verdict 'stationary'; last d tested if none found."""
-    for r in results:
+    """Smallest d for which the unit-root evidence stops requiring a difference.
+
+    ADF directly tests the unit root, so its **rejection** is decisive evidence
+    that a (further) difference is *not* needed.  We therefore pick the smallest d
+    at which ADF rejects, **regardless of KPSS**: a KPSS rejection on its own only
+    reflects low-frequency persistence in a bounded / mean-reverting series (common
+    in climate counts and quantities), and letting it escalate d over a clear ADF
+    rejection over-differences and injects a spurious MA unit root (BUG-0002).
+
+    Order of decision:
+      1. smallest d with ``adf_rejects``  (ADF beats KPSS — no over-differencing);
+      2. else smallest d with the strict consensus verdict ``'stationary'``;
+      3. else the last d tested (nothing conclusive — e.g. a genuine unit root
+         where ADF never rejects within max_d).
+
+    This never recommends d≥1 while ADF is significant at a lower d, and only
+    reaches d=2 when ADF fails to reject at both d=0 and d=1.  The choice is a
+    starting value; the formal test on the estimated model is Shin-Fuller.
+    """
+    if not results:
+        return 0
+    for r in results:                       # 1) ADF rejection governs
+        if r.adf_rejects:
+            return r.d
+    for r in results:                       # 2) strict consensus fallback
         if r.verdict == "stationary":
             return r.d
-    return results[-1].d if results else 0
+    return results[-1].d                     # 3) nothing conclusive
 
 
 # ---------------------------------------------------------------------------

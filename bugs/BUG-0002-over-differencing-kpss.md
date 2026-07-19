@@ -1,10 +1,11 @@
 ---
 id: BUG-0002
 title: guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root
-status: open
+status: fixed
 severity: medium
 component: identification
 found_in: 0.1.1
+fixed_in: 0.1.2
 reported: 2026-07-09
 reporter: D. E. Guerrero
 tags:
@@ -51,14 +52,23 @@ is no rule that a strong ADF rejection of the unit root should cap `d` at 0.
 
 ## Fix
 
-When ADF rejects with margin (e.g. |t_ADF| well beyond the critical value), **do
-not** escalate `d` on KPSS alone; at most flag "low-frequency persistence
-(possible near-unit root) — confirm with Shin–Fuller after estimating". Never
-recommend d≥1 under a strongly significant ADF, and never d=2 unless both tests
-agree on the once-differenced series.
+**Applied** in 0.1.2 (`src/art/identification.py`, `recommended_d`).  ADF directly
+tests the unit root, so its rejection is decisive evidence that a (further)
+difference is not needed.  `recommended_d` now picks the **smallest d at which ADF
+rejects, regardless of KPSS**; only if ADF never rejects does it fall back to the
+strict consensus verdict `'stationary'`, then to the last d tested.  This never
+recommends d≥1 while ADF is significant at a lower d, and reaches d=2 only when ADF
+fails to reject at both d=0 and d=1.  (The recommendation is a starting value; the
+formal test on the estimated model is Shin-Fuller.)
 
 ## Validation
 
-Regression cases: GEP (log) → recommend d=0 (not 2); GE days → d=0 (not 1); a
-genuine unit-root series (ADF fails to reject, KPSS rejects) → still d=1. Assert
-`recommended_d` returns 0 whenever ADF p-value ≪ 0.05 at d=0.
+Real series, `unit_root_tests` + `recommended_d`:
+- **GEP (log):** ADF p=0.0000 at d=0 (KPSS also rejects) → **d=0** (was 2).
+- **GE days:** ADF p=0.011 at d=0 (KPSS also rejects) → **d=0** (was 1).
+
+Regression test `tests/test_bug_0002_over_differencing.py`: decisive ADF rejection
+with KPSS also rejecting → d=0; marginal ADF rejection (p≈0.011) → d=0; genuine
+unit root (ADF fails at d=0, rejects at d=1) → d=1; I(2) only when ADF fails at
+both d=0 and d=1; empty → 0.  Existing unit-root/identification/policy suite: 61
+passed.
