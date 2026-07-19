@@ -1,10 +1,11 @@
 ---
 id: BUG-0003
 title: Clean estimation display-tools do not persist .pre/.out (only confirm_and_estimate does, and it carries BUG-0001)
-status: open
+status: fixed
 severity: medium
 component: mcp-tools
 found_in: 0.1.1
+fixed_in: 0.1.2
 reported: 2026-07-09
 reporter: D. E. Guerrero
 tags:
@@ -50,13 +51,20 @@ The clean display-tools do not call the persistence path (`m.write_pre` /
 
 ## Fix
 
-Give `estimate_and_diagnose` (and optionally `model_equation_display`) an
-`output_path`/flag to write `.pre` and `.out` exactly like `confirm_and_estimate`
-(`m.write_pre` / `m.write_out`), **without** the ×100 rescaling or μ=0 seeding
-(see BUG-0001). Then the clean path yields the full trio directly.
+**Applied** in 0.1.2 (`src/art/mcp_server.py`).  Added a shared helper
+`_persist_pre_out(m, output_path)` that writes `.pre` (=.inp with the estimated
+parameters) and `.out` (ASCII results) via `m.write_pre` / `m.write_out`, and gave
+`estimate_and_diagnose` an opt-in `output_path` parameter that calls it after the
+fit.  The source `.inp` already holds the spec, so the clean path now yields the
+full trio.  Because μ-collapse (BUG-0001) is fixed at the builder level, the
+persisted model no longer carries the ×100/μ=0 degeneracy.  `output_path=""`
+(default) keeps the old screen-only behaviour.
 
 ## Validation
 
-After the fix, `estimate_and_diagnose(inp, output_path=...)` on a hand-seeded GE/GEP
-`.inp` writes `.pre`+`.out` whose logℓ matches the screen output and the
-hand-rolled `_load_fitted` artefacts.
+- `estimate_and_diagnose(inp, output_path=out)` on `RIPC.1` writes `out.pre` and
+  `out.out`, and the response note reports "Guardado …".
+- `estimate_and_diagnose(inp)` with no `output_path` writes nothing (note absent) —
+  backward compatible.
+- Regression test `tests/test_bug_0003_persist_pre_out.py`; existing
+  estimate/confirm mcp tests still pass.

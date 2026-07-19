@@ -277,6 +277,27 @@ def _show_fig(b64: str | None, label: str = "art") -> None:
     ).start()
 
 
+def _persist_pre_out(m, output_path: str) -> str:
+    """Write the fitted model's ``.pre`` (=.inp with the estimated parameters, to
+    seed the next step) and ``.out`` (ASCII results) at *output_path*'s basename,
+    mirroring fue's estimate→outputs convention.  Returns a short markdown note
+    for the tool response.  Mirrors confirm_and_estimate's .pre/.out convention so
+    the clean estimation path also produces the trio, without its ×100/μ=0 seeding
+    (BUG-0001) — the source .inp already holds the spec (BUG-0003)."""
+    output_path = os.path.expanduser(output_path)
+    base = os.path.splitext(output_path)[0]
+    pre_path, out_path = base + ".pre", base + ".out"
+    try:
+        m.write_pre(pre_path)
+    except Exception as exc:
+        return f"\n\n⚠ *No se pudo guardar el .pre: {exc}*"
+    try:
+        m.write_out(out_path)
+    except Exception:
+        return f"\n\n*Guardado: parámetros {pre_path}*"
+    return f"\n\n*Guardado: parámetros {pre_path}  |  resultados {out_path}*"
+
+
 # ---------------------------------------------------------------------------
 # Helper: single-level series + ACF/PACF figure
 # ---------------------------------------------------------------------------
@@ -640,7 +661,7 @@ def model_equation_display(inp_path: str) -> list:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def estimate_and_diagnose(inp_path: str) -> list:
+def estimate_and_diagnose(inp_path: str, output_path: str = "") -> list:
     """
     Fit the model specified in an .inp file and run diagnosis.
 
@@ -650,7 +671,13 @@ def estimate_and_diagnose(inp_path: str) -> list:
 
     Parameters
     ----------
-    inp_path : path to the .inp file with the model specification
+    inp_path    : path to the .inp file with the model specification
+    output_path : if given, also persist the fitted model as the ``.pre``
+                  (= .inp with the estimated parameters, to seed the next step)
+                  and ``.out`` (ASCII results report) alongside this basename —
+                  the same trio confirm_and_estimate writes, so a model estimated
+                  through this clean path is not left without artefacts.  Empty
+                  (default) keeps the old screen-only behaviour.
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -664,6 +691,8 @@ def estimate_and_diagnose(inp_path: str) -> list:
         desc = describe_diagnosis(m)
         _show_fig(desc.figure_b64, "diagnosis")
         text = eq_text + "\n\n---\n\n" + desc.summary + "\n\n---\n" + desc.recommendation
+        if output_path:
+            text += _persist_pre_out(m, output_path)
         items = [TextContent(type="text", text=text)]
         if desc.figure_b64:
             items.append(ImageContent(type="image",
