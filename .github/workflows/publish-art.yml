@@ -22,10 +22,10 @@ jobs:
         run: |
           pip install build
           python -m build
-      - name: Smoke-test the wheel
-        run: |
-          pip install dist/*.whl
-          python -c "import art; print('art-tseries', getattr(art, '__version__', '?'))"
+      # No install-smoke-test here: art-tseries depends on fue>=0.1.7, which may
+      # not be on PyPI yet when this release runs (suite chicken-and-egg). The
+      # `python -m build` above validates packaging; import/behaviour tests belong
+      # in a separate CI where the deps are available.
       - uses: actions/upload-artifact@v4
         with:
           name: dist
