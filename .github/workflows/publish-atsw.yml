@@ -1,0 +1,43 @@
+name: Publish atsw
+
+# Publishes the atsw umbrella meta-package (atsw-suite/) to PyPI via trusted
+# publishing on an `atsw-v*` tag.  atsw has no code of its own — it only pins a
+# compatible set of the suite (fue + pyfug + art-tseries).  Publish art-tseries
+# first (art-v* tag) so atsw's `art-tseries>=x` floor resolves.
+
+on:
+  push:
+    tags: ["atsw-v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist + wheel (atsw-suite/)
+        run: |
+          pip install build
+          python -m build atsw-suite --outdir dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/atsw-v')
+    environment: pypi
+    permissions:
+      id-token: write   # trusted publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
