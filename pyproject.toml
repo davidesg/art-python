@@ -23,7 +23,7 @@ classifiers     = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "fue>=0.1.4",
+    "fue>=0.1.7",
     "pyfug>=2.0",
     "numpy>=1.24",
     "matplotlib>=3.7",
