@@ -272,7 +272,7 @@ def _write_inp(ts, model, output_path: str) -> None:
 
     lines += [
         "** ACF/PACF bands (0 Automatic) and reescaling factor:",
-        f" 0 {_RESCALE_FACTOR:.2f}",
+        f" 0 {float(getattr(model, 'refactor', _RESCALE_FACTOR) or _RESCALE_FACTOR):.2f}",
         "** Time series (stochastic and non-standard deterministic variables):",
     ]
     for v in np.asarray(ts.data, dtype=float):
@@ -388,16 +388,18 @@ def _arma_starts(resid, p, q, P, Q, s):
 _RESCALE_FACTOR = 100.0
 
 
-def _mu_seed(ts, lam, d, D, estimate_mu):
+def _mu_seed(ts, lam, d, D, estimate_mu, refactor=_RESCALE_FACTOR):
     """Pre-estimate of mu for the .inp: the sample mean of the *transformed,
-    differenced* series, in the rescaled space fue estimates in.
+    differenced* series, in the ``refactor``-rescaled space the model estimates in.
 
     fue estimates mu on ``refactor * BoxCox_lam(data)`` after ``d`` regular and
-    ``D`` seasonal differences.  For d=0 this is the level mean (e.g. ~126 for an
-    untransformed series, ~6.76 for log CPI); for d>=1 it is ~0 (a drift).
-    Seeding mu at 0 while the (rescaled) data sit far from 0 strands the exact-ML
-    optimiser in a degenerate optimum where a near-unit AR root absorbs the level
-    (BUG-0001).  Returns 0.0 when mu is not estimated or the series is unusable.
+    ``D`` seasonal differences.  The seed is that same rescaled sample mean, so it is
+    automatically in the model's scale — `refactor` must be the SAME value set on the
+    fue.Model (single source of truth; see docs/RESCALING_ARCHITECTURE.md). For d=0
+    this is the level mean; for d>=1 a drift. Seeding mu at 0 while the (rescaled) data
+    sit far from 0 strands the exact-ML optimiser in a degenerate optimum where a
+    near-unit AR root absorbs the level (BUG-0001). Returns 0.0 when mu is not
+    estimated or the series is unusable.
     """
     if not estimate_mu:
         return 0.0
@@ -413,7 +415,7 @@ def _mu_seed(ts, lam, d, D, estimate_mu):
             w = w[freq:] - w[:-freq]
         if w.size == 0 or not np.all(np.isfinite(w)):
             return 0.0
-        return _RESCALE_FACTOR * float(np.mean(w))
+        return float(refactor) * float(np.mean(w))
     except Exception:
         return 0.0
 
@@ -472,7 +474,7 @@ def _build_arma_on_model(m_base, p: int, q: int,
         ma_s=ma_s_val,  ma_s_free=ma_sf_val if ma_s_val  else None,
         interventions=list(m_base.interventions or []),
         ifadf=list(m_base.ifadf or []),
-        mu=_mu_seed(m_base.series, m_base.boxlam, m_base.d, m_base.D, estimate_mu),
+        mu=_mu_seed(m_base.series, m_base.boxlam, m_base.d, m_base.D, estimate_mu, m_base.refactor),
         estimate_mu=estimate_mu,
         refactor=m_base.refactor,
     )
@@ -617,7 +619,8 @@ def _make_model(ts, lam: float, d: int, D: int,
         ma_s=ma_s_val, ma_s_free=ma_sf_val if ma_sf_val else None,
         interventions=itvs,
         ifadf=[0] * (freq // 2 + 1),
-        mu=_mu_seed(ts, lam, d, D, estimate_mu), estimate_mu=estimate_mu,
+        mu=_mu_seed(ts, lam, d, D, estimate_mu, _RESCALE_FACTOR), estimate_mu=estimate_mu,
+        refactor=_RESCALE_FACTOR,
     )
 
 
