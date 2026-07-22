@@ -1928,6 +1928,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                           P: int = 0, Q: int = 0,
                           base_pre_path: str = "",
                           estimate_mu: bool = False,
+                          seasonal: bool | None = None,
                           include_histogram: bool = False,
                           guion_path: str = "",
                           guion_name: str = "",
@@ -1962,6 +1963,13 @@ def confirm_and_estimate(inp_path: str, output_path: str,
     q               : regular MA order
     n_harmonics     : harmonic pairs cos/sin (D=0 fresh only; ignored when
                       base_pre_path is given — harmonics come from the .pre)
+    seasonal        : on/off switch for the whole deterministic seasonal package
+                      (cos/sin pairs + Nyquist alter). None (default) => derive from
+                      n_harmonics>0, correct for freq>=4. Pass False for a
+                      NON-seasonal series (no seasonal terms at all — avoids the
+                      spurious Nyquist of BUG-0005). Pass True for a SEMI-ANNUAL
+                      seasonal series (freq=2), whose only seasonal term is the
+                      Nyquist alter while n_harmonics (pairs) is 0.
     P               : seasonal AR order (D=1 only)
     Q               : seasonal MA order (D=1 only)
     base_pre_path   : if given, load interventions+harmonics from this .pre and
@@ -2003,7 +2011,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         else:
             m_fresh = _make_model(ts, lam=lam, d=d, D=D, p=p, q=q,
                                   n_harmonics=n_harmonics, P=P, Q=Q,
-                                  estimate_mu=estimate_mu)
+                                  estimate_mu=estimate_mu, seasonal=seasonal)
             _write_inp(ts, m_fresh, output_path)
 
         _, m = _load_fitted(output_path)

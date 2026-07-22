@@ -4,7 +4,7 @@ In-repo bug tracker for **ART** (art-tseries).  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**4 report(s), 0 open.**
+**6 report(s), 0 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -12,4 +12,6 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
 | [BUG-0003](BUG-0003-display-tools-no-persist.md) | fixed | medium | mcp-tools | Clean estimation display-tools do not persist .pre/.out (only confirm_and_estimate does, and it carries BUG-0001) | 0.1.2 |
 | [BUG-0004](BUG-0004-ar-factorization-standard-errors.md) | fixed | low | roots | ar_factorization should return standard errors for damping d and period (delta method) | 0.1.2 |
+| [BUG-0005](BUG-0005-nyquist-added-when-no-harmonics.md) | fixed | medium | pipeline | Nyquist alter harmonic is added even when n_harmonics=0 (non-seasonal series get a spurious deterministic) | 0.1.3 |
+| [BUG-0006](BUG-0006-seasonal-ar-init-spurious-optimum.md) | fixed | medium | pipeline | Seasonal-AR seed contaminated by the deterministic harmonics (wrong sign); with fue's platform-fragile optimizer, sends the US-CPI AR(2)×AR(2) fit to a spurious optimum (Windows) | 0.1.3 |
 

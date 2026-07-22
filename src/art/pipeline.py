@@ -482,12 +482,26 @@ def _make_model(ts, lam: float, d: int, D: int,
                 p: int, q: int, n_harmonics: int,
                 extra_itvs: list | None = None,
                 P: int = 0, Q: int = 0,
-                estimate_mu: bool = False):
+                estimate_mu: bool = False,
+                seasonal: bool | None = None):
     """
     Build a fue.Model from SARIMA(p,d,q)(P,D,Q)_s spec.
 
-    When D=0: harmonic det-vars (cos/sin + alter) + optional extra interventions.
+    When D=0 AND seasonal: deterministic seasonal package (cos/sin pairs + the
+    Nyquist `alter`) + optional extra interventions.
+    When D=0 and NOT seasonal: NO seasonal deterministics (a plain non-seasonal
+    ARIMA), only the optional extra interventions.
     When D=1: seasonal AR/MA operators; no harmonics added.
+
+    `seasonal` is the UNAMBIGUOUS switch for the deterministic seasonal block --
+    the `alter` (Nyquist) is part of that block, so it appears iff `seasonal`.
+    This must NOT be inferred from `n_harmonics` alone: for a semi-annual series
+    (freq=2) the ONLY seasonal harmonic IS the Nyquist and `n_harmonics`
+    (cos/sin pairs) is 0, so `n_harmonics>0` would wrongly drop it; conversely a
+    non-seasonal monthly series also has `n_harmonics=0` but must get nothing
+    (BUG-0005). When `seasonal is None` it defaults to `n_harmonics>0`, correct
+    for the common freq>=4 case; callers that know the seasonality decision
+    (decision != "A") should pass `seasonal` explicitly to cover freq=2.
     extra_itvs : list of (at_0based, form_str) tuples for pulse/step/ramp
 
     Known fue C backend bug: combining ar_s (P≥1) AND ma_s (Q≥1) simultaneously
@@ -499,9 +513,21 @@ def _make_model(ts, lam: float, d: int, D: int,
     freq = ts.freq
 
     # Data-driven ARMA starting values (Yule-Walker AR / Hannan-Rissanen MA) from
-    # the differenced Box-Cox series. For D=1 (no harmonics) this is the clean
-    # ∇^d∇_s series; for D=0 the harmonics are not yet removed, so it is a rough
-    # start for the regular AR/MA (still better than the old constants).
+    # the differenced Box-Cox series.
+    #
+    # BUG-0006: for a D=0 model with DETERMINISTIC harmonics the differenced series
+    # STILL CONTAINS the seasonal pattern, whose seasonal autocorrelation is POSITIVE
+    # (it repeats every s: e.g. r(12)=+0.32 for US CPI). Seeding the seasonal AR on it
+    # via Yule-Walker then returns a POSITIVE seed (~+0.25) — the WRONG SIGN when the
+    # NOISE's seasonal AR is negative (the model estimates the AR of the residual left
+    # AFTER the harmonics). A wrong-sign seed starts a multimodal AR(2)×AR(2) fit in
+    # the wrong basin; on some builds (Windows) the optimizer never escapes and
+    # converges to a spurious optimum. Fix: regress the SAME deterministic harmonics
+    # (+ mean) out of the differenced series FIRST, and seed on the residual noise —
+    # so the seasonal-AR seed carries the sign of the noise, not of the deterministic
+    # seasonality. For D=1 (no harmonics) the ∇^d∇_s series is already clean.
+    _seasonal = (n_harmonics > 0) if seasonal is None else seasonal
+    _n_harm   = min(n_harmonics, max(freq // 2 - 1, 0))
     resid_ref = None
     try:
         yv = np.asarray(getattr(ts, "data", getattr(ts, "values", None)), float)
@@ -511,6 +537,21 @@ def _make_model(ts, lam: float, d: int, D: int,
             w = np.diff(w)
         for _ in range(int(D)):
             w = w[freq:] - w[:-freq]
+        if D == 0 and _seasonal and freq >= 2 and w.size > 2 * freq:
+            # Remove exactly the deterministic terms the model will carry: a
+            # constant (mean/drift), the cos/sin pairs k=1..n_harm and the Nyquist
+            # alternator. Seed the ARMA on the leftover noise.
+            t    = np.arange(w.size)
+            cols = [np.ones_like(t, float)]
+            for k in range(1, _n_harm + 1):
+                cols.append(np.cos(2.0 * np.pi * k * t / freq))
+                cols.append(np.sin(2.0 * np.pi * k * t / freq))
+            cols.append((-1.0) ** t)
+            Xh   = np.column_stack(cols)
+            beta = np.linalg.lstsq(Xh, w, rcond=None)[0]
+            wr   = w - Xh @ beta
+            if np.all(np.isfinite(wr)):
+                w = wr
         resid_ref = w
     except Exception:
         resid_ref = None
@@ -530,18 +571,26 @@ def _make_model(ts, lam: float, d: int, D: int,
     ma_f = [[True]  * q] if q > 0 else []
 
     if D == 0:
-        # Deterministic seasonality: pairs 1..freq//2-1 + alter (Nyquist harmonic).
-        max_pairs = max(freq // 2 - 1, 0)
-        n_harm    = min(n_harmonics, max_pairs)
+        # Deterministic SEASONAL PACKAGE: cos/sin pairs (freq 1..freq//2-1) + the
+        # Nyquist `alter`=(−1)ᵗ (freq//2). The alter is PART of this package, so it
+        # is gated on the seasonality decision, NEVER on n_harmonics: a non-seasonal
+        # series (decision "A") and a semi-annual seasonal series (freq=2, where the
+        # only harmonic IS the Nyquist and n_harmonics=0) both have n_harmonics=0,
+        # yet the first must get nothing and the second must get the alter. Gating
+        # on n_harmonics conflated them and injected a spurious alter into
+        # non-seasonal ARIMA models (BUG-0005). Default `seasonal` from n_harmonics
+        # (correct for freq>=4); callers that know the decision pass it explicitly.
+        if seasonal is None:
+            seasonal = n_harmonics > 0
         itvs = []
-        for k in range(1, n_harm + 1):
-            itvs.append(fue.Intervention("cos", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
-            itvs.append(fue.Intervention("sin", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
-        # The Nyquist harmonic `alter`=(−1)ᵗ only exists for a seasonal period
-        # s>=2; for annual series (freq=1) there is no seasonality, so adding it
-        # injects a spurious deterministic biannual oscillation (see TODO.md).
-        if freq >= 2:
-            itvs.append(fue.Intervention("alter", at=0, omega=[0.0], omega_free=[True]))
+        if seasonal:
+            max_pairs = max(freq // 2 - 1, 0)
+            n_harm    = min(n_harmonics, max_pairs)
+            for k in range(1, n_harm + 1):
+                itvs.append(fue.Intervention("cos", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
+                itvs.append(fue.Intervention("sin", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
+            if freq >= 2:          # the Nyquist alter exists only for a seasonal period
+                itvs.append(fue.Intervention("alter", at=0, omega=[0.0], omega_free=[True]))
         # Stationary stochastic seasonality on top of the deterministic harmonics:
         # a free annual AR/MA operator (no seasonal differencing). YW/HR-initialised.
         ar_s_val  = [ars_i] if P > 0 else []
@@ -589,6 +638,8 @@ class ModelSpec:
     Q: int = 0
     interventions: list = field(default_factory=list)  # list of (at_0based, form)
     estimate_mu: bool = False
+    seasonal: bool | None = None   # deterministic seasonal package on/off (BUG-0005);
+                                   # None => derive from n_harmonics>0 (freq>=4 ok)
 
 
 @dataclass
@@ -638,7 +689,8 @@ def build_and_fit(ts, spec: ModelSpec, output_path: str,
     from art.diagnosis import diagnose
     m = _make_model(ts, spec.lam, spec.d, spec.D, spec.p, spec.q,
                     spec.n_harmonics, extra_itvs=spec.interventions,
-                    P=spec.P, Q=spec.Q, estimate_mu=spec.estimate_mu)
+                    P=spec.P, Q=spec.Q, estimate_mu=spec.estimate_mu,
+                    seasonal=spec.seasonal)
     _write_inp(ts, m, output_path)
     _, m_fit = _load_fitted(output_path)
     diag = diagnose(m_fit, z_threshold=z_threshold)
