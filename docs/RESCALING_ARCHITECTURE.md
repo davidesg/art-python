@@ -142,9 +142,18 @@ architecture. The architecture is about **consistency**, not the specific number
 
 ## 5. Status
 
-- Point fixes shipped: fue BUG-0004 (forecast reads `_result`), ART BUG-0006 (seed on the
-  de-harmonized noise — a separate seeding bug, same "seed hygiene" theme).
-- Open, systemic (this document): P1–P4 — ART `refactor` as single source of truth, fue
-  `Model.fit()` sync, remove hardcoded `100`s, add the in-memory≡round-trip invariant test.
-- Related: fue BUG-0005 (optimizer robustness on multimodal surfaces) is independent of the
-  rescale but shares the "bad seed → wrong basin" failure mode.
+**P1–P4 IMPLEMENTED (2026-07-22).** The invariant `in-memory forecast == .pre round-trip
+forecast` now holds (`tests/test_rescaling_invariant.py`); fue suite 651 passed, ART suite
+466 passed (no golden shift — the pipeline already wrote/loaded `refactor=100`).
+
+- **fue** (`fix(fit)`, `23cc9c3…`): `Model.fit()` calls `sync_params_to_attrs` — the model
+  IS the fit after fitting (P4). `eval_at_params` reads `_result` as a belt-and-suspenders
+  (BUG-0004, `2fd96ee…`).
+- **ART** (`fix(pipeline)`, `f076982…`): `_make_model` sets `model.refactor` (P1/P4);
+  `_mu_seed` takes the model's refactor and seeds on the rescaled series (P3);
+  `_build_arma_on_model` forwards the base refactor; `_write_inp` writes `model.refactor`
+  (P1). Plus ART BUG-0006 seed-on-de-harmonized-noise (`0afe3c4…`).
+- **Remaining (minor):** fue `plots.py` fallback `else 100.0` → `else 1.0` — display-only,
+  now near-dead code since `refactor` is always set; low priority.
+- **Related, independent:** fue BUG-0005 (optimizer robustness on multimodal surfaces)
+  shares the "bad seed → wrong basin" failure mode but is orthogonal to the rescale.
