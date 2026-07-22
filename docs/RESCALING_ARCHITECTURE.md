@@ -116,9 +116,9 @@ is no state that is correct only after a write+load cycle.
    attribute-consumer (forecast, `_write_inp`, reports) sees the fit. With P1–P4 there is no
    ×100 conversion in the sync (single scale), so it is a plain copy. The point-fix in
    `eval_at_params` (read `_result` when present) stays as belt-and-suspenders.
-5. `plots.py` fallback `else 100.0` → `else 1.0` (or read `model.refactor`); no hardcoded
-   `100` as a scale (the `100·x/refactor` percent-unit conversions are display-only and
-   stay).
+5. `plots.py` `plot_residuals_ts` header uses `scale = 100/refactor` (percent), like the
+   rest of the module and `report_forecast.py` — not `scale = refactor`, which
+   double-counts once `refactor` is a consistent 100 (showed 25% instead of 0.25%).
 
 ### The invariant to enforce (and test)
 
@@ -153,7 +153,12 @@ forecast` now holds (`tests/test_rescaling_invariant.py`); fue suite 651 passed,
   `_mu_seed` takes the model's refactor and seeds on the rescaled series (P3);
   `_build_arma_on_model` forwards the base refactor; `_write_inp` writes `model.refactor`
   (P1). Plus ART BUG-0006 seed-on-de-harmonized-noise (`0afe3c4…`).
-- **Remaining (minor):** fue `plots.py` fallback `else 100.0` → `else 1.0` — display-only,
-  now near-dead code since `refactor` is always set; low priority.
+- **fue `plots.py`** (`fix(plots)`): `plot_residuals_ts`'s header used `scale = refactor`
+  (a ×refactor), while the rest of plots.py / `report_forecast.py` correctly use
+  `×100/refactor` (100 = ∇log→%, ÷refactor undoes the rescale). With the now-consistent
+  `refactor=100` and residuals in the ×100 space, `×refactor` double-counted — the header
+  showed `σ̂_w = 25.30%` instead of `0.25%`. **No test caught it** (plot tests check the
+  figure renders, not the label values). Fixed to `scale = 100/refactor`. (The earlier
+  note here — "change the `else 100.0` fallback" — was wrong: the bug was the formula.)
 - **Related, independent:** fue BUG-0005 (optimizer robustness on multimodal surfaces)
   shares the "bad seed → wrong basin" failure mode but is orthogonal to the rescale.
