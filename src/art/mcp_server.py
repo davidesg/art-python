@@ -2597,6 +2597,9 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             interventions=new_itvs,
             mu=m_src.mu0, estimate_mu=m_src.estimate_mu,
             boxlam=m_src.boxlam,
+            # BUG-0007 (sibling): carry refactor so the written .inp and the mu0
+            # seed (rescaled space) stay consistent before re-estimation.
+            refactor=getattr(m_src, "refactor", 1.0) or 1.0,
         )
 
         # Write the updated .inp and re-estimate
@@ -3049,11 +3052,15 @@ def _fuf_path(path: str) -> str:
     return path
 
 
-def _forecast_table(ts, fr, horizon: int) -> str:
+def _forecast_table(ts, fr, horizon: int, boxlam: float = 0.0) -> str:
     """Markdown table of the forecast values so the LLM can read them directly.
 
     fr is a fue.ForecastResult: .level (point forecast, original scale),
-    .level_std (s.e.), .seasonal_diff (year-on-year %).  95% band = level ± 1.96·se.
+    .level_std, .seasonal_diff (year-on-year %).  BUG-0008: level_std is the std
+    of BoxCox_λ(y), NOT of the level — for λ=0 (log) models it is a RELATIVE s.e.
+    (fraction of the level).  Convert to absolute level units with the delta
+    method, se_abs = level_std · level^(1−λ) (λ=0 → ·level; λ=1 → unchanged), then
+    the 95% band is level ± 1.96·se_abs.
     """
     yoy = getattr(fr, "seasonal_diff", None)
     has_yoy = yoy is not None and len(yoy) == len(fr.level)
@@ -3066,7 +3073,8 @@ def _forecast_table(ts, fr, horizon: int) -> str:
         date = _forecast_date(ts.start, ts.nobs + 1, ts.freq, h)
         lvl  = float(fr.level[h])
         se   = float(fr.level_std[h])
-        lo, hi = lvl - 1.96 * se, lvl + 1.96 * se
+        se_abs = se * (lvl ** (1.0 - boxlam)) if lvl > 0 else se   # BUG-0008
+        lo, hi = lvl - 1.96 * se_abs, lvl + 1.96 * se_abs
         row = f"| {h+1} | {date} | {lvl:.4f} | [{lo:.4f}, {hi:.4f}] "
         if has_yoy:
             row += f"| {float(yoy[h]):+.2f}% "
@@ -3122,7 +3130,7 @@ def generate_forecast(inp_path: str,
         last_date = _forecast_date(ts_fuf.start, ts_fuf.nobs, ts_fuf.freq, 0)
         end_date  = _forecast_date(ts_fuf.start, ts_fuf.nobs + 1, ts_fuf.freq, horizon - 1)
 
-        table = _forecast_table(ts_fuf, fr, horizon)
+        table = _forecast_table(ts_fuf, fr, horizon, boxlam=m_fuf.boxlam)
 
         text = (
             f"## Previsiones — {ts_fuf.name or 'Serie'} "
@@ -3208,6 +3216,10 @@ def update_and_forecast(fuf_path: str,
             interventions=m_old.interventions,
             mu=m_old.mu0, estimate_mu=m_old.estimate_mu,
             boxlam=m_old.boxlam,
+            # BUG-0007: carry the rescale factor (fuf models are refactor=100);
+            # mu0 lives in the rescaled space, so a rebuild at the default
+            # refactor=1 reads the drift 100x off and the level explodes.
+            refactor=getattr(m_old, "refactor", 1.0) or 1.0,
         )
         fr_new = m_new.forecast_fuf(horizon=L_old, sigma2=sig2)
 
@@ -3227,7 +3239,7 @@ def update_and_forecast(fuf_path: str,
         if track_lines:
             track_block = "\nSeguimiento (actual vs. previsión anterior):\n" + "\n".join(track_lines) + "\n"
 
-        table = _forecast_table(ts_new, fr_new, L_old)
+        table = _forecast_table(ts_new, fr_new, L_old, boxlam=m_new.boxlam)
 
         text = (
             f"## Previsiones actualizadas — {ts_new.name or 'Serie'} "

@@ -4,14 +4,16 @@ In-repo bug tracker for **ART** (art-tseries).  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**6 report(s), 0 open.**
+**8 report(s), 0 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
+| [BUG-0007](BUG-0007-update-and-forecast-rebuilds-the-model-without-r.md) | fixed | high | mcp-tools | update_and_forecast rebuilds the model without refactor: mu is read 100x off scale and the forecast level explodes | 0.1.3 |
+| [BUG-0008](BUG-0008-forecast-table-builds-the-95-band-as-level-1-96-.md) | fixed | medium | mcp-tools | _forecast_table builds the 95% band as level +- 1.96*level_std, but level_std is RELATIVE for Box-Cox lam=0 models: bands come out ~100x too narrow | 0.1.3 |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
 | [BUG-0003](BUG-0003-display-tools-no-persist.md) | fixed | medium | mcp-tools | Clean estimation display-tools do not persist .pre/.out (only confirm_and_estimate does, and it carries BUG-0001) | 0.1.2 |
 | [BUG-0004](BUG-0004-ar-factorization-standard-errors.md) | fixed | low | roots | ar_factorization should return standard errors for damping d and period (delta method) | 0.1.2 |
 | [BUG-0005](BUG-0005-nyquist-added-when-no-harmonics.md) | fixed | medium | pipeline | Nyquist alter harmonic is added even when n_harmonics=0 (non-seasonal series get a spurious deterministic) | 0.1.3 |
-| [BUG-0006](BUG-0006-seasonal-ar-init-spurious-optimum.md) | fixed | medium | pipeline | Seasonal-AR seed contaminated by the deterministic harmonics (wrong sign); with fue's platform-fragile optimizer, sends the US-CPI AR(2)×AR(2) fit to a spurious optimum (Windows) | 0.1.3 |
+| [BUG-0006](BUG-0006-seasonal-ar-init-spurious-optimum.md) | fixed | medium | pipeline | Seasonal-AR seed is contaminated by the deterministic harmonics (wrong sign); combined with fue's platform-fragile optimizer it sends the US-CPI AR(2)×AR(2) fit to a spurious optimum (Windows) | 0.1.3 |
 
