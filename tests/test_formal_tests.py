@@ -2,7 +2,7 @@
 import os
 import pytest
 import fue
-from art.formal_tests import shin_fuller, dcd, dcd_f, DCDResult, rv, RVResult, meg, MEGResult
+from art.formal_tests import shin_fuller, dcd, dcd_f, DCDResult, rv, RVResult, meg, MEGResult, dcd_overdiff_regular
 
 # Paths to real-case test files (fue project)
 _FUE_TESTS = os.path.expanduser(
@@ -842,3 +842,57 @@ def test_meg_raises_freq_out_of_range():
     _force_fit_py(m)
     with pytest.raises(ValueError, match="out of range"):
         meg(m, frequencies=[7])   # s//2=6, 7 is invalid
+
+
+# ---------------------------------------------------------------------------
+# dcd_overdiff_regular: confirmatory over-differencing test at f=0
+# ---------------------------------------------------------------------------
+
+class TestDCDOverdiffRegular:
+    """Impose one extra regular difference on an I(1) series (true d=1); the
+    +0.85-initialised witness must land at θ→+1 (over-differenced) on the
+    positive f=0 axis, s=1 law, verdict 'd confirmed'."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        import numpy as np
+        rng = np.random.default_rng(0)
+        y = np.cumsum(rng.standard_normal(200)) * 10.0 + 1000.0   # random walk, I(1)
+        ts = fue.TimeSeries(list(y), freq=4, start=(1980, 1), name="RW")
+        m = fue.Model(ts, d=1)
+        _force_fit_py(m)
+        self.r = dcd_overdiff_regular(m)
+
+    def test_returns_dcdresult(self):
+        assert isinstance(self.r, DCDResult)
+
+    def test_witness_on_positive_f0_axis(self):
+        """The regular witness must stay POSITIVE (root toward B=+1), not drift
+        to the Nyquist sign."""
+        assert self.r.coef_free > 0.5
+
+    def test_witness_near_unit_root(self):
+        """Over-differenced ⇒ θ → +1."""
+        assert self.r.coef_free > 0.85
+
+    def test_s1_critical_values(self):
+        """Real root ⇒ s=1 law (5% ≈ 1.94)."""
+        assert abs(self.r._crit['5%'] - 1.94) < 1e-6
+
+    def test_overdifferences_verdict(self):
+        """Non-invertible ⇒ the extra ∇ over-differences ⇒ d confirmed."""
+        assert self.r.lr < self.r._crit['5%']
+        assert not self.r.invertible
+
+
+def test_dcd_overdiff_regular_drops_mean():
+    """A baseline mean is annihilated by the extra difference; the test must
+    drop it and run without raising."""
+    import numpy as np
+    rng = np.random.default_rng(1)
+    y = np.cumsum(rng.standard_normal(200) + 0.5) + 1000.0   # random walk + drift
+    ts = fue.TimeSeries(list(y), freq=4, start=(1980, 1), name="RWd")
+    m = fue.Model(ts, d=1, mu=0.5, estimate_mu=True)
+    _force_fit_py(m)
+    r = dcd_overdiff_regular(m)
+    assert isinstance(r, DCDResult)

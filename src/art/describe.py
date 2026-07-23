@@ -32,7 +32,7 @@ from .identification import (
 from .seasonal_detection import detect_seasonality, plot_seasonality
 from .model_detection import suggest_orders
 from .diagnosis import diagnose, plot_diagnosis
-from .formal_tests import dcd, dcd_f, rv, meg, shin_fuller
+from .formal_tests import dcd, dcd_f, rv, meg, shin_fuller, dcd_overdiff_regular
 from .interventions import diagnose_interventions
 from .full_report import _meg_suitable, _try
 
@@ -290,10 +290,9 @@ def describe_seasonality(ts) -> Description:
 
     if decision == "B1":
         rec = (
-            "Decisión B1 por defecto (Treadway). Confirma D=0 con armónicos. "
-            "MEG validará si alguna frecuencia requiere D=1 más adelante. "
-            "Alternativa: pasar a B2 (D=1) directamente si prefieres la "
-            "tradición Box-Jenkins multiplicativa."
+            "Decisión B1 por defecto — estacionalidad determinista. Confirma D=0 "
+            "con armónicos. MEG validará si alguna frecuencia requiere D=1 más adelante. "
+            "Alternativa: pasar a B2 (estacionalidad estocástica, D=1) directamente."
         )
     elif decision == "A":
         rec = "Decisión A. Confirma D=0, sin armónicos."
@@ -1404,6 +1403,7 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
 
     sf_res    = _try(lambda: shin_fuller(model), None)
     dcd_res   = _try(lambda: dcd(model),   [])
+    od_res    = _try(lambda: dcd_overdiff_regular(model), None)
     dcd_f_res = _try(lambda: dcd_f(model), [])
     rv_res    = _try(lambda: rv(model),    [])
     meg_res   = (_try(lambda: meg(model), [])
@@ -1438,6 +1438,21 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
             verdict = "Invertible ✓" if r.lr >= c5 else "No invertible ✗"
             lines.append(f"- Factor {r.factor_index+1}: θ̂={r.coef_free:+.4f}, "
                          f"LR={r.lr:.3f} (crít 5%={c5:.2f}) → {verdict}")
+
+    # DCD sobre-diferenciación regular — confirmatorio del ORDEN DE INTEGRACIÓN
+    # (distinto del DCD estándar de arriba: impone ∇ extra + testigo MA(1) θ⁰=+0.85).
+    if od_res is not None:
+        c5 = od_res._crit['5%']
+        if od_res.lr < c5:
+            verdict = ("testigo NO invertible (θ→+1) → la ∇ extra sobre-diferencia "
+                       "→ d confirmado ✓")
+        else:
+            verdict = ("testigo invertible → raíz unitaria regular genuina "
+                       "→ considerar d+1 ✗")
+        lines.append("\n**DCD sobre-diferenciación regular** — confirmatorio del orden "
+                     "de integración (testigo θ⁰=+0.85, H₀: θ=1, ley s=1)")
+        lines.append(f"- θ̂={od_res.coef_free:+.4f}, LR={od_res.lr:.3f} "
+                     f"(crít 5%={c5:.2f}) → {verdict}")
 
     # DCD_f
     if dcd_f_res:
@@ -1535,6 +1550,12 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
             ),
             "dcd": [{"factor": r.factor_index, "lr": r.lr, "coef": r.coef_free}
                     for r in dcd_res],
+            "overdiff_regular": (
+                {"lr": od_res.lr, "coef": od_res.coef_free,
+                 "crit_5pct": od_res._crit['5%'],
+                 "overdifferences": od_res.lr < od_res._crit['5%']}
+                if od_res is not None else None
+            ),
             "meg": [{"freq": r.freq, "status": r.status,
                      "lr": r.dcd_result.lr if r.dcd_result else None}
                     for r in meg_res],

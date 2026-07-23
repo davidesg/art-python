@@ -540,6 +540,85 @@ def dcd(model) -> list[DCDResult]:
     return results
 
 
+def dcd_overdiff_regular(model, witness_init: float = 0.85) -> "DCDResult":
+    """CONFIRMATORY over-differencing test on the REGULAR (f=0) integration order.
+
+    This is NOT the standard ``dcd()`` (which tests the non-invertibility of the
+    model's EXISTING regular MA). Here we CONFIRM the regular integration order d
+    from the "do I need one more difference?" side, the MA-side companion of
+    Shin–Fuller: impose one extra regular difference (d → d+1) and fit a regular
+    MA(1) *over-differencing witness* initialised POSITIVE (θ⁰ = +``witness_init``,
+    default +0.85), then apply the DCD (H₀: θ=1).
+
+    Why the POSITIVE initialisation: at the regular frequency f=0 the unit root
+    sits at B=+1 (factor 1−B), so an over-differencing witness approaches θ→+1.
+    (Contrast the seasonal Nyquist witness, initialised −0.9, whose root is at
+    B=−1; and the interior FixedFreqFactor witness.) Left free from a data-driven
+    (Hannan–Rissanen) start, a plain regular MA can drift NEGATIVE — its root then
+    points toward B=−1 and it measures the *Nyquist* (semiannual) frequency, not
+    f=0. The +0.85 start keeps the witness on the f=0 axis.
+
+    Verdict (s=1 law, pile-up 0.6575; DCD crit 5% ≈ 1.94):
+      θ → +1, NON-invertible (LR < crit)  ⇒ the extra ∇ over-differences
+                                            ⇒ **d is enough (confirmed)**.
+      θ  <  1, invertible     (LR ≥ crit)  ⇒ genuine extra unit root
+                                            ⇒ **d+1 needed (under-differenced)**.
+
+    Theory: the s=1 case (single real root) of SF_MEG Theorem 1(i) — the classic
+    Davis–Dunsmuir (1996) regular MA(1) boundary law, shared with the Nyquist.
+    Best run on the deterministic/seasonal baseline (harmonics, no competing
+    regular ARMA), so the witness — the sole regular MA — isolates f=0.
+
+    Parameters
+    ----------
+    model        : fue.Model, already fitted (.fit() called)
+    witness_init : starting value of the regular MA(1) witness (default +0.85)
+
+    Returns
+    -------
+    DCDResult (freq=None ⇒ s=1 critical values), on the witness factor.
+    """
+    if model._result is None:
+        raise RuntimeError("Model has not been fitted — call model.fit() first.")
+
+    # Over-differenced candidate: one extra regular difference, with the witness as
+    # the SOLE regular MA(1) (replace any existing regular MA), initialised positive.
+    mc = copy.deepcopy(model)
+    mc._result = None
+    mc.d = int(mc.d) + 1
+    # A baseline mean μ (a drift on ∇^d y) is ANNIHILATED by the extra difference
+    # (∇μ = 0): in the over-differenced candidate it is unidentified and must be
+    # dropped. (Harmonics/steps survive the extra ∇ and are kept.) If the baseline
+    # had no mean there is nothing to do.
+    mc.mu0 = 0.0
+    mc.estimate_mu = False
+    mc.ma = [[float(witness_init)]]
+    mc.ma_free = [[True]]
+    mc.fit()
+    L_free = float(mc._result.loglik)
+    theta_hat = _extract_ma_param(mc, 0)
+
+    # Constrain the witness at the non-invertibility boundary θ=1.
+    mk = copy.deepcopy(mc)
+    mk._result = None
+    mk.ma[0] = [1.0]
+    mk.ma_free[0] = [False]
+    mk.fit()
+    L_const = float(mk._result.loglik)
+
+    lr = 2.0 * (L_free - L_const)
+    return DCDResult(
+        factor_index=0,
+        freq=None,               # real root ⇒ s=1 law (crit 1.00/1.94/4.41)
+        coef_free=theta_hat,
+        coef_null=1.0,
+        loglik_free=L_free,
+        loglik_constrained=L_const,
+        lr=lr,
+        n=_model_n(mc),
+    )
+
+
 # ---------------------------------------------------------------------------
 # DCD for fixed-frequency MA_f factors
 # ---------------------------------------------------------------------------

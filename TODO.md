@@ -2,6 +2,53 @@
 
 ## Bugs conocidos
 
+- [ ] **ART no estima correctamente series de frecuencia ANUAL (freq=1)** (GRAVE, ABIERTO):
+      descubierto 2026-07-08 revisando series anuales de precipitación (Ginebra,
+      días, n=248, 1768-2015; proyecto "Joseph's Cycles"). El motor `fue` estima
+      bien — el fallo está en la capa ART (construcción del modelo y del `.inp`) y
+      en pyfug (gráfico de diagnosis). Como TODA serie anual es D=0, estos tres
+      defectos afectan a CUALQUIER estimación anual, tanto en modo guiado
+      (`confirm_and_estimate`) como autónomo (`build_model` → ambos vía
+      `_make_model` / `_write_inp`).
+
+      **(1) Determinista `alter`=(−1)ᵗ espurio — `src/art/pipeline.py:503`.** En el
+      bloque `D==0` de `_make_model`, la línea 497 pone correctamente `max_pairs=0`
+      para freq=1 (ningún par cos/sin), pero la línea 503 añade INCONDICIONALMENTE
+      `fue.Intervention("alter", …)` (armónico de Nyquist f=s/2). En una serie anual
+      (s=1) no hay Nyquist estacional: `alter`=(−1)ᵗ es una oscilación bienal
+      determinista libre que no debería existir. Efecto: absorbe señal de periodo 2,
+      distorsiona μ y el AR, y produce ajustes degenerados (observado: un AR(14)
+      anual con logL=−2202, PEOR que su submodelo AR(7) logL=−1058 — imposible entre
+      modelos anidados salvo no convergencia). Fix propuesto: envolver el bloque de
+      deterministas estacionales (líneas 500-503, o al menos el append de `alter`)
+      en `if freq >= 2:`. Test de regresión: estimar un ARMA anual y comprobar que
+      `m.interventions` NO contiene ningún `alter`, y que logL(AR(p+k)) ≥ logL(AR(p)).
+
+      **(2) Cabecera `.inp` mal escrita para anual — `src/art/pipeline.py:150`.** En
+      `_write_inp`, la rama `else` (freq=1) escribe
+      `f" {n}  {beg_year} {beg_year} {name}"`, repitiendo el año en el campo del
+      periodo inicial (p.ej. `248  1768 1768 GE` en vez de `248  1 1768 GE`). Debe
+      ser `f" {n}  1 {beg_year} {name}"` (periodo inicial = 1 en anual, coherente con
+      `beg_period` de la línea 111). Fix: sustituir `{beg_year} {beg_year}` por
+      `1 {beg_year}`. Test: round-trip write→load de una serie anual conserva
+      `start` y `nobs`.
+
+      **(3) `UnboundLocalError: x_pad` en el gráfico anual — pyfug
+      `pyfug/graphics/combined.py:167`.** En `plot_combined`, `x_pad` solo se define
+      dentro de `if f > 1:` (asignado en la línea 146); para `f==1` (anual) se entra
+      en el `else` (línea 155) sin definirla, y la línea 167
+      `ax_s.set_xlim(xs[0] - x_pad, …)` la usa → crash. Bloquea `describe_diagnosis`
+      y, por tanto, `estimate_and_diagnose` y `confirm_and_estimate` (que la llaman
+      tras estimar). Está en pyfug (no en fue ni en art-python), pero rompe ART; se
+      registra aquí como se hizo con el fix de nlags. Fix: definir `x_pad` (p.ej.
+      `x_pad = 0.3 / f`) también en la rama `else`. Test de regresión: caso anual en
+      `tests/test_golden_pipeline.py` que ejecute la diagnosis sin crash (hermano de
+      `test_diagnosis_short_series_no_crash`).
+
+      Workaround temporal: construir el `.inp` a mano (cabecera correcta, sin
+      `alter`) y estimar vía `model_equation_display` / `ar_factorization` (re-ajustan
+      internamente y no invocan el gráfico que rompe).
+
 - [x] **MEG ahora evalúa la frecuencia de Nyquist (bienal, f=s/2)** (RESUELTO):
       `meg` contrasta `f=1…s/2` (6 en mensual), incluyendo el Nyquist, como la
       tesis (chap2.4) y Abraham & Box (1978, Tabla A1). El factor de Nyquist es
