@@ -4,6 +4,41 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## atsw 1.0.4 — 2026-07-23
+
+- Pins bumped to **fue>=0.1.8** and **art-tseries>=0.1.3** so `pip install atsw`
+  pulls the rescaling/forecast fixes and the naming/language pass.
+- Description reworked: **"A Time Series Workshop"** — the fue + pyfug + ART suite,
+  with the MCP server surfaced for discoverability.
+
+## art-tseries 0.1.3 — 2026-07-23
+
+Requires **fue>=0.1.8**. Rescaling made a single source of truth, seasonal-seed fix,
+and a naming/language pass for the (English-majority) audience.
+
+- **Rescaling P1 — `refactor` as single source of truth**
+  (`docs/RESCALING_ARCHITECTURE.md`). No file/function hardcodes `100`: `_make_model`
+  sets `model.refactor`; `_mu_seed(refactor)` seeds on the already-rescaled series;
+  `_build_arma_on_model` forwards the base refactor; `_write_inp` writes
+  `model.refactor`. Invariant `in-memory forecast == .pre round-trip forecast` now
+  holds (`tests/test_rescaling_invariant.py`).
+- **BUG-0006** (seed): the seasonal-AR seed was Yule-Walker'd on the
+  harmonic-*containing* differenced series (positive `r(12)`), giving a positive Φ
+  seed against the noise's negative Φ → spurious optimum for the US AR(2)×AR(2). Now
+  the deterministic harmonics (+ Nyquist alter) are regressed out first; the seed is
+  taken on the residual noise. Removes the per-country seed workaround.
+- **BUG-0005** (seasonal package): the deterministic seasonal block (harmonic pairs +
+  Nyquist alter) is now gated on a `seasonal` flag instead of `n_harmonics>0`, so
+  low-frequency seasonal models are handled correctly.
+- **Naming:** ART is now glossed **"A Real-Time Time-Series Analysis"** (Box-Jenkins-
+  Treadway methodology retained in the description/README body). No package, module,
+  or repo rename.
+- **Seasonality routes** renamed from the school labels to the working hypothesis:
+  **B1 — Deterministic seasonality** (D=0, harmonics), **B2 — Stochastic seasonality**
+  (D=1, seasonal differencing).
+- **Language:** the MCP server now instructs the assistant to **always respond in the
+  user's language** (default English); user-facing route labels are in English.
+
 ## art-tseries 0.1.2 — 2026-07-19
 
 Requires **fue>=0.1.7**. Fixes found reviewing the *Joseph's Cycles* models

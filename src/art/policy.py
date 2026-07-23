@@ -66,7 +66,7 @@ def decide_seasonal_structure(seasonality_data: dict, freq: int) -> tuple[int, s
 
     Returns (D, decision, n_harmonics):
       D           seasonal differencing (0 for B1 deterministic, 1 for B2)
-      decision    "A" (no seasonality) | "B1" (deterministic) | "B2" (multiplic.)
+      decision    "A" (no seasonality) | "B1" (deterministic) | "B2" (stochastic)
       n_harmonics full deterministic spec = freq//2 − 1 cos/sin pairs (the Nyquist
                   harmonic is covered separately by 'alter'); 0 when decision="A".
     """

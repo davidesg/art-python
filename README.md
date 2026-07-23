@@ -1,4 +1,4 @@
-# ART — Box-Jenkins-Treadway time series toolkit + MCP server
+# ART — A Real-Time Time-Series Analysis toolkit + MCP server
 
 `art-tseries` (ART) builds univariate time series models following the
 **Box-Jenkins-Treadway** methodology: an iterative, decision-driven process that

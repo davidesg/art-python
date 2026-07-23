@@ -18,7 +18,18 @@ import traceback
 from mcp.server.fastmcp import FastMCP
 
 _INSTRUCTIONS = """
-Eres el asistente de análisis de series temporales ART (Box-Jenkins-Treadway).
+Eres el asistente de análisis de series temporales ART — A Real-Time Time-Series Analysis (metodología Box-Jenkins-Treadway).
+
+══════════════════════════════════════════════════════
+IDIOMA / LANGUAGE
+══════════════════════════════════════════════════════
+Responde SIEMPRE en el idioma del usuario (inglés por defecto si es ambiguo).
+Estas instrucciones y las salidas de las herramientas pueden venir en español:
+tradúcelas al idioma del usuario al presentarlas; no pegues texto en español a
+un usuario que escribe en inglés.
+── Always respond in the user's language (default to English if ambiguous). These
+instructions and tool outputs may be in Spanish; translate them for the user —
+never paste Spanish text to an English-speaking user.
 
 ══════════════════════════════════════════════════════
 PREGUNTA INICIAL OBLIGATORIA
@@ -195,7 +206,7 @@ REGLAS GENERALES
 - Las decisiones finales (λ, d, D, p, q) son del USUARIO, no del modelo.
 """
 
-mcp = FastMCP("ART — Box-Jenkins-Treadway Analysis", instructions=_INSTRUCTIONS)
+mcp = FastMCP("ART — A Real-Time Time-Series Analysis", instructions=_INSTRUCTIONS)
 
 # Execution layer (model construction, .inp I/O, fit and the autonomous loop)
 # lives in art.pipeline; the MCP tools below import its primitives + entry points.
@@ -1570,13 +1581,13 @@ def guided_identification(inp_path: str, lam: float = -1.0,
 
     Call 3  lam=X  d=<level>  D=-1
       → Series(λ) differenced d times + ACF/PACF + HAC seasonality.
-        ¿Seasonal? + B1 (Treadway, deterministic harmonics, D=0):
+        Seasonal? + B1 (deterministic seasonality: harmonics, D=0):
           Confirm d and D=0, then:
             a) confirm_and_estimate(m00: harmonics only, p=0, q=0)
             b) preliminary_outlier_scan on m00 residuals
             c) [cycle: add steps → re-estimate → scan] until clean
             d) Call 4 with pre_path=<mNN.pre> (ARMA on clean residuals)
-        ¿Seasonal? + B2 (Box-Jenkins multiplicative, D=1):
+        Seasonal? + B2 (stochastic seasonality: seasonal differencing, D=1):
           → Call 4 with lam, d, D=1 (ARMA+P+Q on ∇∇_s series)
         ¿No seasonality? → D=0, no harmonics, Call 4 directly.
       WAIT for user to confirm d and D.
@@ -1695,7 +1706,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             # B1 path: estimate harmonics-only first; treating anomalies is the
             # analyst's OPTION (never required), then ARMA identification.
             b1_steps = (
-                "\n\n### Ruta B1 (Treadway, D=0 + armónicos estacionales)\n\n"
+                "\n\n### Route B1 — Deterministic seasonality (D=0 + seasonal harmonics)\n\n"
                 "Secuencia (tratar anómalos es OPCIONAL — lo decide el analista, "
                 "nunca es obligatorio):\n\n"
                 f"**1.** Estima m00 (armónicos estacionales, sin ARMA):\n"
@@ -1718,7 +1729,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
 
             # B2 path: go directly to ARMA identification on ∇∇_s series
             b2_steps = (
-                "\n\n### Ruta B2 (Box-Jenkins, D=1)\n\n"
+                "\n\n### Route B2 — Stochastic seasonality (D=1, seasonal differencing)\n\n"
                 f"```\nguided_identification(\n"
                 f"    inp_path=\"{inp_path}\",\n"
                 f"    lam={lam}, d={d}, D=1\n)\n```\n"
