@@ -4,6 +4,13 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## atsw 1.1.0 — 2026-07-27
+
+- Adds **drvarma>=0.1.1** to the suite — multivariate VARMA (exact-ML estimation,
+  forecasting with bands, impulse responses, FEVD, diagnostics, volatility). So
+  `pip install atsw` now pulls the univariate (fue/ART) *and* multivariate (drvarma)
+  engines. Description/keywords updated (VARMA, multivariate).
+
 ## atsw 1.0.4 — 2026-07-23
 
 - Pins bumped to **fue>=0.1.8** and **art-tseries>=0.1.3** so `pip install atsw`

@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "1.0.4"
-description     = "ATSW — A Time Series Workshop: the fue + pyfug + ART suite (exact-ML estimation, graphics, Box-Jenkins model-building) with an MCP server for LLM-driven analysis"
+version         = "1.1.0"
+description     = "ATSW — A Time Series Workshop: the fue + pyfug + ART + drvarma suite (univariate exact-ML estimation, graphics, Box-Jenkins model-building, and multivariate VARMA) with an MCP server for LLM-driven analysis"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
 requires-python = ">=3.10"
 authors         = [
     { name = "David E. Guerrero", email = "davidesg@ucm.es" },
 ]
-keywords        = ["time series", "ARIMA", "Box-Jenkins", "Treadway", "MCP", "suite"]
+keywords        = ["time series", "ARIMA", "VARMA", "multivariate", "Box-Jenkins", "Treadway", "MCP", "suite"]
 classifiers     = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -23,9 +23,10 @@ classifiers     = [
 # Umbrella meta-package: no code of its own, just a compatible set of the suite
 # components. `pip install atsw` installs the whole suite + the MCP server.
 dependencies = [
-    "fue>=0.1.8",          # estimation engine + FUF forecasting
+    "fue>=0.1.8",          # univariate estimation engine + FUF forecasting
     "pyfug>=2.0",          # Jenkins-Treadway graphics
     "art-tseries>=0.1.3",  # model building + MCP server (art-mcp)
+    "drvarma>=0.1.1",      # multivariate VARMA: exact-ML estimation, forecast, IRF/FEVD
 ]
 
 [tool.setuptools]
