@@ -7,21 +7,42 @@ Treadway time series suite plus the MCP server, in one step.
 pip install atsw
 ```
 
-It installs `fue` (exact ML estimation of ARMAX / transfer functions +
-forecasting), `pyfug` (graphics) and `art-tseries` (model building, diagnosis,
-formal tests + the `art-mcp` MCP server). Requires Python ≥ 3.10. `fue` has a C
-engine with an automatic pure-Python fallback, so it installs everywhere.
+It installs the estimation engines, the graphics, and **three MCP assistants**.
+Requires Python ≥ 3.10. Every engine has a C implementation with an automatic
+pure-Python fallback, so the suite installs everywhere.
 
 | Component | Package | Role |
 |-----------|---------|------|
 | **FUE** (+ FUF) | `fue` | Exact ML estimation (ARMAX + transfer functions) and forecasting |
 | **FUG** | `pyfug` | High-definition graphics for time series analysis |
-| **ART** | `art-tseries` | Model building, diagnosis, formal tests + **MCP server** (`art-mcp`) |
+| **ART** | `art-tseries` | Model building, diagnosis, formal tests + the `art-mcp` server |
+| **DRTRAN** | `drtran` | Transfer functions and networks by exact ML + the `mtram` server |
+| **DRVARMA** | `drvarma` | Multivariate VARMA by exact ML + the `sima` server |
+
+## The three assistants, and when to move between them
+
+They are **separate servers on purpose**. An MCP client sees every connected
+server at once, so this is not three tools you have to choose between — it is
+one ladder with three rungs, and each assistant knows when to hand over.
+
+| Assistant | Question it answers | Engine |
+|---|---|---|
+| `art` | One series: what ARIMA model, what interventions? | `fue` |
+| `mtram` | How does X move Y? Transfer functions, and networks of them (a DAG) | `drtran` |
+| `sima` | Everything moves everything: a simultaneous VARMA | `drvarma` |
+
+`mtram` starts from the `.pre` files `art` writes, so the univariate rung is
+already climbed and committed to a file you can read. The handoff to `sima` is
+**testable, not a preference**: if the proposed network contains a CYCLE there is
+no topological order, the system cannot be written as a triangular VARMA, and it
+is therefore simultaneous. `mtram` says so and stops.
 
 ## Use with an LLM (recommended)
 
 ```bash
-claude mcp add art -- art-mcp
+claude mcp add art   -- art-mcp     # one series
+claude mcp add mtram -- mtram       # transfer functions and networks
+claude mcp add sima  -- sima        # simultaneous VARMA
 ```
 
 Then ask Claude to analyse a series (attach a CSV/Excel, or point to an `.inp`).
