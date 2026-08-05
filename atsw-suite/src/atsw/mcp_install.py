@@ -86,6 +86,70 @@ def _config_json() -> str:
         indent=2)
 
 
+
+_UNINSTALL_HELP = """Removing the suite completely
+=============================
+
+There are two separate things, and forgetting the second is what leaves a
+half-removed setup behind:
+
+1. UNREGISTER the assistants from your MCP client:
+
+       atsw-mcp --remove
+
+   (Add --scope project or --scope local if that is how you registered them.
+   The scope has to match: an entry registered at project scope is not removed
+   by a user-scope command.)
+
+2. UNINSTALL the packages. `pip uninstall atsw` removes ONLY the umbrella —
+   it is a meta-package with no code of its own, so the five components stay:
+
+       pip uninstall atsw fue pyfug art-tseries drtran drvarma
+
+   If you installed into a dedicated virtualenv, which is the arrangement this
+   command is happiest with, the whole of step 2 is:
+
+       rm -rf ~/.venvs/atsw
+
+   That is the real argument for the venv: starting from zero is one command,
+   and nothing of the suite can be left behind anywhere else.
+
+To start over:  atsw-mcp --remove ; rm -rf ~/.venvs/atsw
+then            python3 -m venv ~/.venvs/atsw && ~/.venvs/atsw/bin/pip install atsw
+                ~/.venvs/atsw/bin/atsw-mcp
+"""
+
+
+def _remove(scope: str, dry_run: bool) -> int:
+    """Unregister the three assistants, plus the legacy `multiart` name."""
+    known = set() if dry_run else _registered()
+    # `multiart` was sima's name before the suite settled its naming; an install
+    # that predates the rename leaves it pointing at a command that no longer
+    # exists, and a dead entry reads as "the assistant is broken" rather than
+    # "this is a leftover".
+    targets = list(SERVERS) + ["multiart"]
+    removed, absent = [], []
+    for name in targets:
+        if not dry_run and name not in known:
+            absent.append(name)
+            continue
+        cmd = ["claude", "mcp", "remove", "--scope", scope, name]
+        if dry_run:
+            print(" ".join(cmd))
+            continue
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        (removed if p.returncode == 0 else absent).append(name)
+    if dry_run:
+        return 0
+    for n in removed:
+        print("unregistered %s" % n)
+    if absent:
+        print("not registered at %s scope: %s" % (scope, ", ".join(absent)))
+    print("\nThe PACKAGES are still installed. `atsw-mcp --uninstall-help` "
+          "says how to remove those too.")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="atsw-mcp",
@@ -99,7 +163,20 @@ def main(argv=None) -> int:
                          "clients other than Claude Code")
     ap.add_argument("--dry-run", action="store_true",
                     help="show the commands without running them")
+    ap.add_argument("--remove", action="store_true",
+                    help="UNREGISTER the three assistants (and the legacy "
+                         "`multiart` name) instead of registering them. Does "
+                         "not uninstall anything: see --uninstall-help.")
+    ap.add_argument("--uninstall-help", action="store_true",
+                    help="print how to remove the suite completely and exit")
     a = ap.parse_args(argv)
+
+    if a.uninstall_help:
+        print(_UNINSTALL_HELP)
+        return 0
+
+    if a.remove:
+        return _remove(a.scope, a.dry_run)
 
     if a.print_config:
         print(_config_json())
