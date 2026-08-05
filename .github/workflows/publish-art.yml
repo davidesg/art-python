@@ -22,10 +22,28 @@ jobs:
         run: |
           pip install build
           python -m build
-      # No install-smoke-test here: art-tseries depends on fue>=0.1.7, which may
-      # not be on PyPI yet when this release runs (suite chicken-and-egg). The
-      # `python -m build` above validates packaging; import/behaviour tests belong
-      # in a separate CI where the deps are available.
+      # INSTALL AND IMPORT WHAT IS ABOUT TO BE PUBLISHED.
+      #
+      # This step did not exist, on the reasoning that "art-tseries depends on
+      # fue, which may not be on PyPI yet when this release runs (suite
+      # chicken-and-egg)". That was true once and is not any more — fue is
+      # published — and its absence is exactly how 0.1.3 shipped broken: it
+      # declared an unbounded `mcp>=1.0`, mcp 2.0.0 removed
+      # `mcp.server.fastmcp`, and `art-mcp` cannot import at all in a clean
+      # environment. `python -m build` cannot catch that, because the packaging
+      # was fine; the RESOLUTION was not.
+      #
+      # If a future release does hit the chicken-and-egg, this step fails and
+      # the release stops. That is the correct outcome: better a blocked
+      # release than a published package nobody can install.
+      - name: Smoke-test the built wheel
+        run: |
+          WHL=$(ls dist/art_tseries-*-py3-none-any.whl)
+          python -m pip install "$WHL"
+          python -c "import art; print('art-tseries', art.__version__ if hasattr(art,'__version__') else '(sin __version__)')"
+          python -c "import asyncio; from art.mcp_server import mcp; \
+                     n=len(asyncio.run(mcp.list_tools())); print('art tools:', n); \
+                     assert n >= 30, n"
       - uses: actions/upload-artifact@v4
         with:
           name: dist
