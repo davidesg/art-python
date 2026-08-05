@@ -31,15 +31,27 @@ classifiers     = [
 #     art     one series: ARIMA + interventions        engine: fue      -> art-mcp
 #     mtram   transfer functions and networks (a DAG)  engine: drtran   -> mtram
 #     sima    simultaneous VARMA                       engine: drvarma  -> sima
-# The lower bounds on fue and drvarma are NOT cosmetic. Every binary wheel those
-# two published before 0.1.9 / 0.1.3 installed correctly and then failed to load
-# its C engine -- cffi was missing from their runtime dependencies -- so the
-# whole suite quietly ran on the pure-Python fallbacks. Lowering these pins
-# brings that back.
+# NONE of these lower bounds is cosmetic. Every one of them is the first version
+# of its package that actually works in a clean environment:
+#
+#   fue >= 0.1.9, drvarma >= 0.1.3  every earlier binary wheel installed fine and
+#                                   then failed to load its C engine (cffi was
+#                                   missing from their runtime dependencies), so
+#                                   the suite silently ran on the pure-Python
+#                                   fallbacks;
+#   art-tseries >= 0.1.4            0.1.3 CANNOT BE IMPORTED at all in a clean
+#                                   environment: it declares an unbounded
+#                                   `mcp>=1.0`, and mcp 2.0.0 removed
+#                                   `mcp.server.fastmcp`, which art/mcp_server.py
+#                                   imports. mcp is a main dependency there, so
+#                                   this breaks the whole package;
+#   drtran >= 0.1.0                 first stable release.
+#
+# Lowering any of them ships an umbrella that installs and does not work.
 dependencies = [
     "fue>=0.1.9",             # univariate estimation engine + FUF forecasting
     "pyfug>=2.0",             # Jenkins-Treadway graphics
-    "art-tseries>=0.1.3",     # model building + MCP server (art-mcp)
+    "art-tseries>=0.1.4",     # model building + MCP server (art-mcp)
     "drtran[mcp]>=0.1.0",   # transfer functions and networks + MCP server (mtram)
     "drvarma[mcp]>=0.1.3",    # multivariate VARMA + MCP server (sima)
 ]

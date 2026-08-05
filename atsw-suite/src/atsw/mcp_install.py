@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -33,8 +34,31 @@ SERVERS = {
 }
 
 
+def _resolve(exe: str) -> str | None:
+    """Absolute path of a suite console script, or None if it is not installed.
+
+    Looks NEXT TO THE RUNNING INTERPRETER first, then on PATH. The order
+    matters, and getting it wrong is not hypothetical: console scripts live in
+    the same `bin/` as the `python` that runs this one, and that directory is on
+    PATH only while the environment is *activated*. Invoked by absolute path —
+    `/path/to/venv/bin/atsw-mcp`, which is exactly how a user tries a fresh
+    install — a plain `shutil.which` finds nothing and this command reports its
+    own siblings as missing.
+
+    Returning the resolved path rather than a bare name also matters for what
+    gets registered: Claude Code launches the command itself, and it is not
+    running inside the user's virtualenv. A bare `mtram` only works if the
+    environment happens to be active; the absolute path always works.
+    """
+    here = os.path.dirname(os.path.abspath(sys.executable))
+    for cand in (os.path.join(here, exe), os.path.join(here, exe + ".exe")):
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return shutil.which(exe)
+
+
 def _installed(exe: str) -> bool:
-    return shutil.which(exe) is not None
+    return _resolve(exe) is not None
 
 
 def _registered() -> set[str]:
@@ -56,7 +80,7 @@ def _registered() -> set[str]:
 def _config_json() -> str:
     """The equivalent config, for clients that are not Claude Code."""
     return json.dumps(
-        {"mcpServers": {n: {"command": exe, "args": []}
+        {"mcpServers": {n: {"command": _resolve(exe), "args": []}
                         for n, (exe, _) in SERVERS.items()
                         if _installed(exe)}},
         indent=2)
@@ -112,7 +136,8 @@ def main(argv=None) -> int:
         if name in already:
             skipped.append(name)
             continue
-        cmd = ["claude", "mcp", "add", "--scope", a.scope, name, "--", exe]
+        cmd = ["claude", "mcp", "add", "--scope", a.scope, name, "--",
+               _resolve(exe)]
         if a.dry_run:
             print(" ".join(cmd))
             continue
