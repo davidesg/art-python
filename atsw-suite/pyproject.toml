@@ -31,12 +31,17 @@ classifiers     = [
 #     art     one series: ARIMA + interventions        engine: fue      -> art-mcp
 #     mtram   transfer functions and networks (a DAG)  engine: drtran   -> mtram
 #     sima    simultaneous VARMA                       engine: drvarma  -> sima
+# The lower bounds on fue and drvarma are NOT cosmetic. Every binary wheel those
+# two published before 0.1.9 / 0.1.3 installed correctly and then failed to load
+# its C engine -- cffi was missing from their runtime dependencies -- so the
+# whole suite quietly ran on the pure-Python fallbacks. Lowering these pins
+# brings that back.
 dependencies = [
-    "fue>=0.1.8",             # univariate estimation engine + FUF forecasting
+    "fue>=0.1.9",             # univariate estimation engine + FUF forecasting
     "pyfug>=2.0",             # Jenkins-Treadway graphics
     "art-tseries>=0.1.3",     # model building + MCP server (art-mcp)
     "drtran[mcp]>=0.1.0",   # transfer functions and networks + MCP server (mtram)
-    "drvarma[mcp]>=0.1.2",    # multivariate VARMA + MCP server (sima)
+    "drvarma[mcp]>=0.1.3",    # multivariate VARMA + MCP server (sima)
 ]
 
 # One console script, and deliberately nothing else. The umbrella INSTALLS; it
