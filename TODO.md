@@ -549,6 +549,155 @@ Impacto menor pero documentar.
 
 ---
 
+## Los armónicos borran la evidencia estacional antes de buscarla (ago-2026)
+
+**Estado: medido, sin arreglar. Es el que va primero de los dos de esta
+sección — el otro no se puede calibrar hasta que éste esté resuelto.**
+
+`suggest_orders` resta por MCO los armónicos deterministas de la serie
+diferenciada ANTES de calcular la acf/pacf con que identifica
+(`model_detection.py:480, 581`). El docstring de `_remove_harmonics:421` dice
+para qué es:
+
+> *"Used when D=0 so seasonal structure in ACF/PACF reflects ARMA, not
+> harmonics."*
+
+**Y sobre CPI_USA hace lo contrario de lo que dice.** Medido sobre la serie
+diferenciada, banda 2/sqrt(n) = 0.126:
+
+| | r(12) | ¿cruza? |
+|---|---|---|
+| serie diferenciada | **+0.239** | **sí** |
+| tras quitar 5 armónicos (lo que ve el motor) | **+0.014** | no |
+
+La autocorrelación estacional desaparece. Y no se atenúa nada más: la pacf a 12
+pasa de +0.069 a **−0.124**, o sea que **cambia de signo** — la resta no está
+siendo neutral.
+
+### Consecuencia, medida
+
+Sobre CPI_USA, `suggest_orders` propone `(0,1)(0,0)` y sus CUATRO primeros
+candidatos llevan P=Q=0. Nunca mira el retardo estacional. Ajustando a mano,
+con 5 armónicos y d=1:
+
+| modelo | AIC |
+|---|---|
+| **(0,1)(0,0) ← lo que art propone** | **297.54** |
+| (1,0)(0,0) | 290.06 |
+| (2,0)(0,0) | 291.30 |
+| (2,0)(1,0)_12 | 275.47 |
+| (2,0)(2,0)_12 — el que David identifica como el típico | 274.81 |
+| (0,1)(2,0)_12 | **271.98** |
+
+La propuesta de art es **la peor de las seis**, por 25.6 puntos de AIC. El AR
+estacional vale ~25 puntos y el motor no puede verlo.
+
+### El argumento de fondo: es circular
+
+Restar los armónicos es SUPONER que la estacionalidad es determinista, que es
+justo lo que los órdenes P y Q existen para contrastar. El pre-paso decide la
+pregunta antes de hacerla.
+
+A eso se añade lo cuantitativo: con el defecto `n_harmonics = s//2 = 6` son 11
+columnas más la constante, doce regresores ajustados por MCO sobre ~215
+observaciones. Un patrón estacional estocástico es en muestra finita
+parcialmente colineal con esos senos y cosenos fijos, y parte se va con ellos.
+
+### Opciones
+
+1. **Leer los órdenes ESTACIONALES de la serie SIN restar** y los regulares de
+   la restada. Dos acf, cada pregunta sobre el dato que le corresponde. Es la
+   que responde al argumento circular.
+2. **Avisar del conflicto**: si r(s) cruza la banda antes de restar y no
+   después, decirlo. No arregla, pero deja de ser silencioso.
+3. **Bajar el defecto de `n_harmonics`.** Alivia sin resolver, y elige un
+   número sin criterio.
+
+### Cuidado al tocarlo
+
+`suggest_orders` es el motor de identificación y David ha pedido explícitamente
+no meterle heurísticos nuevos: "como está funciona más o menos". Esto NO es un
+heurístico --es un pre-paso que contradice su propio docstring-- pero vive en
+el mismo fichero, así que conviene que el arreglo sea claramente una corrección
+y no una preferencia, y medir las ocho series antes y después.
+
+---
+
+## Penalizar configuraciones MA implausibles: propuesta MEDIDA, en espera
+
+**Estado: propuesta con números, NO implementar todavía.** Depende de la ficha
+de los armónicos: calibrarla ahora sería calibrarla contra un pre-paso roto.
+
+### El mecanismo, que es la parte sólida
+
+Para un MA(1), `rho_1 = -theta/(1+theta^2)`, luego **rho_1 > 0 <=> theta < 0**.
+El signo de theta se lee en la acf empírica del retardo 1, SIN estimar nada. Y
+un IMA(1,1) con theta<0 es un EWMA con suavizado (1-theta) > 1, fuera de rango,
+cuyos pesos de previsión sobre los NIVELES alternan de signo (theta=-0.7 ->
+1.700, -1.190, +0.833, -0.583...). Para un índice de precios no es un proceso
+generador defendible.
+
+En las ocho series del IPC, rho_1 > 0 SIN EXCEPCIÓN (de 0.079 a 0.422): el
+detector dispara exactamente en el dominio del que se habla.
+
+### Dónde y cuánto
+
+`_parsimony_score` (`model_detection.py:381`), que ya lleva penalizaciones
+ESTRUCTURALES --+0.12 si P>0 y Q>0 a la vez, +0.08/0.12/0.20 por exceso de
+orden-- así que penalizar una configuración implausible es lo que esa función
+ya hace, y recibe la acf empírica.
+
+Márgenes de similitud medidos, MA(1) contra AR(1):
+
+| serie | sim(0,1) | sim(1,0) | margen |
+|---|---|---|---|
+| CPI_USA | 0.8917 | 0.8487 | 0.0429 |
+| IPC_JP | 0.8664 | 0.8101 | 0.0564 |
+| IPC_DE | 0.9246 | 0.8663 | 0.0583 |
+| IPC_CA | 0.9464 | 0.8674 | **0.0790** |
+
+**lambda_1 = 0.10** para `p==0 and q==1 and rho_1>0` bastaría — el mínimo
+medido es 0.0790, y 0.10 está en el mismo orden que el 0.12 que ya se aplica.
+Para el MA(2) NO hay medida y no debe inventarse el número.
+
+### Tres condiciones
+
+1. **Condicional al DOMINIO.** Un prior de precios en una herramienta general
+   es un sesgo escondido. `suggest_orders` no tiene marca de dominio, y ya van
+   TRES fichas que la necesitan (ésta, el empate AR(1)/MA(1) y la del
+   objetivo). Conviene añadirla de una vez.
+2. **Anunciada siempre**, o deja de ser criterio y pasa a ser sesgo.
+3. **Reversible** por parámetro.
+
+### Lo que cuesta
+
+**IPC_JP se voltearía, y es uno de los tres que art acierta** hoy según AIC. La
+penalización no sale gratis.
+
+### Y por qué esperar
+
+Con el AR estacional dentro, el mejor modelo de CPI_USA resulta ser
+**(0,1)(2,0)_12 — un MA regular**. Si se penaliza el MA regular calibrando
+sobre las similitudes que produce el pre-paso de los armónicos, se estaría
+corrigiendo el síntoma de otro defecto y empujando en contra de un modelo que
+es bueno. Primero los armónicos, luego volver a medir los márgenes, luego
+decidir.
+
+### Lo que NO se confirmó, y queda anotado
+
+El sesgo hacia MA **no se sostiene como dirección** en datos reales. De los
+cinco desacuerdos entre la propuesta de art y el mejor AIC (3 de 8 coinciden),
+tres van art->MA cuando el AR ajusta mejor y **dos van al revés**; y el
+desacuerdo mayor con diferencia --IPC_ES, delta AIC 21.7-- es art proponiendo
+AR(2) cuando el mejor es MA(2). Con n=8 no hay dirección. Lo que sí queda es un
+problema de ACIERTO, y la ficha de los armónicos explica buena parte de él.
+
+Tampoco se reprodujo el AR(2) de raíces complejas identificado como MA(2): sólo
+tres de las ocho tienen raíces complejas al ajustar AR(2) (ES, EMU, JP) y en
+ninguna art propone MA(2). En simulación el fallo es sub-ordenar a AR(1).
+
+---
+
 ## El empate AR(1)/MA(1): la regla existe, falta aplicarla sola (ago-2026)
 
 **La regla está escrita y razonada** en `policy.py:decide_orders` y, desde
