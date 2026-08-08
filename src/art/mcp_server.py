@@ -135,6 +135,24 @@ LLAMADA 3 — guided_identification(inp_path, lam=X, d=<nivel>)   [D=-1 por defe
   • ¿Sin picos estacionales? → D=0 sin armónicos
   • ¿Todavía con tendencia? → repite con d+1
   • Hipótesis B1 es revisable al final mediante MEG (formal_tests)
+
+  ⚠ SI HAY ESTACIONALIDAD, DI PARA QUÉ VA A SERVIR EL MODELO ANTES DE ELEGIR.
+    B1 y B2 no son equivalentes aguas abajo, y la diferencia no se ve desde
+    aquí:
+      · para ANÁLISIS MULTIVARIANTE (transferencias en mtram, VARMA en sima)
+        es preferible la estacionalidad DETERMINISTA (B1, armónicos). El
+        preblanqueo filtra el output por el ARMA del INPUT, y si el output
+        lleva estacionalidad ESTOCÁSTICA y el input no, ese filtro no la
+        quita: la ccf sale poco informativa y --lo peligroso-- no sale vacía,
+        sale con estructura por todas partes y la heurística le lee un orden
+        igualmente.
+      · para PREVISIÓN, a veces es preferible la ESTOCÁSTICA (B2): deja que el
+        patrón estacional evolucione, y cuando de hecho evoluciona, previene
+        mejor que unos armónicos fijos.
+    Pregunta al analista cuál es el objetivo. No lo decidas tú, y NO lo
+    preguntes antes de haber visto la ACF/PACF: hasta aquí nadie sabe si la
+    serie es estacional, y una pregunta sobre estacionalidad al abrir el
+    análisis pide una decisión sobre algo que todavía no existe.
   → ESPERA confirmación de d y D.
 
 LLAMADA 4 — guided_identification(inp_path, lam=X, d=<confirmado>, D=<confirmado>)
