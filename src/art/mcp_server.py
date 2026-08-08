@@ -135,6 +135,10 @@ LLAMADA 3 — guided_identification(inp_path, lam=X, d=<nivel>)   [D=-1 por defe
   • ¿Sin picos estacionales? → D=0 sin armónicos
   • ¿Todavía con tendencia? → repite con d+1
   • Hipótesis B1 es revisable al final mediante MEG (formal_tests)
+    ⚠ pero el MEG es EXPERIMENTAL: la clase de modelos no, los CONTRASTES sí
+      (valores críticos en investigación, y tres defectos abiertos y
+      reproducidos: BUG-0009/0010/0011). No decidas la especificación sólo con
+      él, y si contradice a Shin-Fuller o a la acf/pacf, sospecha del MEG.
 
   ⚠ SI HAY ESTACIONALIDAD, DI PARA QUÉ VA A SERVIR EL MODELO ANTES DE ELEGIR.
     B1 y B2 no son equivalentes aguas abajo, y la diferencia no se ve desde
@@ -949,17 +953,46 @@ def formal_tests(inp_path: str, run_meg: bool = True) -> list:
     """
     Run formal hypothesis tests on a fitted model.
 
+    ⚠ LA FAMILIA MEG/DCD ES EXPERIMENTAL. PRESÉNTALA COMO TAL.
+
+    La CLASE de modelos --Modelos de Estacionalidad Generalizada, Abraham y Box
+    (1978)-- está establecida desde hace décadas y no es experimental. Lo
+    reciente son estos CONTRASTES: los valores críticos del DCD y del
+    Shin-Fuller estacional son objeto de investigación en curso (SF_MEG), y la
+    implementación tiene tres defectos ABIERTOS y reproducidos, los tres en
+    esta familia:
+
+      BUG-0009  dcd_overdiff_regular pisa el testigo de Nyquist --comparten la
+                ranura de MA regular y miden raíces OPUESTAS (B=+1 frente a
+                B=-1)-- y recomienda d+1 sobre una d correcta.
+      BUG-0010  podar un armónico no significativo anula el barrido MEG
+                ENTERO, la excepción se traga, y el informe cierra diciendo
+                que el modelo es adecuado mientras se pierde una frecuencia
+                genuinamente estocástica.
+      BUG-0011  dcd_overdiff_regular recomienda d+1 en toda especificación de
+                un índice de precios, incluida la línea base que su propio
+                docstring prescribe. Causa establecida: los armónicos
+                deterministas compiten con el testigo, y la precondición del
+                docstring nombra al competidor equivocado.
+
+    Así que: NO propongas tú la ruta MEG. Si el analista la pide, dale el
+    resultado con la advertencia, y NO tomes una decisión de especificación
+    apoyándote sólo en ella -- contrástala con Shin-Fuller y con la acf/pacf.
+    Un veredicto MEG que contradiga al resto del informe es, hoy, más probable
+    que sea el MEG.
+
     Tests run (where applicable to the model structure):
     - Shin-Fuller (1998): Phi_1u test; H0: rho=1-4/n (near-unit-root); crit 5%≈1.75
-    - DCD: non-invertibility of regular MA factors (H0: theta=1)
-    - DCD_f: non-invertibility of seasonal MA factors (H0: lambda2=-1)
+    - DCD: non-invertibility of regular MA factors (H0: theta=1)          [exper.]
+    - DCD_f: non-invertibility of seasonal MA factors (H0: lambda2=-1)    [exper.]
     - RV: fixed frequency for AR(2) factors
     - MEG: stochastic vs deterministic seasonality (requires D=0 + harmonics)
+                                                                          [exper.]
 
     Parameters
     ----------
     inp_path : path to .inp or .pre file
-    run_meg  : whether to run MEG (slow, default True)
+    run_meg  : whether to run MEG (slow, default True; EXPERIMENTAL, see above)
     """
     try:
         from art.describe import describe_formal_tests

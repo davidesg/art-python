@@ -4,12 +4,13 @@ In-repo bug tracker for **ART** (art-tseries).  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**10 report(s), 2 open.**
+**11 report(s), 3 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
 | [BUG-0009](BUG-0009-dcd-overdiff-regular-overwrites-nyquist-witness.md) | open | medium | formal-tests | dcd_overdiff_regular overwrites the Nyquist witness (both are regular MA(1) but measure opposite roots) and reports a spurious d+1 | — |
 | [BUG-0010](BUG-0010-pruning-harmonics-voids-the-meg-sweep.md) | open | high | formal-tests | Pruning a non-significant harmonic pair silently voids the ENTIRE MEG sweep, and the report then closes with "el modelo es adecuado" | — |
+| [BUG-0011](BUG-0011-dcd-overdiff-recommends-d2-on-seasonal-price-index.md) | open | medium | formal-tests | dcd_overdiff_regular recommends d+1 on every IPC_ES specification, including the harmonics-only baseline its own docstring prescribes | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
 | [BUG-0003](BUG-0003-display-tools-no-persist.md) | fixed | medium | mcp-tools | Clean estimation display-tools do not persist .pre/.out (only confirm_and_estimate does, and it carries BUG-0001) | 0.1.2 |
