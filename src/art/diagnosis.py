@@ -66,6 +66,9 @@ class DiagnosisResult:
     param_labels: list[str] | None = None          # label for each free param
     param_corr: np.ndarray | None = None           # full correlation matrix
     high_corr_pairs: list | None = None            # (i, j, r, lbl_i, lbl_j) with |r|>threshold
+    # Residual mean against zero — Brajín's adequacy criterion, see `centred`
+    mean: float = 0.0
+    mean_t: float = 0.0
 
     @property
     def white_noise(self) -> bool:
@@ -78,10 +81,49 @@ class DiagnosisResult:
         return self.jb_pvalue > 0.05
 
     @property
-    def clean(self) -> bool:
-        """True if white noise, normal, and no residual seasonality."""
+    def centred(self) -> bool:
+        """True if the residual mean is not significantly different from zero.
+
+        Brajín (2004) §2 lists it among the adequacy criteria — "la media
+        residual es pequeña en relación con su desviación típica" — and it was
+        the one criterion art did not test. It is also the criterion that
+        catches a MISSING MEAN, which is exactly what the drift of a price index
+        becomes when `estimate_mu` is off: it leaks into the residuals.
+
+        The instrument was blind to it BY CONSTRUCTION. `diagnose` computes the
+        residual mean only to CENTRE the residuals before the z-scores, so a
+        systematic offset is subtracted away before anything looks for it —
+        and Q and Jarque-Bera run on centred residuals too. All three verdicts
+        could not see it (BUG-0013).
+        """
+        return abs(self.mean_t) <= 2.0
+
+    @property
+    def residuals_ok(self) -> bool:
+        """The residual-shape verdict: white noise, normal, no seasonality.
+
+        This is what the OUTLIER LOOP must consult, and the reason it is
+        separate from `clean`. Adding an intervention can fix a residual that
+        misbehaves; it cannot fix a mean that is missing from the model, and
+        letting the loop try is a category error — the same one as
+        re-specifying a transfer's shape around an anomaly.
+
+        Measured: folding `centred` into the stop condition made the autonomous
+        run on IPC_ES add TWO interventions it had not added before, chasing a
+        drift that no dummy can absorb.
+        """
         seas_ok = (self.seasonal is None) or (not self.seasonal.seasonal_detected)
         return self.white_noise and self.normal and seas_ok
+
+    @property
+    def clean(self) -> bool:
+        """True if the model is adequate: centred AND its residuals well behaved.
+
+        `centred` belongs here — a model whose drift sits in the residuals is
+        not adequate, and Brajín lists the criterion — but NOT in the loop's
+        stop condition. See `residuals_ok`.
+        """
+        return self.centred and self.residuals_ok
 
     def summary(self) -> str:
         lines = [f"Diagnosis: {self.label}",
@@ -312,9 +354,17 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
     skew      = float(sp_stats.skew(r))
     kurt      = float(sp_stats.kurtosis(r))   # excess kurtosis (Fisher)
 
-    # --- Extreme residuals (compare standardized residuals against threshold) ---
+    # --- Residual mean against zero -----------------------------------------
+    # It is computed here anyway, to centre the z-scores. What was missing is
+    # CONTRASTING it: t = mean / (sd/sqrt(n)). With a free mu the residual mean
+    # is ~0 by construction, so a large t is the signature of a mean that is
+    # NOT in the model -- the drift of a trending series, sitting in the
+    # residuals. See the `centred` property.
     r_mean = r.mean()
     r_std  = r.std(ddof=1) if len(r) > 1 else 1.0
+    mean_t = (float(r_mean) / (r_std / np.sqrt(len(r)))) if (r_std > 0 and len(r) > 1) else 0.0
+
+    # --- Extreme residuals (compare standardized residuals against threshold) ---
     r_z    = (r - r_mean) / r_std if r_std > 0 else r
     extreme = [(i + 1, float(z)) for i, z in enumerate(r_z) if abs(z) > z_threshold]
     extreme.sort(key=lambda x: abs(x[1]), reverse=True)
@@ -346,6 +396,8 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
         jb_pvalue=jb_pvalue,
         skewness=skew,
         excess_kurtosis=kurt,
+        mean=float(r_mean),
+        mean_t=float(mean_t),
         extreme=extreme,
         acf=acf_r,
         pacf=pacf_r,

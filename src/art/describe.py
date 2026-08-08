@@ -1255,10 +1255,27 @@ def describe_diagnosis(model) -> Description:
     lines = [
         f"## Diagnosis — {result.label}",
         f"- Veredicto: {verdict}",
+        f"- Media residual: {'✓' if result.centred else '✗'}  "
+        f"media={result.mean:+.4f}, t={result.mean_t:+.2f}",
         f"- Ruido blanco (Q): {wn}  {'OK' if result.white_noise else ', '.join(q_fails)}",
         f"- Normalidad (JB): {nm}  JB={result.jb_stat:.3f}, p={result.jb_pvalue:.4f}",
         f"- Asimetría={result.skewness:.3f}, curtosis exceso={result.excess_kurtosis:.3f}",
     ]
+
+    if not result.centred:
+        lines += [
+            "",
+            f"⚠ **La media residual NO es cero** (t={result.mean_t:+.2f}). El "
+            "modelo no lleva la deriva de la serie y ésta se ha ido a los "
+            "residuos.",
+            "  NO lo arregles con intervenciones: un dummy no absorbe una "
+            "deriva, y añadirlos aquí es el mismo error que reespecificar la "
+            "forma de un modelo alrededor de un anómalo. Lo que falta es la "
+            "MEDIA — reestima con `estimate_mu=True`.",
+            "  (Criterio de adecuación de Brajín §2: la media residual pequeña "
+            "en relación con su desviación típica. Es el único de su lista que "
+            "art no contrastaba.)",
+        ]
 
     if result.seasonal and result.seasonal.seasonal_detected:
         lines.append(

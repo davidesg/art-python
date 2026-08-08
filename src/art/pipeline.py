@@ -747,7 +747,12 @@ def run_full(ts, output_path: str, max_rounds: int = 5,
         fr = build_and_fit(ts, spec, output_path, z_threshold)
         m_fit, diag = fr.model, fr.diag
 
-        if pol.should_stop(diag.clean, len(diag.extreme)):
+        # El bucle de anómalos pregunta por la FORMA de los residuos, no por la
+        # adecuación entera: una intervención arregla un residuo que se porta
+        # mal, no una media que falta en el modelo. Consultar `clean` aquí hacía
+        # que el autónomo añadiera dos intervenciones en IPC_ES persiguiendo una
+        # deriva que ningún dummy puede absorber.
+        if pol.should_stop(diag.residuals_ok, len(diag.extreme)):
             rounds.append(RoundResult(round_num, m_fit, diag, [], "clean"))
             break
 
