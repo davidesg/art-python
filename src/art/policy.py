@@ -98,16 +98,33 @@ def decide_orders(specs) -> tuple[int, int]:
     response — i.e. *inflation persistence / inertia*, a robust, theoretically
     grounded regularity (staggered Calvo/Taylor pricing, indexation, adaptive
     expectations; Fuhrer, Stock-Watson, Pivetta-Reis). φ is a directly
-    interpretable measure of that inertia. MA(1) implies only ~1 month of memory
-    and, in AR(∞) form, sign-alternating coefficients with no clean structural
-    story. Confirmed on the IPC_ES case (2002:01–2019:12): AR(1) φ≈0.40 chosen
+    interpretable measure of that inertia.
+
+    The competing MA(1) carries θ < 0 (that is the sign that puts ρ₁ > 0 in the
+    differenced series, which is what makes it compete at all), and an IMA(1,1)
+    with θ < 0 is an EWMA whose smoothing constant (1 − θ) exceeds 1 — outside
+    the valid range. Its forecast weights on past LEVELS alternate in sign:
+    with θ = −0.7 they are 1.700, −1.190, +0.833, −0.583, +0.408, … So it
+    forecasts by overshooting the last observation and correcting backwards.
+    That is not a defensible generating process for a price index, even though
+    the ACF of the differenced series is perfectly compatible with it. (A
+    "normal" IMA(1,1) with θ > 0 has all-positive decaying weights — 0.700,
+    0.210, 0.063 for θ = 0.3 — the textbook local level.) Confirmed on the IPC_ES case (2002:01–2019:12): AR(1) φ≈0.40 chosen
     over MA(1) θ≈0.43 despite ΔAIC=1.12 nominally favouring MA(1).
 
     Scope: applies only to price/index series and only under a genuine tie; when
-    the statistics *do* discriminate, fit wins. Currently a documented guided-mode
-    rule (the analyst, with Claude, applies it); not yet auto-applied here because
-    decide_orders does not receive the series-domain flag or the candidate fit
-    stats needed to detect the tie safely.
+    the statistics *do* discriminate, fit wins. And it must always be STATED —
+    "the data prefer X by ΔAIC=…, theory prefers Y because…, you decide". A
+    theoretical criterion that is not announced stops being a criterion and
+    becomes a bias.
+
+    Since 2026-08-08 the rule is also in the MCP instructions (LLAMADA 4), which
+    is what Claude actually reads: before that it lived only here, so it was
+    applied when Claude happened to open this file and not otherwise — which is
+    exactly the inconsistency the analyst reported. Still not auto-applied in
+    the function below, because `decide_orders` does not receive the
+    series-domain flag or the candidate fit stats needed to detect the tie
+    safely. See TODO §El empate AR(1)/MA(1).
     """
     if specs:
         top = specs[0]

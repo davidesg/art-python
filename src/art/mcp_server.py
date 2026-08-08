@@ -180,6 +180,39 @@ LLAMADA 4 — guided_identification(inp_path, lam=X, d=<confirmado>, D=<confirma
   • Corte brusco ACF, decaimiento PACF → MA(q)
   • Ambas decaen → ARMA(p,q)
   • Sin estructura → p=0, q=0
+
+  ⚠ EL EMPATE AR(1) vs MA(1), Y CÓMO SE ROMPE. En un índice de precios en
+    logaritmos con d=1 --la serie diferenciada ES la inflación-- la
+    identificación empata a menudo: un único pico dominante en el retardo 1 de
+    la acf Y de la pacf. Los dos candidatos generan rho1 > 0 en la serie
+    diferenciada, y sólo los separan los retardos 2+ (el AR decae, el MA corta),
+    que es justo donde la evidencia es más débil en muestras cortas o ruidosas.
+
+    CUANDO EL AJUSTE TAMPOCO DISCRIMINA --ΔAIC < 2, igual parsimonia, los dos
+    pasan Q y Jarque-Bera, acf/pacf residuales casi idénticas-- rompe el empate
+    a favor de **AR(1)**, y DI POR QUÉ. No es preferencia estética:
+
+      · AR(1) sobre la inflación tiene respuesta al impulso positiva y
+        geométricamente decreciente: PERSISTENCIA / INERCIA inflacionaria, una
+        regularidad con base teórica (precios escalonados Calvo/Taylor,
+        indexación, expectativas adaptativas; Fuhrer, Stock-Watson,
+        Pivetta-Reis). phi es una medida directa de esa inercia.
+      · El MA(1) que compite con él lleva theta < 0, y eso es un IMA(1,1) con
+        constante de suavizado (1-theta) > 1, fuera del rango válido de un
+        EWMA. Sus pesos de previsión sobre los niveles pasados ALTERNAN de
+        signo: con theta=-0.7 salen 1.700, -1.190, +0.833, -0.583, ... Previene
+        sobrepasando la última observación y corrigiendo hacia atrás. Para un
+        índice de precios eso no es un proceso generador defendible, aunque la
+        acf de la serie diferenciada sea compatible con él.
+
+    ALCANCE, y es estricto: sólo en series de precios/índices y sólo ante un
+    empate GENUINO. Si los estadísticos SÍ discriminan, manda el ajuste. Y en
+    cualquier caso PRESENTA LAS DOS: "los datos prefieren X por ΔAIC=..., la
+    teoría prefiere Y porque..., decides tú". Un criterio teórico que no se
+    enuncia deja de ser un criterio y pasa a ser un sesgo.
+    (Verificado en IPC_ES 2002:01-2019:12: AR(1) phi=0.40 elegido sobre MA(1)
+     theta=0.43 con ΔAIC=1.12 que nominalmente favorecía al MA. La regla está
+     razonada en `art/policy.py:decide_orders`, que todavía NO la aplica sola.)
   → ESPERA confirmación de p, q.
 
 DESPUÉS DE LLAMADA 4 — Modelo de referencia (si D=0):

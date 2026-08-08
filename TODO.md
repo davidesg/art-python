@@ -549,6 +549,53 @@ Impacto menor pero documentar.
 
 ---
 
+## El empate AR(1)/MA(1): la regla existe, falta aplicarla sola (ago-2026)
+
+**La regla está escrita y razonada** en `policy.py:decide_orders` y, desde
+2026-08-08, en las instrucciones MCP (LLAMADA 4), que es lo que Claude lee de
+verdad. Hasta entonces vivía sólo en el docstring, así que se aplicaba cuando
+Claude abría ese fichero y no si no — la inconsistencia que reportó el analista
+("a veces caza que los precios prefieren AR, a veces sigue al pie de la letra").
+
+**Lo que falta es que `decide_orders` la aplique**, y su propio docstring dice
+por qué: no recibe (a) la marca de DOMINIO de la serie (precio/índice) ni (b)
+los estadísticos de ajuste de los candidatos, que son lo que permite detectar el
+empate con seguridad. Sin las dos, aplicarla sería adivinar.
+
+### Lo que hay que decidir antes de tocarlo
+
+1. **Cómo llega el dominio.** ¿Un campo en el `.inp`/`.pre`? ¿Un parámetro de
+   `guided_identification`? ¿Se infiere del nombre, que sería frágil? Toca el
+   convenio de ficheros si es lo primero.
+2. **Cómo se define "empate".** ΔAIC < 2 es el umbral escrito, pero un empate
+   real pide más: igual parsimonia, los dos pasando Q y JB, acf/pacf residuales
+   casi idénticas. Hay que fijar el conjunto y medirlo, no elegirlo.
+3. **Modo autónomo.** En guiado el analista ve las dos opciones y decide; en
+   autónomo no hay nadie. ¿Aplica la regla y lo declara entre los defectos
+   tomados, o se abstiene y deja el empate anotado? Lo primero encaja con cómo
+   `build_model` ya declara sus defectos.
+4. **Generalización.** Hoy es una regla de precios. ¿Hay otras parejas
+   casi-equivalentes con lectura teórica distinta que merezcan el mismo trato?
+   Diseñar un mecanismo para una sola regla es sobreingeniería; escribir la
+   segunda regla a mano cuando llegue, probablemente no.
+
+### El argumento, para que no haya que reconstruirlo
+
+Los dos candidatos dan ρ₁ > 0 en la serie diferenciada y sólo los separan los
+retardos 2+, que es donde la evidencia es más débil. El MA(1) que compite lleva
+θ < 0, y un IMA(1,1) con θ < 0 es un EWMA con constante de suavizado (1−θ) > 1,
+fuera de rango: sus pesos de previsión sobre los NIVELES alternan de signo
+(θ=−0.7 → 1.700, −1.190, +0.833, −0.583…). Previene sobrepasando la última
+observación y corrigiendo hacia atrás. El AR(1) con φ>0 dice que el CAMBIO está
+positivamente autocorrelado — persistencia — que es lo que la teoría de precios
+espera.
+
+**Y la salvaguardia, que no es opcional:** la regla debe ENUNCIARSE siempre.
+"Los datos prefieren X por ΔAIC=…, la teoría prefiere Y porque…, decides tú".
+Un criterio teórico que no se anuncia deja de ser criterio y pasa a ser sesgo.
+
+---
+
 ## El objetivo del modelo: ¿análisis multivariante o previsión? (ago-2026)
 
 **Estado: a diseñar. No implementado, y no conviene implementarlo a medias.**
