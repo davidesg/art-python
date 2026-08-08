@@ -539,11 +539,81 @@ Impacto menor pero documentar.
 
 - [ ] **Bloque M**: `_plot_series_at_d` → migrar a pyfug (ver §Optimizaciones)
 - [ ] **Bloque M**: `seasonality_form="deterministic"|"multiplicative"` en
-      `guided_identification` call 3 como parámetro explícito (no solo texto)
+      `guided_identification` call 3 como parámetro explícito (no solo texto).
+      Es el MECANISMO de la pregunta de objetivo de más abajo (§El objetivo
+      del modelo); conviene diseñar las dos juntas.
 - [ ] **Pruebas de raíz unitaria**: integrar ADF/KPSS/Shin-Fuller en el flujo
 - [ ] **Notebook de demostración**: flujo completo IPC_DE con pyfug + fue
 
 ---
+
+---
+
+## El objetivo del modelo: ¿análisis multivariante o previsión? (ago-2026)
+
+**Estado: a diseñar. No implementado, y no conviene implementarlo a medias.**
+
+La línea de la escuela NO es la misma según para qué sea el modelo, y art
+today no pregunta para qué es. La elección que se bifurca es la
+**especificación de la estacionalidad**, en LLAMADA 3:
+
+| objetivo | preferencia | por qué |
+|---|---|---|
+| análisis MULTIVARIANTE | determinista (B1, armónicos) | el preblanqueo filtra el output por el ARMA del INPUT; una estacionalidad estocástica en el output que el input no tiene sobrevive al filtro, y la ccf sale poco informativa — y **no vacía**: sale con estructura por todas partes y la heurística le lee un orden igualmente |
+| PREVISIÓN | a veces estocástica (B2) | deja que el patrón estacional evolucione; unos armónicos fijos no, y cuando de hecho evoluciona previene peor |
+
+Desde 2026-08-08 el aviso está en LLAMADA 3 y dice las dos direcciones, pero
+sigue siendo TEXTO: art no pregunta el objetivo ni lo propaga.
+
+### Lo que hace esto no trivial
+
+**El objetivo NO manda sobre los datos.** «Es más fácil el análisis
+multivariante con estacionalidad determinista **si ésta es sostenible con los
+datos**» — y quien decide si lo es no es la preferencia del analista sino el
+MEG, frecuencia por frecuencia (DCD sobre el testigo MA_f, Shin-Fuller sobre
+el AR_f). Un diseño que dejara al objetivo imponer determinismo donde el
+contraste lo rechaza convertiría una preferencia en un sesgo, y sería peor que
+no preguntar nada.
+
+Así que la pregunta no es «¿determinista o estocástica?» sino algo más fino, y
+ahí está el trabajo de diseño:
+
+1. **¿Dónde entra el objetivo?** Lo natural es que rompa EMPATES y fije la
+   parada provisional, no que decida. La tradición ya especifica la
+   estacionalidad provisionalmente como determinista y sólo después resuelve
+   frecuencia por frecuencia: el objetivo diría hasta dónde llevar esa
+   resolución, no cuál es el resultado.
+2. **¿Y si el MEG dice estocástica y el objetivo es multivariante?** Es el caso
+   interesante y el que más se va a dar. Hay al menos tres salidas y hay que
+   elegir: (a) aceptarla y avisar de que la ccf va a ser difícil de leer;
+   (b) el artificio Muñoz §2.4 — un modelo para IDENTIFICAR con la
+   estacionalidad hecha determinista y otro para ESTIMAR, que es lo que mtram
+   ya soporta con `ident_pre=`; (c) rechazarla, que no es defendible.
+   La (b) parece la buena y ya tiene la mitad construida.
+3. **¿Un modelo o dos?** Si el mismo `.pre` va a servir para prever y para una
+   transferencia, el conflicto es real. ¿Se emiten dos `.pre` con un nombre que
+   diga para qué es cada uno? Eso toca el convenio de ficheros
+   (`drtran-python/docs/LADDER_AS_OPTIMISATION.md`) y no debería hacerse sin
+   leerlo.
+4. **¿Cuándo se pregunta?** No al abrir el análisis: hasta LLAMADA 3 nadie sabe
+   si la serie es estacional, y preguntar antes pide una decisión sobre algo
+   que todavía no existe. Ése fue el defecto que originó esta ficha.
+5. **¿Se propaga?** Si art conoce el objetivo, mtram y sima podrían leerlo del
+   `.pre` en vez de volver a deducirlo. Eso es un campo nuevo en el fichero, y
+   otra vez el convenio.
+
+### Mecanismo
+
+`seasonality_form` en `guided_identification` (§Pendiente) es la palanca. El
+objetivo sería lo que la mueve, no un segundo camino paralelo.
+
+### Contraparte ya hecha en mtram
+
+`_seasonality_note` detecta el desajuste (output estocástico / input no),
+distingue SARIMA multiplicativo de híbrido MEG, y ofrece `ident_pre=`. Dice
+también que para previsión la estocástica a veces gana. Lo que falta es que
+alguien PREGUNTE antes, que es esta ficha.
+
 
 ## Revisar problemas de MEG  (detectados en el caso IPC_DE, 2026-06)
 

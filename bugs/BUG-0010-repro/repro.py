@@ -93,8 +93,8 @@ ok = meg(m, frequencies=[1, 2, 3, 4, 6])
 print()
 print("  meg(model, frequencies=[1,2,3,4,6])  -> the testable frequencies alone:")
 for r in ok:
-    verdict = "stochastic" if r.stochastic else "deterministic"
-    print(f"      freq={r.freq}  LR={r.lr:7.3f}   {verdict}")
+    lr = r.dcd_result.lr if r.dcd_result else float("nan")
+    print(f"      freq={r.freq}  LR={lr:7.3f}   {r.status}")
 print()
 print("  f=3 is STOCHASTIC and it is reported only when f=5 is excluded by hand.")
 print("  On the pruned model the analyst is told the model is adequate instead.")
