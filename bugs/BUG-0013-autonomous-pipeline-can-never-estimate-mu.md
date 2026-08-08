@@ -48,6 +48,73 @@ honours it. The defect is specific to the autonomous pipeline.
 with sigma 0.19 (n=215, t ≈ 8.5). The diagnosis checks Q, Jarque-Bera and
 extreme residuals; none of them looks at whether the residual mean is zero.
 
+## Root cause, and why guided looked fine (2026-08-08)
+
+Three layers. **Only the first differs between the two paths**, and the other
+two are why the defect survived unnoticed in both.
+
+### 1. mu is not a DECISION the policy can make
+
+The `Policy` protocol (`policy.py:194-209`) declares exactly six decisions:
+
+```
+decide_lambda   decide_d   decide_seasonal_structure
+decide_orders   decide_form   decide_interventions
+```
+
+There is no `decide_mu`. So `run_full` does not "forget" to set `estimate_mu` —
+**it has no way to ask**. Every other structural choice arrives through a policy
+call; this one has no door.
+
+The guided path differs in exactly one respect: `confirm_and_estimate` takes
+`estimate_mu` as a parameter, so the CALLER can supply what the policy cannot.
+That is the whole asymmetry.
+
+### 2. Nothing asks for it in guided either
+
+`_INSTRUCTIONS` mentions a mean once, and that mention is LLAMADA 1's Box-Cox
+plot ("media vs desviación típica") — unrelated. The guided protocol never
+prompts for mu at any of its four calls.
+
+So guided does not *handle* mu; it merely *permits* it. It worked whenever the
+analyst happened to think of it, which is precisely why the gap looked closed:
+a human was filling it, and a human filling a gap is indistinguishable from no
+gap until you look at the code. The autonomous path removed the human and the
+gap became visible — not because it is worse, but because nobody was patching
+it.
+
+### 3. And the diagnosis SUBTRACTS the symptom before looking
+
+`diagnosis.py:316-318`:
+
+```python
+r_mean = r.mean()
+r_std  = r.std(ddof=1) if len(r) > 1 else 1.0
+r_z    = (r - r_mean) / r_std if r_std > 0 else r     # centred
+```
+
+`r_mean` occurs exactly twice in the file: computed, then used to CENTRE the
+residuals for the z-scores. **It is never tested against zero.** A model missing
+its drift has residuals with mean 0.11 and sigma 0.19 (n=215, t ≈ 8.5), and the
+instrument standardises that away as part of its own preprocessing before
+hunting for anomalies. Q and Jarque-Bera are computed on centred residuals too,
+so none of the three verdicts can see a mean offset.
+
+That is why the report comes back `Diagnosis final: APROBADA ✓` on a model whose
+residuals are visibly off-centre.
+
+### What this implies for the fix
+
+Layer 1 is the one to fix for the reported symptom, but fixing it alone leaves
+the suite exactly as blind as before to the next defect of this shape. **The
+residual-mean test in layer 3 is worth more than the parameter**: it is the
+check that would have caught this on the first autonomous run, and it costs one
+t-statistic. Brajín's own adequacy criteria list it — "the residual mean is
+small relative to its standard deviation" — and art does not test it.
+
+Order: (3) first, because it makes (1) verifiable; then (1); then BUG-0014,
+which is the same missing mu travelling down the ladder.
+
 ## Impact
 
 Every trending series modelled autonomously loses its drift, which then leaks
