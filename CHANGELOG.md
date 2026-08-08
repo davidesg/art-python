@@ -4,6 +4,42 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.1.5 — 2026-08-08
+
+Todo lo de esta versión es lo que Claude LEE. En un servidor MCP las
+instrucciones son el producto, y aquí había criterio escrito que no llegaba.
+
+- **El empate AR(1)/MA(1) llega por fin a las instrucciones.** La regla estaba
+  razonada y con citas en `policy.py:decide_orders` —incluido el caso IPC_ES,
+  ΔAIC=1.12 favoreciendo nominalmente al MA(1) y AR(1) elegido— pero
+  `_INSTRUCTIONS` no la mencionaba ni una vez, así que se aplicaba cuando Claude
+  abría ese fichero por casualidad. Ahora está en LLAMADA 4 con el argumento
+  entero, el alcance estricto (sólo precios/índices, sólo ante empate genuino) y
+  la obligación de presentar SIEMPRE las dos opciones: un criterio teórico que
+  no se enuncia deja de ser criterio y pasa a ser sesgo.
+  El argumento contra el MA(1) va con números: su competidor lleva θ<0, y un
+  IMA(1,1) con θ<0 es un EWMA con suavizado (1−θ)>1, fuera de rango, cuyos pesos
+  de previsión sobre los NIVELES alternan de signo (θ=−0.7 → 1.700, −1.190,
+  +0.833, −0.583…).
+- **El aviso de estacionalidad va donde se DETECTA** (LLAMADA 3), no al abrir el
+  análisis: preguntar antes pide una decisión sobre algo que aún no se sabe si
+  existe. Y dice qué cuesta la elección aguas abajo — determinista para análisis
+  multivariante, a veces estocástica para previsión.
+- **HSM, y "(experimental)" dicho con precisión.** Las líneas de estacionalidad
+  son dos (determinista y estocástica); HSM —Hybrid Seasonal Models, MEG en la
+  literatura española— es la forma canónica de Abraham y Box (1978) que las
+  anida. La etiqueta es una salvaguardia, no una advertencia sobre el método:
+  los modelos son de 1978, la idea está en HEGY, y DCD y Shin-Fuller están
+  publicados. Lo nuevo son los valores críticos por Monte Carlo, que difieren
+  por un margen marginal de los publicados, y la implementación.
+- **BUG-0011: causa establecida.** No es el ARMA, son los armónicos
+  deterministas: quitarlos invierte el veredicto (LR 4.220 → 0.193). La
+  precondición del docstring nombra al competidor equivocado. Sigue ABIERTO —
+  el porqué no está entendido y no se toca hasta que lo esté.
+- **BUG-0009 y BUG-0010 verificados y reproducidos**, ambos abiertos.
+- TODO: la pregunta del OBJETIVO (multivariante o previsión), analizada y sin
+  implementar — el objetivo no manda sobre los datos, y ésa es la parte difícil.
+
 ## atsw 1.1.0 — 2026-07-27
 
 - Adds **drvarma>=0.1.1** to the suite — multivariate VARMA (exact-ML estimation,
