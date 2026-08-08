@@ -135,10 +135,24 @@ LLAMADA 3 — guided_identification(inp_path, lam=X, d=<nivel>)   [D=-1 por defe
   • ¿Sin picos estacionales? → D=0 sin armónicos
   • ¿Todavía con tendencia? → repite con d+1
   • Hipótesis B1 es revisable al final mediante MEG (formal_tests)
-    ⚠ pero el MEG es EXPERIMENTAL: la clase de modelos no, los CONTRASTES sí
-      (valores críticos en investigación, y tres defectos abiertos y
-      reproducidos: BUG-0009/0010/0011). No decidas la especificación sólo con
-      él, y si contradice a Shin-Fuller o a la acf/pacf, sospecha del MEG.
+    Las DOS líneas son DETERMINISTA (armónicos) y ESTOCÁSTICA (SARIMA
+    multiplicativo). HSM --Hybrid Seasonal Models; MEG en la literatura
+    española, Gallego 1995-- no es una tercera: es la forma canónica de Abraham
+    y Box (1978) que las anida, resolviendo frecuencia por frecuencia.
+
+    PUEDES OFRECER evaluar la NATURALEZA de la estacionalidad con el barrido
+    HSM (`formal_tests`, `run_meg`), marcándolo "(experimental)". Hay analistas
+    que quieren verificar frecuencias mixtas siempre; otros no tienen por qué,
+    y no debe ser el camino por defecto.
+    Y si preguntan qué significa "(experimental)", explícalo bien: los MODELOS
+    son de 1978, la IDEA de ir frecuencia por frecuencia está en HEGY, y el DCD
+    y el Shin-Fuller están PUBLICADOS. Lo nuevo son los valores críticos por
+    Monte Carlo --que difieren por un margen marginal de los interpolados
+    publicados-- y sobre todo LA IMPLEMENTACIÓN DE ART, que hoy tiene tres
+    defectos abiertos (BUG-0009/0010/0011). Es una salvaguardia, no una
+    advertencia de que el método sea dudoso.
+    No decidas la especificación sólo con él: contrástalo con Shin-Fuller y con
+    la acf/pacf.
 
   ⚠ SI HAY ESTACIONALIDAD, DI PARA QUÉ VA A SERVIR EL MODELO ANTES DE ELEGIR.
     B1 y B2 no son equivalentes aguas abajo, y la diferencia no se ve desde
@@ -953,13 +967,42 @@ def formal_tests(inp_path: str, run_meg: bool = True) -> list:
     """
     Run formal hypothesis tests on a fitted model.
 
-    ⚠ LA FAMILIA MEG/DCD ES EXPERIMENTAL. PRESÉNTALA COMO TAL.
+    ⚠ MARCA ESTA RUTA COMO (EXPERIMENTAL) — Y SI TE PREGUNTAN QUÉ SIGNIFICA,
+      EXPLÍCALO BIEN, PORQUE NO ES LO QUE PARECE.
 
-    La CLASE de modelos --Modelos de Estacionalidad Generalizada, Abraham y Box
-    (1978)-- está establecida desde hace décadas y no es experimental. Lo
-    reciente son estos CONTRASTES: los valores críticos del DCD y del
-    Shin-Fuller estacional son objeto de investigación en curso (SF_MEG), y la
-    implementación tiene tres defectos ABIERTOS y reproducidos, los tres en
+    QUÉ ESTÁ PUBLICADO Y ESTABLECIDO (casi todo):
+      · los MODELOS son antiguos: Abraham y Box (1978).
+      · la IDEA de resolver la estacionalidad frecuencia por frecuencia está en
+        HEGY (Hylleberg, Engle, Granger y Yoo).
+      · el contraste DCD (Davis, Chen y Dunsmuir) está PUBLICADO.
+      · el Shin-Fuller está PUBLICADO.
+
+    QUÉ ES NUEVO (poco, y menos de lo que "experimental" sugiere):
+      · los VALORES CRÍTICOS derivados por Monte Carlo, que difieren por un
+        margen MARGINAL de los interpolados que están publicados.
+      · y, sobre todo, LA IMPLEMENTACIÓN DE ART -- que es donde están los tres
+        defectos abiertos de abajo. Eso es lo realmente nuevo aquí.
+
+    Así que "(experimental)" es una SALVAGUARDIA, no una advertencia de que el
+    método sea dudoso. El método está establecido; lo que aún no está avalado
+    es esta implementación y el último decimal de los críticos.
+
+    NOMBRE: la clase se llama HSM --Hybrid Seasonal Models-- que es como la
+    nombra el artículo de referencia (SF_MEG). `MEG`, Modelos de Estacionalidad
+    Generalizada (Gallego, 1995), es su nombre en la literatura española y el
+    identificador que conserva el código; en prosa, di HSM.
+
+    LAS DOS LÍNEAS DE ESTACIONALIDAD son:
+      · DETERMINISTA   armónicos con coeficientes de previsión fijos
+      · ESTOCÁSTICA    SARIMA multiplicativo, la diferencia anual 1-B^s entera
+
+    HSM no es una tercera línea: es la FORMA CANÓNICA de Abraham y Box (1978),
+    en la que cada frecuencia es independientemente una u otra, y que anida las
+    dos líneas como casos especiales. Ellos ya distinguen componentes
+    deterministas de "forecast-adaptive" y notan que un modelo puede ser
+    adaptativo en unos parámetros y no en otros. ESA RUTA ES LA EXPERIMENTAL.
+
+    Los tres defectos ABIERTOS y reproducidos de la implementación, todos en
     esta familia:
 
       BUG-0009  dcd_overdiff_regular pisa el testigo de Nyquist --comparten la
@@ -975,19 +1018,24 @@ def formal_tests(inp_path: str, run_meg: bool = True) -> list:
                 deterministas compiten con el testigo, y la precondición del
                 docstring nombra al competidor equivocado.
 
-    Así que: NO propongas tú la ruta MEG. Si el analista la pide, dale el
-    resultado con la advertencia, y NO tomes una decisión de especificación
-    apoyándote sólo en ella -- contrástala con Shin-Fuller y con la acf/pacf.
-    Un veredicto MEG que contradiga al resto del informe es, hoy, más probable
-    que sea el MEG.
+    PUEDES OFRECERLA. Preguntar al analista si quiere evaluar la NATURALEZA de
+    la estacionalidad --determinista o estocástica, frecuencia por frecuencia--
+    es una pregunta legítima y hay analistas que la quieren siempre. Ofrécela
+    marcada "(experimental)", no como el camino por defecto.
+
+    Lo que sí: no tomes una decisión de especificación apoyándote SÓLO en ella.
+    Contrástala con Shin-Fuller y con la acf/pacf, y si el veredicto contradice
+    al resto del informe, hoy es más probable que el fallo esté en esta
+    implementación que en los otros instrumentos.
 
     Tests run (where applicable to the model structure):
     - Shin-Fuller (1998): Phi_1u test; H0: rho=1-4/n (near-unit-root); crit 5%≈1.75
     - DCD: non-invertibility of regular MA factors (H0: theta=1)          [exper.]
     - DCD_f: non-invertibility of seasonal MA factors (H0: lambda2=-1)    [exper.]
     - RV: fixed frequency for AR(2) factors
-    - MEG: stochastic vs deterministic seasonality (requires D=0 + harmonics)
-                                                                          [exper.]
+    - MEG: HSM sweep — stochastic vs deterministic seasonality, frequency by
+      frequency (requires D=0 + harmonics). `meg` is the API name; the class is
+      HSM (Hybrid Seasonal Models).                                       [exper.]
 
     Parameters
     ----------
