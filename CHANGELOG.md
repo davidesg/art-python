@@ -4,6 +4,32 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.1.7 — 2026-08-10
+
+Corrige el EMPAQUETADO de 0.1.6, no el código: el motor y el servidor son los
+mismos. La 0.1.6 llevaba `recursive-include docs *.md` en su `MANIFEST.in` y eso
+metió en el sdist siete documentos INTERNOS --un borrador de email de difusión,
+el anuncio, el procedimiento de publicación, las notas de estado y los 18
+informes de `bugs/`-- que no son documentación de usuario. **No se expuso
+ninguna credencial**: esos ficheros mencionan que existen tokens, nunca sus
+valores.
+
+- `docs/email_final.md` eliminado del repositorio.
+- El `MANIFEST.in` LISTA los documentos uno a uno y además EXCLUYE
+  explícitamente los internos. Las dos cosas hacen falta: `include` sólo añade,
+  nunca quita, y el `SOURCES.txt` del `egg-info` anterior arrastra lo que se
+  incluyó alguna vez, así que una lista blanca por sí sola no basta --comprobado
+  construyendo, no supuesto--.
+- El README gana una sección **Documentation** con enlaces ABSOLUTOS. PyPI
+  renderiza sólo el README y resuelve los relativos contra la Homepage, así que
+  fuera del repositorio se rompen.
+
+Viajan ahora: README, CHANGELOG, TODO, QUICKSTART, TOOLS, ARCHITECTURE y
+RESCALING_ARCHITECTURE.
+
+La 0.1.6 sigue descargable con los internos dentro: PyPI no permite reemplazar
+una versión ya subida.
+
 ## art-tseries 0.1.6 — 2026-08-10
 
 Publica lo que quedó fuera de 0.1.5: el cambio de código llegó DESPUÉS del

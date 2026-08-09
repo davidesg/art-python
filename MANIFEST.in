@@ -1,7 +1,23 @@
-# La documentación viaja con el código: sin esto el sdist lleva README,
-# pyproject y src/ y nada más, y quien instale desde fuentes no puede leer nada.
+# La documentación viaja con el código, pero SE LISTA UNA A UNA.
+#
+# Nada de `recursive-include docs *.md`: un comodín reparte lo que haya en la
+# carpeta el día que se empaqueta, que no es lo mismo que lo que uno quiere
+# repartir. En docs/ conviven documentación de usuario y notas internas
+# --anuncios, el procedimiento de publicación, el estado del proyecto-- y esas
+# últimas no se distribuyen.
 include README.md
 include CHANGELOG.md
 include TODO.md
-recursive-include docs *.md
-recursive-include bugs *.md
+include docs/QUICKSTART.md
+include docs/TOOLS.md
+include docs/ARCHITECTURE.md
+include docs/RESCALING_ARCHITECTURE.md
+
+# Y EXCLUIR EXPLÍCITAMENTE lo que no se distribuye. `include` sólo AÑADE: no
+# quita nada, y el SOURCES.txt del egg-info anterior arrastra lo que se incluyó
+# alguna vez. Sin estas líneas los internos seguían viajando aunque la lista de
+# arriba no los mencionara -- comprobado construyendo, no supuesto.
+exclude docs/ANNOUNCEMENT.md
+exclude docs/PUBLISHING.md
+exclude docs/STATUS.md
+prune bugs
