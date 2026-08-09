@@ -4,6 +4,25 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.1.6 — 2026-08-10
+
+Publica lo que quedó fuera de 0.1.5: el cambio de código llegó DESPUÉS del
+empaquetado, así que la 0.1.5 de PyPI no lo lleva. Y arregla los metadatos, que
+no declaraban ni una sola URL.
+
+- **BUG-0013, capa 3: la media residual se CONTRASTA, no sólo se resta.**
+  `diagnosis` expone `mean` y `mean_t = r̄/(s/√n)`, y el bucle autónomo para con
+  `residuals_ok` en vez de con `clean`. La distinción no es cosmética: fundir
+  las dos hacía que el guiado añadiera DOS intervenciones persiguiendo una media
+  que faltaba, y separarlas deja el veredicto (`clean`) intacto para el analista
+  mientras el bucle usa el criterio que le corresponde.
+- **Metadatos.** `[project.urls]` con Homepage, Documentation, Issues y
+  Changelog —no había ninguna, así que la página de PyPI no llevaba a ningún
+  sitio— y un `MANIFEST.in` que mete `docs/`, `CHANGELOG.md` y `bugs/` en el
+  sdist, de modo que la documentación se lee sin red.
+
+Batería: 474 pasan, 21 saltados.
+
 ## art-tseries 0.1.5 — 2026-08-08
 
 Todo lo de esta versión es lo que Claude LEE. En un servidor MCP las

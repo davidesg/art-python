@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "art-tseries"
-version         = "0.1.5"
+version         = "0.1.6"
 description     = "ART — A Real-Time Time-Series Analysis toolkit (Box-Jenkins-Treadway methodology) + MCP server (uses fue and pyfug)"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -43,6 +43,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev  = ["pytest>=7"]
+
+[project.urls]
+# No había NINGUNA: la página de PyPI no llevaba a ningún sitio. `Documentation`
+# es además el campo que PyPI muestra más arriba.
+Homepage = "https://github.com/davidesg/art-python"
+Documentation = "https://github.com/davidesg/art-python/tree/master/docs"
+Repository = "https://github.com/davidesg/art-python"
+Issues = "https://github.com/davidesg/art-python/issues"
+Changelog = "https://github.com/davidesg/art-python/blob/master/CHANGELOG.md"
 
 [project.scripts]
 art-mcp = "art.mcp_server:main"

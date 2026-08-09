@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "1.2.1"
+version         = "1.2.2"
 description     = "ATSW — A Time Series Workshop: the Box-Jenkins-Treadway suite (univariate exact-ML estimation, graphics, model building, transfer functions and multivariate VARMA) with three MCP assistants for LLM-driven analysis"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -51,8 +51,14 @@ classifiers     = [
 dependencies = [
     "fue>=0.1.9",             # univariate estimation engine + FUF forecasting
     "pyfug>=2.0",             # Jenkins-Treadway graphics
-    "art-tseries>=0.1.4",     # model building + MCP server (art-mcp)
-    "drtran[mcp]>=0.1.0",   # transfer functions and networks + MCP server (mtram)
+    "art-tseries>=0.1.6",     # model building + MCP server (art-mcp)
+    # >=0.2.0 is NOT housekeeping. Up to 0.1.1 drtran related each series
+    # differenced by ITS OWN operator, so whenever the output and the input
+    # carried different differencing the fitted transfer was nu(B)*Delta(B) and
+    # the reported GAIN was wrong by Delta(1) -- annihilated outright when the
+    # excess root sat at frequency zero. An open lower bound would let a stale
+    # environment satisfy the suite with the defect live. See drtran BUG-8.
+    "drtran[mcp]>=0.2.0",     # transfer functions and networks + MCP server (mtram)
     "drvarma[mcp]>=0.1.3",    # multivariate VARMA + MCP server (sima)
 ]
 
@@ -60,6 +66,15 @@ dependencies = [
 # does not speak. `atsw-mcp` registers the three assistants with Claude Code in
 # one step — MCP has no mechanism for one server to register another, so this is
 # a setup command, not a fourth server.
+[project.urls]
+# atsw no declaraba NINGUNA: su página de PyPI renderizaba el README y no
+# llevaba a ningun sitio. El paquete vive en el monorepo de art-python.
+Homepage = "https://github.com/davidesg/art-python/tree/master/atsw-suite"
+Documentation = "https://github.com/davidesg/art-python/tree/master/docs"
+Repository = "https://github.com/davidesg/art-python"
+Issues = "https://github.com/davidesg/art-python/issues"
+Changelog = "https://github.com/davidesg/art-python/blob/master/CHANGELOG.md"
+
 [project.scripts]
 atsw-mcp = "atsw.mcp_install:main"
 

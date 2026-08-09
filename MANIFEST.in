@@ -1,0 +1,7 @@
+# La documentación viaja con el código: sin esto el sdist lleva README,
+# pyproject y src/ y nada más, y quien instale desde fuentes no puede leer nada.
+include README.md
+include CHANGELOG.md
+include TODO.md
+recursive-include docs *.md
+recursive-include bugs *.md
