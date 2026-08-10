@@ -1,272 +1,276 @@
-# Arquitectura de la suite ART / FUE / FUG / FUF
+# Architecture of the ART / FUE / FUG / FUF suite
 
-> Documento de visión arquitectónica. Captura la separación de capas, la
-> filosofía **evidencia vs criterio**, los dos modos de operación, y el plan
-> de refactor para **unificar la orquestación**.
-> Redactado jun-2026 tras la revisión crítica de la suite.
-
----
-
-## 1. Propósito de la suite
-
-Construcción de modelos univariantes siguiendo la metodología
-**Box-Jenkins-Treadway (BJT)**: un proceso **iterativo** que usa herramientas
-gráficas y contrastes para tomar decisiones, construyendo el modelo paso a paso
-mediante identificación parcial hasta obtener un modelo definitivo, listo para
-usarse (estimación + previsión).
-
-La limitación intrínseca del proceso BJT es que **requiere criterio**: las
-decisiones (empíricas o teóricas) no son arbitrarias. Quien aporta ese criterio
-es **Claude**, alimentado por la evidencia que produce la suite.
-
-Esto es el núcleo de una **falsa simplicidad**: los modelos ARMA son simples,
-pero el proceso iterativo de construcción funcionaba de maravilla sobre todo si
-eras Box, Jenkins o uno de sus discípulos. La dificultad real es entrenar al
-analista en unas decisiones muchas veces heurísticas; la IA hace aquí, con sus
-limitaciones, el papel de ese analista entrenado. Nótese además que el análisis
-**no es el canónico de Box y
-Jenkins**, sino la versión con extensiones de **Arthur B. Treadway** (discípulo
-de Gwilym Jenkins), con elementos y heurísticos procedentes de su trabajo en los
-Servicios de Previsión y Seguimiento (SPS) de la economía española.
-
-**Principio de diseño (regla de medida):** la previsión es uno de los objetivos
-del modelo ARMAX —quizá imbatible en previsión—, pero el modelo univariante es
-además la base de un análisis de relaciones más sofisticado. Por eso estos
-modelos univariantes deben ser la **regla de medida** de modelos más complejos:
-si un modelo sofisticado no mejora sus previsiones, tiene algún problema y debe
-repensarse.
+> Architectural vision document. It records the separation of layers, the
+> **evidence vs judgement** philosophy, the two modes of operation, and the
+> refactor plan that **unified the orchestration**.
+> Written Jun-2026 after the critical review of the suite; translated into
+> English Aug-2026, when the tool count was also corrected from 32 to 35.
 
 ---
 
-## 2. Componentes y fronteras
+## 1. What the suite is for
 
-| Componente | Rol | Naturaleza |
+Building univariate models by the **Box-Jenkins-Treadway (BJT)** methodology: an
+**iterative** process that uses graphical tools and tests to take decisions,
+building the model step by step through partial identification until a final
+model is reached, ready to use (estimation + forecasting).
+
+The intrinsic limitation of the BJT process is that **it requires judgement**:
+the decisions, empirical or theoretical, are not arbitrary. What supplies that
+judgement is **Claude**, fed by the evidence the suite produces.
+
+This is the core of a **false simplicity**: ARMA models are simple, but the
+iterative building process worked wonderfully mainly if you were Box, Jenkins or
+one of their disciples. The real difficulty is training the analyst in decisions
+that are often heuristic; AI plays here, with its limitations, the part of that
+trained analyst. Note also that the analysis is **not the canonical Box and
+Jenkins one** but the version extended by **Arthur B. Treadway** (a disciple of
+Gwilym Jenkins), with elements and heuristics coming out of his work at the
+Forecasting and Monitoring Services (SPS) of the Spanish economy.
+
+**Design principle (the measuring stick):** forecasting is one of the objectives
+of an ARMAX model — perhaps unbeatable at it — but the univariate model is also
+the foundation of a more sophisticated analysis of relationships. That is why
+these univariate models must be the **measuring stick** for more complex ones:
+if a sophisticated model does not improve on their forecasts, something is wrong
+with it and it should be rethought.
+
+---
+
+## 2. Components and boundaries
+
+| Component | Role | Nature |
 |------------|-----|-----------|
-| **FUE** (`atws/fue`) | Estimación ML exacta + **forecasting (FUF)** + diagnósticos de bajo nivel | Python sobre `_fue_engine.so` (C) |
-| **FUG / pyfug** (`atws/fug/pyfug`) | Gráficos de alta definición para análisis de series temporales | Python + matplotlib |
-| **ART** (`art-python/src/art`) | Orquestación + adaptación semántica + audit trail | Python |
-| **ART MCP** (`mcp_server.py`) | Superficie de 32 herramientas hacia Claude | FastMCP |
-| **Claude** | **Criterio**: identificación, interpretación, decisiones | LLM |
+| **FUE** (`atws/fue`) | Exact ML estimation + **forecasting (FUF)** + low-level diagnostics | Python over `_fue_engine.so` (C) |
+| **FUG / pyfug** (`atws/fug/pyfug`) | High-definition graphics for time series analysis | Python + matplotlib |
+| **ART** (`art-python/src/art`) | Orchestration + semantic adaptation + audit trail | Python |
+| **ART MCP** (`mcp_server.py`) | A surface of 35 tools facing Claude | FastMCP |
+| **Claude** | **Judgement**: identification, interpretation, decisions | LLM |
 
-**FUF no es un componente par.** En la suite Python el forecasting vive *dentro*
-de FUE (`load_fuf`, `forecast_fuf`, `write_fuf`, `fuf_cli.py`,
-`report_forecast.py`). Es una **capacidad de FUE** aguas abajo del modelo
-terminado. Los `atws/fuf/fuf-*` son el legado C/GTK.
+**FUF is not a peer component.** In the Python suite forecasting lives *inside*
+FUE (`load_fuf`, `forecast_fuf`, `write_fuf`, `fuf_cli.py`,
+`report_forecast.py`). It is a **capability of FUE** downstream of the finished
+model. The `atws/fuf/fuf-*` trees are the C/GTK legacy.
 
 ---
 
-## 3. Capas (sin ciclos)
+## 3. Layers (no cycles)
 
 ```
-CLAUDE — criterio (empírico/teórico)
-  guiado:   sugiere → el analista decide
-  autónomo: decide todo → presenta modelo final
-   │  protocolo MCP + instrucciones del servidor
-ART MCP  (mcp_server.py · 32 tools)
+CLAUDE — judgement (empirical / theoretical)
+  guided:     suggests → the analyst decides
+  autonomous: decides everything → presents the final model
+   │  MCP protocol + the server's instructions
+ART MCP  (mcp_server.py · 35 tools)
    │
-ART describe.py  ── ADAPTADOR SEMÁNTICO
+ART describe.py  ── SEMANTIC ADAPTER
    │  Description{summary, figure_b64, recommendation, data}
-   │  convierte números/gráficos en evidencia legible por LLM
+   │  turns numbers and graphs into evidence an LLM can read
    ├──────────────────────────────┐
-ART análisis                     (describe.py y mcp_server.py
-  identification                   son los únicos que importan pyfug)
+ART analysis                     (describe.py and mcp_server.py are
+  identification                   the only ones that import pyfug)
   seasonal_detection
   model_detection · interventions
   formal_tests · diagnosis · guion
    │                                │
-FUE (estimación + FUF)            FUG / pyfug (gráficos)
+FUE (estimation + FUF)            FUG / pyfug (graphics)
    │
 _fue_engine.so (C)
 ```
 
-Invariantes verificados: el grafo no tiene ciclos; solo `describe.py` y
-`mcp_server.py` conocen pyfug; FUE es la base numérica transversal.
+Verified invariants: the graph has no cycles; only `describe.py` and
+`mcp_server.py` know about pyfug; FUE is the numerical base underneath
+everything.
 
-**`describe.py` es el acierto central**: el adaptador que hace que los motores
-numéricos «hablen Claude». Es la abstracción correcta y debe preservarse.
-
----
-
-## 4. Filosofía: evidencia ≠ criterio
-
-La frontera que el diseño debe respetar:
-
-- **Evidencia** (determinista, reproducible): motores + módulos de análisis.
-- **Presentación de la evidencia**: `describe.py` (`summary` + `figure_b64` + `data`).
-- **Criterio**: Claude, vía el protocolo MCP.
-- **Registro de decisiones** (audit trail BJT): `guion.py` → `guion.json`.
-
-**Tensión detectada:** el criterio se filtra hacia la capa de evidencia. El
-campo `Description.recommendation` lo calcula ART con heurísticas cableadas
-(p. ej. «Decisión B1 por defecto»), de modo que hay **dos jueces simultáneos**
-—las heurísticas de ART y Claude— que pueden contradecirse y que **anclan** a
-Claude y al analista antes de que razonen.
-
-Regla de diseño objetivo: la capa de evidencia emite **evidencia + el menú de
-decisiones posibles con argumentos a favor/en contra**, no sentencias. El cierre
-del criterio lo pone Claude (guiado: propone; autónomo: decide).
+**`describe.py` is the central success**: the adapter that makes the numerical
+engines "speak Claude". It is the right abstraction and must be preserved.
 
 ---
 
-## 5. Los dos modos
+## 4. Philosophy: evidence ≠ judgement
 
-| | Guiado (analista + Claude) | Autónomo (solo Claude) |
+The boundary the design has to respect:
+
+- **Evidence** (deterministic, reproducible): the engines and the analysis
+  modules.
+- **Presentation of the evidence**: `describe.py` (`summary` + `figure_b64` +
+  `data`).
+- **Judgement**: Claude, through the MCP protocol.
+- **Record of decisions** (the BJT audit trail): `guion.py` → `guion.json`.
+
+**Tension found:** judgement leaks down into the evidence layer. The
+`Description.recommendation` field is computed by ART with hard-wired heuristics
+(e.g. "Decision B1 by default"), so there are **two judges at once** — ART's
+heuristics and Claude — which can contradict each other and which **anchor**
+Claude and the analyst before either has reasoned.
+
+The design rule to aim for: the evidence layer emits **evidence plus the menu of
+possible decisions with the arguments for and against**, not verdicts. Closing
+the judgement is Claude's part (guided: it proposes; autonomous: it decides).
+
+---
+
+## 5. The two modes
+
+| | Guided (analyst + Claude) | Autonomous (Claude alone) |
 |---|---|---|
-| Quién decide | El analista, con sugerencias de Claude | Claude |
-| Salida | Iterativa, con confirmación en cada etapa | Un modelo final |
-| Camino actual | `guided_identification` → `confirm_and_estimate` → `suggest_intervention_form` → `confirm_and_estimate(base_pre_path)` → `formal_tests` | `build_model` / `batch_build` (monolito) |
+| Who decides | The analyst, with Claude's suggestions | Claude |
+| Output | Iterative, confirmed at every stage | One final model |
+| Path as it was | `guided_identification` → `confirm_and_estimate` → `suggest_intervention_form` → `confirm_and_estimate(base_pre_path)` → `formal_tests` | `build_model` / `batch_build` (a monolith) |
 
-### Problema estructural: DOBLE ORQUESTACIÓN
+### The structural problem: DOUBLE ORCHESTRATION
 
-El modo autónomo **no conduce las mismas herramientas que conduciría Claude**:
-las *reimplementa* en un monolito. `build_model` (mcp_server.py:2735-2932) toma
-seis decisiones inline que en guiado toma Claude leyendo los `describe_*`:
+The autonomous mode **did not drive the same tools Claude would drive**: it
+*reimplemented* them in a monolith. `build_model` (`mcp_server.py:2735-2932`)
+took six decisions inline that in guided mode Claude takes by reading the
+`describe_*`:
 
-| Decisión | En `build_model` (autónomo) | En guiado |
+| Decision | In `build_model` (autonomous) | In guided mode |
 |----------|------------------------------|-----------|
-| λ | `0.0 if bc.data["gap"] >= 0 else 1.0` | Claude lee `describe_boxcox` |
-| d | `urt.data["recommended_d"]` | Claude lee `describe_unit_root` |
-| D, decisión | `seas.data` | Claude lee `describe_seasonality` |
-| nº armónicos | `freq//2-1 if decision!="A" else 0` | Claude / `confirm_and_estimate` |
-| p, q | `suggest_orders(...)[0]` | Claude lee `describe_identification` |
-| Intervención | lazo `z>3.0` + step-si-consecutivo-si-no-pulse | `suggest_intervention_form` (umbral 2.5) |
+| λ | `0.0 if bc.data["gap"] >= 0 else 1.0` | Claude reads `describe_boxcox` |
+| d | `urt.data["recommended_d"]` | Claude reads `describe_unit_root` |
+| D, decision | `seas.data` | Claude reads `describe_seasonality` |
+| no. of harmonics | `freq//2-1 if decision!="A" else 0` | Claude / `confirm_and_estimate` |
+| p, q | `suggest_orders(...)[0]` | Claude reads `describe_identification` |
+| Intervention | `z>3.0` loop + step-if-consecutive-else-pulse | `suggest_intervention_form` (threshold 2.5) |
 
-**Consecuencia probada de la deriva:** `batch_build` tenía `d=1` cableado
-mientras `build_model` llamaba bien a `describe_unit_root` — el clásico bug de
-mantener dos implementaciones del mismo método. Además contradice la filosofía:
-en el autónomo «decide Claude», pero en realidad decide un heurístico fijo en
-código.
+**Proven consequence of the drift:** `batch_build` had `d=1` hard-wired while
+`build_model` correctly called `describe_unit_root` — the classic bug of keeping
+two implementations of the same method. It also contradicts the philosophy: in
+autonomous mode "Claude decides", when in fact a fixed heuristic in the code
+decided.
 
 ---
 
-## 6. Plan de refactor: unificar la orquestación
+## 6. The refactor: unifying the orchestration
 
-**Objetivo:** una sola fuente de verdad por decisión y por paso de ejecución.
-El autónomo pasa a ser «Claude/ política por defecto ejecutando la MISMA
-secuencia guiada sin pausas de confirmación».
+**Objective:** one single source of truth per decision and per execution step.
+Autonomous mode becomes "Claude / the default policy running the SAME guided
+sequence without the confirmation pauses".
 
-### Arquitectura objetivo: tres capas separadas
+### Target architecture: three separated layers
 
 ```
-art/policy.py    ← REGLAS DE DECISIÓN (un único hogar). Funciones puras:
+art/policy.py    ← DECISION RULES (a single home). Pure functions:
                    decide_lambda(bc_data)                  -> float
                    decide_differencing(seas_data, urt_data)-> (d, D, decision, n_harm)
                    decide_orders(specs)                    -> (p, q, P, Q)
                    decide_interventions(diag, existing)    -> list[(at, form)]
                    should_stop(diag)                       -> bool
-                   THRESHOLDS = {...}   # 2.0/2.5/3.0/3.5 en un solo sitio
+                   THRESHOLDS = {...}   # 2.0/2.5/3.0/3.5 in one place
 
-art/pipeline.py  ← PASOS DE EJECUCIÓN (un único hogar). Mecanismo puro:
+art/pipeline.py  ← EXECUTION STEPS (a single home). Pure mechanism:
                    build_and_fit(ts, spec)        -> (model, diag)
-                       # envuelve _make_model + _write_inp + _load_fitted + diagnose
+                       # wraps _make_model + _write_inp + _load_fitted + diagnose
                    outlier_round(ts, spec, diag)  -> spec'
                    run_full(ts, policy)           -> PipelineResult
 
-mcp_server.py    ← TOOLS DELGADAS sobre pipeline + policy:
+mcp_server.py    ← THIN TOOLS over pipeline + policy:
                    build_model          = pipeline.run_full(ts, DefaultPolicy())
-                   batch_build          = bucle de run_full
-                   confirm_and_estimate = pipeline.build_and_fit(ts, spec_de_claude)
-                   guided_*             = describe_* + policy.decide_* COMO SUGERENCIA
+                   batch_build          = a loop of run_full
+                   confirm_and_estimate = pipeline.build_and_fit(ts, claude_spec)
+                   guided_*             = describe_* + policy.decide_* AS A SUGGESTION
 ```
 
-**Principio clave:** las funciones de `policy` son el único hogar de cada regla
-de decisión. En guiado se exponen como *sugerencia* (Claude puede sobrescribir);
-en autónomo se aplican. Misma regla, dos formas de consumo, **cero deriva**.
+**The key principle:** the `policy` functions are the only home of each decision
+rule. In guided mode they are exposed as a *suggestion* (Claude may override);
+in autonomous mode they are applied. Same rule, two ways of consuming it,
+**zero drift**.
 
-### Fases (cada una entregable y verificable por separado)
+### Phases (each one deliverable and verifiable on its own)
 
-**Fase 0 — Red de seguridad.**
-Tests de caracterización: capturar la salida actual de `build_model` y
-`confirm_and_estimate` sobre series fixture (golden output). El refactor debe
-preservar el comportamiento del modo autónomo.
+**Phase 0 — Safety net.**
+Characterisation tests: capture the current output of `build_model` and
+`confirm_and_estimate` over fixture series (golden output). The refactor must
+preserve the behaviour of the autonomous mode.
 
-**Fase 1 — Extraer `policy.py`.**
-Mover las seis decisiones inline de `build_model` a funciones puras.
-`build_model` las llama (sin cambio de comportamiento). Los tools guiados
-empiezan a exponer `policy.decide_*` en su campo `recommendation`, sustituyendo
-las recomendaciones cableadas/dispersas (p. ej. «Decisión B1 por defecto»).
-→ Resuelve §4 (criterio filtrado): se centraliza Y se hace sobrescribible.
+**Phase 1 — Extract `policy.py`.**
+Move `build_model`'s six inline decisions into pure functions. `build_model`
+calls them (no behavioural change). The guided tools begin to expose
+`policy.decide_*` in their `recommendation` field, replacing the hard-wired and
+scattered recommendations (e.g. "Decision B1 by default").
+→ Resolves §4 (leaked judgement): it is centralised AND made overridable.
 
-**Fase 2 — Extraer `pipeline.py`.**
-Mover `_make_model`+`_write_inp`+`_load_fitted`+`diagnose` a `build_and_fit`, y
-el lazo de outliers a `run_full`. `build_model` queda en ~15 líneas:
-`result = run_full(ts, DefaultPolicy()); return render(result)`.
-`confirm_and_estimate` reutiliza `build_and_fit`. `batch_build` itera `run_full`.
-→ Elimina la duplicación `_make_model`-loop vs tools guiados.
+**Phase 2 — Extract `pipeline.py`.**
+Move `_make_model` + `_write_inp` + `_load_fitted` + `diagnose` into
+`build_and_fit`, and the outlier loop into `run_full`. `build_model` comes down
+to ~15 lines: `result = run_full(ts, DefaultPolicy()); return render(result)`.
+`confirm_and_estimate` reuses `build_and_fit`. `batch_build` iterates `run_full`.
+→ Removes the duplication between the `_make_model` loop and the guided tools.
 
-**Fase 3 — Unificar la lógica de intervención.**
-La heurística step/pulse existe en `build_model` (inline) y en
-`suggest_intervention_form` (umbral 2.5). Mover a `policy.decide_interventions`.
-Guiado y autónomo pasan a usar la regla idéntica.
+**Phase 3 — Unify the intervention logic.**
+The step/pulse heuristic existed in `build_model` (inline) and in
+`suggest_intervention_form` (threshold 2.5). Move it to
+`policy.decide_interventions`. Guided and autonomous then use the identical rule.
 
-**Fase 4 — Policy como objeto intercambiable.**
-`DefaultPolicy` (heurísticas) vs `ClaudePolicy` (delega en Claude). Autónomo =
-`DefaultPolicy`. Hace explícita la filosofía en código: el autónomo es «la
-política heurística por defecto», y queda la puerta abierta a que las elecciones
-de Claude realimenten como política.
+**Phase 4 — Policy as an interchangeable object.**
+`DefaultPolicy` (heuristics) vs `ClaudePolicy` (delegates to Claude). Autonomous
+= `DefaultPolicy`. This makes the philosophy explicit in code: autonomous mode
+is "the default heuristic policy", and it leaves the door open for Claude's own
+choices to feed back as a policy.
 
-**Fase 5 — Limpieza.**
-Borrar duplicación muerta, alinear umbrales a `policy.THRESHOLDS`, retirar los
-caminos divergentes.
+**Phase 5 — Cleanup.**
+Delete dead duplication, align thresholds to `policy.THRESHOLDS`, retire the
+divergent paths.
 
-### Estado de implementación (jun-2026)
+### Implementation status (Jun-2026)
 
-| Fase | Estado | Resultado |
+| Phase | State | Result |
 |------|--------|-----------|
-| 0 | ✅ | `tests/test_golden_pipeline.py` + fixture congelada; red de seguridad |
-| 1 | ✅ | `art/policy.py` — funciones puras de decisión + `THRESHOLDS` |
-| 2 | ✅ | `art/pipeline.py` — primitivos de ejecución + `build_and_fit` + `run_full`; `build_model`/`batch_build` comparten el lazo |
-| 3 | ✅ | `policy.decide_form` único; umbrales de intervención desde `THRESHOLDS` |
+| 0 | ✅ | `tests/test_golden_pipeline.py` + a frozen fixture; the safety net |
+| 1 | ✅ | `art/policy.py` — pure decision functions + `THRESHOLDS` |
+| 2 | ✅ | `art/pipeline.py` — execution primitives + `build_and_fit` + `run_full`; `build_model`/`batch_build` share the loop |
+| 3 | ✅ | a single `policy.decide_form`; intervention thresholds from `THRESHOLDS` |
 | 4 | ✅ | `Policy`/`DefaultPolicy`/`ClaudePolicy`; `run_full(decision_policy=…)` |
-| 5 | ✅ | umbrales user-facing → `THRESHOLDS["outlier_user"]`; eliminados `_param_table`/`_param_names` muertos |
+| 5 | ✅ | user-facing thresholds → `THRESHOLDS["outlier_user"]`; dead `_param_table`/`_param_names` removed |
 
-Comportamiento preservado en todas las fases (golden verde). Cero regresiones
-netas frente al baseline `af2ba9b` (los fallos restantes del suite son
-pre-existentes: nlags en series cortas, tolerancias Chile, npar trimestral).
+Behaviour preserved through every phase (golden green). Zero net regressions
+against the `af2ba9b` baseline (the suite's remaining failures are
+pre-existing: nlags on short series, Chile tolerances, quarterly npar).
 
-**Cierre de la unificación (hecho):** `build_model` es ahora el único motor en
-ambos modos. Sin spec → `DefaultPolicy` (autónomo). Con spec confirmada
-(`lam/d/D/p/q/n_harmonics/decision`) → `ClaudePolicy`, que honra lo que el
-analista fijó y deja el resto a la heurística, conduciendo el mismo
-`run_full`. «Autónomo» y «guiado» son literalmente el mismo camino con distinto
-«quién confirma». Para confirmación outlier-a-outlier sigue disponible el flujo
-`confirm_and_estimate` + `suggest_intervention_form`.
+**Closing the unification (done):** `build_model` is now the only engine in both
+modes. With no spec → `DefaultPolicy` (autonomous). With a confirmed spec
+(`lam/d/D/p/q/n_harmonics/decision`) → `ClaudePolicy`, which honours what the
+analyst fixed and leaves the rest to the heuristic, driving the same `run_full`.
+"Autonomous" and "guided" are literally the same path with a different "who
+confirms". For outlier-by-outlier confirmation the `confirm_and_estimate` +
+`suggest_intervention_form` flow is still available.
 
-### Riesgo y verificación
+### Risk and verification
 
-- **Riesgo principal:** la salida de `build_model` puede cambiar si una decisión
-  inline no era exactamente equivalente a la nueva función de `policy`. Mitigado
-  por los golden tests de la Fase 0.
-- **Verificación por fase:** los golden tests deben pasar tras cada fase
-  (comportamiento preservado) salvo cambios deliberados documentados.
-- **Secuencia:** cada fase es independiente y desplegable; no hay big-bang.
+- **Main risk:** `build_model`'s output can change if an inline decision was not
+  exactly equivalent to the new `policy` function. Mitigated by the Phase 0
+  golden tests.
+- **Verification per phase:** the golden tests must pass after each phase
+  (behaviour preserved) except for deliberate, documented changes.
+- **Sequence:** every phase is independent and deployable; there is no big bang.
 
-### Estado del contrato `data` (relacionado)
+### State of the `data` contract (related)
 
-`Description.data` es un `dict` no tipado con defaults mágicos
-(`data.get("recommended_d", 1)`). Ahí se escondió el bug del `d=1` cableado.
-Recomendación complementaria al refactor: tipar `data` por etapa
-(`SeasonalityData`, `UnitRootData`, …) o eliminar los defaults mágicos para que
-una clave ausente sea error explícito.
+`Description.data` is an untyped `dict` with magic defaults
+(`data.get("recommended_d", 1)`). That is where the hard-wired `d=1` bug hid.
+A recommendation complementary to the refactor: type `data` per stage
+(`SeasonalityData`, `UnitRootData`, …) or remove the magic defaults so that a
+missing key is an explicit error.
 
 ---
 
-## 7. Deuda arquitectónica residual (fuera del refactor de orquestación)
+## 7. Residual architectural debt (outside the orchestration refactor)
 
-| Tema | Severidad | Nota |
+| Item | Severity | Note |
 |------|-----------|------|
-| Frontera FUF con atributos privados (`_fuf_*`) | Baja-media | Falta un `ForecastSpec` explícito |
-| Estado partido: `.inp`/`.pre` vs `guion.json` | Media | `guion.json` debería ser la fuente de verdad |
-| `_write_inp` duplica el conocimiento de formato de FUE | Media | Sin sello de versión en el header `.inp` |
-| Gráficos partidos: pyfug vs `fue.plots` | Baja | pyfug debería ser dueño de toda la gráfica |
+| The FUF boundary uses private attributes (`_fuf_*`) | Low-medium | An explicit `ForecastSpec` is missing |
+| Split state: `.inp`/`.pre` vs `guion.json` | Medium | `guion.json` ought to be the source of truth |
+| `_write_inp` duplicates FUE's knowledge of the format | Medium | No version stamp in the `.inp` header |
+| Split graphics: pyfug vs `fue.plots` | Low | pyfug should own all the plotting |
 
 ---
 
-## 8. Qué preservar
+## 8. What to preserve
 
-- `describe.py` como **adaptador semántico** (motores → evidencia conversable).
-- El **grafo de dependencias sin ciclos** y la separación FUE(números) /
-  pyfug(gráficos).
-- `guion` como **audit trail** del proceso iterativo BJT.
-- La distinción guiado/autónomo — pero implementada como **un solo camino de
-  orquestación** con distinto «quién confirma».
+- `describe.py` as the **semantic adapter** (engines → conversable evidence).
+- The **acyclic dependency graph** and the FUE(numbers) / pyfug(graphics)
+  separation.
+- `guion` as the **audit trail** of the iterative BJT process.
+- The guided/autonomous distinction — but implemented as **a single
+  orchestration path** with a different "who confirms".

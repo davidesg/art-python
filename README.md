@@ -65,7 +65,7 @@ PyPI renders this page only, so everything below is linked absolutely and also
 | | |
 |---|---|
 | [Quickstart](https://github.com/davidesg/art-python/blob/master/docs/QUICKSTART.md) | install, first analysis, EN / ES |
-| [MCP tool reference](https://github.com/davidesg/art-python/blob/master/docs/TOOLS.md) | every `art-mcp` tool and what it answers |
+| [MCP tool reference](https://github.com/davidesg/art-python/blob/master/docs/TOOLS.md) | every `art-mcp` tool, generated from the docstrings |
 | [Architecture](https://github.com/davidesg/art-python/blob/master/docs/ARCHITECTURE.md) | how ART, FUE, FUG and FUF fit together |
 | [Rescaling](https://github.com/davidesg/art-python/blob/master/docs/RESCALING_ARCHITECTURE.md) | why the scale factor exists and where it acts |
 | [Changelog](https://github.com/davidesg/art-python/blob/master/CHANGELOG.md) | what changed, version by version |
