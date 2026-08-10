@@ -49,6 +49,13 @@ a defensible study and a tidy one.
 
 ---
 
+> **Reproducing these numbers.** The study **deseasonalises** before fitting
+> (`Model(..., deseason="auto")`). It matters more than it sounds: on the Spanish
+> pair, leaving the seasonality in moves the contemporaneous correlation from
+> **0.51 to 0.23** and halves the pass-through coefficient — and the variance
+> decomposition below is driven by that correlation. Measured in
+> `COMPARISON_STATSMODELS.md`.
+
 ## Node 3 · The estimates
 
 The CPI equation, per country:

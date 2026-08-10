@@ -74,14 +74,19 @@ about 0.027 % of the Spanish CPI level.
 
 ### The `sima` example — the same pair, simultaneously
 
-> Take the same two series, difference them in logs, and fit a bivariate VAR
-> with `sima`. Give me the impulse responses and the variance decomposition —
-> and tell me what the Cholesky ordering assumes, and what changes if I reverse
-> it.
+> Take the same two series and fit a bivariate VAR with `sima` — logs, one
+> regular difference, **and deseasonalise**. Give me the impulse responses and
+> the variance decomposition, and tell me what the Cholesky ordering assumes and
+> what changes if I reverse it.
 
 The reversal is the point. With a contemporaneous residual correlation near
 0.5, how the shared variance is attributed is decided by the ordering, not by
 the data.
+
+And **do not skip the deseasonalising**. Without it that correlation comes out
+at 0.23 instead of 0.51 and the decomposition changes accordingly — measured in
+[Compared with statsmodels](COMPARISON_STATSMODELS.md), which also shows that
+`statsmodels.VARMAX` has no seasonal handling at all.
 
 ---
 

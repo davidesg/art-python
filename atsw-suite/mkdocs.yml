@@ -38,3 +38,4 @@ nav:
       - "mtram — oil into the Spanish CPI": WORKED_EXAMPLE_MTRAM.md
       - "sima — the same pair, simultaneously": WORKED_EXAMPLE_SIMA.md
   - File formats: FILE_FORMATS.md
+  - Compared with statsmodels: COMPARISON_STATSMODELS.md

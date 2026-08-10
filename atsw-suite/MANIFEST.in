@@ -7,3 +7,4 @@ include docs/index.md
 include docs/RUN_THE_EXAMPLES.md
 include src/atsw/examples/PROVENANCE.md
 recursive-include src/atsw/examples *.csv *.md
+include docs/COMPARISON_STATSMODELS.md
