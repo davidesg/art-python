@@ -2,3 +2,5 @@ include README.md
 include docs/WORKED_EXAMPLE_ART.md
 include docs/WORKED_EXAMPLE_MTRAM.md
 include docs/WORKED_EXAMPLE_SIMA.md
+include docs/FILE_FORMATS.md
+include docs/index.md

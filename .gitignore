@@ -12,3 +12,4 @@ cases/**/work/
 
 # Monte-Carlo draws for the DCD_f crits (regenerable; see research/sf_meg/README.md)
 research/sf_meg/out/
+site/

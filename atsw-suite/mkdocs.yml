@@ -1,0 +1,38 @@
+site_name: ATSW — A Time Series Workshop
+site_description: The Box-Jenkins-Treadway suite — exact-ML univariate estimation, transfer functions and VARMA, with three MCP assistants
+site_url: https://davidesg.github.io/art-python/
+repo_url: https://github.com/davidesg/art-python
+edit_uri: edit/master/atsw-suite/docs/
+docs_dir: docs
+site_dir: ../site
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/weather-night, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/weather-sunny, name: Light mode}
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.superfences
+  - pymdownx.highlight
+
+nav:
+  - Start here: index.md
+  - Worked examples:
+      - "art — the same series, two objectives": WORKED_EXAMPLE_ART.md
+      - "mtram — oil into the Spanish CPI": WORKED_EXAMPLE_MTRAM.md
+      - "sima — the same pair, simultaneously": WORKED_EXAMPLE_SIMA.md
+  - File formats: FILE_FORMATS.md
