@@ -29,9 +29,13 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - run: pip install mkdocs-material
+      # OJO: mkdocs resuelve -d RELATIVO AL FICHERO DE CONFIGURACIÓN, no al
+      # directorio de trabajo. Con -f atsw-suite/mkdocs.yml, `-d _site` escribe
+      # en atsw-suite/_site. Apuntar el artefacto a `_site` a secas no encuentra
+      # nada y upload-pages-artifact falla sin decir por qué.
       - run: mkdocs build -f atsw-suite/mkdocs.yml -d _site
       - uses: actions/upload-pages-artifact@v3
-        with: {path: _site}
+        with: {path: atsw-suite/_site}
 
   deploy:
     needs: build
