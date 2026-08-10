@@ -4,6 +4,21 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.1.9 / atsw 1.2.4 — 2026-08-10
+
+Limpieza para una versión estable. Sin cambios en los motores.
+
+- **`__version__` se lee de los metadatos instalados** en vez de ser una
+  constante escrita a mano. `art.__version__` decía `0.1.2` con la 0.1.8
+  instalada, y `atsw` iba a derivar igual: dos sitios que cambiar es uno de más,
+  y el que deriva es siempre el que nadie construye. `drtran` ya lo hacía así.
+- **Silenciado el aviso de `pydantic_settings` al arrancar el servidor MCP.**
+  `IncompleteFieldDefinitionWarning` sobre el campo `lifespan` sale de la
+  interacción entre versiones de dependencias, no de este código, y no toca el
+  protocolo --stdout sale limpio--; pero un servidor de stdio que escribe en
+  stderr al arrancar puede leerse como un fallo. Silenciado ACOTADO a ese aviso
+  y sólo alrededor del import que lo dispara.
+
 ## art-tseries 0.1.8 — 2026-08-10
 
 Documentación. Sin cambios en el motor ni en el servidor.

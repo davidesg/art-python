@@ -41,7 +41,17 @@ from .describe import (
     _sample_acf_raw, _acf_outlier_contributions,
 )
 
-__version__ = "0.1.2"
+# Read from the installed metadata rather than repeated here: a hand-written
+# constant drifts, and the copy that drifts is always the one nobody builds
+# from. This one said "0.1.2" while the distribution was already further on.
+try:
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+    try:
+        __version__ = _pkg_version("art-tseries")
+    except PackageNotFoundError:            # running from a source tree
+        __version__ = "0.0.0.dev0"
+except ImportError:                         # pragma: no cover
+    __version__ = "0.0.0.dev0"
 __all__ = [
     "IdentificationListing", "identification_listing",
     "BoxCoxSelection", "boxcox_selection",

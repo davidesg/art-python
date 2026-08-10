@@ -5,9 +5,17 @@ Treadway suite and its three MCP assistants. It carries no analysis code of its
 own, on purpose (see `atsw-mcp --help`).
 """
 
-__version__ = "1.2.3"
-
-
+# Read from the installed metadata rather than repeated here: a hand-written
+# constant drifts, and the copy that drifts is always the one nobody builds
+# from. This one said "1.2.3" while the distribution was already further on.
+try:
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+    try:
+        __version__ = _pkg_version("atsw")
+    except PackageNotFoundError:            # running from a source tree
+        __version__ = "0.0.0.dev0"
+except ImportError:                         # pragma: no cover
+    __version__ = "0.0.0.dev0"
 def example_path(name: str = "") -> str:
     """Where the example data lives after `pip install atsw`.
 
