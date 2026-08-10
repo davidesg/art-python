@@ -75,10 +75,16 @@ whatever the answer.
 > about the series. Reading it as evidence for the null is a mistake, and it is
 > exactly the kind of thing a guided assistant should say out loud.
 
-### Node 5 · The competing representation, and a tie broken on economics
+### Node 5 · The canonical airline (D = 1), and a tie broken on economics
 
-Built through the guided B2 branch on ∇∇₁₂, the Box-Jenkins airline competitor
-needs a regular term. The textbook answer is MA(1). **The decision was AR(1)**,
+This node deserves saying plainly: `∇∇₁₂` with a regular and a seasonal MA is
+**the canonical Box-Jenkins model for a seasonal series** — the airline model of
+the 1970 book — and it is what most practitioners would build first. It is not a
+straw man set up to lose. It is the reference against which the
+frequency-selective alternative has to justify itself, and if it wins there is
+nothing to discuss.
+
+Built through the guided B2 branch on ∇∇₁₂, it needs a regular term. The textbook answer is MA(1). **The decision was AR(1)**,
 on the grounds that inflation has inertia and the deterministic model had
 already estimated φ ≈ 0.40 for exactly that.
 
