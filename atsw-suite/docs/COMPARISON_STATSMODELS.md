@@ -89,6 +89,77 @@ is the right tool for most of them.
 
 ---
 
+## 3b. Is VARMAX an alternative to `drtran`? No — but ARDL is the near miss
+
+VARMAX does accept exogenous variables, so the question is fair. Its own
+documentation writes the model as
+
+```
+y_t = A(t) + A_1 y_{t-1} + … + A_p y_{t-p} + B x_t + ε_t + M_1 ε_{t-1} + …
+```
+
+**`B x_t` — contemporaneous, and nothing else.** No lags of `x`, no polynomial.
+As a transfer function that is the degenerate case `ν(B) = ω₀` with `b = 0`,
+`r = 0`, `s = 0`: a regression on `x` with VARMA errors. You can add lags by
+building extra columns of `exog` by hand, and then you have a free coefficient
+per lag and no denominator — which is precisely the parsimony the rational form
+exists to buy.
+
+**The real analogue in statsmodels is `statsmodels.tsa.ardl.ARDL`**, and it is
+genuinely a rational transfer. Written out,
+
+```
+φ(B) y_t = c + β(B) x_t + ε_t        ⟹     y_t = [β(B)/φ(B)] x_t + [1/φ(B)] ε_t
+```
+
+so the input does pass through a rational filter. Against Box-Jenkins:
+
+```
+y_t = [ω(B)/δ(B)] B^b x_t  +  [θ(B)/φ(B)] a_t
+```
+
+**The difference is one polynomial doing two jobs.** In ARDL the transfer's
+denominator IS the noise's AR — one `φ(B)` for both — and there is no MA in the
+noise at all. In Box-Jenkins `δ(B)` and `φ(B)/θ(B)` are specified and estimated
+separately, because there is no reason the dynamics through which oil reaches
+prices should be the dynamics of what is left over.
+
+An ARDL can of course *approximate* a Box-Jenkins transfer by raising its order
+until one polynomial mimics both. You pay in parameters, and you lose the
+reading: you can no longer say "this is the transfer's decay and that is the
+noise's", which is the sentence a transfer model is built to be able to say.
+
+Measured on the example series (`Δln × 100`, same construction as §1):
+
+| | long-run multiplier | note |
+|---|---|---|
+| `ARDL(1,1)` | 0.037283 | includes the contemporaneous `dwti.L0 = 0.0151` |
+| `drvarma` VAR(1), CPI equation | 0.024495 | reduced form has no contemporaneous term |
+
+They differ partly because they are different models — the ARDL has a
+contemporaneous term the VAR's reduced form cannot have — which is itself the
+point: *which* dynamic assumptions you can state is what separates these tools,
+not how well they optimise.
+
+What ARDL does not offer, and `drtran` does:
+
+* a **delay `b`** as a parameter of the specification rather than an accident of
+  which lag columns you included;
+* a **separate noise ARMA**, so the transfer's decay and the residual dynamics
+  are not forced to share a polynomial;
+* **identification by prewhitening and the cross-correlation**, which reads
+  `(b, r, s)` off a correlogram; ARDL selects by information criteria over a
+  grid (`ardl_select_order`);
+* **networks** — several inputs and outputs as a DAG;
+* and **exact ML** for the whole system at once; ARDL is conditional least
+  squares.
+
+And a search of `statsmodels.tsa` for "transfer function" or "rational lag"
+returns **nothing**. The Box-Jenkins transfer function, with `ω(B)/δ(B)B^b` and
+an independently specified noise, is not implemented there.
+
+---
+
 ## 4. What to take from this
 
 1. **Do not choose on the engine.** Two independent implementations of exact ML
