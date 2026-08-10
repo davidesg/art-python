@@ -4,6 +4,7 @@ site_url: https://davidesg.github.io/art-python/
 repo_url: https://github.com/davidesg/art-python
 edit_uri: edit/master/atsw-suite/docs/
 docs_dir: docs
+# site_dir lo fija el workflow con -d; en local va a ../site
 site_dir: ../site
 
 theme:
@@ -31,6 +32,7 @@ markdown_extensions:
 
 nav:
   - Start here: index.md
+  - Run the examples: RUN_THE_EXAMPLES.md
   - Worked examples:
       - "art — the same series, two objectives": WORKED_EXAMPLE_ART.md
       - "mtram — oil into the Spanish CPI": WORKED_EXAMPLE_MTRAM.md

@@ -26,6 +26,20 @@ you are prepared to assume — the `sima` example ends on exactly that question.
 **And the univariate model is the measuring stick.** If a multivariate model
 cannot beat its forecasts, the multivariate model is what needs rethinking.
 
+## The examples run
+
+Both series the worked examples use **ship inside the package**, so every node
+can be reproduced:
+
+```python
+import atsw
+atsw.example_path("IPC_ES.csv")    # Spanish CPI, 216 obs, 2002-01…2019-12
+atsw.example_path("WTI.csv")       # oil, same window
+```
+
+[**How to run them**](RUN_THE_EXAMPLES.md) — the prompts to paste, and what to
+expect.
+
 ## Where to start
 
 * **New to the suite** — read the [`art` worked example](WORKED_EXAMPLE_ART.md).

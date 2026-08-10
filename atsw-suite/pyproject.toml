@@ -81,3 +81,6 @@ atsw-mcp = "atsw.mcp_install:main"
 [tool.setuptools]
 package-dir = { "" = "src" }
 packages = ["atsw"]
+# Los datos de los ejemplos viajan DENTRO del wheel: si sólo fueran en el
+# sdist, quien instalase normalmente no podría correr los ejemplos.
+package-data = { "atsw" = ["examples/*"] }
