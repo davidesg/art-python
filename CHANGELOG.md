@@ -4,6 +4,14 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.1.10 / atsw 1.2.5 — 2026-08-10
+
+Corrige el silenciado de 0.1.9, que no silenciaba. El aviso de
+`pydantic_settings` no salta al IMPORTAR FastMCP sino al CONSTRUIRLO, y el
+filtro estaba puesto alrededor del import, dentro de un `catch_warnings` que se
+deshacía justo antes de que hiciera falta. Ahora va a nivel de módulo, acotado
+por mensaje y por módulo de origen. Comprobado con `-W always`: cero avisos.
+
 ## art-tseries 0.1.9 / atsw 1.2.4 — 2026-08-10
 
 Limpieza para una versión estable. Sin cambios en los motores.
