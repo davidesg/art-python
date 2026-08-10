@@ -274,3 +274,15 @@ missing key is an explicit error.
 - `guion` as the **audit trail** of the iterative BJT process.
 - The guided/autonomous distinction — but implemented as **a single
   orchestration path** with a different "who confirms".
+
+## Releasing: push a tag, do not run `twine`
+
+This package publishes from CI: pushing a `v*` tag (or `art-v*` / `atsw-v*`)
+triggers the workflow that builds and uploads. Running `twine upload` by hand
+gets there first, and then the workflow finds the files already present and
+fails — which is what happened to several releases before this note existed.
+
+    git tag -a v<version> -m "<package> <version>"
+    git push origin v<version>
+
+That is the whole release. Watch the run; do not upload anything yourself.
