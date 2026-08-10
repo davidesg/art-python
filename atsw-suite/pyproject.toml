@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "1.2.2"
+version         = "1.2.3"
 description     = "ATSW — A Time Series Workshop: the Box-Jenkins-Treadway suite (univariate exact-ML estimation, graphics, model building, transfer functions and multivariate VARMA) with three MCP assistants for LLM-driven analysis"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -51,7 +51,7 @@ classifiers     = [
 dependencies = [
     "fue>=0.1.9",             # univariate estimation engine + FUF forecasting
     "pyfug>=2.0",             # Jenkins-Treadway graphics
-    "art-tseries>=0.1.6",     # model building + MCP server (art-mcp)
+    "art-tseries>=0.1.7",     # model building + MCP server (art-mcp)
     # >=0.2.0 is NOT housekeeping. Up to 0.1.1 drtran related each series
     # differenced by ITS OWN operator, so whenever the output and the input
     # carried different differencing the fitted transfer was nu(B)*Delta(B) and

@@ -4,6 +4,21 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.1.8 — 2026-08-10
+
+Documentación. Sin cambios en el motor ni en el servidor.
+
+- **`docs/TOOLS.md` se GENERA de los docstrings** (`tools/gen_tools_md.py`), y
+  cubre las **35** herramientas: la versión escrita a mano cubría 32. En un
+  servidor MCP el docstring es lo que lee el MODELO, así que la referencia y la
+  instrucción son ahora el mismo texto por construcción y no pueden divergir.
+  El generador lee las herramientas REGISTRADAS, no el código, así que una que
+  exista y no esté registrada aparece como ausente también aquí.
+- **`docs/ARCHITECTURE.md` traducido al inglés.** Era el único documento que se
+  publicaba en español. Corregido de paso su recuento de herramientas.
+- `docs/SUITE_DOCUMENTATION_PLAN.md`: el inventario de la documentación de los
+  tres servidores y qué hacer con ella.
+
 ## art-tseries 0.1.7 — 2026-08-10
 
 Corrige el EMPAQUETADO de 0.1.6, no el código: el motor y el servidor son los

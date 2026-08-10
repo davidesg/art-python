@@ -10,6 +10,7 @@ include CHANGELOG.md
 include TODO.md
 include docs/QUICKSTART.md
 include docs/TOOLS.md
+include docs/SUITE_DOCUMENTATION_PLAN.md
 include docs/ARCHITECTURE.md
 include docs/RESCALING_ARCHITECTURE.md
 

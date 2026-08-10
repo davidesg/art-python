@@ -5,7 +5,7 @@ Treadway suite and its three MCP assistants. It carries no analysis code of its
 own, on purpose (see `atsw-mcp --help`).
 """
 
-__version__ = "1.2.1"
+__version__ = "1.2.3"
 
 
 def example_path(name: str = "") -> str:
