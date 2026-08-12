@@ -239,8 +239,16 @@ DESPUÉS DE LLAMADA 4 — Modelo de referencia (si D=0):
 ─────────────────────────────────────────────────────
 ETAPA 2 — ESTIMACIÓN DEL MODELO ARMA ELEGIDO
 ─────────────────────────────────────────────────────
-  → Llama confirm_and_estimate con (λ, d, D, p, q, n_harmonics=freq//2-1) confirmados
+  → Llama confirm_and_estimate con (λ, d, D, p, q) confirmados y
+    **base_pre_path=<el .pre del modelo de referencia>**
     output_path: cases/<serie>/work/<serie>_v1.inp (NUNCA la raíz cases/<serie>/)
+
+    ENCADENA SIEMPRE por base_pre_path cuando ya existe un .pre. Un .pre es un
+    ÓPTIMO en forma re-ejecutable: encadenar hereda armónicos, intervenciones y
+    la media YA estimados y solo añade el ARMA. Sin base_pre_path el modelo se
+    reconstruye desde cero, se re-estima lo ya resuelto y la media se pierde
+    (BUG-0014). Con base_pre_path, n_harmonics se ignora: los armónicos vienen
+    del .pre.
     Este tool construye el INP, estima y devuelve la ECUACIÓN + diagnosis en una sola respuesta.
     NO llames model_equation_display por separado — la ecuación ya viene incluida.
   → PRESENTA la ecuación del modelo (verbatim) y MUESTRA el gráfico diagnóstico Treadway
@@ -267,10 +275,34 @@ ETAPA 3 — DIAGNOSIS E INTERVENCIONES
 ─────────────────────────────────────────────────────
 ETAPA 4 — CONTRASTES FORMALES
 ─────────────────────────────────────────────────────
+  ⚠ EL MEG VA ANTES DE PODAR ARMÓNICOS ESTACIONALES. Es un ORDEN, no una
+    preferencia, y es la trampa más fácil de este flujo (BUG-0010):
+      · La hipótesis nula del MEG ES el armónico determinista en f. Si lo has
+        podado, esa frecuencia no se puede contrastar: el barrido la devuelve
+        como «sin contrastar» y te quedas sin veredicto.
+      · Una t BAJA en un armónico es evidencia A FAVOR de que esa frecuencia sea
+        estocástica, no de que no exista: un armónico de coeficiente fijo
+        ajustado a una frecuencia cuya amplitud vaga promedia hacia cero. Podar
+        por significación borra justo las frecuencias que el MEG necesita mirar.
+      · Medido en IPC_ES: f=5 (|t|=0.29 y 1.27, la primera que cualquier filtro
+        borra) llevaba la segunda evidencia más fuerte de estocasticidad, y f=3
+        (|t|=5.4 y 2.1, intocable) es la que ES estocástica.
+    La regla general de contrastar sobre un modelo parsimonioso NO alcanza a los
+    parámetros que SON la hipótesis bajo contraste. Si la diagnosis de la ETAPA 3
+    sugiere sobreparametrización en pares cos/sin, esa poda espera a después de
+    esta etapa.
   → Llama formal_tests (Shin-Fuller, DCD, RV, MEG)
   → MEG: si detecta estocasticidad en alguna frecuencia → reformular con D=1
     (revisión de la hipótesis de trabajo B1)
+  → Si el MEG devuelve alguna frecuencia «sin contrastar», NO lo trates como
+    ausencia de problema: dilo, y vuelve a correrlo sobre la línea base pre-MEG
+    (todas las frecuencias estacionales deterministas).
   → DCD: si no rechaza invertibilidad → reformular el factor MA
+
+  → SOLO DESPUÉS: si quedan armónicos no significativos en frecuencias que el MEG
+    declaró DETERMINISTAS, ahí sí procede seasonal_param_analysis +
+    test_seasonal_simplification. Las que salieron ESTOCÁSTICAS no se podan: se
+    reformulan con ifadf[f]=1.
 
 ══════════════════════════════════════════════════════
 REGLAS GENERALES
@@ -1388,6 +1420,27 @@ def seasonal_param_analysis(inp_path: str) -> list:
     Bar chart figure: two panels (cos coefficients | sin coefficients),
     colour-coded by significance.
 
+    ⚠ PRECONDITION — run the MEG FIRST (BUG-0010)
+    ---------------------------------------------
+    "Which harmonics could be dropped" is only answerable AFTER the MEG has run
+    on the all-deterministic baseline. Two reasons, and the second is the one
+    that bites:
+
+    * The MEG's null model IS the deterministic harmonic at f. Drop it and there
+      is nothing left to contrast: the sweep reports that frequency as
+      **sin contrastar** and the analyst never gets a verdict for it.
+    * **A low t-ratio at f is evidence FOR stochastic seasonality at f**, not
+      evidence that f is absent. A fixed-coefficient harmonic fitted to a
+      frequency whose amplitude wanders averages toward zero. So pruning by
+      significance removes preferentially the frequencies the MEG most needs to
+      look at, under the very hypothesis (deterministic) it exists to test.
+
+    Measured on IPC_ES, the two criteria came out close to orthogonal in both
+    directions at once: f=5 (|t| = 0.29 and 1.27 — the first pair any filter
+    deletes) carried the second-highest MEG evidence of stochasticity, while
+    f=3 (|t| = 5.4 and 2.1 — untouchable by any filter) is the one that IS
+    stochastic.
+
     Parameters
     ----------
     inp_path : path to a fitted .inp or .pre file
@@ -1415,9 +1468,18 @@ def test_seasonal_simplification(inp_path: str,
     computes LR = 2·(L_free − L_restricted) ~ χ²(df), where df = number of
     constrained parameters (2 per regular harmonic, 1 for Nyquist/alter).
 
-    Typical workflow after seasonal_param_analysis:
-    - Pass the k values with |t| ≤ 2 in both cos and sin as freq_list.
-    - If LR < χ²(df, 5%): safely remove those harmonics and refit.
+    ⚠ RUN THE MEG FIRST. This tool prunes the deterministic harmonics, which are
+    the MEG's null hypothesis: prune before testing and that frequency can no
+    longer be contrasted at all. And the t-ratio is not neutral evidence here —
+    a low |t| at f is evidence FOR stochastic seasonality at f, not for its
+    absence. See `seasonal_param_analysis` for the measured IPC_ES case and
+    `meg_frequency` for the test itself. (BUG-0010.)
+
+    Typical workflow, AFTER the MEG has run on the all-deterministic baseline:
+    - Pass the k values with |t| ≤ 2 in both cos and sin as freq_list —
+      **excluding any frequency the MEG called stochastic**, which needs
+      `ifadf[f]=1` rather than pruning.
+    - If LR < χ²(df, 5%): remove those harmonics and refit.
     - If LR ≥ χ²(df, 5%): the harmonics are jointly significant — keep them.
 
     Parameters
@@ -1767,11 +1829,11 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             bc      = describe_boxcox(ts)
             rec_lam = bc.data["recommended_lambda"]
 
-            # Index series rule: series without a natural zero base → always log
-            _INDEX_PREFIXES = ("ipc", "ipi", "ipp", "cpi", "ppi", "cci",
-                               "indice", "índice", "index", "idx", "price")
-            name_lower = (ts.name or "").lower()
-            is_index   = any(name_lower.startswith(p) for p in _INDEX_PREFIXES)
+            # Index series rule: series without a natural zero base → always log.
+            # La regla vive en `policy.decide_domain`, no aquí: tenerla sólo en
+            # esta capa es lo que produjo BUG-0015 —el camino autónomo partía una
+            # familia de ocho IPC entre logs y niveles—. Una copia, dos caminos.
+            is_index = policy.decide_domain(ts) == "price_index"
             if is_index and rec_lam != 0.0:
                 rec_lam   = 0.0
                 index_note = (
@@ -1934,19 +1996,32 @@ def guided_identification(inp_path: str, lam: float = -1.0,
         # ── Mean significance check ───────────────────────────────────────────
         import numpy as _np
         from art.identification import boxcox_transform as _bct, apply_differences as _adiff
-        _series_for_mu = (
-            _np.array(m_pre.residuals.data) if pre_path else
-            _np.array(_adiff(_bct(ts.data, lam), ts.freq, d, D))
-        )
+        # BUG-0013: this used to read `m_pre.residuals` whenever a .pre existed
+        # -- the residuals of a model in which mu had ALREADY been fitted. It
+        # therefore measured t ~ 0 and advised `estimate_mu=False` on series
+        # whose drift is significant at t > 5 (observed on IPC_ES: t=-0.00
+        # reported against a true t=5.40). The question is about the DATA, so
+        # it is always asked of the differenced series.
+        _series_for_mu = _np.array(_adiff(_bct(ts.data, lam), ts.freq, d, D))
         _mu_bar = float(_np.mean(_series_for_mu))
         _se_mu  = float(_np.std(_series_for_mu, ddof=1) / _np.sqrt(len(_series_for_mu)))
         _t_mu   = _mu_bar / _se_mu if _se_mu > 0 else 0.0
         _rec_mu = abs(_t_mu) > 2.0
+        # A base that already carries a fitted mean settles it: chaining from
+        # its .pre inherits that estimate (BUG-0014), so dropping it here would
+        # throw away an optimum.
+        _mu_in_base = bool(pre_path and getattr(m_pre, "estimate_mu", False))
+        if _mu_in_base:
+            _rec_mu = True
         mu_decision = (
-            f"\n\n**¿Incluir media (μ)?** μ̄={_mu_bar:.4f}, SE={_se_mu:.4f}, "
-            f"t={_t_mu:+.2f} → "
-            + ("**Sí, `estimate_mu=True`** (|t|>2)" if _rec_mu
-               else "**No, `estimate_mu=False`** (|t|≤2, media no significativa)")
+            f"\n\n**¿Incluir media (μ)?** Deriva de {data_label}: "
+            f"μ̄={_mu_bar:.4f}, SE={_se_mu:.4f}, t={_t_mu:+.2f} → "
+            + ("**Sí, `estimate_mu=True`** — el modelo base ya la lleva estimada "
+               "y se hereda al encadenar por `base_pre_path`" if _mu_in_base
+               else "**Sí, `estimate_mu=True`** (|t|>2)" if _rec_mu
+               else "**No, `estimate_mu=False`** (|t|≤2, sin deriva)")
+            + "\n*(En un índice de precios μ ES la tasa de inflación: si sale "
+              "significativa, omitirla deja la deriva en los residuos.)*"
         )
 
         if D == 1:
@@ -1968,9 +2043,12 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             if pre_path:
                 next_call = (
                     f"Llama a `confirm_and_estimate` añadiendo el ARMA al modelo "
-                    f"de `{os.path.basename(pre_path)}`:\n"
-                    f"`inp_path=\"{pre_path}\", output_path=..._mFinal.inp, "
-                    f"lam={lam}, d={d}, D=0, p=<p>, q=<q>, n_harmonics={n_harm}"
+                    f"de `{os.path.basename(pre_path)}` — **encadenando por "
+                    f"`base_pre_path`**, que hereda armónicos, intervenciones y "
+                    f"media ya estimados en lugar de reconstruir desde cero:\n"
+                    f"`inp_path=\"{pre_path}\", base_pre_path=\"{pre_path}\", "
+                    f"output_path=..._mFinal.inp, "
+                    f"lam={lam}, d={d}, D=0, p=<p>, q=<q>"
                     f", estimate_mu={'True' if _rec_mu else 'False'}`\n"
                     f"*(Sugerencia: p={rec_p}, q={rec_q})*"
                 )
@@ -2131,7 +2209,11 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                       add only the ARMA spec. Typical use: final ARMA step after
                       outlier cycle in B1 flow.
     estimate_mu     : include mean parameter μ in estimation (default False).
-                      Set True when μ̄/SE > 2 in the residuals of the clean model.
+                      Set True when the DRIFT of the differenced series has
+                      |t| > 2 -- not the mean of residuals of a model that
+                      already fitted a mu, which reads ~0 by construction
+                      (BUG-0013). When base_pre_path carries a fitted mean it is
+                      inherited, so pass True to keep it.
     include_histogram : return histogram PNG as third item (default False).
                       Keep False during the outlier cycle to save tokens; set True
                       for the final model only.
@@ -2862,6 +2944,8 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
                 run_meg: bool = False,
                 lam: float = -1.0, d: int = -1, D: int = -1,
                 p: int = -1, q: int = -1, n_harmonics: int = -1,
+                estimate_mu: int = -1,
+                domain: str = "",
                 decision: str = "",
                 guion_path: str = "",
                 guion_name: str = "",
@@ -2876,8 +2960,8 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
     decision:
 
       - Autonomous (all spec params left at their sentinel): the heuristic
-        DefaultPolicy decides λ, d, D, harmonics, p, q.
-      - Guided (any of lam/d/D/p/q/n_harmonics/decision provided): those
+        DefaultPolicy decides λ, d, D, harmonics, p, q and the mean.
+      - Guided (any of lam/d/D/p/q/n_harmonics/estimate_mu/decision provided): those
         analyst/Claude-confirmed choices are honoured (ClaudePolicy) and the
         heuristic fills only what was left unspecified. Use after
         guided_identification to run the build with the confirmed spec while
@@ -2895,6 +2979,18 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
     d, D          : confirmed differencing orders; -1 = heuristic
     p, q          : confirmed ARMA orders; -1 = heuristic
     n_harmonics   : confirmed cos/sin pairs (B1); -1 = heuristic
+    estimate_mu   : free mean? 1 = yes, 0 = no, -1 = let the policy decide from
+                    the drift of the differenced series (|t| > 2). For a price
+                    index the mean IS the inflation rate, so -1 usually gives 1;
+                    force 0 only when you mean "this series has no drift".
+    domain        : what KIND of series this is — "price_index" or "generic".
+                    "" (default) = infer from the name, which is WEAK evidence
+                    and is why declaring it wins. A price index has no natural
+                    zero (its base year is a convention), so it takes λ=0
+                    whatever the Box-Cox statistic says; measured on eight CPI
+                    indices the statistic split them 4/4 on a |gap| that never
+                    exceeded 0.304. Declare it when the name does not say so —
+                    "EMU" is a price index and does not look like one.
     decision      : confirmed "A"/"B1"/"B2"; "" = heuristic
     guion_path    : (optional) path to guion.json — records the final model
     guion_name    : version name (e.g. "PC1"); auto-assigned if empty
@@ -2922,6 +3018,11 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
         if p >= 0:           overrides["p"] = p
         if q >= 0:           overrides["q"] = q
         if n_harmonics >= 0: overrides["n_harmonics"] = n_harmonics
+        # BUG-0013: -1 leaves the mean to the policy's drift test, which is what
+        # you want -- the analyst only overrides to force it on or off.
+        if estimate_mu >= 0: overrides["estimate_mu"] = bool(estimate_mu)
+        # BUG-0015: qué CLASE de serie es. Declarado gana a inferido del nombre.
+        if domain:           overrides["domain"] = domain
         if decision:         overrides["decision"] = decision
         guided = bool(overrides)
         decision_policy = policy.ClaudePolicy(**overrides) if guided else None

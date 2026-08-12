@@ -334,6 +334,23 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
     results = unit_root_tests(ts, lam=lam, max_d=max_d)
     rec_d   = recommended_d(results)
 
+    # ¿Cuánto de la serie ES la tendencia? R² de una recta sobre el nivel
+    # transformado. Es evidencia, no decisión: la política la usa para dudar de
+    # un `recommended_d = 0` sobre una serie que sube (BUG-0016), y la fracción
+    # de varianza explicada es lo que corresponde a "observar el gráfico" —
+    # una pendiente puede ser significativa y no dominar nada. Medido: las
+    # series anuales de precipitación de Cycles, que son I(0), dan 0.076 y
+    # 0.035 con pendiente HAC significativa; IPC_ES da 0.910.
+    _yv = np.asarray(ts.data, float)
+    _z = np.log(np.where(_yv > 0, _yv, np.nan)) if lam == 0.0 else _yv
+    trend_r2 = 0.0
+    if _z.size >= 3 and np.all(np.isfinite(_z)):
+        _t = np.arange(_z.size, dtype=float)
+        _fit = np.polyval(np.polyfit(_t, _z, 1), _t)
+        _sst = float(((_z - _z.mean()) ** 2).sum())
+        if _sst > 0:
+            trend_r2 = float(1.0 - ((_z - _fit) ** 2).sum() / _sst)
+
     _VERDICT_ES = {
         "stationary": "estacionaria ✓",
         "unit_root":  "raíz unitaria ✗",
@@ -448,6 +465,7 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
         recommendation=rec_text,
         data={
             "recommended_d": rec_d,
+            "trend_r2": trend_r2,
             "results": [
                 {
                     "d": r.d, "label": r.label, "n": r.n,
@@ -996,8 +1014,16 @@ def model_equation(ts, model) -> str:
         ar_sf = model.ar_s_free if hasattr(model, "ar_s_free") else None
         _add_arma_blocks(left_blocks, model.ar_s, ar_sf, lag_mult=freq)
     _add_fixed_freq(left_blocks, model.ar_f)
+
+    # Los factores `ifadf` NO van a `left_blocks` (BUG-0012). Son DIFERENCIACIÓN,
+    # igual que ∇ y ∇_s, así que van dentro del paréntesis de μ: μ es la media de
+    # la variable COMPLETAMENTE diferenciada. Fuera del paréntesis la ecuación
+    # impresa dice A_f(B)·(∇Nₜ − μ), cuya media es A_f(1)·(m − μ) ≠ 0 — es decir,
+    # no es el modelo que se ajustó.
+    ifadf_blocks: list[tuple[str, str]] = []
     if getattr(model, "ifadf", None):
-        _add_ifadf_blocks(left_blocks, model.ifadf)
+        _add_ifadf_blocks(ifadf_blocks, model.ifadf)
+    ifadf_s = "".join(f"{v} " for v, _ in ifadf_blocks)
 
     _add_arma_blocks(right_blocks, model.ma or [],  model.ma_free)
     if model.ma_s:
@@ -1021,7 +1047,16 @@ def model_equation(ts, model) -> str:
     # ∇ is placed INSIDE the Nₜ term so that μ is the mean of the
     # differenced process (∇Nₜ), not of the non-stationary level Nₜ.
     # Correct form: (1−φB)(∇Nₜ − μ) = aₜ
-    nt_core = f"{diff_s}Nₜ" if diff_s else "Nₜ"
+    #
+    # The `ifadf` factors go in the same place and for the same reason: they are
+    # part of the differencing, so μ is the mean of what is left after ALL of it.
+    # Written outside, `A_f(B)(∇Nₜ − μ)` has mean `A_f(1)(m − μ)`, which for the
+    # f=4 case of BUG-0012 is 3·(0.1545 − 0.4642) = −0.93, not zero.
+    #
+    # Order: the ifadf factors are printed before ∇, so the seasonal operator
+    # reads outermost. They all commute — they are polynomials in B — so this is
+    # a presentation choice, fixed here so the regression can assert it.
+    nt_core = f"{ifadf_s}{diff_s}Nₜ" if (diff_s or ifadf_s) else "Nₜ"
     if mu_val_str:
         nt_label   = f"({nt_core} {mu_sign} {mu_val_str})"
         mu_pfx_len = len(f"({nt_core} {mu_sign} ")
@@ -1378,10 +1413,29 @@ def describe_diagnosis(model) -> Description:
             f"corr({lbl_i},{lbl_j})={r_val:+.3f}"
             for _, _, r_val, lbl_i, lbl_j in overpar_pairs
         )
+        # BUG-0010: este consejo se anexa a la MISMA cadena que dice "procede a
+        # los contrastes formales (DCD, MEG)", sin orden entre los dos. Si el par
+        # es un cos/sin estacional, podarlo primero deja al MEG sin hipótesis nula
+        # en esa frecuencia — y podar por t pre-juzga justo lo que el MEG contrasta.
+        seasonal_pair = any(
+            lbl.lower().startswith(("cos", "sin", "alter"))
+            for _, _, _, lbl_i, lbl_j in overpar_pairs for lbl in (lbl_i, lbl_j)
+        )
         overpar_note = (
             f" Sobreparametrización: {pair_str}. "
             f"Considera eliminar el parámetro menos significativo de cada par."
         )
+        if seasonal_pair:
+            overpar_note += (
+                " ⚠ PERO hay armónicos estacionales (cos/sin/alter) entre esos "
+                "pares: **la poda estacional va DESPUÉS del MEG**, no antes. El "
+                "MEG contrasta el armónico determinista contra su forma "
+                "estocástica, así que sin el armónico no hay nada que contrastar; "
+                "y una t baja en un armónico es evidencia A FAVOR de que esa "
+                "frecuencia sea estocástica, no de que no exista. La regla general "
+                "de contrastar sobre un modelo parsimonioso no alcanza a los "
+                "parámetros que SON la hipótesis."
+            )
         rec = rec.rstrip(".") + "." + overpar_note
 
     return Description(
@@ -1423,8 +1477,17 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
     od_res    = _try(lambda: dcd_overdiff_regular(model), None)
     dcd_f_res = _try(lambda: dcd_f(model), [])
     rv_res    = _try(lambda: rv(model),    [])
-    meg_res   = (_try(lambda: meg(model), [])
-                 if run_meg and _meg_suitable(model) else [])
+    # BUG-0010: this was `_try(lambda: meg(model), [])`, which made "raised" and
+    # "not requested" the same empty list. The sweep no longer raises on an
+    # unreformulable frequency -- it returns it as `skipped` -- so what is left
+    # here is the unexpected, and an unexpected failure of the MEG must be said
+    # out loud rather than read downstream as "nothing to report".
+    meg_res, meg_error = [], None
+    if run_meg and _meg_suitable(model):
+        try:
+            meg_res = meg(model)
+        except Exception as exc:
+            meg_error = f"{type(exc).__name__}: {exc}"
 
     lines = ["## Contrastes formales"]
 
@@ -1471,6 +1534,58 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
         lines.append(f"- θ̂={od_res.coef_free:+.4f}, LR={od_res.lr:.3f} "
                      f"(crít 5%={c5:.2f}) → {verdict}")
 
+    # ── EL PAR CONFIRMATORIO EN f=0 ───────────────────────────────────────
+    # Shin-Fuller y el DCD de sobrediferenciación tienen nulas OPUESTAS y
+    # acotan la banda de cuasi-cancelación. Su desacuerdo no es una
+    # contradicción a resolver eligiendo uno: ES el diagnóstico de que se está
+    # en esa banda (SF_MEG, tabla `tab:compare`). Reportarlos por separado
+    # invitaba a leer «considera d+1» como una conclusión.
+    quasi_cancellation = False
+    if sf_res is not None and od_res is not None:
+        od_says_more = od_res.lr >= od_res._crit['5%']
+        sf_says_enough = sf_res.stationary
+        lines.append("\n**Par confirmatorio en f=0** — dos contrastes con nulas "
+                     "opuestas sobre el mismo orden de integración")
+        lines.append(f"- lado AR (Shin-Fuller, H₀: ρ=1): "
+                     f"{'d basta ✓' if sf_says_enough else 'raíz unitaria → d+1'}")
+        lines.append(f"- lado MA (DCD sobrediferenciación, H₀: θ=1): "
+                     f"{'raíz genuina → d+1' if od_says_more else 'la ∇ extra sobra → d basta ✓'}")
+        if sf_says_enough != (not od_says_more):
+            quasi_cancellation = True
+            lines += [
+                "",
+                f"  ⚠ **DISCREPAN, y eso es el diagnóstico.** Con θ̂="
+                f"{od_res.coef_free:+.4f} el testigo está a "
+                f"{abs(1.0 - abs(od_res.coef_free)):.4f} de la frontera: es la "
+                "**banda de cuasi-cancelación** (r≈0.90–0.95 en la tabla del "
+                "paper), donde el lado MA detecta que r<1 y el lado AR ve un "
+                "proceso casi estacionario. Los dos tienen razón.",
+                "  En esa banda las representaciones son **equivalentes en "
+                "previsión**, así que la decisión no se toma con estos "
+                "estadísticos: se toma por parsimonia, o comparando previsiones "
+                "fuera de muestra.",
+                "  **No leas «considerar d+1» como una conclusión.**",
+            ]
+        else:
+            lines.append("  ✓ Los dos coinciden: el orden de integración no está "
+                         "en la banda ambigua.")
+
+        # Los dos avisos del paper, y sólo cuando pueden morder.
+        n_det = len(model.interventions or [])
+        if n_det:
+            lines.append(
+                f"  ℹ El crítico usado ({od_res._crit['5%']:.2f}) es el de la ley "
+                f"DESNUDA s=1. Este modelo lleva {n_det} deterministas, y en f=0 "
+                "el regresor constante es RESONANTE con la raíz unitaria — el "
+                "paper mide pile-up 0.927 en esa configuración frente a 0.6575 "
+                "desnudo. El crítico correcto ahí es mayor.")
+        if abs(abs(od_res.coef_free) - 1.0) > 1e-6:
+            lines.append(
+                "  ℹ θ̂ no se apila en la frontera, así que el LR usa ℓ(θ=1) "
+                "calculada por fue justo donde su perfil da un salto errático "
+                "(SF_MEG, apéndice de la verosimilitud de frontera). La decisión "
+                "debería revisarse con la verosimilitud exacta bandeada.")
+
     # DCD_f
     if dcd_f_res:
         lines.append("\n**DCD_f — no invertibilidad MA estacional** (H₀: λ₂=−1)")
@@ -1495,7 +1610,9 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
                      "(crít. DCD_f Monte Carlo, s=2 dependiente de n en frecuencias "
                      "interiores; s=1 en Nyquist)")
         for r in meg_res:
-            if r.dcd_result is None:
+            if r.skipped:
+                lines.append(f"- freq={r.freq}: ⚠ **sin contrastar** — {r.reason}")
+            elif r.dcd_result is None:
                 lines.append(f"- freq={r.freq}: {r.status}")
             else:
                 c5 = r.dcd_result._crit['5%']
@@ -1521,6 +1638,12 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
                 f"  ✓ Frecuencia(s) **determinista(s)**: {det_freqs}. "
                 "Los armónicos cos/sin actuales son la especificación correcta."
             )
+    elif meg_error is not None:
+        lines.append(
+            f"\n⚠ **El MEG falló y no hay veredictos**: {meg_error}. "
+            "La ausencia de esta sección NO significa que el modelo esté bien "
+            "en las frecuencias estacionales — significa que no se miraron."
+        )
     elif run_meg and not _meg_suitable(model):
         lines.append(
             "\n*MEG no aplica: requiere D=0 con armónicos cos/sin en el modelo.*"
@@ -1531,7 +1654,19 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
 
     # Build recommendation
     issues = []
-    if sf_res is not None and not sf_res.stationary:
+    if quasi_cancellation:
+        # En la banda, el par NO da una acción sobre d: da un diagnóstico. Emitir
+        # "considera d+1" aquí es justo lo que el paper dice que no se haga.
+        issues.append(
+            f"**Banda de cuasi-cancelación en f=0** (θ̂={od_res.coef_free:+.4f}): "
+            f"Shin-Fuller dice que d basta (Φ̂₁ᵤ={sf_res.phi_1u:.3f}) y el DCD de "
+            f"sobrediferenciación dice d+1 (LR={od_res.lr:.3f}). Los dos tienen "
+            "razón: es la banda donde las dos representaciones son equivalentes "
+            "en previsión. NO cambies d con esta evidencia — decide por "
+            "parsimonia (quédate con la actual) o compara previsiones fuera de "
+            "muestra. Ver SF_MEG, tabla `tab:compare`."
+        )
+    elif sf_res is not None and not sf_res.stationary:
         issues.append(
             f"Shin-Fuller no rechaza H₀ (Φ̂₁ᵤ={sf_res.phi_1u:.3f} ≤ {sf_res.crit_5pct:.2f}): "
             "posible raíz unitaria en el componente AR. Considera aumentar d en 1."
@@ -1547,6 +1682,23 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
         issues.append(
             f"freq={freq} es estocástica: activa ifadf[{freq}]=1 y elimina "
             f"los armónicos cos/sin de freq={freq}. Reestima."
+        )
+    # BUG-0010: una frecuencia sin contrastar no puede terminar en "el modelo es
+    # adecuado". El veredicto que falta es justo el que nadie va a echar de menos.
+    skipped_freqs = [r.freq for r in meg_res if r.skipped]
+    if skipped_freqs:
+        issues.append(
+            f"MEG sin contrastar en freq={skipped_freqs}: el modelo no tiene el "
+            "armónico determinista que el contraste necesita como hipótesis nula. "
+            "Si se podaron armónicos, corre el MEG sobre la línea base pre-MEG "
+            "(todas las frecuencias estacionales deterministas): una t baja en un "
+            "armónico es evidencia A FAVOR de estacionalidad estocástica en esa "
+            "frecuencia, no de que la frecuencia no exista."
+        )
+    if meg_error is not None:
+        issues.append(
+            f"El MEG no pudo ejecutarse ({meg_error}): las frecuencias "
+            "estacionales quedan sin contrastar."
         )
 
     if issues:
@@ -1574,8 +1726,19 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
                 if od_res is not None else None
             ),
             "meg": [{"freq": r.freq, "status": r.status,
-                     "lr": r.dcd_result.lr if r.dcd_result else None}
+                     "lr": r.dcd_result.lr if r.dcd_result else None,
+                     "reason": r.reason}
                     for r in meg_res],
+            "meg_error": meg_error,
+            "f0_pair": (
+                {"sf_stationary": sf_res.stationary,
+                 "sf_phi_1u": sf_res.phi_1u,
+                 "dcd_lr": od_res.lr,
+                 "dcd_theta": od_res.coef_free,
+                 "dcd_crit_5pct": od_res._crit['5%'],
+                 "quasi_cancellation": quasi_cancellation}
+                if (sf_res is not None and od_res is not None) else None
+            ),
         },
     )
 

@@ -194,6 +194,25 @@ def detect_seasonality(
     num_harmonics = s - 1
     total_params  = num_harmonics + 1
 
+    # An ANNUAL series (s=1) has NO seasonal frequencies: s-1 = 0 harmonics, so
+    # there is nothing to contrast and `f_stat = … / num_harmonics` divided by
+    # zero. It was not a degenerate test result — it was an exception thrown
+    # before any test ran, and it took the whole autonomous pipeline with it
+    # (`run_full` → `describe_seasonality`, BUG-0018).
+    #
+    # "Not applicable" is the honest answer and it is also the right one
+    # downstream: `decide_seasonal_structure` reads `seasonal_detected=False` as
+    # decision "A" with n_harmonics=0, which is what an annual model needs.
+    if s < 2:
+        return SeasonalDetectionResult(
+            name=name, freq=s, d=d, lam=lam,
+            seasonal_detected=False, f_stat=0.0, p_value=1.0,
+            dummies=np.zeros(s), dummy_se=np.zeros(s),
+            harmonic_coeffs=np.zeros(0),
+            freq_results=[], n_obs=n,
+            message="Serie anual (s=1): no hay frecuencias estacionales que contrastar",
+        )
+
     _fail = SeasonalDetectionResult(
         name=name, freq=s, d=d, lam=lam,
         seasonal_detected=False, f_stat=0.0, p_value=1.0,

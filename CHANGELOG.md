@@ -4,6 +4,214 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries (sin publicar) — 2026-08-12
+
+**BUG-0011 — el par confirmatorio de f=0 se reportaba partido**, así que sobre
+IPC_ES el informe emitía «considerar d+1» como si fuera una conclusión.
+
+Shin-Fuller y el DCD de sobrediferenciación tienen nulas **opuestas** y acotan la
+banda de cuasi-cancelación: su desacuerdo no es una contradicción que resolver
+eligiendo uno, **es el diagnóstico** (SF_MEG, `tab:compare`). Sobre este modelo el
+lado AR da Φ̂₁ᵤ=37.5 («d basta») y el lado MA LR=4.220 («d+1») con el testigo en
+θ̂=0.9709 — a tres centésimas de la frontera, literalmente la columna r≈0.95 de la
+tabla del paper. Los dos tienen razón, y en esa banda las dos representaciones son
+equivalentes en previsión.
+
+Ahora el informe lleva un bloque «Par confirmatorio en f=0», etiqueta la
+discrepancia como lo que es, y **la recomendación dice que NO se cambie `d` con
+esta evidencia** — que se decida por parsimonia o comparando previsiones fuera de
+muestra. Se imprimen además los dos avisos que el paper documenta y que sólo
+muerden aquí: que el crítico usado es el de la ley desnuda s=1 mientras el modelo
+lleva deterministas **resonantes** con la raíz unitaria de f=0 (el paper mide
+pile-up 0.927 frente a 0.6575), y que con θ̂<1 la ℓ(θ=1) se evalúa justo donde el
+perfil de fue da un salto errático.
+
+Quedan abiertas las dos partes de calibración —verosimilitud exacta de frontera y
+crítico corregido por resonancia—, que tocan los valores críticos del paper.
+
+**BUG-0012 — los factores `ifadf` se imprimían fuera del paréntesis de μ**, así
+que la ecuación impresa no era de media cero y por tanto no era el modelo que se
+había ajustado. Sólo renderizado: la estimación siempre fue correcta.
+
+```
+antes  (1 − 0.4074·B) (1 + B + B²)_f=4 (∇Nₜ − 0.4642) = …
+ahora  (1 − 0.4074·B) ((1 + B + B²)_f=4 ∇Nₜ − 0.4642) = …
+```
+
+`ifadf` es diferenciación, igual que ∇, así que va dentro: μ es la media de lo
+que queda **después de toda** la diferenciación. Leída la forma antigua, la media
+de la expresión era `A_f(1)·(m − μ)` = 3·(0.1545 − 0.4642) = −0.93.
+
+Con la colocación correcta la deriva se lee directamente de la ecuación y sale
+invariante en las cuatro frecuencias —0.1544, 0.1552, 0.1547 y 0.1545 con
+ganancias 1, 2, 3 y 2—, que es la definición funcionando. La forma antigua hacía
+que eso pareciera una inconsistencia entre el factor AR regular y el estacional,
+y llegó a costar un informe de bug falso.
+
+Doce tests, seis de los cuales fallan contra el código previo, en tres capas: que
+el factor esté dentro, que **ningún** operador de diferenciación quede fuera —el
+contraste que atrapa la clase entera— y el invariante numérico μ̂ ≈ A_f(1)·m.
+
+**BUG-0009 — el testigo de f=0 se apropiaba de la ranura del de Nyquist.**
+`dcd_overdiff_regular` construía su candidato con «reemplaza cualquier MA regular
+existente», y esa ranura no siempre está libre: cuando la frecuencia de Nyquist
+se ha reformulado a estocástica, el testigo que vive ahí es el suyo. Misma forma
+—un MA regular de primer orden— y fronteras opuestas: en el convenio `(1 − θB)`,
+θ=+1 cancela `(1−B)` y θ=−1 cancela `(1+B)`. Sólo así cancela cada uno su
+diferencia, y por eso compartir ranura no podía funcionar.
+
+Ahora cada frecuencia lleva su testigo y no se comparten: con Nyquist estocástica
+el MA existente **no es competencia** —es lo que cancela `(1+B)`— así que se
+conserva y el de f=0 va a ranura propia. Donde no hay colisión, el
+comportamiento es idéntico al anterior.
+
+- **La dirección del defecto no era la que la ficha predecía.** Se esperaba que
+  el testigo borrado empujara a un `d+1` espurio; en el caso medido hizo lo
+  contrario — la `(1+B)` huérfana tiraba del testigo de f=0 hacia −1 y el LR caía
+  POR DEBAJO del crítico. Lo que importa es que **el veredicto se movía**:
+  reformular f=6 no cambia `d`, así que el contraste del orden regular debe dar
+  lo mismo. Antes 4.220 → 1.859; ahora 4.220 → 4.257. El test de regresión afirma
+  esa invariancia, no el veredicto.
+- **Y el error de categoría, dicho:** f=s/2 no lo gobierna `d`. Su orden de
+  integración es `ifadf[s/2]`; `d` es el orden en la frecuencia cero.
+- **Calibración comprobada primero**, antes de tocar nada: sobre un paseo
+  aleatorio con deriva `∇w_t − μ = a_t`, sin armónicos ni ARMA, 25 muestras — 4 %
+  de falsos positivos contra un 5 % nominal, y θ̂ exactamente en la frontera en 12
+  de 25. La maquinaria del contraste es sana; lo que falla es lo que el candidato
+  arrastra.
+
+**BUG-0015 y BUG-0016 — dos decisiones más que la capa guiada tomaba y el
+autónomo no tenía por dónde pedir.** La misma forma que BUG-0013, por tercera y
+cuarta vez, y **se arreglan juntas porque interactúan**: con λ=1 el IPC_ES no
+sobrediferenciaba, así que arreglar la regla índice sola habría hecho que la otra
+disparara en más series y pareciera una regresión del arreglo.
+
+- **`decide_domain` es la séptima decisión del protocolo `Policy`**, y cierra el
+  hueco general que BUG-0015 identificó: *la política tomaba evidencia pero nunca
+  dominio*. La regla índice —λ=0 sobre un índice de precios, cuya base es una
+  convención— vivía sólo en `guided_identification`, así que el autónomo partía
+  una familia de ocho IPC en 4 logs y 4 niveles por el signo de un gap que nunca
+  pasó de 0.304 en valor absoluto. `_INDEX_PREFIXES` aparece ahora **cero veces**
+  en `mcp_server.py`: una copia de la regla, no dos.
+- **Declarado gana a inferido.** El detector infiere del nombre, que es evidencia
+  débil, así que la respuesta se REGISTRA (`PipelineResult.domain`) en vez de
+  aplicarse en silencio y `build_model(domain=…)` la declara. El propio caso lo
+  justifica: `EMU` es un índice de precios y su nombre no lo dice.
+- **`decide_d` recibe la decisión estacional** y topa d en 1 cuando hay
+  estacionalidad detectada y sin tratar. El ADF no lleva términos estacionales,
+  así que el patrón infla su error típico y sesga hacia no rechazar: las dos
+  series que sobrediferenciaban eran exactamente las dos primeras del ranking de
+  estacionalidad, con corte limpio en F-HAC ≈ 50. El tope va en la POLÍTICA:
+  `recommended_d` sigue diciendo 2 y en la tabla se ve que se topó.
+- **Y de d=0 sólo se pasa a d=1, nunca a d=2** (`max_step=1` por defecto), haya
+  estacionalidad o no. No es prudencia: la pregunta que se hace desde el nivel no
+  es «¿cuántas diferencias?» sino «¿hace falta AL MENOS una?». La estacionalidad
+  se lee normalmente sobre una serie ya diferenciada una vez, así que desde d=0
+  la pregunta por la SEGUNDA nunca se ha puesto; saltar 0 → 2 responde a algo que
+  nadie preguntó. Y lo obvio primero: si d=1 es lo obvio, d=2 no se alcanza de un
+  salto. Lo que cierra la objeción de que esto subdiferenciaría una I(2) genuina
+  es que **no se pierde nada por empezar bajo**: ADF, KPSS y el gráfico son
+  herramientas de especificación INICIAL, y el contraste de verdad sobre el orden
+  de integración se hace al FINAL, sobre un modelo adecuado y bien especificado
+  —`dcd_overdiff_regular`, Shin-Fuller—, que es donde este flujo ya los pone.
+  Desde `current_d=1` la segunda diferencia sí se alcanza, porque para entonces
+  la pregunta ya se hizo.
+
+Las ocho series salen ahora en logs y con d=1, y IPC_JP sigue sin media — el
+control de BUG-0013 intacto. 23 tests, 20 de los cuales fallan contra el código
+previo.
+
+**BUG-0018 — las series anuales (freq=1) no llegaban al final del flujo.** Y el
+diagnóstico cambió al medirlo: de los tres defectos que el TODO llevaba anotados
+desde el 8-jul, **los tres estaban ya arreglados** —el `alter` espurio por el
+guardia `freq >= 2` de BUG-0005, la cabecera de `_write_inp`, y el `x_pad` de
+pyfug— y lo que bloqueaba de verdad era un cuarto sin anotar.
+
+- **`detect_seasonality` dividía por cero.** `num_harmonics = s - 1`, que en anual
+  es CERO, y el F-test HAC divide por él. No era un resultado degenerado: era una
+  excepción lanzada antes de correr ningún contraste, y se llevaba el pipeline
+  autónomo entero (`run_full` → `describe_seasonality`) sin haber estimado nada.
+  Una serie anual no tiene frecuencias estacionales, así que el contraste **no
+  aplica** en vez de fallar: se devuelve pronto un resultado bien formado, que
+  `decide_seasonal_structure` lee como decisión "A" con `n_harmonics=0` — lo que
+  un modelo anual necesita.
+- **`_write_bare_inp` seguía escribiendo el año repetido** en el campo del periodo
+  inicial mientras `_write_inp` ya lo hacía bien. El arreglo no viajó de un
+  escritor al otro, que es el argumento para unificarlos. La cabecera mal escrita
+  no rompía el round-trip —el parser la tolera en anual—, así que era latente.
+
+Con esto una serie anual completa el flujo: identificación, estimación, diagnosis
+con figura y contrastes formales. 9 tests nuevos, 6 de los cuales fallan contra el
+código previo; los otros 3 son guardias de los defectos ya arreglados.
+
+**BUG-0010 — podar un armónico anulaba el barrido MEG entero, en silencio.** Se
+quitaba un par cos/sin no significativo y el MEG no perdía esa frecuencia:
+perdía **todas**. `meg()` validaba las frecuencias por adelantado, así que una
+irreformulable abortaba el barrido; `describe_formal_tests` la llamaba dentro de
+`_try(..., [])`, que hace indistinguible «lanzó» de «no se pidió»; y
+`_meg_suitable()` seguía siendo cierto, así que tampoco saltaba el aviso de «MEG
+no aplica». La sección desaparecía del informe sin una palabra y la recomendación
+pasaba a «El modelo es adecuado» sobre un modelo con f=3 estocástica dentro.
+
+- **El barrido reporta lo que no puede contrastar.** La validación pasa al bucle
+  y devuelve `status='skipped'` con la razón. Un skip es un resultado, no una
+  ausencia. Barrido y petición explícita se separan: `meg(model)` salta y
+  reporta, `meg(model, frequencies=[f])` lanza con el mensaje accionable — que es
+  lo que `meg_frequency` necesita y lo que los dos tests de guarda ya afirmaban.
+- **El informe no puede callarse.** Las saltadas se imprimen con su razón y
+  **entran en la recomendación**, así que ya no puede cerrarse con «adecuado» una
+  frecuencia sin mirar. Un fallo inesperado del MEG se anuncia en vez de
+  devolver lista vacía.
+- **Y la guía, que es lo que llevaba a podar primero.** La nota de
+  sobreparametrización avisa cuando el par incluye armónicos estacionales; los
+  docstrings de `seasonal_param_analysis` y `test_seasonal_simplification`
+  declaran la precondición; y la ETAPA 4 de las instrucciones abre con el orden.
+  El argumento, que no es de fontanería: **una t baja en un armónico es evidencia
+  A FAVOR de que esa frecuencia sea estocástica**, no de que no exista, así que
+  podar por significación borra justo las frecuencias que el MEG necesita mirar.
+  En IPC_ES los dos criterios salen casi ortogonales en las dos direcciones a la
+  vez: f=5 (|t|=0.29 y 1.27, la primera que cualquier filtro borra) llevaba la
+  segunda evidencia más fuerte de estocasticidad, y f=3 (|t|=5.4 y 2.1) es la que
+  ES estocástica. La regla general de contrastar sobre un modelo parsimonioso no
+  alcanza a los parámetros que SON la hipótesis.
+
+
+
+**La media deja de perderse entre el modelo determinista y el ARMA.** Dos
+defectos con un solo síntoma: se estimaba un modelo con armónicos y media, y al
+añadirle la estructura ARMA volvía sin media.
+
+- **BUG-0014 — el contrato `.pre` se respeta.** `_build_arma_on_model` heredaba
+  las intervenciones y el `ifadf` del modelo base pero no la media: con
+  `estimate_mu=False` la tiraba (0.154472 → 0) y con `True` la volvía a derivar
+  de la serie (0.160085) en vez de llevarla. Once deterministas se heredaban
+  idénticos y la media no, en el mismo constructor. Ahora `estimate_mu` tiene
+  tres estados y `None` —el de por defecto— hereda `estimate_mu` y `mu0` del
+  base. Y **`base_pre_path` pasa de 0 menciones a 4 en las instrucciones**: la
+  máquina existía, nada mandaba a usarla, y la Llamada 4 pasaba el `.pre` como
+  `inp_path`, que es el modo "desde cero".
+
+- **BUG-0013 — la política decide la media.** No es que `run_full` se olvidara
+  de ponerla: **no tenía por dónde pedirla**. El protocolo `Policy` declaraba
+  seis decisiones y ninguna era la media, así que toda serie modelada de forma
+  autónoma salía con μ clavado en cero. Se añade `decide_mu`, séptima decisión,
+  con la regla que el propio informe proponía: la deriva de la serie
+  diferenciada contra su error típico, `|t| > 2` (`THRESHOLDS["mu_drift"]`).
+  Reproduce las ocho series del informe, **Japón incluido** —la única en que
+  `estimate_mu=False` es la respuesta correcta, t=1.08—, que es lo que lo hace
+  un contraste y no una regla que siempre dice que sí. `build_model` acepta
+  `estimate_mu` con el mismo convenio de `-1` que `lam`/`d`/`p`/`q`.
+
+- **La pregunta de la media se hacía sobre los residuos equivocados.** La
+  Llamada 4 medía la media de los residuos de un modelo que YA tenía μ ajustado,
+  leía t ≈ 0 y recomendaba `estimate_mu=False` sobre una serie con t=5.40. Ahora
+  contrasta siempre la deriva de la diferenciada.
+
+En IPC_FR los residuos pasan de media 0.11 con t ≈ 8.5 —y `APROBADA`— a t=0.00.
+La capa 3 (el contraste de media residual en `diagnose`, ya existente) hizo su
+trabajo: falló al cambiar la política, porque IPC_ES ya no llega sin deriva. El
+test ahora induce el defecto a propósito.
+
 ## art-tseries 0.1.10 / atsw 1.2.5 — 2026-08-10
 
 Corrige el silenciado de 0.1.9, que no silenciaba. El aviso de

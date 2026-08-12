@@ -1,11 +1,11 @@
 ---
 id: BUG-0009
 title: dcd_overdiff_regular overwrites the Nyquist witness (both are regular MA(1) but measure opposite roots) and reports a spurious d+1
-status: open
+status: fixed
 severity: medium
 component: formal-tests
 found_in: 0.1.3
-fixed_in:
+fixed_in: 0.1.11 (unreleased)
 reported: 2026-07-24
 reporter: David / SF_MEG NL_CPI
 tags:
@@ -52,6 +52,66 @@ considerar d+1 ✗"* on a model whose `d` is correct.
 Note the category error underneath: **f = s/2 is not governed by `d` at all.** Its
 integration order is `ifadf[s/2]`; `d` is the order at frequency zero. A test that
 confirms the *regular* integration order should never disturb the seasonal one.
+
+## Resolution (2026-08-12)
+
+Each frequency now carries its own witness and they are never shared.
+
+When the Nyquist frequency is stochastic (`ifadf[s/2] = 1`) the baseline's own
+regular MA is **not competition** — it is what cancels `(1 + B)` — so it is kept
+and the f=0 witness is appended in a slot of its own. Where there is no
+collision the behaviour is byte-identical to before.
+
+There is a second reason this is the right shape, and it is the opposite of what
+the original design feared. The docstring replaced any existing regular MA so
+that the witness, being the sole one, would "isolate f=0": a free regular MA left
+to itself can drift negative, and its root then points at B = −1, measuring the
+Nyquist frequency instead. But when Nyquist already has its own witness pinned to
+θ = −1, the f=0 witness is no longer tempted there. **Keeping it makes the
+isolation better, not worse.**
+
+### Measured, and the direction is not the one this report predicted
+
+| model | LR before | LR after |
+|---|---|---|
+| Nyquist deterministic (`ifadf` all zero) | 4.220 | **4.220** — identical |
+| Nyquist stochastic (`ifadf[6] = 1`) | **1.859** | **4.257** |
+
+This report predicted that the deleted witness would drag θ̂ off +1 and produce a
+spurious *d+1*. On this case it did the opposite: the orphaned `(1 + B)` pulled
+the f=0 witness towards −1, θ̂ moved from 0.9709 to 0.9787 and the LR fell BELOW
+the critical value, so the old code reported *d confirmed*.
+
+The direction was incidental. **The defect is that the verdict moved at all**,
+and that is the right way to state it: reformulating f = 6 to stochastic does not
+change `d`, so a test of the regular order must return the same answer either
+way. Before the fix it swung 4.220 → 1.859; after it, 4.220 → 4.257. That
+invariance is what the regression test asserts, not the verdict.
+
+Both post-fix figures sit above the critical value, which is BUG-0011 — the
+deterministic harmonics competing with the witness — and is untouched here. The
+two defects share a family and a routine, and they are now separable: this one is
+about the SLOT, that one about the REGRESSORS.
+
+### The category error, stated
+
+`f = s/2` is not governed by `d` at all. Its integration order is `ifadf[s/2]`;
+`d` is the order at frequency zero. A test that confirms the REGULAR order must
+never disturb the SEASONAL one — and in the `(1 − θB)` convention the two
+witnesses are heading for opposite boundaries, θ = +1 to cancel `(1 − B)` and
+θ = −1 to cancel `(1 + B)`, which is exactly why sharing a slot could never work.
+
+### Calibration checked first
+
+Before touching anything, the test was verified on the case with a known answer:
+a random walk with drift, `∇w_t − μ = a_t`, no harmonics and no ARMA, 25 samples
+at μ=0.15 and σ=0.25. False-positive rate **1/25 = 4 %** against a nominal 5 %,
+and θ̂ lands exactly on the boundary in 12 of the 25. The machinery of the test is
+sound; both this defect and BUG-0011 are about what else the candidate carries.
+
+Tests: `tests/test_bug_0009_witness_slot_collision.py`, 5 tests. Two fail against
+the previous code — the slot and the invariance — and the other three are guards
+that must keep passing either way.
 
 ## Impact
 

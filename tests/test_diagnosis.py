@@ -53,17 +53,43 @@ def test_the_outlier_loop_asks_about_the_residuals_not_the_mean():
     So the loop consults `residuals_ok` (shape) and the verdict consults `clean`
     (adequacy, which includes the mean). Measured: 1 round and 0 interventions,
     the same as before the check existed, and the defect still reported.
+
+    Since BUG-0013 capa 1 the defect has to be INDUCED: the policy now decides
+    the mean and decides it correctly for IPC_ES, so the run that used to arrive
+    here missing its drift no longer does. Forcing `estimate_mu=False` recreates
+    exactly the old condition, which makes this a sharper test than before — the
+    separation is asserted against a model deliberately missing its mean rather
+    than against one that happened to be.
     """
     import os
     import tempfile
 
     from art.pipeline import run_full
+    from art.policy import ClaudePolicy
 
     ts, _m = _ipc()
-    r = run_full(ts, os.path.join(tempfile.mkdtemp(), "a.inp"), max_rounds=5)
+    r = run_full(ts, os.path.join(tempfile.mkdtemp(), "a.inp"), max_rounds=5,
+                 decision_policy=ClaudePolicy(estimate_mu=False))
     assert len(r.interventions) == 0, (
         f"{len(r.interventions)} intervenciones: el bucle está persiguiendo la media")
     fd = r.final_diag
     assert fd.residuals_ok is True      # la FORMA de los residuos está bien
     assert fd.centred is False          # y aun así el modelo NO es adecuado
     assert fd.clean is False
+
+
+def test_the_policy_now_removes_the_defect_this_check_reports():
+    """The two halves meeting: capa 3 sees the missing mean, capa 1 stops it
+    happening. Same series, same pipeline, the mean left to the policy."""
+    import os
+    import tempfile
+
+    from art.pipeline import run_full
+
+    ts, _m = _ipc()
+    r = run_full(ts, os.path.join(tempfile.mkdtemp(), "b.inp"), max_rounds=5)
+    assert r.estimate_mu is True        # la política la pide (t de la deriva > 2)
+    fd = r.final_diag
+    assert abs(fd.mean_t) < 2.0
+    assert fd.centred is True
+    assert len(r.interventions) == 0

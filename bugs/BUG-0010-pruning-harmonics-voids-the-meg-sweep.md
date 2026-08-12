@@ -1,11 +1,11 @@
 ---
 id: BUG-0010
 title: Pruning a non-significant harmonic pair silently voids the ENTIRE MEG sweep, and the report then closes with "el modelo es adecuado"
-status: open
+status: fixed
 severity: high
 component: formal-tests
 found_in: 0.1.4
-fixed_in:
+fixed_in: 0.1.11 (unreleased)
 reported: 2026-08-08
 reporter: David / IPC_ES passthrough
 tags:
@@ -39,6 +39,81 @@ from the report **without a single word**, and the recommendation line becomes
 
 On the case that surfaced this (IPC_ES), the verdict thrown away was `freq=3:
 **stochastic**` — a reformulation the analyst is instead told is unnecessary.
+
+## Resolution (2026-08-12)
+
+Las dos mitades que este informe pedía: el fontanero y la guía.
+
+### El barrido reporta lo que no puede contrastar
+
+`meg()` valida **una frecuencia cada vez, dentro del bucle**, y devuelve
+`MEGResult(status='skipped', reason=…)` en vez de abortar. Un skip es un
+RESULTADO, no una ausencia.
+
+La distinción que hacía falta la marcaban los dos llamadores, que quieren cosas
+opuestas y ahora las reciben:
+
+* **Barrido** (`frequencies=None`) — lo que usa `describe_formal_tests` y los
+  informes. Una frecuencia intestable no puede costar las otras cinco: se
+  devuelve como `skipped` con su razón.
+* **Explícito** (`frequencies=[f]`) — lo que usa `meg_frequency`. El analista la
+  nombró, así que no atenderla es un error y el `ValueError` lleva el mensaje
+  accionable que `_check_reformulable` ya se había molestado en escribir.
+
+Los dos tests que afirmaban que `meg` lanza (`already stochastic`, `out of
+range`) siguen verdes sin tocarlos: pedían frecuencias explícitas, y esa
+semántica no cambia. Que pasaran ya es evidencia de que la distinción coincide
+con lo que el código creía.
+
+### Y el informe no puede callarse
+
+- `_try(lambda: meg(model), [])` se sustituye por un manejador que **guarda el
+  mensaje** (`meg_error`) y lo imprime: un MEG que no pudo correr lo dice, porque
+  su ausencia se leía como "nada que reportar".
+- Las frecuencias saltadas se imprimen como `⚠ sin contrastar — <razón>`.
+- **Y entran en la recomendación**, que es donde el silencio dolía. Ya no puede
+  salir «El modelo es adecuado» con una frecuencia sin mirar.
+
+Medido sobre los dos `.pre` del repro:
+
+```
+PRUNED  f=5 dropped for |t| < 2, everything else identical
+    describe_formal_tests -> MEG section present: True        (antes: False)
+      - freq=3: coef=-0.9547, LR=2.229 (crít 5%=2.07) → **stochastic**
+      - freq=5: ⚠ **sin contrastar** — the baseline has no cos/sin harmonics…
+    recommendation: Reformulación necesaria:
+      • freq=3 es estocástica: activa ifadf[3]=1 …
+      • MEG sin contrastar en freq=[5]: … una t baja en un armónico es evidencia
+        A FAVOR de estacionalidad estocástica en esa frecuencia, no de que la
+        frecuencia no exista.
+```
+
+Antes: `MEG section present: False` y «Los contrastes formales no detectan
+problemas. El modelo es adecuado.»
+
+### La guía, en los tres sitios que este informe nombra
+
+1. **La nota de sobreparametrización** (`describe.py`) detecta si el par de alta
+   correlación incluye términos `cos`/`sin`/`alter` y, si los incluye, añade que
+   **la poda estacional va DESPUÉS del MEG**, con el porqué. Antes decía «elimina
+   el menos significativo» sin condición, pegado a la misma cadena que manda a
+   los contrastes formales.
+2. **`seasonal_param_analysis` y `test_seasonal_simplification`** declaran la
+   precondición en el docstring —que es lo que el modelo lee— con el caso IPC_ES
+   medido, y `test_seasonal_simplification` añade que las frecuencias que el MEG
+   declaró estocásticas **no se podan**: se reformulan con `ifadf[f]=1`.
+3. **ETAPA 4 de `_INSTRUCTIONS`** abre con «EL MEG VA ANTES DE PODAR ARMÓNICOS
+   ESTACIONALES», los dos motivos, los números de IPC_ES, y la frase que cierra
+   el argumento: *la regla general de contrastar sobre un modelo parsimonioso no
+   alcanza a los parámetros que SON la hipótesis bajo contraste*. Y añade el paso
+   que faltaba: la poda, si procede, va después de esta etapa.
+
+### Tests
+
+`tests/test_bug_0010_meg_sweep_survives_pruning.py`, 7 tests con los dos `.pre`
+del repro. Contra el código previo fallan 6; el séptimo —que la petición
+explícita siga lanzando— pasa en ambos, que es justo lo que debe hacer un test
+de invariante conservado.
 
 ## Impact
 

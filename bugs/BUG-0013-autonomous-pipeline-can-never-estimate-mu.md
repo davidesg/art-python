@@ -1,11 +1,11 @@
 ---
 id: BUG-0013
 title: The autonomous pipeline can NEVER estimate mu — run_full builds ModelSpec without it, the policy has no mu logic, and the diagnosis approves the model anyway
-status: open
+status: fixed
 severity: high
 component: pipeline
 found_in: 0.1.5
-fixed_in:
+fixed_in: 0.1.11 (unreleased)
 reported: 2026-08-08
 reporter: David / IPC-WTI passthrough, 8-country batch
 tags:
@@ -114,6 +114,65 @@ small relative to its standard deviation" — and art does not test it.
 
 Order: (3) first, because it makes (1) verifiable; then (1); then BUG-0014,
 which is the same missing mu travelling down the ladder.
+
+## Resolution (2026-08-12)
+
+**All three layers are fixed.** Layer 3 (the residual-mean check) was
+implemented earlier; layers 1 and 2 are the work recorded here.
+
+`policy.decide_mu(ts, lam, d, D)` is the seventh decision in the `Policy`
+protocol. The rule is the one this report proposed — the drift of the
+differenced series against its standard error, `|t| > THRESHOLDS["mu_drift"]`
+with the threshold at 2.0 — implemented in `DefaultPolicy` and overridable in
+`ClaudePolicy(estimate_mu=…)`, where `None` means "use the rule" and not "no
+mean". `run_full` calls it and passes the answer into `ModelSpec`, and
+`PipelineResult.estimate_mu` records what was decided. `build_model` gained
+`estimate_mu: int = -1` on the same sentinel convention as `lam`/`d`/`p`/`q`.
+
+The eight-series table reproduces exactly, Japan included:
+
+| series | t(drift) | decide_mu | fitted t (this report) |
+|---|---|---|---|
+| IPC_UK | 9.06 | yes | 11.94 |
+| CPI_USA | 6.66 | yes | 5.41 |
+| IPC_CA | 6.25 | yes | 7.37 |
+| IPC_FR | 5.29 | yes | 8.08 |
+| IPC_DE | 4.88 | yes | 6.52 |
+| EMU | 4.38 | yes | 7.37 |
+| IPC_ES | 3.94 | yes | 5.40 |
+| **IPC_JP** | **1.08** | **no** | **1.05** |
+
+8/8. Japan is what makes it a test rather than a rule that always says yes.
+
+And the reported symptom is gone. Autonomous `run_full` on the real series:
+
+```
+IPC_FR   estimate_mu=True   residuals: mean +0.0000  sd 18.6052  t=0.00
+IPC_ES   estimate_mu=True   residuals: mean +0.0044  sd 22.7941  t=0.00
+IPC_JP   estimate_mu=False  residuals: mean +0.0182  sd  0.2400  t=1.11
+```
+
+IPC_FR previously came back `APROBADA` with residuals of mean 0.11, sigma 0.19,
+t ≈ 8.5.
+
+The Call-4 mu question is also fixed: it read `m_pre.residuals` — the residuals
+of a model in which mu was already fitted, hence t ≈ 0 by construction — and now
+always tests the drift of the differenced series, recommending inheritance when
+the base already carries a fitted mean.
+
+**Layer 3 was already closed** and this report's judgement about it was right:
+it is what made layer 1 verifiable. `diagnose` now carries `mean_t` and
+`centred`, `clean` includes the mean while `residuals_ok` does not — so the
+outlier loop cannot chase a drift with dummies — and the check caught the
+change: `test_the_outlier_loop_asks_about_the_residuals_not_the_mean` FAILED
+once the policy started deciding, because IPC_ES no longer arrives at the
+diagnosis missing its drift. The test now induces the defect explicitly
+(`ClaudePolicy(estimate_mu=False)`) and a companion asserts the policy removes
+it. An instrument that reports a defect the pipeline can no longer produce is
+the outcome this report asked for.
+
+Tests: `tests/test_bug_0013_mu_inheritance.py` (17), including the eight-series
+regression above, which skips when `IPC.xlsx` is absent.
 
 ## Impact
 

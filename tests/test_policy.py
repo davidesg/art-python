@@ -20,7 +20,12 @@ def test_decide_lambda_missing_gap_defaults_log():
 # ── decide_d ───────────────────────────────────────────────────────────────
 
 def test_decide_d_reads_recommendation():
-    assert policy.decide_d({"recommended_d": 2}) == 2
+    assert policy.decide_d({"recommended_d": 1}) == 1
+    # Desde d=0 no se salta a 2: la pregunta que se hizo fue "¿hace falta AL
+    # MENOS una diferencia?", y desde el nivel nunca se llegó a evaluar si hace
+    # falta una segunda (BUG-0016). Desde d=1 sí se puede avanzar a 2.
+    assert policy.decide_d({"recommended_d": 2}) == 1
+    assert policy.decide_d({"recommended_d": 2}, current_d=1) == 2
 
 
 def test_decide_d_default():
@@ -134,7 +139,7 @@ def test_thresholds_present():
 def test_default_policy_matches_module_functions():
     p = policy.DefaultPolicy()
     assert p.decide_lambda({"gap": -0.3}) == policy.decide_lambda({"gap": -0.3})
-    assert p.decide_d({"recommended_d": 2}) == 2
+    assert p.decide_d({"recommended_d": 2}) == policy.decide_d({"recommended_d": 2})
     assert p.decide_seasonal_structure({"decision": "B1", "recommended_D": 0}, 12) == (0, "B1", 5)
     assert p.decide_orders([_Spec(2, 1)]) == (2, 1)
     assert p.decide_form(60, {60, 61}) == "step"
@@ -152,7 +157,7 @@ def test_claude_policy_overrides_provided_choices():
 def test_claude_policy_falls_back_to_heuristic():
     p = policy.ClaudePolicy(lam=0.0)   # only λ fixed
     # d, orders, seasonal not provided → heuristic
-    assert p.decide_d({"recommended_d": 2}) == 2
+    assert p.decide_d({"recommended_d": 2}) == 1     # un paso desde d=0
     assert p.decide_orders([_Spec(3, 1)]) == (3, 1)
     D, dec, nh = p.decide_seasonal_structure({"decision": "B1", "recommended_D": 0}, 4)
     assert (D, dec, nh) == (0, "B1", 1)

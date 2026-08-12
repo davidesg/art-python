@@ -1,11 +1,11 @@
 ---
 id: BUG-0015
 title: The INDEX RULE that forces lambda=0 on a price index exists only in the guided MCP layer, so the autonomous pipeline splits one family of CPI indices between logs and levels on the sign of a near-zero statistic
-status: open
+status: fixed
 severity: high
 component: policy
 found_in: 0.1.5
-fixed_in:
+fixed_in: 0.1.11 (unreleased)
 reported: 2026-08-08
 reporter: David / IPC-WTI passthrough, 8-country batch
 tags:
@@ -75,6 +75,63 @@ differ in kind; the statistic says so, barely, and the policy obeys the sign.
 Confirmed end to end through `build_model` / `batch_build` on the same files:
 IPC_ES, IPC_FR, CPI_USA and IPC_CA come back with `λ=1` and coefficients in index
 points (`+10.081 (−1)^t`, `σ̂ₐ = 22.82`), the rest in logs.
+
+## Resolution (2026-08-12) — junto con BUG-0016, como este informe exigía
+
+**`decide_domain` es la séptima decisión del protocolo `Policy`**, y cierra el
+hueco general que este informe identificó: *«la política toma evidencia pero
+nunca dominio»*. Es la misma forma que BUG-0013 y se arregla con la misma
+plantilla.
+
+```python
+domain = pol.decide_domain(ts)          # price_index | generic
+lam    = pol.decide_lambda(bc.data, domain)
+```
+
+`decide_lambda(boxcox_data, domain=None)` devuelve λ=0 cuando el dominio es
+`price_index`, diga lo que diga la estadística. `PipelineResult.domain` registra
+lo decidido y `build_model(domain=…)` / `ClaudePolicy(domain=…)` lo declaran.
+
+### Declarado gana a inferido
+
+El detector infiere del NOMBRE, que es evidencia débil — un modelo no puede salir
+distinto porque el fichero se llamara `IPC_ES` en vez de `serie3`. Dos cosas lo
+mantienen honesto: la respuesta **se registra** en vez de aplicarse en silencio,
+y **lo declarado gana siempre**. La inferencia existe para que el camino autónomo
+no se quede sin nada, no porque el nombre sea buena evidencia.
+
+**Y el propio caso lo demuestra:** `EMU` sale del detector como `generic` — es un
+índice de precios y su nombre no lo dice. Acaba en logs sólo porque su gap es
++0.304. Es exactamente el argumento para poder declararlo.
+
+### Una copia de la regla, no dos
+
+La regla vivía dentro de `guided_identification` con su propia tupla de prefijos.
+Ahora esa capa llama a `policy.decide_domain(ts)`: `_INDEX_PREFIXES` aparece
+**cero veces** en `mcp_server.py`. Tener el criterio escrito dos veces, y sólo uno
+de los dos corriendo en el camino autónomo, ERA el defecto.
+
+### Medido
+
+`bugs/BUG-0015-repro/repro.py` sale con 0. Y de punta a punta por `run_full`:
+
+```
+serie     dominio         λ  d  D  dec      μ
+IPC_ES    price_index   0.0  1  0   B1   True
+IPC_FR    price_index   0.0  1  0   B1   True
+IPC_DE    price_index   0.0  1  0   B1   True
+CPI_USA   price_index   0.0  1  0   B1   True
+EMU       generic       0.0  1  0   B1   True
+IPC_JP    price_index   0.0  1  0   B1  False
+IPC_CA    price_index   0.0  1  0   B1   True
+IPC_UK    price_index   0.0  1  0   B1   True
+```
+
+Las ocho en logs (antes 4 y 4) y las ocho con d=1 (antes dos con d=2). Y IPC_JP
+sigue sin media, que es el control de BUG-0013 intacto.
+
+Tests: `tests/test_bug_0015_0016_policy_domain_and_d_cap.py`, 23 tests para los
+dos informes. Contra el código previo fallan 20.
 
 ## Impact
 

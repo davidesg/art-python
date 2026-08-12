@@ -1,11 +1,11 @@
 ---
 id: BUG-0014
 title: The .pre contract is not honoured when adding ARMA — base_pre_path is unreachable from the instructions, and mu is discarded even when it is used
-status: open
+status: fixed
 severity: high
 component: pipeline
 found_in: 0.1.5
-fixed_in:
+fixed_in: 0.1.11 (unreleased)
 reported: 2026-08-08
 reporter: David / passthrough IPC_ES
 tags:
@@ -72,6 +72,39 @@ series (0.160088) instead of carried (0.154475).
 
 One class of estimate is inherited and the other is not, in the same function.
 Whatever the intent, that is not the `.pre` contract.
+
+## Resolution (2026-08-12)
+
+Both counts, together with BUG-0013 as this report required.
+
+**(b) mu is carried.** `_build_arma_on_model`'s `estimate_mu` is now three-state:
+`None` (the default) inherits the base's `estimate_mu` AND its estimated `mu0`;
+`True`/`False` force the choice, with `_mu_seed` used only when a base with no
+mean is asked for one. Measured on the reported case `ES_CPI_m10.pre`
+(base `mu0 = 0.154472`, `estimate_mu=True`, 11 deterministics):
+
+| call | mu | = base? | deterministics |
+|---|---|---|---|
+| `_build_arma_on_model(p=1)` (inherits) | **0.154472** | **yes** | 11, identical |
+| `_build_arma_on_model(p=1, estimate_mu=True)` | **0.154472** | **yes** | 11, identical |
+| `_build_arma_on_model(p=1, estimate_mu=False)` | 0.000000 | forced off | 11, identical |
+
+Previously the first row gave 0.000000 (discarded) and the second 0.160085
+(re-derived). The asymmetry this report identified — one class of estimate
+inherited, the other not, in the same constructor — is gone.
+
+**(a) It is now routed.** `base_pre_path` went from **0 mentions in
+`_INSTRUCTIONS` to 4**. Stage 2 of the guided protocol now states that the ARMA
+step chains from the reference model's `.pre`, and says why: a `.pre` is an
+optimum in re-runnable form, so chaining inherits harmonics, interventions and
+the mean instead of re-solving them. Call 4's suggested invocation passed the
+`.pre` as `inp_path`, which is `confirm_and_estimate`'s *fresh* mode and
+rebuilds from scratch; it now passes `base_pre_path` as well.
+
+Tests: `tests/test_bug_0013_mu_inheritance.py` — `_build_arma_on_model(m,…).mu0
+== m.mu0` for a base fitted with a free mean, that a base without one does not
+acquire one, and that the explicit argument still overrides in both directions.
+The report notes none of these existed; each fails against the pre-fix code.
 
 ## Impact
 

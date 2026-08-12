@@ -564,6 +564,11 @@ def dcd_overdiff_regular(model, witness_init: float = 0.85) -> "DCDResult":
       θ  <  1, invertible     (LR ≥ crit)  ⇒ genuine extra unit root
                                             ⇒ **d+1 needed (under-differenced)**.
 
+    When the Nyquist frequency is already stochastic (`ifadf[s/2] = 1`) the
+    baseline's own Nyquist witness — also a regular MA(1), but heading for θ = −1
+    — is KEPT and this witness gets a slot of its own. Each frequency carries its
+    own witness and they are never shared (BUG-0009).
+
     Theory: the s=1 case (single real root) of SF_MEG Theorem 1(i) — the classic
     Davis–Dunsmuir (1996) regular MA(1) boundary law, shared with the Nyquist.
     Best run on the deterministic/seasonal baseline (harmonics, no competing
@@ -592,23 +597,54 @@ def dcd_overdiff_regular(model, witness_init: float = 0.85) -> "DCDResult":
     # had no mean there is nothing to do.
     mc.mu0 = 0.0
     mc.estimate_mu = False
-    mc.ma = [[float(witness_init)]]
-    mc.ma_free = [[True]]
+
+    # The witness needs a slot, and taking whatever is in the regular-MA slot is
+    # not always free (BUG-0009). When the Nyquist frequency has been reformulated
+    # to stochastic, `meg_reformulate` keeps ITS witness there — a Nyquist witness
+    # is a regular MA(1) too. Same shape, opposite targets: this one must reach
+    # θ = +1 to cancel (1−B), that one θ = −1 to cancel (1+B). Overwriting it
+    # deleted a witness belonging to a different frequency while `ifadf[s/2]=1`
+    # survived, so the candidate carried an uncancelled seasonal unit root and the
+    # only remaining regular MA had to absorb it — dragging θ̂ off +1 and reporting
+    # a spurious d+1 on a model whose d is right.
+    #
+    # And the category error underneath: f = s/2 is not governed by `d` at all.
+    # Its integration order is `ifadf[s/2]`; `d` is the order at frequency zero. A
+    # test of the REGULAR order must not disturb the SEASONAL one.
+    #
+    # So when Nyquist is stochastic the existing regular MA is not competition —
+    # it is what cancels (1+B), and keeping it makes the isolation of f=0 BETTER,
+    # not worse: the f=0 witness is no longer tempted to drift negative and
+    # measure Nyquist itself, because Nyquist already has its own witness.
+    freq = int(getattr(model.series, "freq", 1) or 1)
+    ifadf = list(getattr(model, "ifadf", None) or [])
+    nyquist_stochastic = (freq >= 2 and len(ifadf) > freq // 2
+                          and ifadf[freq // 2] == 1)
+
+    if nyquist_stochastic:
+        mc.ma = [list(f) for f in (mc.ma or [])] + [[float(witness_init)]]
+        mc.ma_free = [list(f) for f in (mc.ma_free or [])] + [[True]]
+        witness_idx = len(mc.ma) - 1
+    else:
+        mc.ma = [[float(witness_init)]]
+        mc.ma_free = [[True]]
+        witness_idx = 0
+
     mc.fit()
     L_free = float(mc._result.loglik)
-    theta_hat = _extract_ma_param(mc, 0)
+    theta_hat = _extract_ma_param(mc, witness_idx)
 
     # Constrain the witness at the non-invertibility boundary θ=1.
     mk = copy.deepcopy(mc)
     mk._result = None
-    mk.ma[0] = [1.0]
-    mk.ma_free[0] = [False]
+    mk.ma[witness_idx] = [1.0]
+    mk.ma_free[witness_idx] = [False]
     mk.fit()
     L_const = float(mk._result.loglik)
 
     lr = 2.0 * (L_free - L_const)
     return DCDResult(
-        factor_index=0,
+        factor_index=witness_idx,
         freq=None,               # real root ⇒ s=1 law (crit 1.00/1.94/4.41)
         coef_free=theta_hat,
         coef_null=1.0,
@@ -1053,7 +1089,19 @@ class MEGResult:
     freq: int                      # seasonal harmonic tested (1..s//2−1)
     coef_ma_f: float | None        # estimated MA_f testigo coef (None if ambiguous)
     dcd_result: DCDResult | None   # DCD_f output (None if ambiguous)
-    status: str                    # 'stochastic', 'deterministic', 'ambiguous'
+    status: str                    # 'stochastic' | 'deterministic' | 'ambiguous' | 'skipped'
+    reason: str | None = None      # why, when status == 'skipped' (BUG-0010)
+
+    @property
+    def skipped(self) -> bool:
+        """True if this frequency could not be tested — see `reason`.
+
+        A skip is a RESULT, not an absence. BUG-0010: one unreformulable
+        frequency used to abort the whole sweep, the exception was swallowed
+        into an empty list, and the report closed with "el modelo es adecuado"
+        on a model with a stochastic frequency in it.
+        """
+        return self.status == 'skipped'
 
     @property
     def stochastic(self) -> bool:
@@ -1118,28 +1166,58 @@ def meg(model, frequencies=None) -> list[MEGResult]:
 
     Returns
     -------
-    list[MEGResult] — one entry per tested frequency, in order.
+    list[MEGResult] — **one entry per REQUESTED frequency**, in order. A
+    frequency that cannot be reformulated comes back with `status='skipped'`
+    and the explanation in `reason`; it is never dropped.
+
+    Sweep vs explicit request (BUG-0010)
+    ------------------------------------
+    The two callers want opposite things and now get them:
+
+    * **Sweep** (`frequencies=None`) — a report asking "what does this model say
+      at every frequency?". One untestable frequency must not cost the other
+      five, so it becomes a `skipped` entry with its reason. This used to be an
+      up-front validation loop: a model pruned at f=5 raised, the caller
+      swallowed the exception into `[]`, and the report concluded *"el modelo es
+      adecuado"* while f=3 was stochastic.
+    * **Explicit** (`frequencies=[f, …]`) — the analyst named that frequency, so
+      not honouring it is an error and `ValueError` carries the actionable
+      message saying what the baseline is missing.
+
+    Either way nothing is silent. The absence of a verdict is itself reportable.
 
     Raises
     ------
     RuntimeError  if model not fitted
-    ValueError    if any requested frequency is already stochastic
-                  (ifadf[f]=1 in the base model) or out of valid range
+    ValueError    only for EXPLICITLY requested frequencies that are already
+                  stochastic (ifadf[f]=1 in the base model) or out of range
     """
     if model._result is None:
         raise RuntimeError("Model has not been fitted — call model.fit() first.")
 
     s = model.series.freq
-    if frequencies is None:
+    # A SWEEP (frequencies=None) reports what it cannot test; an EXPLICIT request
+    # raises. See the note in the docstring -- this is BUG-0010's fix.
+    sweep = frequencies is None
+    if sweep:
         frequencies = list(range(1, s // 2 + 1))   # includes the Nyquist f=s/2
-
-    for f in frequencies:
-        _check_reformulable(model, f, s)
 
     from fue.model import FixedFreqFactor
 
     results = []
     for f in frequencies:
+        # Validate HERE, one frequency at a time. It used to be an up-front loop
+        # over every frequency, so a single unreformulable one aborted the sweep
+        # before any verdict was computed (BUG-0010).
+        try:
+            _check_reformulable(model, f, s)
+        except ValueError as exc:
+            if not sweep:
+                raise
+            results.append(MEGResult(freq=f, coef_ma_f=None, dcd_result=None,
+                                     status='skipped', reason=str(exc)))
+            continue
+
         mc = copy.deepcopy(model)
         mc._result = None
         is_nyquist = (f == s // 2)

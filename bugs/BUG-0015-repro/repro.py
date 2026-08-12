@@ -43,7 +43,14 @@ SERIES = ["IPC_ES", "IPC_FR", "IPC_DE", "CPI_USA",
 
 def main() -> int:
     from art.describe import describe_boxcox
-    from art.policy import decide_lambda
+    from art.policy import DefaultPolicy
+
+    # Se pregunta a la POLÍTICA por el mismo camino que `run_full`: primero el
+    # dominio, y la λ con el dominio en la mano. Antes del arreglo `decide_lambda`
+    # sólo recibía las estadísticas Box-Cox y la regla índice no tenía por dónde
+    # entrar. El repro se actualizó al contrato nuevo el 12-ago-2026; la tabla y
+    # el argumento son los mismos.
+    pol = DefaultPolicy()
 
     print(__doc__.split("Run:")[0].strip())
     print()
@@ -59,7 +66,7 @@ def main() -> int:
         ts, _model = fue.load(str(HERE / f"{name}.inp"))
         d = describe_boxcox(ts).data
         gap = float(d.get("gap", 0.0))
-        lam = decide_lambda(d)
+        lam = pol.decide_lambda(d, pol.decide_domain(ts))
         rows.append((name, d.get("corr_raw"), d.get("corr_log"), gap, lam))
         if lam == 0.0:
             logs += 1
@@ -98,7 +105,14 @@ def main() -> int:
         print("     check added there does not cover this one.")
         return 1
 
-    print("  All eight in logs — BUG-0015 would be refuted by this run.")
+    print("  All eight in logs — la regla índice está en la política.")
+    print()
+    print("  Nota, y es una limitación honesta del criterio: EMU sale del")
+    print("  detector como `generic` porque su NOMBRE no lleva prefijo de")
+    print("  índice, y acaba en logs sólo porque su gap es +0.304. El nombre")
+    print("  es evidencia débil: por eso `domain` se puede DECLARAR")
+    print("  (`build_model(domain=...)`, `ClaudePolicy(domain=...)`) y lo")
+    print("  declarado gana siempre a lo inferido.")
     return 0
 
 

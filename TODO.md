@@ -2,7 +2,18 @@
 
 ## Bugs conocidos
 
-- [ ] **ART no estima correctamente series de frecuencia ANUAL (freq=1)** (GRAVE, ABIERTO):
+- [x] **ART no estima correctamente series de frecuencia ANUAL (freq=1)**
+      **(RESUELTO 2026-08-12 — ver `bugs/BUG-0018`).** Y el diagnóstico cambió al
+      medirlo: de los tres defectos descritos abajo, los TRES estaban ya
+      arreglados, y lo que bloqueaba de verdad era un cuarto sin anotar —
+      `detect_seasonality` dividía por `num_harmonics = s-1`, que en anual es
+      cero, y la excepción se llevaba `run_full` antes de estimar nada. Más
+      `_write_bare_inp`, que conservaba la cabecera antigua mientras `_write_inp`
+      ya la escribía bien. **Lección: este defecto vivió un mes aquí en vez de en
+      el registro, y en ese mes dejó de ser cierto sin que nadie lo notara.** El
+      texto original se conserva debajo como registro de lo que se creía.
+
+      (histórico) descripción original:
       descubierto 2026-07-08 revisando series anuales de precipitación (Ginebra,
       días, n=248, 1768-2015; proyecto "Joseph's Cycles"). El motor `fue` estima
       bien — el fallo está en la capa ART (construcción del modelo y del `.inp`) y
@@ -69,6 +80,260 @@
       consistentes, convención preservada cuando n>6·(f+1)) y `statistics.pacf`
       capa defensivamente a `len//2−1`. Test de regresión:
       `tests/test_golden_pipeline.py::test_diagnosis_short_series_no_crash`.
+
+## El pipeline autónomo tiene documento propio (ago-2026)
+
+**Ver `docs/AUTONOMOUS_PIPELINE.md`.** No se trabaja aquí: es tarea grande, exige
+pensar la arquitectura, y el orden decidido es **primero dejar sólido el camino
+guiado y después depurar el autónomo**, que es la joya de la corona.
+
+Resumen de por qué necesita documento aparte, para quien no lo abra:
+
+- Sus fallos no son números mal, son **decisiones que localmente parecen
+  razonables** y que interactúan. Cuatro de los defectos cerrados en agosto de
+  2026 (BUG-0013, 0015, 0016 y el de series anuales) eran invisibles sobre
+  cualquier modelo aislado y sólo aparecieron corriendo la misma regla sobre una
+  familia de series con respuesta conocida.
+- Hoy entrega la **especificación inicial** y para. Medido sobre los IPC de Chile
+  y Colombia (I(2), tesis): entrega d=1 con estacionalidad toda determinista,
+  cuando los diecisiete modelos de la tesis son d=2 y varios llevan `ifadf`
+  activo. En Chile el modelo entregado además no es adecuado — Q falla en 6, 12,
+  24 y 36, los retardos estacionales.
+- Y hay un defecto de reporte concreto y barato: **`dcd_overdiff_regular` no
+  llega al informe de `build_model`**, que sólo formatea `dcd()` y `meg()`. El
+  LR=18.235 de Chile —«considera d+1», la señal más fuerte del análisis— no se
+  produce en el camino autónomo. El MEG sí se muestra, así que de los dos
+  contrastes que contradicen la especificación entregada, uno se ve y el otro no.
+- Cerrar el bucle no es aplicar el veredicto: **un contraste formal sobre un
+  modelo inadecuado no es un contraste**, y el modelo de Chile no lo es. La
+  circularidad —el modelo puede ser inadecuado *por* aquello a lo que el
+  contraste apunta— es el problema de diseño, no un parche.
+
+El documento lista los riesgos de explosión (escalada de `d`, activación de
+`ifadf` en frecuencias que la muestra no sostiene, interacción entre decisiones,
+el bucle de anómalos persiguiendo estructura, no terminación, divergencia
+silenciosa respecto al guiado), las cinco preguntas de arquitectura que hay que
+responder antes de escribir código, y qué significa exactamente «el guiado está
+sólido» como puerta para volver.
+
+---
+
+## PRIORIDAD — Arquitectura asistente/motor de los tres pares (ago-2026)
+
+**Estado:** propuesta escrita (`docs/ASSISTANT_LAYER_PROPOSAL.md`), inventario de
+símbolos medido, nada implementado. Es la deuda arquitectónica más importante de
+la suite y la que una revisión externa de los tres servidores MCP no vio
+(`~/Dropbox/SRC/atws/atsw-suite/RESPUESTA_REVISION_2026-08-12.md` §5.1 y §7).
+
+### El problema, medido
+
+Tres pares asistente↔motor, y solo uno está bien repartido:
+
+| Asistente | Motor | ¿Paquete propio? | Símbolos privados que cruzan |
+|---|---|---|---|
+| `art` | `fue`/`fuf` | **sí** (`art-tseries`) | — (pero ART importa 3 privadas de `fue.plots`) |
+| `mtram` | `drtran` | no, vive dentro | 3 de 33 |
+| `sima` | `drvarma` | no, vive dentro | 6 de 10 |
+
+Coste ya pagado: `drtran` fue 0.2.2 → 0.2.3 → 0.2.4 por documentación y un filtro
+de avisos, y los usuarios movieron tres veces su motor de estimación por cambios
+que no lo tocaron. Y `drtran[mcp]` arrastra matplotlib y jinja2 a un motor de
+estimación exacta.
+
+### La regla que decide qué va a cada lado
+
+No es "presentación frente a cómputo", que deja casos ambiguos:
+
+> **Todo lo que el modelo lee pertenece al asistente. El motor entrega números y
+> no argumenta.**
+
+Instrucciones, docstrings, `TOOLS.md`, la ecuación renderizada, los argumentos a
+favor y en contra: asistente. La función que devuelve los números de esa tabla:
+motor. Corolario: **el motor lleva sus reservas como DATO**, no como prosa —
+`ifault`/`termcode`, `delta_warnings`, el hueco de optimalidad de la puerta
+diagonal ya lo hacen en `drtran`; generalizarlo.
+
+### Consistencia del patrón, no del tamaño
+
+El peso del criterio depende del método y los tres métodos son distintos:
+
+- **`art`/`fue`** — el juicio es denso y está en CADA nodo (λ, d, D por
+  frecuencia, armónicos, órdenes, intervenciones, media) y es iterativo. Y `art`
+  está **aguas arriba**: `sima` la invoca para la siembra univariante y `mtram`
+  consume los `.pre` que `art`/`fue` producen. Un defecto de política en `art` se
+  propaga a la suite entera; ninguno de los otros dos tiene esa propiedad. Es a la
+  vez el más complejo y el más crítico, y su reparto es el patrón a replicar.
+- **`mtram`/`drtran`** — el juicio se concentra en pocas decisiones (coincidencia
+  de operadores, `(b,r,s)` desde la CCF preblanqueada, la puerta diagonal). Es
+  coherente que su capa de asistente sea menor, y ya está casi lista (30/33).
+- **`sima`/`drvarma`** — el juicio (orden de Cholesky, desestacionalizar,
+  `(p,q)` desde CCM/Tiao-Box) está MENOS guiado por la evidencia que el
+  univariante, no más. Que tenga 53 líneas de instrucciones y docstrings de 412
+  caracteres de media (frente a 963 de `art`, `diagnose` en 116) es el reparto
+  invertido.
+
+### El orden — y no es "separar primero"
+
+- [ ] **(1) `<motor>/assistant/`**: subir la capa de criterio fuera de
+      `mcp_server.py` a su propio subpaquete, espejo de `describe.py`/`policy.py`.
+      Sin cambio de empaquetado todavía. Ahí van `report_fit`, el dibujo de
+      paneles, el renderizado de ecuaciones y `_what_the_transfer_bought`.
+- [ ] **(2) Declarar la API**: las promociones entran en `__all__` con docstring
+      de símbolo público. `drtran`: `common_window`, `delta_operator`.
+      `drvarma`: `deseasonalize_raw`, `ccf`, `qccf`, `irf_fevd_bands`.
+- [ ] **(3) Partir las baterías**: hoy el servidor viaja con el motor.
+- [ ] **(4) Entonces `mtram-tseries` y `sima-tseries`** — mecánico a esas alturas.
+
+Hacer (4) antes que (2) publica un paquete cuya dependencia son internos no
+declarados, y deja dos salidas: promoverlos igual, o clavar `mtram-tseries==X` a
+`drtran==X` — que devuelve el acoplamiento por la puerta principal y compra un
+paquete que mantener a cambio de nada.
+
+### Por dónde empezar: por `sima`, no por el más importante
+
+Nadie ha trabajado en él, sus docstrings son los más delgados y medibles, y
+construir el patrón ahí cuesta lo menos y enseña lo más antes de tocar `mtram`,
+que está en uso diario. **`art` no necesita separación —ya la tiene—: necesita lo
+contrario**, cerrar su único leak y estrenar la disciplina de tests de asistente:
+
+- [ ] **Cerrar el leak de `Description.recommendation`** (`ARCHITECTURE.md:104`):
+      calcula un veredicto con heurísticas cableadas EN PARALELO al modelo. Dos
+      jueces que pueden contradecirse y que anclan al analista antes de que
+      ninguno haya razonado. Debe emitir **evidencia + el menú de decisiones con
+      argumentos a favor y en contra**, y dejar el veredicto al modelo y al
+      analista. Es lo único de `art` que NO hay que copiar a los otros dos.
+- [ ] **Tests de asistente**, que son de otra clase que los del motor: comprueban
+      lo que el servidor DICE. Ya hay ejemplos reales: que `estimate` anuncie un
+      cast despachado, que `check_operators` avise en desajuste y calle en
+      coincidencia, que toda herramienta esté registrada.
+
+### La pieza que falta en los tres: el contrato `.pre` no tiene dueño
+
+- [ ] **Prueba de conformidad `.pre` compartida.** El contrato cruza fronteras de
+      paquete (el `.pre` de `fue` alimenta a `drtran`; `art` siembra a `sima`) y no
+      vive en ninguno: se re-explica en las instrucciones de cada servidor y no hay
+      una sola prueba común. **BUG-0014 es la factura**: el mecanismo para encadenar
+      existía (`base_pre_path`), no estaba enrutado en ninguna parte, y la media
+      estimada se tiraba en cada peldaño. El invariante ya está escrito en prosa en
+      las instrucciones de `mtram` ("corre fue sobre un `.pre` y los números no se
+      mueven"); falta que sea código que los tres importen y ejecuten sobre sus
+      propios artefactos. Un contrato que nadie posee es un contrato que nadie prueba.
+
+---
+
+## Series I(0) con tendencia determinista suave — anotado, sin tocar (ago-2026)
+
+Salió al calibrar el criterio de tendencia de BUG-0016 y **se decidió no hacer
+nada por ahora**, pero conviene que quede escrito porque el caso es real y está
+medido.
+
+Las dos series anuales de precipitación de `~/Dropbox/Cycles` son I(0) y sirven
+de control en el lado «la regla no debe dispararse». Pero **tienen tendencia
+determinista**, suave y real:
+
+| serie | ventana | pendiente | t (HAC) | R² de una recta |
+|---|---|---|---|---|
+| Ginebra, días con precipitación | 1768–2015 | +7.25 días/siglo (+5.8 % de la media) | 3.37 | 0.076 |
+| Zúrich, mm | 1708–2015 | +53.3 mm/siglo (+4.9 %) | 2.20 | 0.035 |
+
+Ginebra pasa de 121 días de media en los primeros 50 años a 135.6 en los
+últimos. Es señal climática, no ruido.
+
+**Hoy ART las modela con d=0 y sin término de tendencia, así que esa deriva queda
+sin modelar.** Es lo correcto frente a la alternativa mala —diferenciar
+sobrediferenciaría una serie estacionaria e inyectaría una raíz MA en −1—, pero
+no es lo correcto en absoluto: una serie estacionaria alrededor de una tendencia
+determinista se modela con un regresor `trend`, que **fue ya soporta** (el tipo
+`trend` está en `_write_inp`).
+
+Opciones cuando se retome, en orden de intromisión:
+
+- [ ] Avisar en la diagnosis cuando haya pendiente significativa sin modelar, con
+      las dos salidas y sus argumentos, y que decida el analista.
+- [ ] Sugerir el determinista `trend` sin aplicarlo.
+- [ ] Nada automático. La regla de tendencia de `decide_d` mide DOMINANCIA (R² >
+      0.5) justo para no confundir este caso con una raíz unitaria.
+
+Lo que NO hay que hacer es convertirlo en un contraste de pendiente: con |t| > 2
+estas dos se diferenciarían, y son el control de que eso está mal.
+
+## Respuesta a la revisión externa (ago-2026)
+
+Revisión en `~/Dropbox/SRC/atws/atsw-suite/` (tres documentos, 11-ago-2026);
+respuesta razonada en `RESPUESTA_REVISION_2026-08-12.md` del mismo directorio.
+Se aceptó ~60 % de las recomendaciones, se corrigió ~20 % y se rechazó ~20 % con
+argumento. Lo aceptado, en orden:
+
+- [ ] 🔴 **Series anuales (freq=1)**, 3 defectos — ya está arriba en §Bugs
+      conocidos. Es el mayor excluyente de usuarios y sube a lo más alto.
+- [ ] 🟠 **BUG-0015 por `domain` DECLARADO, no por detector de tipo de serie.**
+      La revisión proponía clasificar la serie en ~5 categorías por "nombre,
+      variabilidad, tendencia" y sobreescribir `decide_lambda`/`decide_orders`.
+      **Se rechaza el mecanismo**: clasificar por el nombre del fichero es
+      adivinación disfrazada de política y mete un segundo juez oculto, justo lo
+      que `ARCHITECTURE.md:104` advierte. Un modelo que sale distinto porque el CSV
+      se llamaba `IPC_ES.csv` en vez de `serie3.csv` no es una política, es un
+      efecto lateral. **Se acepta el problema**: `build_model(..., domain=
+      "price_index")`, declarado por el analista, igual que `estimate_mu` acaba de
+      pasar de "nada lo decide" a "lo decide la política y el analista puede
+      fijarlo". Declarado se audita y entra en el guion; inferido, no.
+- [ ] 🟠 **C1 — promover en `fue` lo que ART importa de `fue.plots`.**
+      `_draw_acf_panel`, `_snap_cmax`, `_tj_spines` entran desde `diagnosis.py`,
+      `model_detection.py`, `seasonal_detection.py` y `mcp_server.py`: cuatro
+      módulos colgando de funciones con guion bajo que ningún test de `fue`
+      protege. Misma clase de problema que el inventario de `mtram`/`sima`.
+- [ ] 🟠 **Tests de CONTENIDO de las instrucciones MCP** (sustituye a "extraer
+      `_INSTRUCTIONS` a Markdown", que se rechaza). Las instrucciones son el
+      producto; sacarlas a un fichero las saca del alcance de los tests de
+      importación y crea un artefacto que empaquetar — eso ya costó la 0.1.6→0.1.7.
+      Si se quieren revisar fuera del código, **generar `INSTRUCTIONS.md` desde el
+      string**, como `TOOLS.md` se genera desde los docstrings; no mover la fuente
+      de verdad al Markdown. El problema real es otro: **no hay ningún test sobre
+      lo que las instrucciones dicen**. Prueba: `base_pre_path` tenía CERO
+      menciones en `_INSTRUCTIONS` mientras era la única vía de respetar el
+      contrato `.pre` al añadir ARMA.
+- [ ] 🟠 **`run_full` escribe en el guion** (sustituye a "log narrativo de
+      decisiones"). `guion.py` ya registra especificación, diagnóstico, ecuación,
+      decisión y justificación — la revisión lo elogia en una sección y propone
+      construirlo de nuevo en otra. El hueco real es que solo se rellena desde el
+      camino guiado (`confirm_and_estimate`, `record_version`); el autónomo no deja
+      traza. Con `PipelineResult.estimate_mu` ya hay precedente de qué registrar.
+- [ ] 🟡 **Quitar las 4 tools legacy** (`boxcox_analysis`, `seasonal_analysis`,
+      `unit_root_analysis`, `identification_analysis`): las cuatro remiten a
+      `guided_identification` en su propio docstring. **Y resolver el solape
+      `estimate_and_diagnose` / `confirm_and_estimate`**, que es el que un modelo
+      puede confundir de verdad. Se descarta "bajar el catálogo a 20": el número no
+      es la métrica, el solape sí.
+- [ ] 🟡 **Unificar `_write_inp` y `_write_bare_inp`.** La revisión decía que
+      `create_inp` construye el `.inp` a mano — **es falso**: construye un
+      `fue.Model` y llama al único `_write_inp` (`mcp_server.py:498`). Pero hay un
+      SEGUNDO escritor que no menciona: `_write_bare_inp` (`pipeline.py:34`), usado
+      desde `mcp_server.py:3765`. Dos funciones que emiten el mismo formato con las
+      cabeceras duplicadas — incluida la del `beg_period` que está detrás del
+      defecto (2) del bug de series anuales. Arreglar los dos a la vez.
+- [ ] 🟡 **Tipar `Description.data`** (dataclass por etapa). Ya declarado como
+      deuda en `docs/ARCHITECTURE.md` §7 línea 250; la revisión lo confirma pero no
+      añade nada.
+- [ ] 🟡 **Tests golden de más dominios**: serie sin estacionalidad, serie anual,
+      outlier extremo, varianza no constante. Hoy `test_golden_pipeline.py` cubre
+      IPC mensual, que es exactamente donde las heurísticas están calibradas.
+- [ ] 🟢 **Versión en el formato `.inp`** (`** FORMAT VERSION: 1`).
+- [ ] 🟢 `pip install --upgrade drvarma` en el entorno local (hoy 0.1.3 editable
+      contra 0.1.6 publicada). Es entorno, no paquete.
+
+**Rechazado con argumento** (detalle en la respuesta §4): el detector de tipo de
+serie por nombre; extraer `_INSTRUCTIONS` a Markdown; reconstruir el log de
+decisiones; "35 herramientas es demasiado"; y "dependencia de Claude" como riesgo
+—es la tesis del proyecto, no una amenaza; el riesgo real y distinto es que el
+asistente prometa lo que el motor ya no cumple, y eso se mitiga con versionado y
+tests de asistente—.
+
+**Ya hecho cuando se escribió la revisión** y por tanto fuera de la lista: README
+de `fue` en PyPI (4.000 caracteres), CHANGELOG y docs de DRVARMA (5.948), docs
+unificadas de la suite (`atsw-suite/docs/`, 7 documentos, GitHub Pages en 200).
+BUG-0013 y BUG-0014 se cerraron el 12-ago.
+
+---
 
 ## Filosofía: ART simple + Claude como analista BJ
 

@@ -46,7 +46,11 @@ SERIES = ["IPC_ES", "IPC_FR", "IPC_DE", "CPI_USA",
 def main() -> int:
     import fue
     from art.describe import describe_seasonality, describe_unit_root
-    from art.policy import decide_d, decide_seasonal_structure
+    from art.policy import decide_seasonal_structure, DefaultPolicy
+
+    # `decide_d` recibe ahora la decisión estacional, como en `run_full`. Antes
+    # no la veía, aunque `run_full` ya la había tomado tres líneas antes.
+    pol = DefaultPolicy()
 
     print(__doc__.split("Run:")[0].strip())
     print()
@@ -61,7 +65,7 @@ def main() -> int:
         se = describe_seasonality(ts).data
         D, _dec, nh = decide_seasonal_structure(se, ts.freq)
         u = describe_unit_root(ts, lam=0.0).data
-        d = decide_d(u)
+        d = pol.decide_d(u, seasonal=(_dec != "A"))
         rows.append((name, float(se["f_stat"]), bool(se["seasonal_detected"]),
                      D, nh, int(u["recommended_d"]), d))
 

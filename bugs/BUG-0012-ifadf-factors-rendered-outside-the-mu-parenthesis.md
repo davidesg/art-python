@@ -1,11 +1,11 @@
 ---
 id: BUG-0012
 title: ifadf differencing factors are rendered OUTSIDE the μ parenthesis, so the printed equation is not the model that was fitted
-status: open
+status: fixed
 severity: medium
 component: describe/equation
 found_in: 0.1.5
-fixed_in:
+fixed_in: 0.1.11 (unreleased)
 reported: 2026-08-08
 reporter: David / IPC_ES passthrough
 tags:
@@ -44,6 +44,58 @@ variable, and `ifadf` is part of the differencing. Its mean is
 ```
 
 **The estimation is correct.** This is a rendering defect only.
+
+## Resolution (2026-08-12)
+
+The `ifadf` factors go inside the μ parenthesis, alongside ∇ and ∇_s, because
+they are part of the differencing and μ is the mean of what is left after ALL of
+it. They are built into `nt_core` instead of being appended to `left_blocks`.
+
+```
+antes  (1 − 0.4074·B) (1 + B + B²)_f=4 (∇Nₜ − 0.4642) = …
+ahora  (1 − 0.4074·B) ((1 + B + B²)_f=4 ∇Nₜ − 0.4642) = …
+```
+
+Rendered across four frequencies of `IPC_ES_m10`, with the implied drift now
+readable straight off the equation:
+
+| f | A_f(1) | μ̂ | predicted A_f(1)·m | implied drift μ̂/A_f(1) |
+|---|---|---|---|---|
+| 2 | 1 | 0.1544 | 0.1545 | 0.1544 |
+| 3 | 2 | 0.3104 | 0.3090 | 0.1552 |
+| 4 | 3 | 0.4642 | 0.4635 | 0.1547 |
+| 6 (Nyquist) | 2 | 0.3090 | 0.3090 | 0.1545 |
+
+Four gains, one drift. That invariance is the definition working, and it is what
+the old rendering made look like an inconsistency.
+
+**Ordering.** This report gives two orders — the Summary and the Validation put
+the ifadf factors before ∇, the Fix section after. The operators commute, so it
+is a presentation choice; the Validation's form was taken, since it is the
+concrete assertion, and the choice is now fixed by the test rather than left to
+whoever edits next.
+
+### Tests
+
+`tests/test_bug_0012_ifadf_inside_mu_parenthesis.py`, 12 tests, of which 6 fail
+against the previous code. Three layers, as this report asked:
+
+* the factor is inside the μ parenthesis, at f=3, f=4 and the Nyquist f=6;
+* **no differencing operator is left outside it** — the class-catching check,
+  not just this instance;
+* and the numeric invariant `μ̂ ≈ A_f(1)·m`, so the printed expression is
+  mean-zero.
+
+Plus guards on the paths that were already right (plain `d`, and the no-μ case),
+and one test whose only job is to record that **f=2 is useless as a fixture**:
+its gain is 1, so both readings agree and the defect is invisible there.
+
+**One of the new tests initially passed against the broken code**, which is worth
+recording because it is a trap in this file specifically:
+`line.split("=")` cuts at the `=` inside `_f=4`, not at the equation's, so the
+left-hand side came out truncated before the factor and the assertion was
+vacuous. It now splits on a standalone ` = `. A test that passes for the wrong
+reason is worse than no test.
 
 ## Impact
 

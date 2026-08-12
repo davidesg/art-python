@@ -35,7 +35,12 @@ def _write_bare_inp(ts, path: str) -> None:
     """Write a minimal fue .inp with only series data and no model spec."""
     freq    = ts.freq
     begyear = int(ts.start[0])
-    begtime = int(ts.start[1]) if freq > 1 else begyear  # annual: year repeated twice
+    # El periodo inicial de una serie ANUAL es 1, no el año repetido. `_write_inp`
+    # (la otra función de este mismo módulo que emite este formato) ya lo escribía
+    # bien; este escritor conservaba la forma antigua — la demostración de por qué
+    # dos escritores del mismo formato son un defecto y no una duplicación
+    # inocente (BUG-0018).
+    begtime = int(ts.start[1]) if freq > 1 else 1
     n_ifadf = freq // 2 + 1 if freq > 1 else 1
     lines = [
         "************************************************",
@@ -422,13 +427,29 @@ def _mu_seed(ts, lam, d, D, estimate_mu, refactor=_RESCALE_FACTOR):
 
 def _build_arma_on_model(m_base, p: int, q: int,
                          P: int = 0, Q: int = 0,
-                         estimate_mu: bool = False):
+                         estimate_mu=None):
     """
     Return a new unfitted fue.Model that keeps all interventions and harmonics
     from m_base but replaces the ARMA specification with (p, q, P, Q).
 
     Used by confirm_and_estimate(base_pre_path=...) to add ARMA to a model
     that already has its outlier interventions estimated.
+
+    **The mean is INHERITED, like everything else (BUG-0014).** It used not to
+    be: the interventions were copied from the base and `mu` was re-derived in
+    the same constructor, so a base fitted with a free mean of 0.154472 produced
+    an ARMA step with `mu = 0` — the estimate was not re-seeded, it was thrown
+    away — and with `estimate_mu=True` it came back as 0.160085, the sample mean
+    of the differenced series rather than the optimum the previous rung had
+    found. Re-deriving a parameter that was already estimated is precisely what
+    the `.pre` convention exists to avoid.
+
+    `estimate_mu` is therefore three-state:
+
+    * `None` (default) — **inherit** the base's `estimate_mu` and its estimated
+      `mu0`. This is the `.pre` contract and should be what callers want.
+    * `True` / `False` — an explicit override. When forcing a mean on to a base
+      that has none, the seed comes from `_mu_seed` as before.
     """
     import fue
     import numpy as np
@@ -465,6 +486,20 @@ def _build_arma_on_model(m_base, p: int, q: int,
     ma_s_val  = [mas_i] if Q > 0 else []
     ma_sf_val = [[True] * Q] if Q > 0 else []
 
+    # THE MEAN, carried like the interventions above. `mu0` is where fue keeps
+    # the mean -- the seed before a fit, the estimate after one -- so inheriting
+    # it is inheriting the optimum. A fresh seed is computed only when the base
+    # has no mean at all and the caller asked for one.
+    base_est = bool(getattr(m_base, "estimate_mu", False))
+    est_mu = base_est if estimate_mu is None else bool(estimate_mu)
+    if est_mu and base_est:
+        mu_val = float(getattr(m_base, "mu0", 0.0) or 0.0)
+    elif est_mu:
+        mu_val = _mu_seed(m_base.series, m_base.boxlam, m_base.d, m_base.D,
+                          True, m_base.refactor)
+    else:
+        mu_val = 0.0
+
     return fue.Model(
         m_base.series,
         d=m_base.d, D=m_base.D, boxlam=m_base.boxlam,
@@ -474,8 +509,8 @@ def _build_arma_on_model(m_base, p: int, q: int,
         ma_s=ma_s_val,  ma_s_free=ma_sf_val if ma_s_val  else None,
         interventions=list(m_base.interventions or []),
         ifadf=list(m_base.ifadf or []),
-        mu=_mu_seed(m_base.series, m_base.boxlam, m_base.d, m_base.D, estimate_mu, m_base.refactor),
-        estimate_mu=estimate_mu,
+        mu=mu_val,
+        estimate_mu=est_mu,
         refactor=m_base.refactor,
     )
 
@@ -680,6 +715,8 @@ class PipelineResult:
     final_model: object
     final_diag: object
     interventions: list  # final accumulated (at_0, form)
+    estimate_mu: bool = False  # BUG-0013: what the policy decided about the mean
+    domain: str = "generic"    # BUG-0015: what KIND of series the policy saw
 
 
 def build_and_fit(ts, spec: ModelSpec, output_path: str,
@@ -727,14 +764,27 @@ def run_full(ts, output_path: str, max_rounds: int = 5,
         z_threshold = _policymod.THRESHOLDS["outlier_autonomous"]
 
     # ── Decisions (evidence → policy) ─────────────────────────────────────
+    # BUG-0015: qué CLASE de serie es. La regla índice vivía sólo en la capa
+    # guiada, así que el autónomo partía una familia de ocho IPC entre logs y
+    # niveles por el signo de un estadístico casi nulo.
+    domain = pol.decide_domain(ts)
     bc   = describe_boxcox(ts)
-    lam  = pol.decide_lambda(bc.data)
+    lam  = pol.decide_lambda(bc.data, domain)
     seas = describe_seasonality(ts)
     D, decision, n_harmonics = pol.decide_seasonal_structure(seas.data, ts.freq)
     urt  = describe_unit_root(ts, lam=lam)
-    d    = pol.decide_d(urt.data)
+    # BUG-0016: la estacionalidad ya está decidida cuando se pregunta por d, y
+    # contamina los tests de raíz unitaria — el ADF no lleva términos
+    # estacionales, así que el patrón infla el error típico y sesga hacia "vuelve
+    # a diferenciar". Con estacionalidad detectada y sin tratar, d se topa en 1.
+    d    = pol.decide_d(urt.data, seasonal=(decision != "A"))
     specs = suggest_orders(ts, d=d, D=D, lam=lam, top_n=5)
     p, q = pol.decide_orders(specs)
+    # BUG-0013: the autonomous path could not set a mean at all -- `ModelSpec`
+    # defaulted `estimate_mu=False` and nothing here ever reconsidered it, so
+    # every autonomous model was fitted with mu fixed at zero regardless of the
+    # data. The decision now goes through the policy like the other five.
+    est_mu = pol.decide_mu(ts, lam, d, D)
 
     # ── Outlier-addition loop ─────────────────────────────────────────────
     extra_itvs: list = []
@@ -743,7 +793,8 @@ def run_full(ts, output_path: str, max_rounds: int = 5,
     diag  = None
     for round_num in range(1, max_rounds + 1):
         spec = ModelSpec(lam=lam, d=d, D=D, p=p, q=q,
-                         n_harmonics=n_harmonics, interventions=list(extra_itvs))
+                         n_harmonics=n_harmonics, interventions=list(extra_itvs),
+                         estimate_mu=est_mu)
         fr = build_and_fit(ts, spec, output_path, z_threshold)
         m_fit, diag = fr.model, fr.diag
 
@@ -770,4 +821,6 @@ def run_full(ts, output_path: str, max_rounds: int = 5,
         boxcox_data=bc.data, seasonality_data=seas.data, orders_specs=specs,
         rounds=rounds, final_model=m_fit, final_diag=diag,
         interventions=extra_itvs,
+        estimate_mu=est_mu,
+        domain=domain,
     )

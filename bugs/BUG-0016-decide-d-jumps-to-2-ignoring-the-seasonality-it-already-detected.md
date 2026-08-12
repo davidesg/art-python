@@ -1,11 +1,11 @@
 ---
 id: BUG-0016
 title: decide_d takes the ADF+KPSS consensus straight, so a seasonal series jumps from d=0 to d=2 in one step — with the seasonality that contaminated the tests already detected three lines earlier and ignored
-status: open
+status: fixed
 severity: high
 component: policy
 found_in: 0.1.5
-fixed_in:
+fixed_in: 0.1.11 (unreleased)
 reported: 2026-08-08
 reporter: David / IPC-WTI passthrough, 8-country batch
 tags:
@@ -64,6 +64,77 @@ why the guided path runs its HAC test on ∇y(λ) and not on the level.
 
 Over-differencing a price index is not a venial error: it injects an MA unit root
 at −1, and in a transfer function it destroys the interpretation of the gain.
+
+## Resolution (2026-08-12) — junto con BUG-0015, como este informe exigía
+
+`decide_d(unit_root_data, seasonal=None, current_d=0, max_step=None)`. Con
+estacionalidad detectada y sin tratar, **d se topa en 1**; `run_full` le pasa
+ahora la decisión estacional que ya había tomado tres líneas antes.
+
+### El tope va en la POLÍTICA, no en la evidencia
+
+`recommended_d` sigue reportando lo que los tests hallaron. En la tabla del repro
+se ve el diseño:
+
+```
+   series      F-HAC   seasonal?   D  harm   recommended_d   decide_d
+   IPC_ES        90.1        True   0     5               2          1
+   IPC_UK        57.7        True   0     5               2          1
+   EMU           45.4        True   0     5               1          1
+   ...
+```
+
+Se sugirió 2, se topó a 1, y **se ve que se topó**. Si el tope viviera dentro del
+estadístico, la evidencia mentiría sobre lo que halló.
+
+### One step at a time, and why it is the method rather than an option
+
+`max_step` defaults to **1**: d never advances by more than one in a single
+decision, seasonality or not. The first implementation left this off by default,
+on the argument that capping a non-seasonal series would silently
+under-difference a genuine I(2) to fix a defect it does not have. That argument
+is wrong, and the correction is worth recording because it is the substance of
+the rule rather than a tuning choice.
+
+*The question asked from the level is not "how many differences?"* It is "is at
+least one regular difference needed?". Seasonality is normally read on a series
+already differenced once, so from d=0 the question of whether a SECOND difference
+is warranted has never been put. A series may well be I(2) — but that is not what
+the test at d=0 examined, least of all on a series that may carry seasonality.
+Jumping 0 → 2 is not answering quickly; it is answering a question nobody asked.
+
+*Take the obvious step first.* If d=1 is the obvious reading, d=2 is not
+reachable from d=0 in one move. And this cuts both ways: low power can equally
+leave the test failing to call for a difference at all, but a series that trends
+and may be seasonal is a reason to doubt the test rather than to believe it, and
+the obvious step remains d=1. Nominal series in economics and finance are almost
+always d=1, and occasionally d=2.
+
+**Nothing is lost by starting low, and that is what settles the objection.** ADF,
+KPSS and the plot are tools of INITIAL SPECIFICATION, sound as such and not asked
+to be the last word. The real contrast on the order of integration comes at the
+END of the process, on a model that is adequate and correctly specified —
+`dcd_overdiff_regular` and Shin-Fuller — which is exactly where this flow already
+puts them. Capping at identification does not under-difference in silence; it
+defers the question to where it can be answered properly, instead of settling it
+with an instrument that cannot yet see.
+
+From `current_d=1` the second difference is reachable, because by then the
+question has been asked.
+
+The "deeper fix" this report mentions — running the ADF with the harmonics that
+`decide_seasonal_structure` has just chosen, so the test is not asked a question
+its regression cannot represent — remains open and is the right medium-term
+route.
+
+### La interacción se confirmó
+
+Este informe avisaba: *«arregla la regla índice sola y este bug dispara en más
+series»*. Cierto — con λ=0, IPC_ES pasa a sobrediferenciar. Por eso se movieron
+juntos, y la tabla de las ocho series es la comprobación conjunta.
+
+Tests: `tests/test_bug_0015_0016_policy_domain_and_d_cap.py`. Contra el código
+previo fallan 20 de 23.
 
 ## Reproduction
 
