@@ -4,7 +4,7 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
-## art-tseries (sin publicar) — 2026-08-12
+## art-tseries 0.1.11 — 2026-08-13
 
 **BUG-0011 — el par confirmatorio de f=0 se reportaba partido**, así que sobre
 IPC_ES el informe emitía «considerar d+1» como si fuera una conclusión.
