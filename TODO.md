@@ -1210,3 +1210,36 @@ nula raíz unitaria estacional).
 - [ ] Aplicar el par confirmatorio frecuencia por frecuencia (DCD + SF AR_f);
       documentar los casos de cuasi-cancelación (desacuerdo del par).
 - [ ] Redactar la sección de aplicación empírica del paper con los resultados.
+
+## Un ejemplo de función de transferencia, con los papeles de aplicación (ago-2026)
+
+La FLT `ω(B)/δ(B)` es una de las tres cosas que distinguen a `fue` —respuesta
+**dinámica** a un input, no un coeficiente estático— y en `fue/docs/MODEL.md`
+§2.1 está escrita formalmente. Lo que falta es un **ejemplo de aplicación**, y
+su sitio es aquí y no en el motor: `fue` estima la FLT que se le especifique;
+decidir `(b, s, r)` y qué input corresponde a qué incidente es criterio, que es
+lo que hace `art`.
+
+Material disponible, en `fue/literature/`:
+
+* **García-Hiernaux y Guerrero (2021)**, «Price convergence: representation and
+  testing», *Economic Modelling* 104, 105641 — la fase de transición de un
+  proceso de convergencia **es** un input determinista pasado por una FLT: `ω`
+  es cuánto recorre, `δ` la velocidad, y la fecha de inicio es la del input. La
+  forma y el punto de arranque se **estiman**, y las definiciones implican
+  restricciones sobre los parámetros que se contrastan.
+* **García-Hiernaux, González-Pérez y Guerrero (2023)**, «Eurozone prices: a
+  tale of convergence and divergence», *Economic Modelling* 126, 106418 — el
+  mismo marco sobre precios relativos de la UEM, 2001-2020, identificando fecha,
+  forma y velocidad de cada proceso.
+
+(Los otros dos de esa carpeta no son aplicaciones: `518-2013-11-11-JAM102.pdf`
+es Mauricio (2002) en *JTSA* 23(4) —el `JTSA02` que cita el código— y `9720.pdf`
+es Relloso Pereda (1997), ICAE WP 9720.)
+
+**No sobrelaborar**: basta un
+ejemplo con un incidente real, su `(b, s, r)`, la ganancia a largo plazo
+`g = ω(1)/δ(1)` y el contraste de simplificación —que ya está documentado en
+`fue/docs/FORMAL_TESTS.md` §6—. Lo que enseña es la diferencia entre «el efecto
+se instala» y «el efecto se absorbe», que es lo que un escalón y un impulso
+compensado dicen y un regresor estático no puede decir.
