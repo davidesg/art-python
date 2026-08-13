@@ -6,6 +6,22 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries 0.1.11 — 2026-08-13
 
+**Compatibilidad con fue 0.1.10, y no es cosmética.** En esa versión
+`FitResult.converged` deja de significar «el motor no reventó» (`ifault == 0`) y
+pasa a exigir que el optimizador haya parado por el criterio del gradiente.
+
+`formal_tests._fit_py` abortaba con `RuntimeError` cuando `converged` era falso.
+Con la semántica nueva eso alcanzaba a ajustes perfectamente utilizables: **18
+errores en el banco RV_M15**, en modelos restringidos que paran por criterio de
+paso precisamente porque la restricción los deja en una cresta.
+
+Ahora lo que aborta es `ifault != 0`, que es el fallo del motor; un ajuste que
+existe pero no es máximo emite `RuntimeWarning` y sigue, porque **eso no es un
+fallo de estimación: es información**, y quien la necesita es el contraste, que
+compara dos verosimilitudes y debe poder decir que una de las dos es dudosa.
+La dependencia sube a `fue>=0.1.10`.
+
+
 **BUG-0011 — el par confirmatorio de f=0 se reportaba partido**, así que sobre
 IPC_ES el informe emitía «considerar d+1» como si fuera una conclusión.
 

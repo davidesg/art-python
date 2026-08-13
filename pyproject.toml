@@ -26,7 +26,13 @@ dependencies = [
     # >=0.1.9: earlier fue wheels installed but could not load their C engine
     # (cffi was missing from its runtime dependencies), so the estimator
     # silently degraded to pure Python.
-    "fue>=0.1.9",
+    # >=0.1.10: `FitResult.converged` cambia de significado en esa versión —deja
+    # de ser «ifault == 0» y exige además que el optimizador haya parado por el
+    # criterio del gradiente—, y art distingue ahora las dos cosas
+    # (formal_tests._fit_py). Con fue 0.1.9 el aviso nuevo no existe; con
+    # 0.1.10 y el art anterior, los contrastes que reestiman con restricción
+    # lanzaban RuntimeError.
+    "fue>=0.1.10",
     "pyfug>=2.0",
     "numpy>=1.24",
     "matplotlib>=3.7",

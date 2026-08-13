@@ -86,6 +86,7 @@ T2. MEG_AR (NOT IMPLEMENTED) — complementary test using AR_f non-stationarity,
 
 from __future__ import annotations
 
+import warnings
 import copy
 import math
 from dataclasses import dataclass, field
@@ -686,10 +687,30 @@ def _fit_py(mc) -> None:
     from fue.model import FitResult
     raw = estimate_py(mc)
     mc._result = FitResult(raw)
-    if not mc._result.converged:
+
+    # El fallo del MOTOR es lo que aborta, y eso es `ifault`.
+    #
+    # Aquí ponía `if not converged`, que en fue <=0.1.9 significaba
+    # exactamente `ifault == 0`. Desde fue 0.1.10 `converged` es más estricto
+    # —exige además que el optimizador haya parado por el criterio del
+    # gradiente— y con eso esta línea empezó a lanzar RuntimeError sobre
+    # ajustes perfectamente utilizables: 18 errores en el banco de RV_M15, en
+    # modelos restringidos que paran por criterio de paso porque la
+    # restricción los deja en una cresta.
+    #
+    # Un ajuste que existe pero no es un máximo NO es un fallo de estimación:
+    # es información, y quien la necesita es el contraste, que compara dos
+    # verosimilitudes y debe poder decir que una de las dos es dudosa.
+    if mc._result.ifault != 0:
         raise RuntimeError(
             f"Pure-Python estimation failed: ifault={mc._result.ifault}"
         )
+    if not getattr(mc._result, "converged", True):
+        warnings.warn(
+            f"art: el ajuste restringido paró sin anular el gradiente "
+            f"({getattr(mc._result, 'termination', '?')}). La razón de "
+            f"verosimilitudes que lo use hereda esa duda.",
+            RuntimeWarning, stacklevel=2)
 
 
 def dcd_f(model) -> list[DCDResult]:
