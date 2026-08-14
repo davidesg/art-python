@@ -268,10 +268,24 @@ def describe_seasonality(ts) -> Description:
         lines += [
             "",
             "**Decisión B1 — estacionalidad determinista (punto de partida recomendado).**",
-            "- D=0, con armónicos cos/sin para cada frecuencia significativa.",
+            "- D=0, con armónicos cos/sin en **TODAS** las frecuencias, f=1..s/2.",
             "- Los armónicos absorben el patrón estacional fijo (igual cada año).",
             "- MEG (etapa 3, tras estimar) validará si alguna frecuencia es",
             "  estocástica y conviene pasar a B2.",
+            "",
+            "⚠ **La lista de frecuencias significativas de arriba es DESCRIPTIVA, no",
+            "  una regla de selección.** No se omite el armónico de una frecuencia",
+            "  porque el HAC no la marque, y menos aquí:",
+            "  - el modelo nulo del MEG en la frecuencia f **es** el armónico",
+            "    determinista en f. Si no se pone, esa frecuencia deja de ser una",
+            "    pregunta: no se puede contrastar lo que no está;",
+            "  - un estadístico bajo en f es evidencia **a favor** de estacionalidad",
+            "    estocástica en f — amplitud que vaga y promedia hacia cero—, que es",
+            "    justo lo que el MEG viene a decidir;",
+            "  - y en este punto no hay nada estimado: el único criterio disponible",
+            "    procede de un modelo sin ARMA, cuyos errores estándar están",
+            "    inflados por la dinámica sin modelar.",
+            "  La poda, si procede, va DESPUÉS del MEG y sobre un modelo adecuado.",
             "",
             "**Decisión B2 — estacionalidad multiplicativa (tradición Box-Jenkins).**",
             "- D=1: diferencia estacional ∇_s elimina el patrón estacional.",
@@ -2334,13 +2348,44 @@ def describe_seasonal_params(model) -> Description:
         )
 
     if drop_k:
+        # La poda NO está prohibida: está ORDENADA. Un |t| bajo en la frecuencia
+        # f no es por sí solo evidencia de que f sobre —también es lo que produce
+        # una estacionalidad estocástica, cuya amplitud vaga y promedia hacia
+        # cero—, y el modelo nulo del MEG en f ES este armónico. De ahí el orden.
+        #
+        # Pero hay dos caminos legítimos hasta la poda, y art los ofrecía antes:
+        #   * el analista renuncia al MEG y fija la estacionalidad como
+        #     determinista: entonces el contraste de simplificación es
+        #     exactamente lo que procede;
+        #   * el MEG ya corrió y el modelo es mixto: se poda lo que NO declaró
+        #     estocástico, y lo que sí se reformula con ifadf[f]=1.
+        # Lo que no se hace es podar ANTES y sin decidir cuál de los dos es.
         rec = (
             f"Los armónicos {', '.join(f'k={k}' for k in drop_k)} tienen |t| ≤ 2 "
-            f"en ambos componentes. Considera eliminarlos con un test RV conjunto "
-            f"(Bloque H) antes de simplificar."
+            f"en ambos componentes. Antes de eliminarlos, decide en qué camino "
+            f"estás — un |t| bajo en f también es lo que produce una "
+            f"estacionalidad ESTOCÁSTICA en f, y el modelo nulo del MEG en esa "
+            f"frecuencia ES este armónico:\n\n"
+            f"**(a) Vas a contrastar el MEG** (recomendado si la estacionalidad "
+            f"puede evolucionar): **no podes todavía**. Estima un modelo "
+            f"adecuado, corre el MEG sobre esas frecuencias, y después poda sólo "
+            f"donde NO haya declarado estocástica; las que sí, se reformulan con "
+            f"ifadf[f]=1, no se eliminan.\n\n"
+            f"**(b) Fijas la estacionalidad como determinista** y renuncias al "
+            f"MEG: entonces **procede simplificar ahora** — test RV conjunto del "
+            f"Bloque H (`test_seasonal_simplification`) sobre "
+            f"{', '.join(f'k={k}' for k in drop_k)}, sobre un modelo cuyos "
+            f"residuos no tengan estructura.\n\n"
+            f"En un modelo MIXTO ya resuelto, la poda de los armónicos que "
+            f"quedan deterministas es el paso final y también procede."
         )
     else:
-        rec = "Todos los armónicos son significativos (|t| > 2). No se recomienda simplificación."
+        rec = (
+            "Todos los armónicos son significativos (|t| > 2): no hay "
+            "simplificación que proponer por esta vía. Si la estacionalidad "
+            "puede evolucionar, la pregunta que queda —si alguna frecuencia es "
+            "estocástica— la responde el MEG, no los t-ratios."
+        )
 
     return Description(
         summary="\n".join(summary_lines),
