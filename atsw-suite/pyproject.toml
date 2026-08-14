@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "1.2.5"
+version         = "1.2.6"
 description     = "ATSW — A Time Series Workshop: the Box-Jenkins-Treadway suite (univariate exact-ML estimation, graphics, model building, transfer functions and multivariate VARMA) with three MCP assistants for LLM-driven analysis"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -49,9 +49,18 @@ classifiers     = [
 #
 # Lowering any of them ships an umbrella that installs and does not work.
 dependencies = [
-    "fue>=0.1.9",             # univariate estimation engine + FUF forecasting
+    # >=0.1.11 is not housekeeping either. In fue 0.1.10 `FitResult.converged`
+    # stopped meaning "ifault == 0" and started requiring that the optimiser
+    # stopped on the GRADIENT criterion. art <=0.1.10 raised RuntimeError on
+    # `not converged`, so the pair (art 0.1.10, fue 0.1.11) installs cleanly and
+    # then aborts every likelihood-ratio test that re-estimates under a
+    # restriction -- 18 errors in the RV_M15 bank, on models that stop on the
+    # step criterion precisely BECAUSE the restriction leaves them on a ridge.
+    # art 0.1.11 distinguishes the two questions; the bound is what keeps the
+    # broken combination out.
+    "fue>=0.1.11",            # univariate estimation engine + FUF forecasting
     "pyfug>=2.0",             # Jenkins-Treadway graphics
-    "art-tseries>=0.1.7",     # model building + MCP server (art-mcp)
+    "art-tseries>=0.1.11",    # model building + MCP server (art-mcp)
     # >=0.2.0 is NOT housekeeping. Up to 0.1.1 drtran related each series
     # differenced by ITS OWN operator, so whenever the output and the input
     # carried different differencing the fitted transfer was nu(B)*Delta(B) and

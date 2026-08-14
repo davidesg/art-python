@@ -347,6 +347,23 @@ instrucciones son el producto, y aquí había criterio escrito que no llegaba.
 - TODO: la pregunta del OBJETIVO (multivariante o previsión), analizada y sin
   implementar — el objetivo no manda sobre los datos, y ésa es la parte difícil.
 
+## atsw 1.2.6 — 2026-08-14
+
+Sube las cotas a `fue>=0.1.11` y `art-tseries>=0.1.11`, y no es mantenimiento.
+
+En fue 0.1.10 `FitResult.converged` dejó de significar «ifault == 0» y pasó a
+exigir que el optimizador hubiera parado por el criterio del **gradiente**.
+`art <=0.1.10` lanzaba `RuntimeError` cuando `converged` era falso, así que la
+pareja **(art 0.1.10, fue 0.1.11) instala limpiamente y luego aborta** todo
+contraste de razón de verosimilitudes que reestime bajo restricción — 18 errores
+en el banco RV_M15, sobre modelos que paran por criterio de paso precisamente
+**porque** la restricción los deja en una cresta.
+
+`art 0.1.11` distingue las dos preguntas —el fallo del motor es `ifault`; un
+ajuste que no es máximo es información y avisa—, y la cota es lo que impide que
+un entorno resuelva la combinación rota. Las cotas de este paquete nunca son
+cosméticas: cada una es la primera versión que funciona de verdad.
+
 ## atsw 1.1.0 — 2026-07-27
 
 - Adds **drvarma>=0.1.1** to the suite — multivariate VARMA (exact-ML estimation,
