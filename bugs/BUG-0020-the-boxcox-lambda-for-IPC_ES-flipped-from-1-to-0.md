@@ -1,8 +1,8 @@
 ---
 id: BUG-0020
 title: art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved
-status: open
-severity: high
+status: closed — not a defect
+severity: none (el defecto estaba en el pin)
 component: identification
 found_in: working copy (posterior a art-tseries 0.1.11)
 reported: 2026-08-15
@@ -86,3 +86,45 @@ el hallazgo es que el pin es frágil y la serie está en la frontera, y entonces
 que hay que corregir es el pin —o la regla— y no el código. Si el margen es amplio,
 hay un defecto de verdad. **Cuál de las dos λ es la correcta para IPC_ES es una
 decisión sobre los datos, no sobre el código.**
+
+---
+
+## Resuelto 2026-08-15 — NO es un defecto de art. El pin registró el estado anterior a BUG-0015
+
+Bisección sobre `test_regression_art_still_identifies_the_same_two_models` de
+`drtran-python`, 30 s por punto:
+
+| commit | resultado |
+|---|---|
+| `e257f6d` (art-tseries 0.1.10) | **pasa** (λ=1) |
+| `f8ee98e` | **falla** (λ=0) |
+| `6937299`, `4ede646`, `master` | falla |
+
+El salto está en `f8ee98e`, y dentro de él es deliberado: `policy.decide_lambda`
+implementa **la regla de los números índice (BUG-0015)** — para
+`domain="price_index"` la respuesta es λ=0 **diga lo que diga el estadístico**,
+porque un índice no tiene cero natural, su año base es una convención (2016=100)
+y sólo los cambios relativos tienen significado. `IPC_ES` entra por
+`_INDEX_PREFIXES` y recibe la regla.
+
+La regla es correcta y es la del dominio: además de la base arbitraria, el log
+permite leer la **primera diferencia como inflación**. El commit añade un dato que
+lo cierra: sobre ocho IPC mensuales el estadístico repartía **cuatro en logs y
+cuatro en niveles**, con IPC_JP a un pelo de voltear — nada en los datos distingue
+esos ocho.
+
+**Conclusión, invertida respecto a la sospecha inicial:** lo anómalo era el λ=1
+que se fijó el 2026-08-07, que es `art` *antes* de tener la regla. El pin capturó
+el estado defectuoso y lo consagró. `f8ee98e` no rompió nada; restauró lo que
+`art` hacía desde sus primeras versiones.
+
+**Acción:** regrabar los pines de `drtran-python`. Ninguna en `art`.
+
+## Lo que sí queda como cautela, y no como defecto
+
+El dominio se **infiere del nombre de la serie** (`ts.name.startswith(...)`). El
+propio código lo reconoce —«Declared beats inferred. The inference exists so the
+autonomous path is not left with nothing, not because the name is good evidence»—
+y deja abierta la puerta del `domain=` explícito. Con `IPC_ES` acierta; una serie
+llamada `serie3` no recibiría la regla, y el mismo IPC saldría en niveles o en
+logs según de qué lado del estadístico cayera.
