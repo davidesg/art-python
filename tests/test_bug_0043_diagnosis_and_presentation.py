@@ -29,6 +29,9 @@ import fue
 from art.describe import describe_diagnosis
 from art.pipeline import _write_inp, _load_fitted
 
+from datos_replica import REPLICA, REPLICA_DS, requiere_replica
+
+
 
 def _fit(ts, tmp_path, nombre, **kw):
     ruta = str(tmp_path / f"{nombre}.inp")
@@ -98,10 +101,11 @@ def test_the_recommendation_is_never_an_empty_reason(tmp_path):
             assert len(rec) > 40, f"razón demasiado corta para ser una razón: {rec!r}"
 
 
+@requiere_replica
 def test_marginal_joint_seasonality_says_so_instead_of_an_empty_field():
     """El testigo real: conjunto p=0.0492 y ninguna frecuencia significativa."""
     import os
-    ruta = ("/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/autonomo/"
+    ruta = (REPLICA + "autonomo/"
             "RATIO/RATIO_m80.inp")
     if not os.path.exists(ruta):
         pytest.skip("el testigo de la réplica no está en esta máquina")
@@ -112,13 +116,14 @@ def test_marginal_joint_seasonality_says_so_instead_of_an_empty_field():
     assert "NINGUNA frecuencia" in rec or "freq=" in rec
 
 
+@requiere_replica
 def test_percentages_are_only_given_where_the_acf_is_out_of_band(tmp_path):
     """Donde la ACF ronda cero el cociente se dispara sin significar nada."""
     import re
     from art import mcp_server as M
     salida = str(tmp_path / "I.inp")
     t = M.confirm_and_estimate(
-        "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/ITCER.inp", salida,
+        REPLICA + "ITCER.inp", salida,
         lam=0.0, d=1, D=0, p=0, q=0, n_harmonics=0, seasonal=False,
         estimate_mu=True)[0].text
     linea = [l for l in t.splitlines() if "Retardos ACF" in l]
@@ -129,21 +134,23 @@ def test_percentages_are_only_given_where_the_acf_is_out_of_band(tmp_path):
     assert max(pcts) <= 200, f"porcentaje con denominador nulo: {linea[0]}"
 
 
+@requiere_replica
 def test_no_seasonality_prints_no_route_recipes():
     """Una salida que concluye A y luego imprime la receta de B1 es una
     instrucción para hacer lo contrario de lo que acaba de concluir."""
     from art import mcp_server as M
     t = M.guided_identification(
-        "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/ITCER.inp",
+        REPLICA + "ITCER.inp",
         lam=0.0, d=1)[0].text
     assert "Decisión A" in t
     assert "Route B1" not in t and "Route B2" not in t
     assert "no hay estacionalidad que enrutar" in t
 
 
+@requiere_replica
 def test_with_seasonality_the_recipes_are_still_there():
     from art import mcp_server as M
     t = M.guided_identification(
-        "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/RATIO.inp",
+        REPLICA + "RATIO.inp",
         lam=0.0, d=1)[0].text
     assert "Route B1" in t and "Route B2" in t

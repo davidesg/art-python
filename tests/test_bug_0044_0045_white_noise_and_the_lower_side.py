@@ -28,6 +28,9 @@ from art.model_detection import _parsimony_score, suggest_orders
 from art.formal_tests import dcd_overdiff_regular, dcd_underdiff_regular
 from art.pipeline import _load_fitted, _write_inp
 
+from datos_replica import REPLICA, REPLICA_DS, requiere_replica
+
+
 
 # ── BUG-0044 ────────────────────────────────────────────────────────────────
 
@@ -43,11 +46,12 @@ def test_the_parsimony_score_does_not_punish_zero_parameters():
     assert _parsimony_score(0.10, 0, 0, 0, 0, emp, 4) > 0.0
 
 
+@requiere_replica
 def test_white_noise_wins_when_there_is_nothing_to_model():
     """Testigo real: residuos del ITCER con la intervención, cero retardos fuera
     de banda."""
     import os
-    ruta = ("/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/autonomo2/"
+    ruta = (REPLICA + "autonomo2/"
             "ITCER/ITCER_m10.pre")
     if not os.path.exists(ruta):
         pytest.skip("el testigo de la réplica no está en esta máquina")
@@ -186,11 +190,12 @@ def test_with_d_zero_there_is_no_difference_to_question(tmp_path):
     assert dcd_underdiff_regular(m) is None
 
 
+@requiere_replica
 def test_the_report_bounds_the_order_from_both_sides():
     """La frase «no está en la banda ambigua» necesitaba los dos lados."""
     import os
     from art.describe import describe_formal_tests
-    ruta = ("/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/autonomo2/"
+    ruta = (REPLICA + "autonomo2/"
             "PGAS/PGAS_m20.inp")
     if not os.path.exists(ruta):
         pytest.skip("el testigo de la réplica no está en esta máquina")

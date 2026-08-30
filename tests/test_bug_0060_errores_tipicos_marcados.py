@@ -15,7 +15,10 @@ import fue
 from art.describe import model_equation
 from art.diagnosis import bfgs_seed_var
 
-R = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/"
+from datos_replica import REPLICA, REPLICA_DS
+
+
+R = REPLICA
 
 
 def _cargar(rel):

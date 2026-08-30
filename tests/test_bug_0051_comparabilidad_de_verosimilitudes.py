@@ -12,7 +12,10 @@ import pytest
 from art.guion import _build_equation, _extract_spec
 from art.mcp_server import _nested_relation, _spec_diff
 
-R = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/run2/RATIO/"
+from datos_replica import REPLICA, REPLICA_DS
+
+
+R = REPLICA + "run2/RATIO/"
 
 
 def _spec(**kw):

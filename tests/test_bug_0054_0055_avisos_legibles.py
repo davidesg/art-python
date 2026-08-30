@@ -11,7 +11,10 @@ import warnings
 import numpy as np
 import pytest
 
-PGAS = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/run2/PGAS/"
+from datos_replica import REPLICA, REPLICA_DS
+
+
+PGAS = REPLICA + "run2/PGAS/"
 
 
 def _modelo(nombre):

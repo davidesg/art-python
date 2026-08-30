@@ -4,6 +4,76 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.1.12 — 2026-08-30
+
+**44 defectos cerrados (BUG-0021…0064), cada uno con repro determinista, arreglo
+y test.** La suite pasa de 787 a 901 tests.
+
+Salieron de replicar un TFM de econometría por tres caminos independientes: el
+modo guiado, y dos LLM distintos trabajando en chats sin contexto previo sobre
+las mismas tres series. **Seis los encontraron esos analistas**, y uno de ellos
+era un agujero en un arreglo anterior.
+
+### Lo que cambia de comportamiento
+
+* **`objetivo` como entrada del carril autónomo** (`univariante` |
+  `multivariante` | `estructural`). Decide la ruta estacional cuando los
+  contrastes no la deciden solos: en multivariante veta la ruta D=1, porque las
+  series de un sistema necesitan el mismo tratamiento o sus órdenes de
+  integración no son comparables. Lo aceptan `build_model`, `batch_build` y
+  `guided_identification` (BUG-0046).
+* **El ruido blanco entra en la lista de candidatos por su propio contraste**, la
+  Q de Ljung-Box, en vez de sin filtro (BUG-0048). Era una regresión introducida
+  al arreglar BUG-0044.
+* **`P` y `Q` funcionan con `D=0`.** La documentación decía «D=1 only» y era
+  falso; creerla llevaba a la ruta que el objetivo multivariante prohíbe
+  (BUG-0050).
+* **`loglik`/`AIC`/`BIC` ya no se comparan entre modelos con diferenciación
+  distinta.** `ifadf` se caía del spec, así que la transformación era invisible
+  en la ecuación, en el diff y en la detección de anidamiento — y el LR llegaba a
+  salir negativo (BUG-0051).
+* **La cascada de abandono conserva las razones ya escritas** y no barre ramas
+  que dejaron de descender del callejón (BUG-0058).
+* **Valores críticos DCD para el MA estacional** (Davis-Chen-Dunsmuir), que antes
+  se contrastaba con la ley equivocada.
+
+### Lo que cambia de lo que se lee
+
+Nueve de los 44 son la misma familia: **el contenido correcto existía y la forma
+de presentarlo lo contradecía**. Ninguno tenía un estadístico mal calculado.
+
+* Un titular que el propio bloque retiraba tres párrafos después (BUG-0055).
+* La capa de evidencia hablando con voz de política — «Usa d=2» — saltándose el
+  tope que BUG-0016 y BUG-0023 pusieron aguas abajo (BUG-0056).
+* El Box-Cox imprimiendo el módulo y perdiendo el signo, con lo que
+  sobretransformación e infratransformación quedaban indistinguibles (BUG-0059).
+* **Errores típicos que son la semilla del BFGS, impresos con el mismo formato
+  que los válidos**: `t = −4.64` donde el honesto es `−2.43`. Ahora se marcan
+  dentro del bloque y, cuando es calculable, se da el correcto (BUG-0060).
+* **La misma covarianza inválida leída como correlaciones no infla un número:
+  PIERDE pares.** Tres se convertían en dos, y el que desaparecía era el menos
+  visible (BUG-0061).
+* **Operadores fuera de la región admisible** —un MA estacional con Θ₄ = −2.0989,
+  no invertible— presentados como cualquier otro resultado. Se distingue «dentro
+  del círculo» de «en la frontera», que se arreglan de forma distinta (BUG-0062).
+* `guion_map` volcaba los textos enteros y se truncaba a fichero justo en la
+  serie con más ramas: 52.921 bytes → 9.868, con el recorte anunciado y
+  `detalle=True` para lo entero (BUG-0064).
+
+### Convenio de ficheros
+
+La regla 1 —«los parámetros se leen del `.out`, nunca de reejecutar un `.pre`»—
+se amplía de «errores típicos» a **toda la covarianza**, con el caso medido. Y se
+añade la regla de recorrido: **con varias series, una detrás de otra, nunca en
+paralelo**, con el mecanismo y lo que cuesta.
+
+### Tests
+
+Los que fijan un comportamiento sobre un caso real leen la ruta de los datos de
+`ART_TEST_DATA` en vez de tenerla escrita. Sin esa variable hacen `skip`: antes
+eran dieciséis ficheros que sólo podían ejecutarse en una máquina y aun así
+viajaban en el sdist.
+
 ## art-tseries 0.1.11 — 2026-08-13
 
 **Compatibilidad con fue 0.1.10, y no es cosmética.** En esa versión

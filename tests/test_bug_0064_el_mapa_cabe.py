@@ -10,7 +10,10 @@ import warnings
 
 import pytest
 
-R = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/run3/"
+from datos_replica import REPLICA, REPLICA_DS
+
+
+R = REPLICA + "run3/"
 RATIO = R + "RATIO/RATIO_guion.json"
 
 

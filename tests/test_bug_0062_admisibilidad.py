@@ -12,8 +12,11 @@ import pytest
 
 from art.diagnosis import _raices_factor, admissibility_problems
 
-R = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/"
-RDS = "/home/david/Dropbox/TFM_UCM/Tesis_Michael_DS/replica/"
+from datos_replica import REPLICA, REPLICA_DS
+
+
+R = REPLICA
+RDS = REPLICA_DS
 
 
 class _M:

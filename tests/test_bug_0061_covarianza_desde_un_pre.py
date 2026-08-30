@@ -9,7 +9,10 @@ import warnings
 
 import pytest
 
-RATIO_PRE = ("/home/david/Dropbox/TFM_UCM/Tesis_Michael_DS/replica/run2/"
+from datos_replica import REPLICA, REPLICA_DS
+
+
+RATIO_PRE = (REPLICA_DS + "run2/"
              "RATIO/RATIO_m23.pre")
 RATIO_OUT = RATIO_PRE[:-4] + ".out"
 

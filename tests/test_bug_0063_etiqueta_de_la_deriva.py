@@ -11,7 +11,10 @@ import warnings
 import numpy as np
 import pytest
 
-R = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/run3/"
+from datos_replica import REPLICA, REPLICA_DS, requiere_replica
+
+
+R = REPLICA + "run3/"
 PGAS = R + "PGAS/PGAS_m03.pre"
 ITCER = R + "ITCER/ITCER_m02.pre"
 
@@ -82,8 +85,9 @@ def test_la_identificacion_ARMA_conserva_su_etiqueta():
     assert "residuos de `ITCER_m02.pre`" in txt
 
 
+@requiere_replica
 def test_sin_pre_path_no_se_añade_la_nota():
-    inp = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/ITCER.inp"
+    inp = REPLICA + "ITCER.inp"
     if not os.path.exists(inp):
         pytest.skip("datos de la réplica no disponibles")
     warnings.simplefilter("ignore")

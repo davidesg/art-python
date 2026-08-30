@@ -14,8 +14,11 @@ import warnings
 
 import pytest
 
-PGAS = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/run2/PGAS/PGAS_m03.pre"
-RATIO = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/run2/RATIO/RATIO_m03.pre"
+from datos_replica import REPLICA, REPLICA_DS, requiere_replica
+
+
+PGAS = REPLICA + "run2/PGAS/PGAS_m03.pre"
+RATIO = REPLICA + "run2/RATIO/RATIO_m03.pre"
 
 
 def _fn(name):
@@ -55,12 +58,13 @@ def test_se_avisa_de_que_la_lista_es_un_incremento(salida_pgas):
     assert "sustituye" in salida_pgas.lower()
 
 
+@requiere_replica
 def test_sin_base_arma_no_se_inventa_el_aviso(tmp_path):
     """Un .pre sin ARMA no necesita la advertencia: incremento y total coinciden."""
     if not os.path.exists(PGAS):
         pytest.skip("datos de la réplica no disponibles")
     warnings.simplefilter("ignore")
-    base = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/run2/PGAS/PGAS_m00.pre"
+    base = REPLICA + "run2/PGAS/PGAS_m00.pre"
     if not os.path.exists(base):
         pytest.skip("PGAS_m00.pre no disponible")
     from art.mcp_server import _load_fitted
@@ -109,6 +113,7 @@ def test_la_reformulacion_cuelga_de_su_padre(tmp_path):
 
 # ── BUG-0057 ──────────────────────────────────────────────────────────────
 
+@requiere_replica
 def test_un_operador_FIJADO_no_cuenta_como_base(tmp_path):
     """Un AR(1) fijado en cero está en la estructura, no en la estimación.
 
@@ -116,7 +121,7 @@ def test_un_operador_FIJADO_no_cuenta_como_base(tmp_path):
     seguirla estimaba un AR donde el analista no había pedido ninguno.
     """
     import os
-    base = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/guiado/ITCER/ITCER_m10.pre"
+    base = REPLICA + "guiado/ITCER/ITCER_m10.pre"
     if not os.path.exists(base):
         pytest.skip("datos de la réplica no disponibles")
     warnings.simplefilter("ignore")

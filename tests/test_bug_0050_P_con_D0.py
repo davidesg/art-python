@@ -14,6 +14,9 @@ import pytest
 import fue
 from art.pipeline import ModelSpec, build_and_fit
 
+from datos_replica import REPLICA, REPLICA_DS, requiere_replica
+
+
 
 def _serie(n=120, Phi=0.65, seed=11):
     """D=0: armónico fijo + AR(1) estacional ESTACIONARIO sobre ∇ln."""
@@ -52,10 +55,11 @@ def test_un_AR_estacional_con_D0_se_estima_y_blanquea(tmp_path):
         "el caso sintético ya no mide lo que dice medir")
 
 
+@requiere_replica
 def test_el_caso_real_del_proyecto_lleva_P1_con_D0():
     """Los dos RATIO finales son exactamente la combinación que se negaba."""
     import os
-    R = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/"
+    R = REPLICA
     encontrados = 0
     for f in ("guiado/RATIO/RATIO_m31.pre", "run2/RATIO/RATIO_m03.pre"):
         if not os.path.exists(R + f):

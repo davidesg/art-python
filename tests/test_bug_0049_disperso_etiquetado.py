@@ -13,7 +13,10 @@ import pytest
 from art.describe import describe_identification
 from art.model_detection import suggest_orders
 
-INP = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/PGAS.inp"
+from datos_replica import REPLICA, REPLICA_DS
+
+
+INP = REPLICA + "PGAS.inp"
 
 
 @pytest.fixture

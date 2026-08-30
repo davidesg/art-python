@@ -18,10 +18,13 @@ import numpy as np
 import pytest
 
 from art.diagnosis import (BANDA_CASI_SEMILLA, bfgs_seed_var,
+
                            covariance_is_degenerate,
                            degenerate_variance_indices,
                            near_seed_distances,
                            near_seed_variance_indices)
+
+from datos_replica import REPLICA, REPLICA_DS, requiere_replica
 
 
 class _Res:
@@ -77,11 +80,12 @@ def test_no_result_no_crash():
     assert near_seed_distances(None) == {}
 
 
+@requiere_replica
 def test_the_real_witness_end_to_end(tmp_path):
     """Sobre el fichero de la réplica, si sigue estando."""
     import os
     import fue
-    ruta = ("/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/limpio/"
+    ruta = (REPLICA + "limpio/"
             "ITCER/ITCER_m01.inp")
     if not os.path.exists(ruta):
         pytest.skip("el testigo de la réplica no está en esta máquina")

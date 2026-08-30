@@ -15,7 +15,10 @@ import fue
 from art.describe import describe_unit_root
 from art.policy import decide_d
 
-R = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/"
+from datos_replica import REPLICA, REPLICA_DS
+
+
+R = REPLICA
 
 
 def _desc(inp):

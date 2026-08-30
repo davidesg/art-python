@@ -14,7 +14,10 @@ import pytest
 import fue
 from art.describe import describe_boxcox
 
-R = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/"
+from datos_replica import REPLICA, REPLICA_DS
+
+
+R = REPLICA
 
 
 def _desc(inp):

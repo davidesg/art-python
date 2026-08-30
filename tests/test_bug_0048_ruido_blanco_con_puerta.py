@@ -16,6 +16,9 @@ import fue
 from fue.diagnostics import ljung_box
 from art.model_detection import suggest_orders, _validate_white_noise
 
+from datos_replica import REPLICA, REPLICA_DS, requiere_replica
+
+
 
 def _serie(w, freq=4):
     return fue.TimeSeries(w.tolist(), freq=freq, start=(2000, 1), name="X")
@@ -79,11 +82,12 @@ def test_el_ruido_blanco_sigue_ganando_cuando_de_verdad_lo_es():
         "sobre ruido blanco de verdad, (0,0,0,0) tiene que encabezar")
 
 
+@requiere_replica
 def test_el_caso_real_que_lo_destapo():
     """∇ln PGAS: Q(15)=35.90, p=0.0018. El ruido blanco salía CUARTO."""
     warnings.simplefilter("ignore")
     import os
-    inp = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/PGAS.inp"
+    inp = REPLICA + "PGAS.inp"
     if not os.path.exists(inp):
         pytest.skip("datos de la réplica no disponibles")
     from art.pipeline import _load_ts_model
