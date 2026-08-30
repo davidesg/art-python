@@ -17,6 +17,7 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
+import numpy as _np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -32,7 +33,8 @@ from .identification import (
 from .seasonal_detection import detect_seasonality, plot_seasonality
 from .model_detection import suggest_orders
 from .diagnosis import diagnose, plot_diagnosis
-from .formal_tests import dcd, dcd_f, rv, meg, shin_fuller, dcd_overdiff_regular
+from .formal_tests import (dcd, dcd_f, rv, meg, shin_fuller, dcd_overdiff_regular,
+                            dcd_underdiff_regular)
 from .interventions import diagnose_interventions
 from .full_report import _meg_suitable, _try
 
@@ -122,26 +124,69 @@ def describe_boxcox(ts) -> Description:
     s = result.name or ts.name or "series"
     n = ts.nobs
 
-    def _abscorr(mdt):
+    # BUG-0059. Esto devolvía `abs(...)` y el signo se perdía antes de imprimirse.
+    # El MÓDULO es el criterio correcto --se elige la escala cuya dependencia
+    # media-dispersión está más cerca de cero-- pero el SIGNO es el diagnóstico, y
+    # dice cosas opuestas:
+    #
+    #   corr > 0  la dispersión CRECE con el nivel → INFRA-transformado
+    #   corr < 0  la dispersión CAE con el nivel   → SOBRE-transformado
+    #
+    # Y lo que de verdad se perdía es el caso de signos OPUESTOS. Sobre PGAS,
+    # λ=1 da +0.150 y λ=0 da −0.173: una escala se queda corta y la otra se pasa,
+    # así que la λ correcta está ENTRE las dos. Impreso en valor absoluto sale
+    # «0.150 frente a 0.173, diferencia 0.024, decisión ambigua, las dos son
+    # razonables» — que es falso: ninguna de las dos lo es.
+    def _corr(mdt):
         x, y = np.array(mdt.means_std), np.array(mdt.stds_std)
         if x.std() < 1e-10 or y.std() < 1e-10:
             return 0.0
-        return abs(float(np.corrcoef(x, y)[0, 1]))
+        return float(np.corrcoef(x, y)[0, 1])
 
-    corr_raw = _abscorr(result.mdt_raw)
-    corr_log = _abscorr(result.mdt_log)
+    corr_raw_s = _corr(result.mdt_raw)      # con signo, para diagnosticar
+    corr_log_s = _corr(result.mdt_log)
+    corr_raw = abs(corr_raw_s)              # módulo, para decidir
+    corr_log = abs(corr_log_s)
+    horquilla = (corr_raw_s * corr_log_s < 0
+                 and min(abs(corr_raw_s), abs(corr_log_s)) > 0.05)
     gap      = corr_raw - corr_log          # >0 → log mejor
     ambiguous = abs(gap) < 0.10
     prefers_log = corr_log < corr_raw
     rec_lam = 0.0 if prefers_log else 1.0
     rec_str = "log (λ=0)" if prefers_log else "identidad (λ=1)"
 
+    def _lectura(c):
+        if c > 0.05:
+            return "la dispersión CRECE con el nivel → se queda corta"
+        if c < -0.05:
+            return "la dispersión CAE con el nivel → se pasa"
+        return "sin dependencia apreciable"
+
     lines = [
         f"## Box-Cox — {s}  (n={n})",
-        f"- Correlación media-std con λ=1 (original): **{corr_raw:.3f}**",
-        f"- Correlación media-std con λ=0 (log):      **{corr_log:.3f}**",
+        f"- Correlación media-std con λ=1 (original): **{corr_raw_s:+.3f}** "
+        f"— {_lectura(corr_raw_s)}",
+        f"- Correlación media-std con λ=0 (log):      **{corr_log_s:+.3f}** "
+        f"— {_lectura(corr_log_s)}",
         f"- Recomendación: **{rec_str}**",
     ]
+
+    if horquilla:
+        lines += [
+            "",
+            "> ⚠ **Los dos signos son OPUESTOS: la λ correcta está ENTRE las "
+            f"dos.** Con λ=1 la dispersión crece con el nivel ({corr_raw_s:+.3f}) "
+            f"y con λ=0 cae ({corr_log_s:+.3f}): una escala se queda corta y la "
+            "otra se pasa. Eso NO es «las dos son razonables» — es que ninguna "
+            "de las dos anula la dependencia, y elegir por el módulo más pequeño "
+            "es arbitrario.",
+            ">",
+            "> La suite sólo ofrece λ∈{0, 1}, así que la decisión no la cierra "
+            "este estadístico: la cierra el DOMINIO de la serie. Un índice de "
+            "precios o una magnitud multiplicativa van a λ=0 aunque el módulo "
+            "favorezca marginalmente a λ=1, porque un modelo en niveles no tiene "
+            "escala interpretable (ver `policy.decide_lambda` y BUG-0040).",
+        ]
 
     if ambiguous:
         lines += [
@@ -187,8 +232,11 @@ def describe_boxcox(ts) -> Description:
         data={
             "prefers_log": prefers_log,
             "recommended_lambda": rec_lam,
-            "corr_raw": corr_raw,
+            "corr_raw": corr_raw,            # módulo: es lo que decide
             "corr_log": corr_log,
+            "corr_raw_signed": corr_raw_s,   # signo: es lo que diagnostica
+            "corr_log_signed": corr_log_s,
+            "horquilla": horquilla,          # signos opuestos → λ entre 0 y 1
             "ambiguous": ambiguous,
             "gap": gap,
         },
@@ -296,11 +344,29 @@ def describe_seasonality(ts) -> Description:
         ]
 
     if not d_ok:
-        lines += [
-            "",
-            "⚠ Los tests de raíz unitaria sugieren que ∇log(y) puede no ser "
-            "estacionaria. Considera d=2.",
-        ]
+        if det:
+            # BUG-0023: la estacionalidad acaba de detectarse TRES LÍNEAS más
+            # arriba, en este mismo bloque. La regresión del ADF no lleva
+            # términos estacionales, así que el patrón cae en su varianza
+            # residual, infla el error típico del coeficiente y sesga el
+            # contraste hacia NO rechazar la raíz unitaria — que se lee como
+            # «vuelve a diferenciar». Emitir «Considera d=2» aquí es tomar la
+            # contaminación por evidencia.
+            lines += [
+                "",
+                "ℹ El ADF sobre ∇y no rechaza, pero **eso no es evidencia de "
+                "d=2 aquí**: la estacionalidad que se acaba de detectar no entra "
+                "en la regresión del ADF, cae en su varianza residual y sesga el "
+                "contraste hacia no rechazar. Primero se trata la estacionalidad "
+                "(D y/o armónicos); el orden de integración se decide después, y "
+                "el contraste que vale sobre el modelo estimado es Shin-Fuller.",
+            ]
+        else:
+            lines += [
+                "",
+                "⚠ Los tests de raíz unitaria sugieren que ∇log(y) puede no ser "
+                "estacionaria. Considera d=2.",
+            ]
 
     if decision == "B1":
         rec = (
@@ -399,10 +465,52 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
             f" {_VERDICT_ES[r.verdict]} |"
         )
 
+    # BUG-0056. Esta herramienta es la CAPA DE EVIDENCIA y `recommended_d`
+    # informa de lo que los contrastes encuentran, en crudo. El tope de la
+    # escuela --un paso cada vez, y la estacionalidad acota d-- vive en
+    # `policy.decide_d`, y así está por diseño: el `.data` sigue crudo para que
+    # la política no lo tope dos veces.
+    #
+    # Lo que estaba mal es que el TEXTO hablaba con voz de recomendación: «d = 2»
+    # y «Usa d=2», sin mencionar el tope ni que la estacionalidad todavía no se
+    # ha contrastado. Un analista que llama a esta herramienta directamente
+    # --los dos carriles del RUN 3 lo hicieron-- se salta la capa de política sin
+    # enterarse, y vuelve a caer en el salto d=0→2 que BUG-0016 y BUG-0023
+    # arreglaron aguas abajo. Sobre RATIO: d=0 con raíz unitaria, d=1 AMBIGUO,
+    # d=2 estacionaria → recomendaba 2, saltándose la duda entera.
+    from art.policy import decide_d as _decide_d
+    _rec_pol = _decide_d({"recommended_d": rec_d, "trend_r2": trend_r2},
+                         seasonal=None, current_d=0, max_step=1)
+
+    _que_es = ("serie ya estacionaria en niveles" if rec_d == 0 else
+               "primera diferencia con consenso" if rec_d == 1 else
+               f"{rec_d} diferencias hasta el consenso")
     lines += [
         "",
-        f"**Recomendación**: d = {rec_d} "
-        f"({'primera diferencia con consenso' if rec_d > 0 else 'serie ya estacionaria en niveles'}).",
+        f"**Lo que encuentran los contrastes**: d = {rec_d} ({_que_es}).",
+    ]
+    if _rec_pol != rec_d:
+        _salto = [r.verdict for r in results if 0 < r.d < rec_d]
+        lines += [
+            "",
+            f"> ⚠ **Punto de partida recomendado: d = {_rec_pol}, no {rec_d}.** "
+            f"Un paso cada vez. Desde d=0 la pregunta que los contrastes "
+            f"responden es «¿hace falta AL MENOS una diferencia?», no «cuántas»: "
+            f"saltar a d={rec_d} contesta una pregunta que nadie ha hecho"
+            + (f", y de paso se salta el d=1 que sale «"
+               f"{_VERDICT_ES.get(_salto[0], _salto[0])}»" if _salto else "") + ".",
+            ">",
+            "> Y la estacionalidad **todavía no se ha contrastado**. La regresión "
+            "del ADF no lleva términos estacionales, así que un patrón estacional "
+            "fuerte se le va a la varianza residual y sesga el contraste hacia NO "
+            "rechazar la raíz unitaria — que se lee como «diferencia otra vez».",
+            ">",
+            "> No se pierde nada empezando bajo: esto es especificación INICIAL. "
+            "El contraste de verdad sobre el orden de integración llega al final, "
+            "sobre un modelo adecuado, con `formal_tests` (Shin-Fuller y el DCD "
+            "de sobrediferenciación).",
+        ]
+    lines += [
         "",
         "ADF H₀: raíz unitaria — rechazar (✓) indica estacionariedad.",
         "KPSS H₀: estacionariedad — no rechazar (✓) indica estacionariedad.",
@@ -458,10 +566,20 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
             "Procede con d=0."
         )
     elif verdicts.get(rec_d) == "stationary":
-        rec_text = (
-            f"La serie con d={rec_d} diferencia(s) es estacionaria. "
-            f"Usa d={rec_d}."
-        )
+        if _rec_pol != rec_d:
+            # BUG-0056: «Usa d=2» era una instrucción, y salteaba el tope.
+            rec_text = (
+                f"Los contrastes llegan a la estacionariedad en d={rec_d}, pero "
+                f"el punto de partida es d={_rec_pol}: un paso cada vez, y la "
+                f"estacionalidad aún no se ha contrastado (contamina el ADF hacia "
+                f"NO rechazar). Empieza en d={_rec_pol} y deja el orden de "
+                f"integración para `formal_tests`, sobre el modelo estimado."
+            )
+        else:
+            rec_text = (
+                f"La serie con d={rec_d} diferencia(s) es estacionaria. "
+                f"Usa d={rec_d}."
+            )
     elif any(r.verdict == "ambiguous" for r in results):
         rec_text = (
             f"Resultados ambiguos. La inspección visual del ACF (listado de "
@@ -478,7 +596,8 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
         figure_b64=b64,
         recommendation=rec_text,
         data={
-            "recommended_d": rec_d,
+            "recommended_d": rec_d,          # CRUDO: la política lo topa (BUG-0056)
+            "recommended_d_policy": _rec_pol,
             "trend_r2": trend_r2,
             "results": [
                 {
@@ -527,9 +646,22 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0) -> Description
     for i, sp in enumerate(specs, 1):
         marker = "→" if i == 1 else "  "
         label  = _pattern_label(sp)
+        # BUG-0049. Un candidato DISPERSO --AR o MA con un solo coeficiente, en
+        # el retardo k, y los anteriores en cero-- se enumeraba con la misma
+        # etiqueta que el completo del mismo orden. Sobre ∇ln PGAS eso imprimía
+        # `ARIMA(2,1,0)(0,0,0)_4` DOS VECES, con similitudes distintas (0.755 y
+        # 0.733) y siendo modelos distintos: el disperso φ₂ solo, y el completo
+        # φ₁ y φ₂. Y el disperso salía ANTES, de modo que quien pidiera «el AR(2)
+        # de la lista» se llevaba el que no creía estar pidiendo.
+        disperso = []
+        if getattr(sp, "sparse_ar_lag", 0):
+            disperso.append(f"AR sólo en B^{sp.sparse_ar_lag}")
+        if getattr(sp, "sparse_ma_lag", 0):
+            disperso.append(f"MA sólo en B^{sp.sparse_ma_lag}")
+        sufijo = f"  [{', '.join(disperso)}]" if disperso else ""
         lines.append(
             f"{marker} {i}. ARIMA({sp.p},{sp.d},{sp.q})({sp.P},{sp.D},{sp.Q})_{sp.s}"
-            f"  sim={sp.similarity:.3f}  —  {label}"
+            f"{sufijo}  sim={sp.similarity:.3f}  —  {label}"
         )
 
     # Ambiguity: top-2 gap < 0.05
@@ -728,10 +860,35 @@ def model_equation(ts, model) -> str:
             return f"{v:.4f}"
         return f"{v:.3f}"
 
+    # BUG-0060. Un error típico que es la semilla del BFGS se imprimía con el
+    # MISMO formato que uno válido, y el aviso iba debajo del bloque. Sobre
+    # ITCER_m00mu eso publicaba μ=−0.7202 (0.1552) → t=−4.64, cuando el honesto
+    # (σ̂ₐ/√n = 0.2966) da t=−2.43: de abrumador a justo significativo, que es la
+    # diferencia entre incluir la media y no incluirla.
+    #
+    # Se marcan por VALOR, no por índice: la semilla es √(2/n) y los índices de
+    # `degenerate_variance_indices` van sobre el vector plano, cuyo orden no es
+    # el de render (el propio módulo avisa de ese desajuste).
+    try:
+        from art.diagnosis import bfgs_seed_var as _seed
+        _sv = _seed(getattr(model, "_result", None))
+        _se_semilla = (_sv ** 0.5) if _sv else None
+    except Exception:
+        _se_semilla = None
+    _hay_semilla = [False]
+
+    def _es_semilla(se: float) -> bool:
+        if _se_semilla is None or not se:
+            return False
+        return abs(abs(se) - _se_semilla) <= 1e-4 * _se_semilla
+
     def _fse(se: float) -> str:
         a = abs(se)
         if a == 0:
             return ""
+        if _es_semilla(se):
+            _hay_semilla[0] = True
+            return f"(✗{se:.4f})"
         if a < 0.001:
             return f"({se:.6f})"
         if a < 0.01:
@@ -1186,11 +1343,25 @@ def model_equation(ts, model) -> str:
         bic_val   = float(model.bic)
         refactor  = float(getattr(model, "refactor", 1.0))
 
-        # fue scales residuals by `refactor` before estimation.
-        # If refactor>=10 (e.g. ×100) the residuals.data are already in pct units.
-        # For log models (lam=0) with no scaling, convert to % for display.
-        if refactor >= 10:
+        # fue escala los residuos por `refactor` antes de estimar. Qué SIGNIFICA
+        # ese residuo escalado depende de λ, y ahí estaba BUG-0033:
+        #
+        #   λ=0 y refactor=100 → el residuo es ∇ln(y)·100, que ES un porcentaje.
+        #   λ=1 y refactor=100 → el residuo es ∇y·100, que son las UNIDADES de la
+        #                        serie multiplicadas por cien. Ni es un porcentaje
+        #                        ni está en la escala de nadie.
+        #
+        # La regla miraba sólo `refactor` y ponía el `%` en los dos casos. En un
+        # modelo en niveles eso publica un número 100× inflado con una etiqueta
+        # que miente: PGAS de la réplica salía con «σ̂ₐ = 2273.6533%» cuando la
+        # innovación es de 22.87 USD/t — un 7.8% de la media de la serie, casi
+        # exactamente lo mismo que el modelo en logs (7.87%). El defecto hacía
+        # parecer que dos modelos con la misma innovación diferían en dos órdenes
+        # de magnitud, y eso invalida cualquier comparación entre carriles.
+        if refactor >= 10 and lam == 0.0:
             sigma_disp = f"{sigma_raw:.4f}%"
+        elif refactor >= 10:
+            sigma_disp = f"{sigma_raw / refactor:.5f}"     # unidades de la serie
         elif lam == 0.0 and sigma_raw < 0.5:
             sigma_disp = f"{sigma_raw:.5f}  ({sigma_raw*100:.3f}%)"
         else:
@@ -1233,7 +1404,79 @@ def model_equation(ts, model) -> str:
         if se_line:
             lines.append(se_line)
 
-    lines += ["", stat_line, sep]
+    lines += ["", stat_line]
+
+    # BUG-0062. Un operador cuyas raíces caen DENTRO del círculo unidad invalida
+    # la lectura del modelo --un AR así no es estacionario, un MA así no es
+    # invertible-- y se presentaba como cualquier otro resultado. `fue` declara
+    # «Check for invertibility: constrained search» en la cabecera del `.out` y
+    # aun así devolvió Θ₄ = −2.0989 tras 45 iteraciones. Sólo la diagnosis rota
+    # lo delataba, y eso es enterarse por el síntoma equivocado.
+    try:
+        from art.diagnosis import admissibility_problems as _adm
+        _probs = _adm(model)
+    except Exception:
+        _probs = []
+    if _probs:
+        dentro = [x for x in _probs if x[2] == "dentro"]
+        frontera = [x for x in _probs if x[2] == "frontera"]
+        lines.append("")
+        if dentro:
+            lines.append("  ⚠ OPERADOR NO ADMISIBLE — raíz DENTRO del círculo unidad:")
+            for etq, mod, _ in dentro:
+                que = ("no estacionario" if etq.startswith("AR") else "NO INVERTIBLE")
+                lines.append(f"      {etq}: |raíz| = {mod:.4f} < 1  →  {que}")
+            lines.append("      El modelo no se puede leer así: reformula el "
+                         "operador. Un MA no invertible")
+            lines.append("      no tiene representación AR(∞), y su previsión "
+                         "depende del pasado infinito.")
+        if frontera:
+            lines.append("  ⚠ OPERADOR EN LA FRONTERA — raíz de módulo 1:")
+            for etq, mod, _ in frontera:
+                lines.append(f"      {etq}: |raíz| = {mod:.4f}")
+            if any(e.startswith("MA") for e, _, _ in frontera) and d >= 1:
+                lines.append("      Un MA con raíz unitaria y d≥1 CANCELA la "
+                             "diferencia: es la firma de la")
+                lines.append("      SOBREDIFERENCIACIÓN. Contrástalo con "
+                             "`formal_tests` antes de mover `d`.")
+            else:
+                lines.append("      En la frontera el modelo es límite: los "
+                             "errores típicos no son leíbles ahí.")
+
+    # BUG-0060: la leyenda del marcador y, cuando es calculable, el error típico
+    # HONESTO — todo dentro del cerco, que es lo que el analista lee.
+    if _hay_semilla[0]:
+        nota = ["", "  ✗ = error típico NO VÁLIDO: es la semilla del BFGS "
+                    f"(√(2/n) = {_se_semilla:.4f}), no el hessiano. "
+                    "No calcules t con él."]
+        # Con μ libre y NINGÚN parámetro ARMA libre, la media es la media
+        # muestral y su error típico exacto es σ̂ₐ/√n (BUG-0027).
+        try:
+            import numpy as _np
+            from math import sqrt as _sqrt
+            def _libres(fac, fl):
+                if not fac:
+                    return 0
+                return len(fac[0]) if not fl else sum(1 for x in fl[0] if x)
+            n_arma = (_libres(model.ar, getattr(model, "ar_free", None))
+                      + _libres(model.ma, getattr(model, "ma_free", None))
+                      + _libres(model.ar_s, getattr(model, "ar_s_free", None))
+                      + _libres(model.ma_s, getattr(model, "ma_s_free", None)))
+            r = getattr(model, "_result", None)
+            if (getattr(model, "estimate_mu", False) and n_arma == 0
+                    and r is not None and getattr(r, "sigma2", 0) > 0):
+                nr = len(_np.asarray(r.residuals, dtype=float))
+                se_mu = _sqrt(r.sigma2) / _sqrt(nr)
+                mu_v = float(_reconstruct_params(model, list(model.params))[8])
+                nota.append(
+                    f"  → μ sin ARMA libre: el error típico correcto es "
+                    f"σ̂ₐ/√n = {se_mu:.4f}, luego t = {mu_v/se_mu:+.2f} "
+                    f"(no {mu_v/_se_semilla:+.2f}).")
+        except Exception:
+            pass
+        lines += nota
+
+    lines += [sep]
     return "\n".join(lines)
 
 
@@ -1327,10 +1570,35 @@ def describe_diagnosis(model) -> Description:
         ]
 
     if result.seasonal and result.seasonal.seasonal_detected:
-        lines.append(
-            f"- ⚠ Estacionalidad residual: F={result.seasonal.f_stat:.2f}, "
-            f"p={result.seasonal.p_value:.4f}"
-        )
+        # BUG-0054. Este contraste se lee sobre los residuos, así que hereda la
+        # regla de siempre: sobre residuos que NO son ruido blanco no es un
+        # contraste débil, no es un contraste. Una estructura regular sin
+        # modelar se hace pasar por estacional, y en trimestral el mecanismo es
+        # inmediato -- el retardo 2 ES la frecuencia de Nyquist, o sea el
+        # armónico semestral (-1)^t --, así que una ACF(2) positiva sin modelar
+        # entra en la regresión armónica como si fuera patrón estacional.
+        #
+        # Caso real: PGAS_m03 (MA(1)) daba F=3.16, p=0.0293 con Q p-mín=0.0358 y
+        # ACF(1)=+0.166, ACF(2)=+0.152. Corregido el orden a MA(2), la alarma
+        # desaparece sola (F=2.05, p=0.1139) sin tocar nada estacional. Sin la
+        # advertencia, empuja a meter armónicos en una serie que no los necesita.
+        linea = (f"- ⚠ Estacionalidad residual: F={result.seasonal.f_stat:.2f}, "
+                 f"p={result.seasonal.p_value:.4f}")
+        if not result.white_noise:
+            nyq = ""
+            frq = getattr(result.seasonal, "freq", 0) or 0
+            if frq >= 2:
+                nyq = (f" En s={frq} el retardo {frq // 2} ES la frecuencia de "
+                       f"Nyquist, así que una ACF({frq // 2}) sin modelar entra "
+                       f"en la regresión armónica como patrón estacional.")
+            linea += (
+                "\n  ⚠ **NO LEÍBLE todavía**: los residuos no son ruido blanco "
+                "(Q rechaza), y este contraste se calcula sobre ellos. Una "
+                "estructura REGULAR sin modelar se hace pasar por estacional."
+                + nyq +
+                "\n  Corrige primero el ARMA regular y vuelve a mirar: si la "
+                "alarma era de eso, desaparece sola.")
+        lines.append(linea)
 
     if result.extreme:
         lines.append(
@@ -1410,16 +1678,102 @@ def describe_diagnosis(model) -> Description:
                 "la no-normalidad (JB) está probablemente causada por los outliers — "
                 "no es un fallo de especificación ARMA"
             )
+            # BUG-0043. La explicación de arriba es legítima y por eso se
+            # mantiene — pero sobre un modelo en NIVELES de una magnitud positiva
+            # de recorrido amplio no es la única, y mandar a añadir
+            # intervenciones puede ser mandar a perseguir un síntoma. Ahí la
+            # heterocedasticidad que el log elimina se manifiesta a la vez como
+            # asimetría y como residuos grandes: los anómalos que uno "trata" son
+            # el propio efecto de escala.
+            #
+            # Medido: un carril autónomo con λ=1 sobre un precio añadió
+            # intervenciones ronda tras ronda con el JB bajando de 46.7 a 8.9 sin
+            # llegar nunca a pasar. El consejo que recibía era éste, y era el que
+            # le impedía volver al nodo correcto.
+            _lam = float(getattr(model, "boxlam", 1.0) or 0.0)
+            if _lam != 0.0:
+                _y = _np.asarray(getattr(model.series, "data", []), dtype=float)
+                if _y.size and _np.min(_y) > 0 and (_np.max(_y) / _np.min(_y)) >= 2.0:
+                    parts.append(
+                        f"pero OJO: este modelo está en niveles (λ={_lam:g}) sobre "
+                        f"una serie positiva que recorre un factor "
+                        f"{_np.max(_y) / _np.min(_y):.1f}, y ahí el efecto de "
+                        "escala se manifiesta a la vez como asimetría "
+                        f"({result.skewness:+.2f}) y como residuos grandes. Si el "
+                        "JB sigue fallando tras tratar los anómalos, el problema "
+                        "no son los anómalos: es λ"
+                    )
         elif not result.normal and not result.extreme:
-            parts.append("los residuos no son normales sin outliers — revisa la especificación")
+            # BUG-0043: aquí decía sólo "revisa la especificación", que no nombra
+            # nada. Una JB que falla SIN anómalos que la expliquen es, antes que
+            # ninguna otra cosa, la firma de una λ equivocada: la
+            # heterocedasticidad que el log elimina reaparece como no-normalidad,
+            # y ninguna intervención la arregla porque no hay un dato anómalo que
+            # tratar — hay una escala mal elegida.
+            #
+            # Medido: un carril autónomo con λ=1 sobre un precio estimó SEIS
+            # modelos consecutivos sin alcanzar la adecuación, con el JB entre
+            # 46.7 y 8.9, añadiendo intervenciones que no podían servir. Nada le
+            # dijo que volviera al nodo de λ.
+            _lam = float(getattr(model, "boxlam", 1.0) or 0.0)
+            _sesgo = abs(result.skewness)
+            if _lam != 0.0:
+                _y = _np.asarray(getattr(model.series, "data", []), dtype=float)
+                _rango = (float(_np.max(_y) / _np.min(_y))
+                          if _y.size and _np.min(_y) > 0 else None)
+                _pista = (f" La serie es positiva y recorre un factor "
+                          f"{_rango:.1f}." if _rango and _rango >= 2 else "")
+                parts.append(
+                    "los residuos no son normales y NO hay anómalos que lo "
+                    f"expliquen (asimetría {result.skewness:+.2f}, curtosis "
+                    f"{result.excess_kurtosis:+.2f}) — el primer sospechoso es la "
+                    "TRANSFORMACIÓN, no el ARMA ni las intervenciones: este modelo "
+                    f"está en niveles (λ={_lam:g}) y la heterocedasticidad que el "
+                    "log elimina reaparece como no-normalidad." + _pista +
+                    " Vuelve al nodo de λ antes de añadir estructura"
+                )
+            else:
+                parts.append(
+                    "los residuos no son normales y NO hay anómalos que lo "
+                    f"expliquen (asimetría {result.skewness:+.2f}, curtosis "
+                    f"{result.excess_kurtosis:+.2f}) — con el modelo ya en "
+                    "logaritmos, mira si queda un episodio sin modelar o si la "
+                    "escala pide algo distinto del log"
+                )
+        if not result.centred:
+            # BUG-0043: la media descentrada no tenía rama, así que un modelo
+            # cuyo ÚNICO fallo era ése cerraba con "Reformulación necesaria: ."
+            # — la razón vacía.
+            parts.append(
+                f"la media residual no es cero (t={result.mean_t:+.2f}) — al "
+                "modelo le falta la media, o la deriva se la está comiendo un "
+                "determinista; ninguna intervención arregla esto"
+            )
         if result.seasonal and result.seasonal.seasonal_detected:
             sig = [str(fr.freq_idx) for fr in (result.seasonal.freq_results or [])
                    if fr.p_value < 0.05]
-            parts.append(
-                f"hay estacionalidad residual en freq={', '.join(sig)} — "
-                "revisa si los armónicos de esas frecuencias están incluidos o "
-                "si MEG sugiere que son estocásticas"
-            )
+            if sig:
+                parts.append(
+                    f"hay estacionalidad residual en freq={', '.join(sig)} — "
+                    "revisa si los armónicos de esas frecuencias están incluidos o "
+                    "si MEG sugiere que son estocásticas"
+                )
+            else:
+                # BUG-0043: cuando el conjunto detecta y ninguna frecuencia es
+                # significativa por separado, esto imprimía "freq=" a secas. El
+                # hecho de que NINGUNA lo sea es información, no un hueco.
+                parts.append(
+                    f"el contraste CONJUNTO detecta estacionalidad residual "
+                    f"(p={result.seasonal.p_value:.4f}) pero NINGUNA frecuencia "
+                    "es significativa por separado — es un rechazo marginal "
+                    "repartido, no una frecuencia concreta sin tratar; mira las "
+                    "amplitudes antes de añadir nada"
+                )
+        if not parts:
+            # Red de seguridad: `clean` es falso, así que algo falla. Decir cuál
+            # sin una razón es peor que no decir nada.
+            parts.append("la diagnosis no es adecuada y esta función no supo "
+                         "nombrar el motivo — revisa el bloque de arriba")
         rec = "Reformulación necesaria: " + "; ".join(parts) + "."
 
     if overpar_pairs:
@@ -1486,9 +1840,59 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
     if model._result is None:
         raise RuntimeError("Model has not been fitted — call model.fit() first.")
 
+    # BUG-0025: los contrastes formales son la ULTIMA etapa del ciclo y
+    # presuponen un modelo adecuado — sus nulas se derivan bajo residuos que son
+    # ruido blanco. La capa guiada lo dice ("B) Contrastes formales SI LOS
+    # RESIDUOS ESTAN LIMPIOS", "el MEG evalua AL FINAL"), pero era prosa: aquí
+    # no se miraba la diagnosis, y un modelo con la Q rota, la normalidad rota o
+    # anómalos sin tratar podía cerrar en "el modelo es adecuado" — una
+    # afirmación sobre el MODELO que esta función no está en condiciones de
+    # hacer. Mismo principio que el comentario de BUG-0010 unas líneas abajo.
+    # BUG-0036: esta guarda tenía su PROPIA lista de fallos, distinta de la que
+    # usa la diagnosis para dictar su veredicto, y las dos se presentaban con la
+    # misma palabra. El mismo modelo salía "APROBADO ✓" de confirm_and_estimate y
+    # "todavía NO es adecuado" de aquí, sin ninguna regla que dijera cuál manda.
+    #
+    # Y no era que una fuese un caso particular de la otra: divergían en las DOS
+    # direcciones. Esta contaba los residuos extremos y `residuals_ok` no —
+    # deliberadamente, porque los extremos gobiernan el bucle de intervenciones y
+    # no la adecuación—; y `residuals_ok` cuenta la estacionalidad residual, que
+    # aquí no se miraba. Un modelo con estacionalidad en los residuos pasaba esta
+    # guarda y fallaba la diagnosis.
+    #
+    # Ahora hay UN predicado: `DiagnosisResult.clean` (centrado + ruido blanco +
+    # normalidad + sin estacionalidad residual), el mismo que dicta el veredicto.
+    # Los extremos siguen reportándose, pero como AVISO y no como bloqueo: un
+    # residuo aislado grande sobre un modelo que pasa la JB no invalida las nulas
+    # de esta etapa, y tratarlo como si lo hiciera empujaba a añadir parámetros
+    # no significativos sólo para cerrar la guarda.
+    _dg = _try(lambda: diagnose(model), None)
+    _dg_fallos: list[str] = []
+    _dg_avisos: list[str] = []
+    if _dg is not None:
+        _q_min = min(_dg.q_pvalues) if _dg.q_pvalues else 1.0
+        if not _dg.white_noise:
+            _dg_fallos.append(f"ruido blanco (Q): p mínimo = {_q_min:.4f}")
+        if not _dg.normal:
+            _dg_fallos.append(
+                f"normalidad (JB): {_dg.jb_stat:.3f}, p = {_dg.jb_pvalue:.4f}")
+        if not _dg.centred:
+            _dg_fallos.append(
+                f"media residual distinta de cero: t = {_dg.mean_t:+.2f}")
+        if _dg.seasonal is not None and getattr(_dg.seasonal, "seasonal_detected", False):
+            _dg_fallos.append(
+                f"estacionalidad en los residuos (p = "
+                f"{getattr(_dg.seasonal, 'p_value', float('nan')):.4f})")
+        if _dg.extreme:
+            _peor = max(_dg.extreme, key=lambda t: abs(t[1]))
+            _dg_avisos.append(
+                f"{len(_dg.extreme)} residuo(s) extremo(s), el mayor obs "
+                f"{_peor[0]} con z = {_peor[1]:+.2f}")
+
     sf_res    = _try(lambda: shin_fuller(model), None)
     dcd_res   = _try(lambda: dcd(model),   [])
     od_res    = _try(lambda: dcd_overdiff_regular(model), None)
+    ud_res    = _try(lambda: dcd_underdiff_regular(model), None)
     dcd_f_res = _try(lambda: dcd_f(model), [])
     rv_res    = _try(lambda: rv(model),    [])
     # BUG-0010: this was `_try(lambda: meg(model), [])`, which made "raised" and
@@ -1504,6 +1908,33 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
             meg_error = f"{type(exc).__name__}: {exc}"
 
     lines = ["## Contrastes formales"]
+    if not _dg_fallos and _dg_avisos:
+        # Adecuado, con una salvedad que se nombra pero no bloquea.
+        lines += [
+            "",
+            "> ℹ La diagnosis es adecuada, y queda una salvedad: "
+            + "; ".join(_dg_avisos) + ".",
+            ">",
+            "> No invalida lo que sigue —las nulas de esta etapa suponen ruido "
+            "blanco, y el modelo lo es— pero conviene saber que está ahí: un "
+            "extremo aislado suele señalar un episodio cuya FORMA todavía no "
+            "está bien especificada. Añadir un parámetro no significativo sólo "
+            "para hacerlo desaparecer no es la respuesta.",
+        ]
+    if _dg_fallos:
+        # BUG-0025: el aviso va ARRIBA, antes de cualquier estadístico, porque
+        # lo que está en cuestión es si estos números se pueden leer.
+        lines += [
+            "",
+            "> ⚠ **Este modelo todavía NO es adecuado.** La diagnosis falla en: "
+            + "; ".join(_dg_fallos) + ".",
+            ">",
+            "> Los contrastes de esta etapa —MEG, Shin-Fuller, los DCD— derivan "
+            "sus distribuciones nulas suponiendo residuos que son ruido blanco, "
+            "así que **sus p-valores y sus veredictos no son fiables aquí**. "
+            "Cierra antes el ciclo (intervenciones y/o ARMA) y vuelve. Lo que "
+            "sigue es informativo, no concluyente.",
+        ]
 
     # Shin-Fuller (non-stationarity of AR component)
     # Φ̂₁ᵤ = L_free − L_constrained  (eq. 3.5); compare to Table II critical values.
@@ -1537,16 +1968,101 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
     # (distinto del DCD estándar de arriba: impone ∇ extra + testigo MA(1) θ⁰=+0.85).
     if od_res is not None:
         c5 = od_res._crit['5%']
+        # BUG-0055. El titular decía «→ considerar d+1 ✗» en negrita y tres
+        # párrafos más abajo el mismo bloque explicaba que ese lado NO da
+        # veredicto sobre d: crítico subestimado con deterministas resonantes,
+        # sin par confirmatorio, y el contraste de sub-diferenciación diciendo
+        # «d confirmado por abajo ✓» a continuación. El contenido correcto
+        # estaba; la JERARQUÍA VISUAL trabajaba en su contra, y un titular
+        # invita a leer sólo el titular. Pasó en esta réplica: se adoptó un d=2
+        # sobre RATIO que hubo que retractar.
+        #
+        # Ahora las salvedades se calculan ANTES y el titular las lleva dentro.
+        # Un veredicto no puede afirmar lo que el párrafo siguiente retira.
+        _n_det   = len(model.interventions or [])
+        _sin_par = sf_res is None
+        _salvedades = bool(_n_det) or _sin_par
+
         if od_res.lr < c5:
             verdict = ("testigo NO invertible (θ→+1) → la ∇ extra sobre-diferencia "
                        "→ d confirmado ✓")
+        elif _salvedades:
+            _por = []
+            if _n_det:
+                _por.append("el crítico impreso está SUBESTIMADO (deterministas "
+                            "resonantes en f=0)")
+            if _sin_par:
+                _por.append("falta el lado AR del par")
+            verdict = ("testigo invertible → **este lado, POR SÍ SOLO, apuntaría "
+                       "a d+1 — pero NO es concluyente**: " + " y ".join(_por) +
+                       ". Lee los avisos de abajo ANTES de mover `d`")
         else:
-            verdict = ("testigo invertible → raíz unitaria regular genuina "
-                       "→ considerar d+1 ✗")
+            verdict = ("testigo invertible → raíz unitaria regular genuina → "
+                       "este lado apunta a d+1 (⚠ un solo lado: confírmalo con "
+                       "el par en f=0, más abajo)")
         lines.append("\n**DCD sobre-diferenciación regular** — confirmatorio del orden "
                      "de integración (testigo θ⁰=+0.85, H₀: θ=1, ley s=1)")
         lines.append(f"- θ̂={od_res.coef_free:+.4f}, LR={od_res.lr:.3f} "
                      f"(crít 5%={c5:.2f}) → {verdict}")
+
+        # BUG-0038: estos dos avisos vivían DENTRO del bloque del par
+        # confirmatorio, y el par sólo se forma cuando Shin-Fuller es aplicable —
+        # es decir, cuando el modelo tiene AR regular libre. Un modelo SIN AR
+        # regular recibía el veredicto "considerar d+1" a pelo, con el crítico de
+        # la ley DESNUDA, y sin que nada dijera que ese crítico está mal calibrado
+        # para él.
+        #
+        # Y muerde justo donde más duele: los dos avisos hablan del VEREDICTO DEL
+        # DCD, no del par. El primero dice que el crítico impreso es menor que el
+        # correcto cuando hay deterministas resonantes con f=0 — un escalón lo es—,
+        # así que un LR apenas por encima de 1.94 puede no cruzar el umbral real.
+        # El segundo dice que el LR se evalúa donde el perfil de verosimilitud de
+        # fue salta. Ninguno de los dos depende de Shin-Fuller.
+        #
+        # Medido sobre RATIO de la réplica: modelo sin AR regular, con un escalón,
+        # LR=2.576 contra un crítico impreso de 1.94. Sin aviso, se lee como
+        # "hay una raíz unitaria más" y se toma d=2. Con el aviso, se lee como lo
+        # que es: marginal contra un umbral que se sabe subestimado.
+        n_det = len(model.interventions or [])
+        if n_det:
+            lines.append(
+                f"  ℹ El crítico usado ({c5:.2f}) es el de la ley "
+                f"DESNUDA s=1. Este modelo lleva {n_det} deterministas, y en f=0 "
+                "el regresor constante es RESONANTE con la raíz unitaria — el "
+                "paper mide pile-up 0.927 en esa configuración frente a 0.6575 "
+                "desnudo. El crítico correcto ahí es mayor, así que un LR apenas "
+                "por encima del impreso NO es evidencia de d+1.")
+        if abs(abs(od_res.coef_free) - 1.0) > 1e-6:
+            lines.append(
+                "  ℹ θ̂ no se apila en la frontera, así que el LR usa ℓ(θ=1) "
+                "calculada por fue justo donde su perfil da un salto errático "
+                "(SF_MEG, apéndice de la verosimilitud de frontera). La decisión "
+                "debería revisarse con la verosimilitud exacta bandeada.")
+        if sf_res is None:
+            lines.append(
+                "  ⚠ **Sin par confirmatorio.** Este modelo no tiene AR regular "
+                "libre, así que Shin-Fuller no es aplicable y el lado AR —la nula "
+                "opuesta— no existe en esta corrida. El veredicto de arriba es UN "
+                "SOLO lado, y los contrastes de frontera se leen en pareja. Antes "
+                "de mover `d`, estima el candidato d+1 y compáralo por diagnosis y "
+                "criterios de información.")
+
+    # BUG-0045: el lado `d−1`. Shin-Fuller y el DCD de sobrediferenciación
+    # miran los DOS hacia arriba —«¿basta d, o hace falta d+1?»— y ninguno
+    # pregunta si con d−1 habría bastado, que es justo la duda cuando la tabla
+    # ADF/KPSS recomienda una d menor que la adoptada.
+    if ud_res is not None:
+        c5u = ud_res._crit['5%']
+        if ud_res.lr < c5u:
+            ver_u = ("testigo NO invertible (θ→+1) → la ∇ está CANCELADA "
+                     "→ con d−1 bastaba ✗")
+        else:
+            ver_u = ("testigo invertible → la ∇ es genuina → d confirmado "
+                     "por abajo ✓")
+        lines.append("\n**DCD sub-diferenciación regular** — ¿sobraba la ÚLTIMA "
+                     "diferencia? (H₀: θ=1, ley s=1)")
+        lines.append(f"- θ̂={ud_res.coef_free:+.4f}, LR={ud_res.lr:.3f} "
+                     f"(crít 5%={c5u:.2f}) → {ver_u}")
 
     # ── EL PAR CONFIRMATORIO EN f=0 ───────────────────────────────────────
     # Shin-Fuller y el DCD de sobrediferenciación tienen nulas OPUESTAS y
@@ -1565,40 +2081,75 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
         lines.append(f"- lado MA (DCD sobrediferenciación, H₀: θ=1): "
                      f"{'raíz genuina → d+1' if od_says_more else 'la ∇ extra sobra → d basta ✓'}")
         if sf_says_enough != (not od_says_more):
-            quasi_cancellation = True
-            lines += [
-                "",
-                f"  ⚠ **DISCREPAN, y eso es el diagnóstico.** Con θ̂="
-                f"{od_res.coef_free:+.4f} el testigo está a "
-                f"{abs(1.0 - abs(od_res.coef_free)):.4f} de la frontera: es la "
-                "**banda de cuasi-cancelación** (r≈0.90–0.95 en la tabla del "
-                "paper), donde el lado MA detecta que r<1 y el lado AR ve un "
-                "proceso casi estacionario. Los dos tienen razón.",
-                "  En esa banda las representaciones son **equivalentes en "
-                "previsión**, así que la decisión no se toma con estos "
-                "estadísticos: se toma por parsimonia, o comparando previsiones "
-                "fuera de muestra.",
-                "  **No leas «considerar d+1» como una conclusión.**",
-            ]
+            # BUG-0022: el testigo de sobrediferenciación sólo mide f=0 mientras
+            # se mantenga en el eje POSITIVO. Si θ̂ < 0 su raíz apunta a B=−1 y
+            # está midiendo NYQUIST, no la frecuencia cero — el propio
+            # `dcd_overdiff_regular` lo documenta como el modo de fallo que la
+            # inicialización en +0.85 pretende evitar. Cuando esa salvaguarda no
+            # sujeta al testigo, el lado MA NO es una lectura de f=0 y no se
+            # puede emparejar con Shin-Fuller. Antes se calculaba la distancia a
+            # la frontera como abs(1-abs(θ̂)), lo que borraba el signo y
+            # presentaba un testigo fugado como si estuviera en la banda de
+            # cuasi-cancelación (r≈0.90–0.95).
+            dist = 1.0 - od_res.coef_free          # distancia CON signo a θ=+1
+            if od_res.coef_free < 0.0:
+                lines += [
+                    "",
+                    f"  ⚠ **El testigo se salió del eje f=0.** θ̂="
+                    f"{od_res.coef_free:+.4f} es NEGATIVO: su raíz apunta a B=−1, "
+                    f"así que mide la frecuencia de Nyquist, no la frecuencia "
+                    f"cero. Está a {dist:.4f} de la frontera θ=+1 — no es la "
+                    "banda de cuasi-cancelación, es otro eje.",
+                    "  **El lado MA no es interpretable como veredicto sobre d** "
+                    "en esta corrida, y su LR no es un contraste de frontera "
+                    "calibrado a esa distancia. Vuelve a correrlo sobre la línea "
+                    "base determinista (armónicos, SIN ARMA regular compitiendo), "
+                    "que es donde el testigo aísla f=0.",
+                    "  Lectura directa que sí vale: si ∇^d y tiene ACF(1) "
+                    "claramente POSITIVA, la diferencia no sobra.",
+                ]
+            else:
+                quasi_cancellation = True
+                lines += [
+                    "",
+                    f"  ⚠ **DISCREPAN, y eso es el diagnóstico.** Con θ̂="
+                    f"{od_res.coef_free:+.4f} el testigo está a "
+                    f"{dist:.4f} de la frontera: es la "
+                    "**banda de cuasi-cancelación** (r≈0.90–0.95 en la tabla del "
+                    "paper), donde el lado MA detecta que r<1 y el lado AR ve un "
+                    "proceso casi estacionario. Los dos tienen razón.",
+                    "  En esa banda las representaciones son **equivalentes en "
+                    "previsión**, así que la decisión no se toma con estos "
+                    "estadísticos: se toma por parsimonia, o comparando previsiones "
+                    "fuera de muestra.",
+                    "  **No leas «considerar d+1» como una conclusión.**",
+                ]
         else:
             lines.append("  ✓ Los dos coinciden: el orden de integración no está "
                          "en la banda ambigua.")
+            # BUG-0045: esa frase afirmaba más de lo que los dos contrastes
+            # sostenían — ambos miran hacia d+1. Acotarlo por los dos lados
+            # requiere el de sub-diferenciación.
+            if ud_res is not None:
+                if ud_res.lr >= ud_res._crit['5%']:
+                    lines.append("  ✓ Y acotado por ABAJO: la última ∇ es genuina "
+                                 "(sub-diferenciación LR="
+                                 f"{ud_res.lr:.3f} ≥ {ud_res._crit['5%']:.2f}), "
+                                 "así que d−1 no habría bastado. Las dos "
+                                 "direcciones cierran sobre la misma d.")
+                else:
+                    lines.append("  ⚠ **Pero por ABAJO no cierra:** el testigo de "
+                                 "sub-diferenciación se apila en θ=+1 (LR="
+                                 f"{ud_res.lr:.3f} < {ud_res._crit['5%']:.2f}), "
+                                 "o sea que la última ∇ está cancelada y con d−1 "
+                                 "bastaba. El orden de integración NO está fijado: "
+                                 "estima el candidato d−1 y compáralo por "
+                                 "diagnosis y criterios de información.")
+            else:
+                lines.append("  ℹ Sólo por arriba: no se pudo contrastar si con "
+                             "d−1 habría bastado, así que esta conclusión acota "
+                             "el orden por un lado.")
 
-        # Los dos avisos del paper, y sólo cuando pueden morder.
-        n_det = len(model.interventions or [])
-        if n_det:
-            lines.append(
-                f"  ℹ El crítico usado ({od_res._crit['5%']:.2f}) es el de la ley "
-                f"DESNUDA s=1. Este modelo lleva {n_det} deterministas, y en f=0 "
-                "el regresor constante es RESONANTE con la raíz unitaria — el "
-                "paper mide pile-up 0.927 en esa configuración frente a 0.6575 "
-                "desnudo. El crítico correcto ahí es mayor.")
-        if abs(abs(od_res.coef_free) - 1.0) > 1e-6:
-            lines.append(
-                "  ℹ θ̂ no se apila en la frontera, así que el LR usa ℓ(θ=1) "
-                "calculada por fue justo donde su perfil da un salto errático "
-                "(SF_MEG, apéndice de la verosimilitud de frontera). La decisión "
-                "debería revisarse con la verosimilitud exacta bandeada.")
 
     # DCD_f
     if dcd_f_res:
@@ -1614,7 +2165,7 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
         lines.append("\n**RV — frecuencia de AR(2)**")
         for r in rv_res:
             verdict = "No rechaza ✓" if r.pvalue >= 0.05 else "Rechaza ✗"
-            lines.append(f"- f̂={r.freq_hat:.3f}, H₀:f={r.freq_null}: "
+            lines.append(f"- f̂={r.freq_estimated:.3f}, H₀:f={r.freq_null}: "
                          f"LR={r.lr:.3f}, p={r.pvalue:.4f} → {verdict}")
 
     # MEG
@@ -1680,6 +2231,17 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
             "parsimonia (quédate con la actual) o compara previsiones fuera de "
             "muestra. Ver SF_MEG, tabla `tab:compare`."
         )
+    elif od_res is not None and od_res.coef_free < 0.0:
+        # BUG-0022: testigo fugado al eje de Nyquist. No es "sin problemas".
+        issues.append(
+            f"**Testigo de sobrediferenciación fuera del eje f=0** "
+            f"(θ̂={od_res.coef_free:+.4f} < 0): su raíz apunta a B=−1, mide "
+            f"Nyquist y no la frecuencia cero, a {1.0 - od_res.coef_free:.4f} de "
+            "la frontera θ=+1. El lado MA no da veredicto sobre d aquí. Repite "
+            "el contraste sobre la línea base determinista (sin ARMA regular "
+            "compitiendo) y, mientras tanto, decide d por el signo de la ACF(1) "
+            "de ∇^d y: positiva ⇒ la diferencia no sobra."
+        )
     elif sf_res is not None and not sf_res.stationary:
         issues.append(
             f"Shin-Fuller no rechaza H₀ (Φ̂₁ᵤ={sf_res.phi_1u:.3f} ≤ {sf_res.crit_5pct:.2f}): "
@@ -1714,6 +2276,15 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
             f"El MEG no pudo ejecutarse ({meg_error}): las frecuencias "
             "estacionales quedan sin contrastar."
         )
+
+    # BUG-0025: una diagnosis que falla no puede terminar en "el modelo es
+    # adecuado" — igual que una frecuencia sin contrastar (BUG-0010).
+    if _dg_fallos:
+        issues.insert(0, (
+            "**El modelo aún no es adecuado**, así que estos contrastes se están "
+            "leyendo fuera de su etapa: " + "; ".join(_dg_fallos) + ". Cierra el "
+            "ciclo (intervenciones y/o ARMA) y repítelos; sus nulas suponen "
+            "residuos de ruido blanco."))
 
     if issues:
         rec = "Reformulación necesaria:\n" + "\n".join(f"  • {i}" for i in issues)
@@ -1753,6 +2324,10 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
                  "quasi_cancellation": quasi_cancellation}
                 if (sf_res is not None and od_res is not None) else None
             ),
+            # BUG-0025: el estado de la adecuación, para quien lea la estructura
+            # en vez del texto.
+            "diagnosis_ok": not _dg_fallos,
+            "diagnosis_failures": list(_dg_fallos),
         },
     )
 
@@ -2044,17 +2619,33 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         if affected_lags:
             top = sorted(affected_lags, key=lambda r: -abs(r["contribution"]))[:6]
             lag_strs = []
+            n_no_informativos = 0
             for r in top:
-                pct_str = f"{r['pct']:+.0f}%" if r["pct"] is not None else "n.a."
-                lag_strs.append(f"k={r['lag']} ({pct_str})")
                 # Only count percentage for lags where ACF itself is significant;
                 # when |acf| < CI the denominator is near zero → spuriously huge pct.
-                if r["pct"] is not None and abs(r["acf"]) > ci_val:
+                informativo = r["pct"] is not None and abs(r["acf"]) > ci_val
+                if informativo:
                     max_acf_pct = max(max_acf_pct, abs(r["pct"]))
+                    lag_strs.append(f"k={r['lag']} ({r['pct']:+.0f}%)")
+                else:
+                    # BUG-0043: el porcentaje es contribución/ACF total, así que
+                    # donde la ACF ronda cero el cociente se dispara y no
+                    # significa nada — salían cifras como −1162% o −1561% junto a
+                    # un ACF_max=0%. El criterio de decisión ya los excluía (ver
+                    # arriba); lo que faltaba era no PUBLICARLOS como si midieran
+                    # algo. Se enseña la ACF, que es el dato honesto.
+                    n_no_informativos += 1
+                    lag_strs.append(f"k={r['lag']} (ACF={r['acf']:+.3f}, "
+                                    f"dentro de banda)")
+            nota_denom = ("  El porcentaje sólo se da donde la ACF sale de la "
+                          "banda: es un cociente sobre la ACF total, y donde ésta "
+                          "ronda cero se dispara sin significar nada."
+                          if n_no_informativos else "")
             lines += [
                 "",
                 f"**Retardos ACF más afectados**: {', '.join(lag_strs)}.",
-                "(Porcentaje = contribución del outlier / ACF total en ese retardo.)",
+                "(Porcentaje = contribución del outlier / ACF total en ese retardo.)"
+                + nota_denom,
             ]
 
         # ── Criterion: should we intervene? ──────────────────────────────────

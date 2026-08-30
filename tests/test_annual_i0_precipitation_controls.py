@@ -140,19 +140,42 @@ def test_a_bounded_count_stays_in_levels():
 
 
 def test_an_unbounded_positive_quantity_goes_to_logs():
-    """Milímetros de lluvia: positivo, sin techo, variabilidad multiplicativa."""
+    """Milímetros de lluvia: positivo, sin techo, variabilidad multiplicativa.
+
+    Este test fijaba `decide_domain(ts) == "generic"`, que era lo que devolvía la
+    taxonomía binaria — pero su propio nombre y su propia descripción dicen
+    «cantidad positiva sin techo, variabilidad multiplicativa», que es justo la
+    categoría que faltaba (BUG-0040). Zúrich va de 626 a 1988 mm, un factor de
+    3.17: es multiplicativa por la misma definición que el test enunciaba.
+
+    Lo que NO cambia es λ, y ésa es la propiedad que importa: `gap = +0.429` está
+    muy fuera de la banda en que el estadístico no discrimina, así que aquí
+    decide el dato y el dominio no interviene. El dominio sólo manda donde el
+    estadístico calla.
+    """
     from art.describe import describe_boxcox
     from art import policy
 
     ts = _zurich()
-    assert policy.decide_domain(ts) == "generic"
-    assert policy.decide_lambda(describe_boxcox(ts).data, policy.decide_domain(ts)) == 0.0
+    assert policy.decide_domain(ts) == "multiplicative"
+    bc = describe_boxcox(ts).data
+    assert abs(bc["gap"]) >= policy.BANDA_AMBIGUA_BOXCOX, (
+        "el testigo dejó de valer: si el gap entrara en la banda, este caso ya "
+        "no probaría que decide el DATO")
+    assert policy.decide_lambda(bc, policy.decide_domain(ts)) == 0.0
 
 
 def test_the_pair_disagrees_on_lambda_which_is_the_point():
     """Dos series del mismo fenómeno, la misma frecuencia y la misma época, y la
     transformación correcta es distinta. Si un cambio futuro las iguala, ha roto
-    algo aunque las baterías pasen."""
+    algo aunque las baterías pasen.
+
+    Sobrevivió intacto a BUG-0040 —que cambió la taxonomía de dominio— y merece
+    decirse por qué: los dos `gap` (−0.318 y +0.429) están lejos de la banda
+    ambigua, así que en ambas series decide el dato. Un cambio en la regla del
+    dominio que rompiera ESTE par estaría haciendo del dominio un decreto, que es
+    exactamente lo que no debe ser.
+    """
     import tempfile
 
     from art.pipeline import run_full

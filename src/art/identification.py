@@ -361,6 +361,20 @@ def recommended_d(results: list[UnitRootResult]) -> int:
     This never recommends d≥1 while ADF is significant at a lower d, and only
     reaches d=2 when ADF fails to reject at both d=0 and d=1.  The choice is a
     starting value; the formal test on the estimated model is Shin-Fuller.
+
+    **"Only when ADF fails at d=0 and d=1" is NOT a safeguard** (BUG-0023).
+    Failing to reject at both is exactly what a strongly seasonal series does:
+    the ADF regression carries no seasonal terms, so the pattern lands in its
+    residual variance and biases the test towards "difference again".  This
+    function is the EVIDENCE layer and deliberately keeps reporting what the
+    tests say — the cap belongs ABOVE it, and there are two:
+
+      · autonomous lane : ``policy.decide_d`` (max_step=1, plus the seasonal cap)
+      · guided lane     : the caller passes ``max_d=current_d + 1``, so a node
+                          evaluating from d=0 never tabulates d=2 at all
+
+    Do not move either cap in here; ``tests/test_bug_0015_0016_policy_domain_and_d_cap``
+    fixes that boundary on purpose.
     """
     if not results:
         return 0

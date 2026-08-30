@@ -84,33 +84,104 @@ THRESHOLDS = {
 # Prefijos de nombre que marcan una serie ÍNDICE. Vivían dentro de
 # `guided_identification` en mcp_server.py: una regla del analista escrita en la
 # capa guiada, invisible para el camino autónomo (BUG-0015). Ahora hay una copia.
+# Prefijos de nombre que delatan un ÍNDICE. Es la única inferencia que sigue
+# apoyada en el nombre, y no por pereza: un índice no tiene firma en el dato que
+# lo distinga de cualquier otra magnitud positiva —lo que lo define es que su
+# nivel es una convención, y eso no se ve en la serie—. Para todo lo demás la
+# inferencia mira el dato (ver `decide_domain`).
 _INDEX_PREFIXES = ("ipc", "ipi", "ipp", "cpi", "ppi", "cci",
-                   "indice", "índice", "index", "idx", "price")
+                   "indice", "índice", "index", "idx", "price",
+                   # tipos de cambio efectivos: son índices de base convencional
+                   "itcer", "tcer", "reer", "neer", "iter")
+
+# Factor de recorrido a partir del cual una magnitud positiva es, a efectos de
+# modelización, multiplicativa. Ver `decide_domain` para el argumento.
+RANGO_MULTIPLICATIVO = 3.0
+
+
+# La banda dentro de la cual el estadístico Box-Cox NO discrimina. Es la misma
+# que art imprime al analista ("Δcorr=0.024 < 0.10 → decisión ambigua"), y aquí
+# es el interruptor: dentro de ella manda el dominio, fuera manda el dato.
+BANDA_AMBIGUA_BOXCOX = 0.10
+
+DOMINIOS = ("price_index", "multiplicative", "ratio", "generic")
 
 
 def decide_domain(ts) -> str:
-    """What KIND of series this is: ``"price_index"`` or ``"generic"``.
+    """What KIND of series this is — one of ``DOMINIOS``.
 
-    The policy protocol took evidence and never DOMAIN, and that gap has now
-    produced three defects in a row: μ (BUG-0013), the λ index rule (BUG-0015)
-    and the AR(1)/MA(1) tie-break for price series (still in TODO). A rule that
-    needs to know what the series IS could not be written, because no argument
-    carried the answer.
+    **BUG-0040: esta taxonomía era BINARIA** (`"price_index"` | `"generic"`) y
+    eso resultó ser el arreglo de BUG-0015 quedándose corto: se añadió el
+    dominio a la política, pero con las dos únicas categorías que el caso de
+    entonces necesitaba. Todo lo que no fuera un índice caía en `"generic"`, y
+    ahí λ la decide el signo de `gap` — un estadístico que sobre series cortas es
+    ruido.
 
-    This is a SUGGESTION and it is inferred from the name, which is weak
-    evidence: a model must not come out different because the file was called
-    `IPC_ES` rather than `serie3`. Two things keep that honest —
+    Medido sobre PGAS (precio de exportación del gas, 95→500 USD/t): `gap` vale
+    −0.024, y con la taxonomía binaria eso daba λ=1. Dos carriles independientes
+    —la heurística por lotes y un analista LLM sin contexto previo— cometieron el
+    MISMO error, y el segundo lo escribió con todas las letras: *«es un precio
+    con cero natural, NO un índice, así que la transformación la decide el
+    estadístico»*. No fue un descuido: es la taxonomía leída correctamente. El
+    texto que art imprime dice «índice de precios **o magnitud multiplicativa**»,
+    pero el código no tenía la segunda categoría.
 
-    * the answer is RECORDED (`PipelineResult.domain`) and announced, never
-      applied in silence; and
-    * the analyst overrides it (`ClaudePolicy(domain=…)`, `build_model(domain=…)`),
-      and a declared domain always wins.
+    Consecuencia medida: con λ=1 ninguno de los seis modelos estimados sobre PGAS
+    alcanzó la adecuación — el JB fue de 46.7 a 8.9 y nunca pasó, porque la
+    heterocedasticidad que el log elimina reaparece como no-normalidad.
 
-    Declared beats inferred. The inference exists so the autonomous path is not
-    left with nothing, not because the name is good evidence.
+    Las cuatro categorías
+    ---------------------
+    ``price_index``   Un índice: base convencional, sin cero natural. λ=0 SIEMPRE
+                      — un modelo en niveles no tiene escala interpretable.
+    ``multiplicative``Magnitud positiva con cero natural que se mueve en
+                      proporción: un precio, una cantidad, un agregado
+                      monetario. λ=0 POR DEFECTO, y el dato puede desmentirlo.
+    ``ratio``         Una participación acotada. λ=0 por defecto con la misma
+                      salvedad, y con una limitación que conviene saber: la
+                      transformación natural de un cociente acotado es la logit,
+                      que la suite no ofrece — λ=0 es la mejor disponible, no la
+                      correcta.
+    ``generic``       Lo demás: decide el estadístico.
+
+    La inferencia mira el DATO, no el nombre
+    ----------------------------------------
+    La versión anterior infería del nombre del fichero, y su propio docstring se
+    quejaba de ello: *«un modelo no debe salir distinto porque el fichero se
+    llamara IPC_ES en vez de serie3»*. El nombre se conserva para los índices
+    —ahí el prefijo es informativo y no hay firma en el dato que los distinga—
+    pero lo demás se decide midiendo:
+
+    * valores no positivos ⇒ ``generic``: el log no está definido, no hay nada
+      que discutir;
+    * todo dentro de (0, 1) ⇒ ``ratio``;
+    * recorrido máx/mín ≥ ``RANGO_MULTIPLICATIVO`` ⇒ ``multiplicative``. El
+      umbral es una convención, y ésta es su razón: sobre un recorrido de factor
+      R, un modelo de varianza aditiva afirma que la innovación tiene la misma
+      magnitud absoluta en los dos extremos. Con R ≥ 3 eso es implausible para
+      una magnitud económica positiva — en PGAS serían los mismos USD/t de
+      sorpresa a 95 que a 500.
+
+    Sigue siendo una SUGERENCIA: se registra en `PipelineResult.domain`, se
+    anuncia, y **lo declarado gana siempre** (`ClaudePolicy(domain=…)`,
+    `build_model(domain=…)`).
     """
+    import numpy as _np
     name = (getattr(ts, "name", "") or "").lower()
-    return "price_index" if name.startswith(_INDEX_PREFIXES) else "generic"
+    if name.startswith(_INDEX_PREFIXES):
+        return "price_index"
+    try:
+        y = _np.asarray(getattr(ts, "data", []), dtype=float)
+        y = y[_np.isfinite(y)]
+        if y.size == 0 or _np.min(y) <= 0.0:
+            return "generic"
+        if _np.max(y) < 1.0:
+            return "ratio"
+        if _np.max(y) / _np.min(y) >= RANGO_MULTIPLICATIVO:
+            return "multiplicative"
+    except Exception:
+        return "generic"
+    return "generic"
 
 
 def decide_lambda(boxcox_data: dict, domain: str | None = None) -> float:
@@ -135,6 +206,14 @@ def decide_lambda(boxcox_data: dict, domain: str | None = None) -> float:
     if domain == "price_index":
         return 0.0
     gap = boxcox_data.get("gap", 0.0)
+    # BUG-0040. Para una magnitud multiplicativa o un cociente, el log es el
+    # punto de partida — pero a diferencia del índice, el dato PUEDE desmentirlo.
+    # El interruptor es la banda dentro de la cual el estadístico no discrimina,
+    # la misma que art ya imprime al analista: dentro, decide el dominio; fuera,
+    # decide el dato. Sobre PGAS gap=−0.024 cae de lleno dentro y el signo de ese
+    # número era lo único que empujaba a λ=1.
+    if domain in ("multiplicative", "ratio") and abs(gap) < BANDA_AMBIGUA_BOXCOX:
+        return 0.0
     return 0.0 if gap >= 0 else 1.0
 
 
@@ -298,6 +377,180 @@ def decide_orders(specs) -> tuple[int, int]:
     return 0, 1
 
 
+def decide_seasonal_orders(specs) -> tuple[int, int]:
+    """Seasonal (P, Q) from suggest_orders(...) — the top-ranked ACF/PACF match.
+
+    The sibling of `decide_orders`, and the reason it exists is BUG-0031.
+
+    `suggest_orders` searches over (p, q, P, Q) with P_max = Q_max = 1, so every
+    spec it ranks CARRIES a seasonal pair. `decide_orders` returned only the
+    regular `(p, q)`, and `run_full` built its `ModelSpec` without touching `P`
+    or `Q` — which left them at 0. The consequence was not a worse model but an
+    UNREACHABLE one: on a series whose identification puts a P=1 spec in first
+    place, the autonomous lane estimated that same spec **without** the seasonal
+    operator, and the residuals were not white noise. The engine was never at
+    fault — `_make_model` has built the D=0 "harmonics + stationary seasonal
+    AR/MA" combination all along (pipeline.py, `ar_s_val` under `if D == 0`).
+    What was missing was the wire from the policy to the spec.
+
+    Why a separate function rather than widening `decide_orders` to a 4-tuple:
+    the regular and the seasonal pair are decided on different evidence (the low
+    lags of the ACF/PACF vs. the lags at multiples of s), the guided lane
+    confirms them as separate acts, and `decide_orders` carries a documented
+    domain tie-break of its own that has nothing to say about P and Q.
+
+    THE P≥1 AND Q≥1 GUARD. The fue C backend aborts when a seasonal AR and a
+    seasonal MA are both free in the same model (see `_make_model`'s docstring
+    and fue/TODO.md, "AR_s+MA_s"). `suggest_orders` does rank (P=1, Q=1) specs —
+    it ranks on correlogram similarity and knows nothing about the backend — so
+    this function must never return that pair. When the top spec asks for both,
+    the seasonal AR is kept and the seasonal MA dropped: at the annual lags an
+    AR nests the persistent decay that a seasonal MA can only cut off at lag s,
+    so it is the safer of the two to keep, and an over-rich AR shows up as a
+    quasi-cancellation the DCD can then test — a dropped MA leaves nothing to
+    look at. The choice is a CONSTRAINT, not a criterion, so it is announced.
+    """
+    if not specs:
+        return 0, 0
+    top = specs[0]
+    P = int(getattr(top, "P", 0) or 0)
+    Q = int(getattr(top, "Q", 0) or 0)
+    if P >= 1 and Q >= 1:
+        # Backend constraint, not a modelling judgement — see docstring.
+        Q = 0
+    return P, Q
+
+
+# ---------------------------------------------------------------------------
+# El OBJETIVO del modelo, y la ruta estacional
+# ---------------------------------------------------------------------------
+
+OBJETIVOS = ("univariante", "multivariante", "estructural")
+
+OBJETIVO_POR_DEFECTO = "univariante"
+
+
+def decide_seasonal_route(meg_verdicts, b2_seasonal_invertible,
+                          objetivo: str = OBJETIVO_POR_DEFECTO,
+                          b1_ok: bool = True, b2_ok: bool = True):
+    """Elige entre B1 (D=0 + armónicos) y B2 (D=1) **por contraste, no por decreto**.
+
+    El problema, y por qué no basta con un default
+    ----------------------------------------------
+    Box-Jenkins canónico: detectada la estacionalidad, `D=1`, y de ahí (p,q,P,Q).
+    La extensión de Treadway: partir de `D=0` + armónicos como HIPÓTESIS DE
+    TRABAJO y contrastarla con el MEG (Abraham-Box 1978; Treadway y Gallego
+    después). En econometría, y sobre todo cuando la serie va a entrar en un
+    sistema multivariante, la práctica es `D=0` con armónicos o dummies.
+
+    Tres tradiciones, y la elección no está en los datos: está en para qué es el
+    modelo. Pero tampoco es ARBITRARIA, y ahí está la salida.
+
+    Los dos caminos son contrastables, y forman PAR
+    ----------------------------------------------
+    * B1 se contrasta con el **MEG**: ¿alguna frecuencia es estocástica?
+    * B2 se contrasta desde el otro lado, con el **DCD_f** sobre su MA
+      estacional: si se apila en la frontera de no invertibilidad, la ∇ₛ sobraba
+      y la estacionalidad era determinista.
+
+    Nulas opuestas sobre la misma pregunta — la misma estructura que
+    Shin-Fuller/DCD en f=0. Habiendo par, elegir por convención es justo lo que
+    el método evita en todos los demás nodos.
+
+    La asimetría que decide, y no es de tradición sino de EXPRESIVIDAD
+    -----------------------------------------------------------------
+    `D=1` impone raíces unitarias en TODAS las frecuencias estacionales a la vez.
+    El instrumento fino no es `D`, es `ifadf` por frecuencia — y a `ifadf` sólo
+    se llega desde B1, vía MEG. Por tanto:
+
+    * **B1 puede llegar a B2.** Medido sobre RATIO (Gasto/PIB Bolivia): el MEG
+      dictó f=1 y después f=2, y el operador total quedó en
+      `(1−B)(1+B²)(1+B) = ∇₄` — el modelo de Box-Jenkins, pero CON la evidencia
+      de por qué, y sabiendo que cada frecuencia lo era por separado.
+    * **B2 no puede llegar a un B1 mixto.** Si la verdad es «f=1 estocástica,
+      f=2 determinista», `D=1` no lo representa y ningún contraste posterior lo
+      recupera.
+
+    Y el coste del error es asimétrico: empezar en B1 cuando la verdad es B2
+    cuesta iteraciones y el MEG lo encuentra; empezar en B2 cuando la verdad es
+    B1 mete una raíz unitaria estacional espuria ANTES de identificar el ARMA, y
+    para cuando el DCD_f lo delata la identificación ya se hizo sobre una serie
+    sobrediferenciada.
+
+    Parameters
+    ----------
+    meg_verdicts  dict {freq: "stochastic"|"deterministic"} del MEG sobre B1, o
+                  None/{} si no se pudo correr.
+    b2_seasonal_invertible
+                  True si el MA estacional de B2 es invertible (la ∇ₛ es
+                  genuina), False si se apila en la frontera (sobraba), None si
+                  no se pudo contrastar.
+    objetivo      para qué es el modelo — rompe el empate cuando los contrastes
+                  no deciden, y VETA B2 en el caso multivariante.
+    b1_ok, b2_ok  si la diagnosis de cada rama es adecuada.
+
+    Returns
+    -------
+    (ruta, razón) con ruta ∈ {"B1", "B2"}.
+    """
+    obj = (objetivo or OBJETIVO_POR_DEFECTO).strip().lower()
+    if obj not in OBJETIVOS:
+        obj = OBJETIVO_POR_DEFECTO
+
+    # 0. La adecuación manda sobre todo lo demás.
+    if b1_ok and not b2_ok:
+        return "B1", ("B2 no pasa la diagnosis y B1 sí. La adecuación decide "
+                      "antes que cualquier preferencia de ruta.")
+    if b2_ok and not b1_ok:
+        return "B2", ("B1 no pasa la diagnosis y B2 sí. La adecuación decide "
+                      "antes que cualquier preferencia de ruta.")
+
+    # 1. El objetivo multivariante VETA B2, y no por gusto: una raíz unitaria
+    #    estacional dentro de una cointegración es otro problema —y mucho más
+    #    duro—, y además las series de un sistema tienen que llevar el MISMO
+    #    tratamiento estacional o sus órdenes de integración no son comparables.
+    if obj == "multivariante":
+        return "B1", ("objetivo=multivariante: las raíces unitarias estacionales "
+                      "complican la cointegración y exigen tratamiento idéntico "
+                      "en todas las series del sistema. B1 con armónicos es la "
+                      "especificación que mantiene comparables los órdenes de "
+                      "integración. No es preferencia: es requisito del uso.")
+
+    # 2. Los contrastes, cuando hablan.
+    v = dict(meg_verdicts or {})
+    if v:
+        estocasticas = [f for f, r in v.items() if r == "stochastic"]
+        if not estocasticas:
+            return "B1", ("el MEG no encuentra ninguna frecuencia estocástica: "
+                          "la estacionalidad es determinista y la ∇ₛ de B2 "
+                          "sobrediferenciaría.")
+        if len(estocasticas) == len(v):
+            if b2_seasonal_invertible is False:
+                return "B1", ("el MEG marca todas las frecuencias estocásticas "
+                              "pero el MA estacional de B2 se apila en la "
+                              "frontera: su ∇ₛ sobra. Los dos contrastes no "
+                              "coinciden y B1, que es reformulable frecuencia a "
+                              "frecuencia, es donde se puede seguir mirando.")
+            return "B2", ("todas las frecuencias salen estocásticas y el MA "
+                          "estacional de B2 es invertible: los dos lados "
+                          "coinciden, y B2 es la forma parsimoniosa de lo mismo. "
+                          "B1 llegaría al mismo operador con más parámetros.")
+        return "B1", (f"el MEG separa las frecuencias: estocástica(s) "
+                      f"{sorted(estocasticas)} y determinista(s) "
+                      f"{sorted(f for f in v if f not in estocasticas)}. "
+                      "Un caso MIXTO sólo lo representa B1 con `ifadf` por "
+                      "frecuencia; D=1 impone la raíz unitaria en todas a la vez.")
+
+    # 3. Sin contrastes utilizables, decide el objetivo — y se dice.
+    if obj == "univariante":
+        return "B2", ("los contrastes no deciden y objetivo=univariante: para "
+                      "previsión el patrón que se adapta suele predecir mejor, y "
+                      "B2 es la forma canónica de Box-Jenkins.")
+    return "B1", ("los contrastes no deciden y objetivo=estructural: B1 deja los "
+                  "componentes estacionales explícitos y legibles, que es para lo "
+                  "que se pidió el modelo.")
+
+
 def decide_form(target_obs: int, extreme_obs) -> str:
     """Choose the intervention form for an outlier at *target_obs* (1-based).
 
@@ -313,22 +566,43 @@ def decide_form(target_obs: int, extreme_obs) -> str:
     return "step" if has_consec else "pulse"
 
 
-def decide_interventions(extreme, existing_ats) -> list[tuple[int, str]]:
+def decide_interventions(extreme, existing_ats,
+                        offset: int = 0) -> list[tuple[int, str]]:
     """Which interventions to add this round, given the residual diagnosis.
 
     Parameters
     ----------
-    extreme       list of (obs_1based, z) extreme residuals (diag.extreme)
+    extreme       list of (obs_1based, z) extreme residuals (diag.extreme).
+                  **Los índices son de la serie de RESIDUOS**, no de la original.
     existing_ats  iterable of 0-based positions already covered by interventions
+    offset        `d + D*s` — cuántas observaciones se pierden al diferenciar,
+                  que es exactamente lo que separa el origen de la serie de
+                  residuos del de la serie original.
 
     Returns a list of (at_0based, form) — form chosen by decide_form — ordered
     by descending |z|; positions already covered are skipped.
+
+    **BUG-0030.** Esto hacía `at_0 = obs - 1`, que sólo sería correcto si las dos
+    series arrancaran a la vez. La serie de residuos empieza `d + D*s`
+    observaciones después, así que TODA intervención del carril autónomo caía ese
+    desfase ANTES del anómalo que la disparó — un trimestre con d=1, trece
+    períodos en un mensual con D=1.
+
+    Y el defecto era estructural, no aritmético: esta función no recibía `d` ni
+    `D`, así que no podía hacer la conversión aunque quisiera. De ahí el
+    parámetro nuevo.
+
+    Lo que lo hacía silencioso: un pulso de NIVEL colocado un período antes
+    ajusta la imagen especular del correcto. Medido — ω = +4.347 (t=+4.57) mal
+    colocado frente a ω = −4.353 (t=−4.58) bien colocado, con Δ logL = 0.03.
+    Signo invertido, magnitud igual, verosimilitud indistinguible. Nada en la
+    diagnosis lo delata.
     """
     ext_obs = {obs for obs, _ in extreme}
     already = set(existing_ats)
     new: list[tuple[int, str]] = []
     for obs, z in sorted(extreme, key=lambda x: -abs(x[1])):
-        at_0 = obs - 1
+        at_0 = obs - 1 + int(offset)
         if at_0 in already:
             continue
         new.append((at_0, decide_form(obs, ext_obs)))
@@ -417,6 +691,13 @@ class Policy:
     def decide_orders(self, specs) -> tuple[int, int]:
         raise NotImplementedError
 
+    def decide_seasonal_orders(self, specs) -> tuple[int, int]:
+        raise NotImplementedError
+
+    def decide_seasonal_route(self, meg_verdicts, b2_seasonal_invertible,
+                              objetivo="univariante", b1_ok=True, b2_ok=True):
+        raise NotImplementedError
+
     def decide_mu(self, ts, lam: float, d: int, D: int) -> bool:
         """Free mean or not. Added for BUG-0013: `run_full` did not forget to
         set it -- there was no door through which to ask."""
@@ -425,7 +706,7 @@ class Policy:
     def decide_form(self, target_obs: int, extreme_obs) -> str:
         raise NotImplementedError
 
-    def decide_interventions(self, extreme, existing_ats) -> list:
+    def decide_interventions(self, extreme, existing_ats, offset: int = 0) -> list:
         raise NotImplementedError
 
     def should_stop(self, clean: bool, n_extreme: int) -> bool:
@@ -454,14 +735,22 @@ class DefaultPolicy(Policy):
     def decide_orders(self, specs):
         return decide_orders(specs)
 
+    def decide_seasonal_orders(self, specs):
+        return decide_seasonal_orders(specs)
+
+    def decide_seasonal_route(self, meg_verdicts, b2_seasonal_invertible,
+                              objetivo="univariante", b1_ok=True, b2_ok=True):
+        return decide_seasonal_route(meg_verdicts, b2_seasonal_invertible,
+                                     objetivo, b1_ok, b2_ok)
+
     def decide_mu(self, ts, lam, d, D):
         return decide_mu(ts, lam, d, D)
 
     def decide_form(self, target_obs, extreme_obs):
         return decide_form(target_obs, extreme_obs)
 
-    def decide_interventions(self, extreme, existing_ats):
-        return decide_interventions(extreme, existing_ats)
+    def decide_interventions(self, extreme, existing_ats, offset: int = 0):
+        return decide_interventions(extreme, existing_ats, offset)
 
     def should_stop(self, clean, n_extreme):
         return should_stop(clean, n_extreme)
@@ -479,7 +768,7 @@ class ClaudePolicy(DefaultPolicy):
 
     def __init__(self, lam=None, d=None, D=None, decision=None,
                  n_harmonics=None, p=None, q=None, estimate_mu=None,
-                 domain=None):
+                 domain=None, P=None, Q=None):
         self.estimate_mu = estimate_mu
         self.domain = domain
         self.lam = lam
@@ -489,6 +778,9 @@ class ClaudePolicy(DefaultPolicy):
         self.n_harmonics = n_harmonics
         self.p = p
         self.q = q
+        # BUG-0031: el par estacional se confirma igual que el regular.
+        self.P = P
+        self.Q = Q
 
     def decide_domain(self, ts):
         """Declarado gana a inferido, siempre. El nombre del fichero es evidencia
@@ -513,6 +805,23 @@ class ClaudePolicy(DefaultPolicy):
         p, q = super().decide_orders(specs)
         return (p if self.p is None else int(self.p),
                 q if self.q is None else int(self.q))
+
+    def decide_seasonal_orders(self, specs):
+        P, Q = super().decide_seasonal_orders(specs)
+        return (P if self.P is None else int(self.P),
+                Q if self.Q is None else int(self.Q))
+
+    def decide_seasonal_route(self, meg_verdicts, b2_seasonal_invertible,
+                              objetivo="univariante", b1_ok=True, b2_ok=True):
+        """La ruta declarada gana, como todo lo demás en esta política.
+
+        `decision` es el campo que la lleva: "B1"/"B2" la fijan; "A" no aplica
+        (no hay estacionalidad que enrutar) y cualquier otra cosa deja decidir
+        al contraste."""
+        if self.decision in ("B1", "B2"):
+            return self.decision, "ruta fijada por el analista"
+        return super().decide_seasonal_route(meg_verdicts, b2_seasonal_invertible,
+                                             objetivo, b1_ok, b2_ok)
 
     def decide_mu(self, ts, lam, d, D):
         """What the analyst fixed, or the heuristic. Same shape as the other

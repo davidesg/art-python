@@ -19,7 +19,7 @@ duplication that used to live, copied, inside build_model and batch_build.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 
 def _load_ts_model(path: str):
@@ -269,7 +269,13 @@ def _write_inp(ts, model, output_path: str) -> None:
     ]
     if freq > 1:
         ifadf = getattr(model, "ifadf", None)
-        if ifadf is None:
+        # BUG-0026: `fue.Model` guarda una LISTA VACÍA cuando no se pasa ifadf,
+        # no None, así que una guarda `is None` no la cubre y el join emitía la
+        # línea VACÍA. `ifadf` indexa las frecuencias desde f=0, de modo que la
+        # línea tiene siempre `freq//2 + 1` entradas — «0 0 0» en trimestral,
+        # «0 0 0 0 0 0 0» en mensual — y el lector cuenta esas posiciones. Sin
+        # ellas se desincroniza y consume la línea del Box-Cox.
+        if not ifadf:
             ifadf = [0] * (freq // 2 + 1)
         lines.append(" ".join(str(v) for v in ifadf))
     else:
@@ -450,6 +456,29 @@ def _build_arma_on_model(m_base, p: int, q: int,
       `mu0`. This is the `.pre` contract and should be what callers want.
     * `True` / `False` — an explicit override. When forcing a mean on to a base
       that has none, the seed comes from `_mu_seed` as before.
+
+    **Los operadores de FRECUENCIA FIJA se heredan (BUG-0034).** `fue` guarda en
+    bloques propios del `.inp` —"AR(2)/MA(2) operators with fixed frequency"— los
+    factores anclados a una frecuencia estacional, que en el modelo llegan como
+    `m.ar_f` y `m.ma_f` (listas de `FixedFreqFactor`), NO dentro de `ar_s`/`ma_s`.
+    Ahí es donde vive el **testigo MA_f** que `meg_reformulate` añade junto a
+    `ifadf[f]=1`, y los dos son un solo objeto: la raíz unitaria estacional más su
+    testigo libre es el modelo S de estacionalidad estocástica que contrasta el
+    MEG; la misma raíz sin testigo es la forma AR-only, que SOBREDIFERENCIA la
+    estacional — σ inflada, Q-test disparado — y que `meg_reformulate` documenta
+    como subproducto de diagnóstico y explícitamente NO S.
+
+    Esta función heredaba `interventions`, `ifadf` y `mu`, y no mencionaba
+    `ar_f` ni `ma_f` en ninguna parte, así que los perdía en TODO encadenamiento.
+    El daño se ve al añadir un ARMA regular a un modelo reformulado por el MEG:
+    la raíz unitaria sobrevive, su testigo no. Medido sobre RATIO de la réplica
+    de Bolivia: σ̂ₐ 4,1153% → 5,5173%, ℓ −232,20 → −254,60, AIC 474,40 → 519,21,
+    y el Q-test pasó de fallar en un retardo a fallar en 2, 4, 8 y 12. Nada en la
+    salida lo dijo.
+
+    No llevan interruptor porque no son un orden que el llamador especifique:
+    `(p, q, P, Q)` nombran los operadores regulares y de retardo estacional, y
+    los de frecuencia fija son estructura, como las intervenciones.
     """
     import fue
     import numpy as np
@@ -486,6 +515,13 @@ def _build_arma_on_model(m_base, p: int, q: int,
     ma_s_val  = [mas_i] if Q > 0 else []
     ma_sf_val = [[True] * Q] if Q > 0 else []
 
+    # BUG-0034: los operadores de FRECUENCIA FIJA son estructura, no órdenes.
+    # Ahí vive el testigo MA_f del MEG, que va con el `ifadf` y sin el cual la
+    # raíz unitaria estacional es la forma sobrediferenciada. Se copian tal cual,
+    # como las intervenciones.
+    ar_f_val = list(m_base.ar_f or [])
+    ma_f_val = list(m_base.ma_f or [])
+
     # THE MEAN, carried like the interventions above. `mu0` is where fue keeps
     # the mean -- the seed before a fit, the estimate after one -- so inheriting
     # it is inheriting the optimum. A fresh seed is computed only when the base
@@ -507,6 +543,8 @@ def _build_arma_on_model(m_base, p: int, q: int,
         ma=ma,       ma_free=ma_f       if ma   else None,
         ar_s=ar_s_val,  ar_s_free=ar_sf_val if ar_s_val  else None,
         ma_s=ma_s_val,  ma_s_free=ma_sf_val if ma_s_val  else None,
+        ar_f=ar_f_val or None,
+        ma_f=ma_f_val or None,
         interventions=list(m_base.interventions or []),
         ifadf=list(m_base.ifadf or []),
         mu=mu_val,
@@ -717,6 +755,13 @@ class PipelineResult:
     interventions: list  # final accumulated (at_0, form)
     estimate_mu: bool = False  # BUG-0013: what the policy decided about the mean
     domain: str = "generic"    # BUG-0015: what KIND of series the policy saw
+    P: int = 0                 # BUG-0031: the seasonal pair the policy decided
+    Q: int = 0
+    # Las dos rutas estacionales y su adjudicación (ver decide_seasonal_route)
+    objetivo: str = "univariante"
+    route: str | None = None       # "B1" | "B2" | None si no hubo estacionalidad
+    route_reason: str = ""
+    branches: dict = field(default_factory=dict)
 
 
 def build_and_fit(ts, spec: ModelSpec, output_path: str,
@@ -737,9 +782,112 @@ def build_and_fit(ts, spec: ModelSpec, output_path: str,
     return FitResult(model=m_fit, diag=diag, spec=spec)
 
 
+def _outlier_loop(ts, pol, spec_base, output_path, z_threshold, max_rounds):
+    """El ciclo estimar → diagnosticar → intervenir, para UNA especificación.
+
+    Extraído de `run_full` porque ahora se recorre una vez por RUTA estacional:
+    cuando hay estacionalidad, el carril autónomo estima B1 y B2 y las adjudica
+    con el par MEG/DCD_f en vez de elegir una por convención (ver
+    `policy.decide_seasonal_route`).
+
+    `max_rounds` cuenta rondas de INTERVENCIÓN y la ronda 1 es la base, sin
+    ninguna: por eso 0 y 1 hacen lo mismo --estimar y no añadir nada-- y nunca
+    se devuelve un modelo `None` por no haber entrado en el bucle (BUG-0047).
+
+    Devuelve (rounds, modelo_final, diagnosis_final, intervenciones).
+    """
+    extra_itvs: list = []
+    rounds: list = []
+    m_fit = None
+    diag  = None
+    # BUG-0047. `max_rounds` cuenta rondas de INTERVENCIÓN, pero la ronda 1 no
+    # interviene: es la estimación BASE, con `extra_itvs` vacío. Con
+    # `max_rounds=0` --que un llamante escribe queriendo decir "estima, pero no
+    # me añadas nada"-- el rango salía vacío, no se estimaba NADA, y el `None`
+    # resultante reventaba aguas abajo en `_write_inp` con un AttributeError
+    # sobre `.interventions`. Siempre hay una estimación: sin ella no hay modelo
+    # que devolver, y "cero rondas de intervención" es justamente la base sola.
+    for round_num in range(1, max(int(max_rounds), 1) + 1):
+        spec = replace(spec_base, interventions=list(extra_itvs))
+        fr = build_and_fit(ts, spec, output_path, z_threshold)
+        m_fit, diag = fr.model, fr.diag
+
+        # El bucle de anómalos pregunta por la FORMA de los residuos, no por la
+        # adecuación entera: una intervención arregla un residuo que se porta
+        # mal, no una media que falta en el modelo. Consultar `clean` aquí hacía
+        # que el autónomo añadiera dos intervenciones en IPC_ES persiguiendo una
+        # deriva que ningún dummy puede absorber.
+        if pol.should_stop(diag.residuals_ok, len(diag.extreme)):
+            rounds.append(RoundResult(round_num, m_fit, diag, [], "clean"))
+            break
+
+        # BUG-0030: `diag.extreme` indexa la serie de RESIDUOS, que empieza
+        # `d + D*s` observaciones después de la original. Sin ese desfase toda
+        # intervención cae antes del anómalo que la disparó.
+        new_itvs = pol.decide_interventions(
+            diag.extreme, [at for at, _ in extra_itvs],
+            offset=int(spec_base.d) + int(spec_base.D) * int(ts.freq))
+        if not new_itvs:
+            rounds.append(RoundResult(round_num, m_fit, diag, [], "no_new"))
+            break
+
+        extra_itvs.extend(new_itvs)
+        rounds.append(RoundResult(round_num, m_fit, diag, new_itvs, ""))
+    return rounds, m_fit, diag, extra_itvs
+
+
+def _meg_verdicts(model):
+    """{frecuencia: 'stochastic'|'deterministic'} del MEG, o {} si no aplica."""
+    try:
+        from art.formal_tests import meg
+        from art.full_report import _meg_suitable
+        if not _meg_suitable(model):
+            return {}
+        # `MEGResult` ya trae el veredicto resuelto — y hay un tercer estado que
+        # NO es un veredicto: `skipped`, la frecuencia que no se pudo contrastar.
+        # Tratarla como determinista sería afirmar lo que no se midió.
+        out = {}
+        for r in meg(model):
+            if getattr(r, "skipped", False):
+                continue
+            if getattr(r, "stochastic", False):
+                out[int(r.freq)] = "stochastic"
+            elif getattr(r, "deterministic", False):
+                out[int(r.freq)] = "deterministic"
+        return out
+    except Exception:
+        return {}
+
+
+def _seasonal_ma_invertible(model):
+    """¿Es genuina la ∇ₛ de B2, o su MA estacional la cancela?
+
+    Es el otro lado del par que adjudica la ruta estacional: si el MA estacional
+    se apila en la frontera de no invertibilidad, `(1 − ΘBˢ)` cancela a
+    `(1 − Bˢ)` y la diferencia sobraba — la estacionalidad era determinista.
+
+    Contraste calibrado con la ley que le corresponde (Davis, Chen y Dunsmuir,
+    Tabla 3.2), no con la ley desnuda s=1: en la frontera un MA de retardo s pone
+    s raíces sobre el círculo a la vez, y sus cuantiles son más exigentes — 2.18
+    al 5% para s=4 frente a 1.94. Ver `formal_tests.dcd_s`.
+
+    Devuelve True (invertible, la ∇ₛ es genuina), False (en la frontera, sobra) o
+    None si el modelo no tiene MA estacional que mirar.
+    """
+    try:
+        from art.formal_tests import dcd_s
+        res = dcd_s(model)
+        if not res:
+            return None
+        return all(r.lr >= r._crit["5%"] for r in res)
+    except Exception:
+        return None
+
+
 def run_full(ts, output_path: str, max_rounds: int = 5,
              z_threshold: float | None = None,
-             decision_policy=None) -> PipelineResult:
+             decision_policy=None,
+             objetivo: str = "univariante") -> PipelineResult:
     """Box-Jenkins-Treadway pipeline driven by a decision policy.
 
     *decision_policy* is a policy.Policy instance:
@@ -778,43 +926,83 @@ def run_full(ts, output_path: str, max_rounds: int = 5,
     # estacionales, así que el patrón infla el error típico y sesga hacia "vuelve
     # a diferenciar". Con estacionalidad detectada y sin tratar, d se topa en 1.
     d    = pol.decide_d(urt.data, seasonal=(decision != "A"))
+    # BUG-0023, la otra mitad: el tope de un paso es RELATIVO, y `decide_d` ya
+    # lo admite (`current_d`) — pero NADIE lo llamaba una segunda vez, así que
+    # el carril autónomo no podía alcanzar d=2 NUNCA, ni sobre una serie I(2)
+    # limpia. Es el defecto espejo del salto 0→2: donde aquél sobrediferenciaba,
+    # éste subdiferencia. Cuando NO hay estacionalidad (decisión "A") no queda
+    # contaminación en el ADF, la primera decisión ya está tomada y la segunda
+    # es legítima: se pregunta por d+1 con el d actual como origen.
+    if decision == "A":
+        d = pol.decide_d(urt.data, seasonal=False, current_d=d)
     specs = suggest_orders(ts, d=d, D=D, lam=lam, top_n=5)
     p, q = pol.decide_orders(specs)
+    # BUG-0031: `suggest_orders` busca sobre (p,q,P,Q) y los specs que devuelve
+    # LLEVAN el par estacional, pero nadie lo leía: el ModelSpec se construía sin
+    # tocar P ni Q y se quedaban en 0. El carril autónomo no podía montar un
+    # AR/MA estacional NUNCA — ni cuando la identificación lo ponía en cabeza.
+    # No era un modelo peor: era un modelo INALCANZABLE.
+    P, Q = pol.decide_seasonal_orders(specs)
     # BUG-0013: the autonomous path could not set a mean at all -- `ModelSpec`
     # defaulted `estimate_mu=False` and nothing here ever reconsidered it, so
     # every autonomous model was fitted with mu fixed at zero regardless of the
     # data. The decision now goes through the policy like the other five.
     est_mu = pol.decide_mu(ts, lam, d, D)
 
-    # ── Outlier-addition loop ─────────────────────────────────────────────
-    extra_itvs: list = []
-    rounds: list = []
-    m_fit = None
-    diag  = None
-    for round_num in range(1, max_rounds + 1):
-        spec = ModelSpec(lam=lam, d=d, D=D, p=p, q=q,
-                         n_harmonics=n_harmonics, interventions=list(extra_itvs),
-                         estimate_mu=est_mu)
-        fr = build_and_fit(ts, spec, output_path, z_threshold)
-        m_fit, diag = fr.model, fr.diag
+    # ── Las DOS rutas estacionales, y su adjudicación ─────────────────────
+    # Detectada la estacionalidad, elegir entre B1 (D=0 + armónicos) y B2 (D=1)
+    # por convención sería el único nodo del método resuelto por decreto: los dos
+    # caminos son contrastables y forman par (MEG sobre B1, DCD_f sobre el MA
+    # estacional de B2). Así que se estiman los dos y decide el contraste, con
+    # `objetivo` rompiendo el empate cuando no deciden. Ver
+    # `policy.decide_seasonal_route`.
+    ruta = None
+    ruta_razon = ""
+    ramas: dict = {}
 
-        # El bucle de anómalos pregunta por la FORMA de los residuos, no por la
-        # adecuación entera: una intervención arregla un residuo que se porta
-        # mal, no una media que falta en el modelo. Consultar `clean` aquí hacía
-        # que el autónomo añadiera dos intervenciones en IPC_ES persiguiendo una
-        # deriva que ningún dummy puede absorber.
-        if pol.should_stop(diag.residuals_ok, len(diag.extreme)):
-            rounds.append(RoundResult(round_num, m_fit, diag, [], "clean"))
-            break
+    if decision == "A":
+        spec_base = ModelSpec(lam=lam, d=d, D=0, p=p, q=q, P=P, Q=Q,
+                              n_harmonics=n_harmonics, estimate_mu=est_mu,
+                              seasonal=False)
+        rounds, m_fit, diag, extra_itvs = _outlier_loop(
+            ts, pol, spec_base, output_path, z_threshold, max_rounds)
+    else:
+        stem, ext = os.path.splitext(output_path)
+        # B1: D=0 con armónicos en TODAS las frecuencias — el nulo que el MEG
+        # necesita. Los órdenes ya identificados sobre ∇^d.
+        b1_spec = ModelSpec(lam=lam, d=d, D=0, p=p, q=q, P=P, Q=Q,
+                            n_harmonics=n_harmonics, estimate_mu=est_mu,
+                            seasonal=True)
+        b1 = _outlier_loop(ts, pol, b1_spec, f"{stem}_B1{ext}",
+                           z_threshold, max_rounds)
+        # B2: D=1. Los órdenes se re-identifican sobre ∇^d∇_s, que es otra
+        # serie — usar los de B1 aquí sería identificar sobre lo que no es.
+        specs_b2 = suggest_orders(ts, d=d, D=1, lam=lam, top_n=5)
+        p2, q2 = pol.decide_orders(specs_b2)
+        P2, Q2 = pol.decide_seasonal_orders(specs_b2)
+        b2_spec = ModelSpec(lam=lam, d=d, D=1, p=p2, q=q2, P=P2, Q=Q2,
+                            n_harmonics=0, estimate_mu=est_mu, seasonal=False)
+        b2 = _outlier_loop(ts, pol, b2_spec, f"{stem}_B2{ext}",
+                           z_threshold, max_rounds)
 
-        new_itvs = pol.decide_interventions(
-            diag.extreme, [at for at, _ in extra_itvs])
-        if not new_itvs:
-            rounds.append(RoundResult(round_num, m_fit, diag, [], "no_new"))
-            break
+        ramas = {"B1": b1, "B2": b2}
+        ruta, ruta_razon = pol.decide_seasonal_route(
+            _meg_verdicts(b1[1]) if b1[1] is not None else {},
+            _seasonal_ma_invertible(b2[1]) if b2[1] is not None else None,
+            objetivo=objetivo,
+            b1_ok=bool(b1[2] and b1[2].residuals_ok),
+            b2_ok=bool(b2[2] and b2[2].residuals_ok))
 
-        extra_itvs.extend(new_itvs)
-        rounds.append(RoundResult(round_num, m_fit, diag, new_itvs, ""))
+        rounds, m_fit, diag, extra_itvs = ramas[ruta]
+        # `decision` es la etiqueta que viaja a la cabecera y al guion: tiene que
+        # decir la ruta ADOPTADA, no la que propuso `decide_seasonal_structure`
+        # antes de contrastar nada.
+        decision = ruta
+        if ruta == "B2":
+            D, n_harmonics, p, q, P, Q = 1, 0, p2, q2, P2, Q2
+        # La ruta adoptada ocupa `output_path`; la otra se queda en su fichero
+        # como rama abandonada, con su razón en el guion.
+        _write_inp(ts, m_fit, output_path)
 
     return PipelineResult(
         lam=lam, d=d, D=D, p=p, q=q, n_harmonics=n_harmonics, decision=decision,
@@ -823,4 +1011,6 @@ def run_full(ts, output_path: str, max_rounds: int = 5,
         interventions=extra_itvs,
         estimate_mu=est_mu,
         domain=domain,
+        P=P, Q=Q,
+        objetivo=objetivo, route=ruta, route_reason=ruta_razon, branches=ramas,
     )

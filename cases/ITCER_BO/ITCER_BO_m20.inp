@@ -1,0 +1,127 @@
+************************************************
+* Input file for program FUE                   *
+* DOCTYPE ATSW-interface SYSTEM                *
+************************************************
+
+** Frequency of time series: either 1(A), 4(Q) or 12(M):
+ 4
+** Number of observations and starting date of time series:
+ 84  1 2004 ITCER_BO
+** Number of deterministic variables (including seasonal components):
+1
+**
+impulse 4 2008
+**
+1
+**
+-8.985121  1
+8.935246  1
+**
+0
+** Number and orders of regular AR operators:
+1 1
+**
+0.184057  1
+** Number and orders of annual AR operators:
+0
+** Number and orders of regular MA operators:
+0
+** Number and orders of anual MA operators:
+0
+** Number and frequencies of regular AR(2) operators with fixed frequency:
+0
+** Number and frequencies of regular MA(2) operators with fixed frequency:
+0
+** Mean parameter (mu):
+-0.720153 1
+** Box-Cox lambda, m. Regular differences and complete annual differences:
+ 0.00  1  0
+** Individual factors of the annual difference (starting at freq 0.0):
+0 0 0
+** ACF/PACF bands (0 Automatic) and reescaling factor:
+ 0 100.00
+** Time series (stochastic and non-standard deterministic variables):
+178.499100 
+178.242200 
+180.774000 
+187.817600 
+189.110800 
+192.048800 
+191.543600 
+190.038400 
+191.597300 
+192.834800 
+191.636400 
+191.706000 
+187.630700 
+191.555100 
+183.849300 
+183.806600 
+180.921400 
+171.603400 
+161.754700 
+144.382800 
+141.062800 
+150.625400 
+155.778300 
+159.631800 
+157.488300 
+157.638300 
+159.532100 
+156.949000 
+151.731700 
+153.709000 
+151.044100 
+146.563800 
+147.639300 
+142.428600 
+140.705700 
+140.353700 
+136.677700 
+132.873700 
+129.066800 
+127.312800 
+125.505700 
+126.975700 
+122.494400 
+118.088800 
+111.530200 
+112.015500 
+105.623200 
+106.019600 
+104.348000 
+108.070900 
+108.813100 
+105.318600 
+107.334200 
+109.368700 
+109.804700 
+109.188100 
+111.220700 
+106.972800 
+103.583900 
+102.692400 
+104.231800 
+103.555100 
+100.922500 
+100.844200 
+99.537800 
+95.639000 
+97.481900 
+100.018000 
+100.448700 
+102.149300 
+101.454900 
+101.642600 
+104.312200 
+103.026900 
+99.625900 
+98.659700 
+102.287900 
+103.663700 
+103.182900 
+103.718700 
+104.948200 
+105.985500 
+102.886600 
+98.185300 

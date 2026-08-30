@@ -45,6 +45,17 @@ Complex-pair regime (interior frequencies f=1…s/2−1) — s=2 law:
     10 % ≈ 1.11,  5 % ≈ 2.04,  1 % ≈ 4.52   (asymptotic; finite-sample by n)
 Derived by Monte Carlo (paper SF_MEG, ~/Dropbox/SF_MEG; research/sf_meg/),
 superseding the interpolated thesis values (1.07/2.02/4.52).  See _dcd_crit.
+Seasonal-lag regime (the MA of an airline model, (1 − Θ·Bˢ)) — its own law:
+    s=4:   10 % = 1.21,  5 % = 2.18,  2.5 % = 3.17,  1 % = 4.75
+    s=12:  10 % = 1.36,  5 % = 2.31,  2.5 % = 3.44,  1 % = 5.12
+Davis, Chen & Dunsmuir, "Inference for Seasonal Moving Average Models With a
+Unit Root", Table 3.2 (SF_MEG/literature/978-1-4612-2412-9_12.pdf).  A third
+regime and not a variant of the other two: at its boundary a seasonal-lag MA
+puts s roots on the circle AT ONCE, not one real root nor a conjugate pair.
+Markedly stricter than the bare law — applying s=1 here over-rejects the unit
+root and declares GENUINE a ∇ₛ that is redundant.  Asymptotic quantiles hit
+nominal size almost exactly from n=20 cycles (Table 3.3), so no finite-sample
+correction is needed, unlike the complex-pair regime.  See _dcd_crit_s, dcd_s.
 
 MEG strategy
 ------------
@@ -149,6 +160,49 @@ def _dcd_crit(n: int | None, complex_pair: bool) -> dict:
             c = tuple((1 - w) * a + w * b
                       for a, b in zip(_DCD_CRIT_MA_F_TABLE[lo], _DCD_CRIT_MA_F_TABLE[hi]))
     return {'10%': round(c[0], 3), '5%': round(c[1], 3), '1%': round(c[2], 3)}
+
+
+# Seasonal-MA regime (lag s): the (1 − Θ·Bˢ) boundary law.
+#
+# Es un TERCER régimen, y no se reduce a los otros dos. Un MA de retardo
+# estacional en su frontera pone **s raíces sobre el círculo a la vez** —las s
+# raíces s-ésimas de la unidad—, no una raíz real (s=1) ni un par conjugado
+# (s=2). Su ley es la de Davis, Chen y Dunsmuir, "Inference for Seasonal Moving
+# Average Models With a Unit Root", Tabla 3.2: cuantiles asintóticos del GLR,
+# que es el mismo estadístico que calcula `dcd()` — el paper lo define como
+# Z_T(β) = L_T(β) − L_T(0), "the −2log of the likelihood ratio", y su región
+# crítica es Z_T > b_GLR(α), la misma dirección.
+#
+# Los cuantiles asintóticos alcanzan el tamaño nominal casi exacto ya con n=20
+# ciclos (Tabla 3.3): para s=4, nominal 0.05 → alcanzado 0.0517; para s=12,
+# 0.0512. No hace falta corrección de muestra finita, al contrario que en el
+# régimen del par complejo.
+#
+# Obsérvese cuánto más exigentes son que la ley desnuda: al 5%, 2.18 (s=4) y
+# 2.31 (s=12) frente a 1.94. Usar la ley s=1 sobre un MA estacional sobre-
+# rechazaría el cero unitario y declararía genuina una ∇ₛ que sobra.
+_DCD_CRIT_MA_S_TABLE = {
+    4:  {'10%': 1.21, '5%': 2.18, '2.5%': 3.17, '1%': 4.75},
+    12: {'10%': 1.36, '5%': 2.31, '2.5%': 3.44, '1%': 5.12},
+}
+
+
+def _dcd_crit_s(s: int) -> dict:
+    """Cuantiles del GLR para un MA de retardo estacional s (DCD Tabla 3.2).
+
+    El paper tabula s=4 y s=12, que son las dos frecuencias que la suite maneja.
+    Para cualquier otro s se interpola/extrapola linealmente en s y se deja
+    constancia: la ley depende de s de forma suave y monótona —los cuantiles
+    crecen con s—, pero fuera de los dos valores tabulados esto es una
+    aproximación, no el valor del paper.
+    """
+    tabla = _DCD_CRIT_MA_S_TABLE
+    if s in tabla:
+        return dict(tabla[s])
+    lo, hi = 4, 12
+    w = (s - lo) / (hi - lo)
+    w = min(max(w, 0.0), 1.0)
+    return {k: round((1 - w) * tabla[lo][k] + w * tabla[hi][k], 3) for k in tabla[lo]}
 
 
 # Backward-compatible alias (asymptotic complex values).
@@ -395,6 +449,11 @@ class DCDResult:
 
     @property
     def _crit(self) -> dict:
+        # Un régimen puede traer su propia ley (el MA de retardo estacional, cuya
+        # frontera pone s raíces sobre el círculo — ver `dcd_s`).
+        _ov = getattr(self, "_crit_override", None)
+        if _ov:
+            return dict(_ov)
         # freq is None (regular MA) is always a real root (s=1); otherwise the
         # regime is set by complex_pair (interior s=2 vs Nyquist/trend s=1).
         return _dcd_crit(self.n, self.complex_pair and self.freq is not None)
@@ -539,6 +598,154 @@ def dcd(model) -> list[DCDResult]:
         ))
 
     return results
+
+
+def dcd_underdiff_regular(model, witness_init: float = 0.85) -> "DCDResult":
+    """¿Sobraba la ÚLTIMA diferencia regular? El lado `d−1` del orden de integración.
+
+    **BUG-0045.** El par confirmatorio en f=0 miraba entero hacia arriba.
+    Shin-Fuller contrasta si el AR del modelo tiene raíz unitaria —o sea, si hace
+    falta MÁS diferenciación— y `dcd_overdiff_regular` impone una diferencia EXTRA
+    y mira si su testigo se apila. Los dos contestan «¿basta con la d que tengo, o
+    necesito d+1?». **Ninguno pregunta si con d−1 habría bastado**, que es
+    justamente la duda cuando la tabla ADF/KPSS recomienda una d menor que la
+    adoptada.
+
+    Lo notó un analista sin contexto previo sobre PGAS: la tabla recomendaba d=0,
+    se adoptó d=1, y la etapa formal concluyó «el orden de integración no está en
+    la banda ambigua» — una afirmación más fuerte de lo que los dos contrastes
+    sostenían, porque ambos miraban hacia d=2.
+
+    Cómo se contesta
+    ----------------
+    Si la ∇ que ya se tomó era innecesaria, el modelo la cancela con un cero MA en
+    +1: `(1 − B)` contra `(1 − θB)` con θ→1. Así que se mira el MA regular del
+    modelo con H₀: θ=1.
+
+    * Si el modelo YA tiene un MA regular libre, ése es el testigo y se contrasta
+      con `dcd()` — no hace falta añadir nada.
+    * Si no lo tiene —un AR(2) puro, por ejemplo— no hay nada que mirar, y ahí
+      estaba el hueco: se AÑADE un testigo MA(1) libre inicializado en +0.85, del
+      mismo modo que `dcd_overdiff_regular` añade el suyo, y se contrasta.
+
+    Veredicto (ley s=1, DCD crít 5% ≈ 1.94):
+      θ → +1, NO invertible (LR < crít) ⇒ la ∇ está cancelada ⇒ **d−1 bastaba**
+      θ  <  1, invertible    (LR ≥ crít) ⇒ la ∇ es genuina    ⇒ **d confirmado**
+
+    Con `d = 0` no hay diferencia que cuestionar: devuelve None.
+
+    Junto con `dcd_overdiff_regular` y Shin-Fuller, el orden de integración queda
+    acotado por los DOS lados: si `d−1` bastara y `d+1` sobrara a la vez, el
+    modelo está en la banda ambigua y hay que decirlo.
+    """
+    if model._result is None:
+        raise RuntimeError("Model has not been fitted — call model.fit() first.")
+    if int(getattr(model, "d", 0) or 0) < 1:
+        return None
+
+    libres = [i for i, fac in enumerate(model.ma or [])
+              if len(fac) == 1 and (model.ma_free is None
+                                    or i >= len(model.ma_free)
+                                    or model.ma_free[i][0])]
+    if libres:
+        # El modelo trae su propio testigo: el MA regular que cancelaría la ∇.
+        # Se toma el que más cerca esté de +1, que es el que la cancela.
+        res = dcd(model)
+        if not res:
+            return None
+        return max(res, key=lambda r: r.coef_free)
+
+    # Sin MA regular no hay nada que mirar — el hueco. Se añade el testigo.
+    mc = copy.deepcopy(model)
+    mc._result = None
+    mc.ma = [list(f) for f in (mc.ma or [])] + [[float(witness_init)]]
+    mc.ma_free = [list(f) for f in (mc.ma_free or [])] + [[True]]
+    idx = len(mc.ma) - 1
+    mc.fit()
+    L_free = float(mc._result.loglik)
+    theta = _extract_ma_param(mc, idx)
+
+    mk = copy.deepcopy(mc)
+    mk._result = None
+    mk.ma[idx] = [1.0]
+    mk.ma_free[idx] = [False]
+    mk.fit()
+    L_const = float(mk._result.loglik)
+
+    return DCDResult(
+        factor_index=idx, freq=None, coef_free=theta, coef_null=1.0,
+        loglik_free=L_free, loglik_constrained=L_const,
+        lr=2.0 * (L_free - L_const), n=_model_n(mc),
+    )
+
+
+def dcd_s(model) -> list["DCDResult"]:
+    """DCD para el MA de retardo ESTACIONAL — H₀: Θ = 1 en (1 − Θ·Bˢ).
+
+    Es el diagnóstico central del modelo estacional de Box-Jenkins, y el que
+    faltaba. Un airline `∇∇ₛ y = (1 − θB)(1 − ΘBˢ) a` con Θ̂ en la frontera de
+    no invertibilidad tiene su `(1 − ΘBˢ)` cancelando a la `(1 − Bˢ)` que se
+    aplicó: **la diferencia estacional sobraba y la estacionalidad era
+    determinista**. Sin este contraste, un modelo B2 no se puede refutar.
+
+    LR = 2·[logL(libre) − logL(Θ=1)], el mismo estadístico que `dcd()`.
+
+    **Ley propia, y no es la de `dcd()`.** En la frontera, un MA de retardo s
+    pone *s* raíces sobre el círculo a la vez —las s raíces s-ésimas de la
+    unidad—, no una raíz real ni un par conjugado. Los cuantiles son los de
+    Davis, Chen y Dunsmuir (Tabla 3.2), notablemente más exigentes que la ley
+    desnuda: al 5%, 2.18 para s=4 y 2.31 para s=12 frente a 1.94. Aplicar la ley
+    s=1 aquí sobre-rechazaría el cero unitario, declarando genuina una ∇ₛ que
+    sobra — que es el error que este contraste existe para evitar.
+
+    Veredicto:
+      LR ≥ crítico  ⇒ invertible: la ∇ₛ es GENUINA (estacionalidad estocástica)
+      LR <  crítico ⇒ en la frontera: la ∇ₛ SOBRA (estacionalidad determinista)
+
+    Returns
+    -------
+    list[DCDResult] — uno por factor MA estacional libre; lista vacía si no hay.
+    """
+    if model._result is None:
+        raise RuntimeError("Model has not been fitted — call model.fit() first.")
+
+    ma_s = model.ma_s or []
+    for fac in ma_s:
+        if len(fac) != 1:
+            raise NotImplementedError(
+                f"dcd_s para MA_s({len(fac)}) no implementado — sólo orden 1.")
+
+    testable = []
+    for i, _fac in enumerate(ma_s):
+        free = (model.ma_s_free[i]
+                if model.ma_s_free and i < len(model.ma_s_free) else None)
+        if free is None or free[0]:
+            testable.append(i)
+    if not testable:
+        return []
+
+    s_freq = int(getattr(model.series, "freq", 1) or 1)
+    L_free = float(model._result.loglik)
+    out = []
+    for i in testable:
+        coef = float(model.ma_s[i][0])
+        mc = copy.deepcopy(model)
+        mc._result = None
+        mc.ma_s[i] = [1.0]
+        if mc.ma_s_free is None:
+            mc.ma_s_free = [[True] for _ in mc.ma_s]
+        mc.ma_s_free[i] = [False]
+        mc.fit()
+        L_const = float(mc._result.loglik)
+        r = DCDResult(
+            factor_index=i, freq=None, coef_free=coef, coef_null=1.0,
+            loglik_free=L_free, loglik_constrained=L_const,
+            lr=2.0 * (L_free - L_const), n=_model_n(model),
+        )
+        # La ley de este régimen no es ninguna de las dos que `_crit` conoce.
+        r._crit_override = _dcd_crit_s(s_freq)
+        out.append(r)
+    return out
 
 
 def dcd_overdiff_regular(model, witness_init: float = 0.85) -> "DCDResult":

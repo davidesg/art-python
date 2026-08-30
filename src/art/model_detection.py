@@ -19,6 +19,7 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
+from fue.diagnostics import ljung_box as _fue_ljung_box
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -204,6 +205,37 @@ def _validate_ar(p: int, pacf: np.ndarray, threshold: float) -> bool:
     return sig_after <= 1
 
 
+def _validate_white_noise(w: np.ndarray, lags: int, alpha: float = 0.05) -> bool:
+    """¿Es admisible el candidato (0,0,0,0)?
+
+    BUG-0048. `_validate_ar(0, ...)` y `_validate_ma(0, ...)` devuelven True sin
+    mirar nada: para un orden 0 no hay «retardo p» que comprobar. Mientras el
+    ruido blanco estaba excluido de la enumeración eso no tenía consecuencia.
+    Admitido por BUG-0044, la tuvo: pasó a ser el ÚNICO candidato que entra en la
+    papeleta sin pasar la puerta que pasan todos los demás.
+
+    Y la bonificación de parsimonia lo empuja hacia arriba. Sobre ∇ln PGAS
+    --PACF(1)=+0.58 y PACF(2)=-0.31, las dos FUERA de la banda de 0.215, o sea un
+    AR(2) de manual-- el ruido blanco salía CUARTO y el AR(2) quinto, aunque la
+    similitud cruda favorece al AR(2) (0.7649 contra 0.7614). Los invierte el
+    ajuste: +0.02 al ruido blanco (no paga parámetros y cobra el bonus) contra
+    -0.01 al AR(2). Un modelo con dos retardos significativos por debajo de «no
+    hace falta modelo» es insensato.
+
+    **El ruido blanco tiene su propio CONTRASTE, y es el que se usa aquí.** No se
+    cuenta cuántos retardos salen de la banda --eso es un sucedáneo, y además
+    depende de cuántos retardos se miren-- sino que se pregunta a la Q de
+    Ljung-Box, que es el mismo instrumento con el que la diagnosis decide si unos
+    residuos son blancos. Si la Q rechaza, «no hace falta modelo» no es una
+    hipótesis sostenible y el candidato no entra.
+
+    `df_correction=0` a propósito: aquí no se han estimado parámetros todavía, se
+    está preguntando por los DATOS.
+    """
+    lb = _fue_ljung_box(w, lags=lags, df_correction=0)
+    return float(lb["pvalue"][-1]) > alpha
+
+
 def _validate_ma(q: int, acf: np.ndarray, threshold: float) -> bool:
     if q == 0:
         return True
@@ -385,9 +417,26 @@ def _parsimony_score(
     s: int,
 ) -> float:
     total = p + q + P + Q
-    if total == 0:
-        return 0.0
-
+    # BUG-0044. Aquí había un caso especial `if total == 0: return 0.0`: la
+    # función de PARSIMONIA daba la peor nota al modelo más parsimonioso. Era una
+    # rama «esto no puede pasar» —el candidato (0,0,0,0) estaba excluido de la
+    # enumeración— que, admitido éste, se convirtió en el ranking. Medido sobre
+    # los residuos del ITCER: similitud cruda 0.9197, la más alta de ocho
+    # candidatas, y salía última con 0.0000.
+    #
+    # Ya no hay caso especial, y ésa es la corrección: la fórmula general lo
+    # trata bien sola. Con total=0 la penalización es la base (0.03, sin término
+    # por parámetro) y le alcanza la bonificación de «simple y con buen ajuste»,
+    # de modo que a igual similitud cruda queda 0.015 por encima de un modelo de
+    # un parámetro — que es lo que la parsimonia debe hacer— y por debajo cuando
+    # la forma prefiere al otro.
+    #
+    # Los dos intentos anteriores fallaron por los dos lados y conviene dejarlo
+    # escrito: sin penalización y CON bonificación, el ruido blanco ganaba al
+    # MA(1) en el caso dorado del proyecto pese a tener peor similitud cruda
+    # (0.7880 contra 0.8173) y empeoraba el AIC en 10 puntos; sin penalización y
+    # SIN bonificación, perdía a igual similitud cruda. La fórmula general no
+    # tiene ninguno de los dos problemas.
     penalty  = 0.03 + total * 0.015
     if P > 0 and Q > 0:  penalty += 0.12   # both seasonal AR+MA simultaneously
     if total > 4:         penalty += 0.08
@@ -536,7 +585,29 @@ def suggest_orders(
                 continue
             for P in range(eff_P + 1):
                 for Q in range(eff_Q + 1):
-                    if p == 0 and q == 0 and P == 0 and Q == 0:
+                    # BUG-0044: aquí se saltaba (0,0,0,0). El ruido blanco —«no
+                    # hace falta ARMA»— quedaba fuera de la papeleta por
+                    # construcción, mientras la herramienta imprime la regla
+                    # «Sin estructura → p=0, q=0» justo encima de la lista.
+                    #
+                    # Y a veces es la respuesta. Sobre ITCER, con la intervención
+                    # ya puesta, ningún retardo cruza las bandas y ni el AR(1)
+                    # (t=1.87) ni el MA(1) (t=1.80) alcanzan significación: el
+                    # BIC prefiere el modelo sin ARMA. Un analista sin contexto
+                    # previo llegó a esa conclusión y tuvo que hacerlo CONTRA la
+                    # lista, que le ofrecía cinco candidatos todos con
+                    # parámetros.
+                    #
+                    # Su teórico es legítimo y calculable: ACF y PACF todo ceros,
+                    # que es lo que el ruido blanco ES. No había razón técnica
+                    # para excluirlo, sólo la incomodidad de ofrecer «ninguno»
+                    # como candidato.
+                    #
+                    # BUG-0048: pero entra por la MISMA puerta que los demás. Un
+                    # correlograma con retardos significativos no admite «no hace
+                    # falta modelo», por muy parsimonioso que sea.
+                    if p == q == P == Q == 0 and not _validate_white_noise(
+                            w, lags):
                         continue
                     _add_candidate(p, q, P, Q)
 

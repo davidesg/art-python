@@ -10,18 +10,18 @@
   "interventions": [
     [
       "STEP",
-      60
-    ],
-    [
-      "STEP",
       61
     ],
     [
+      "STEP",
+      62
+    ],
+    [
       "PULSE",
-      120
+      121
     ]
   ],
   "verdict": "REVISAR",
-  "loglik": -1201.4,
-  "aic": 2432.8
+  "loglik": -1176.1,
+  "aic": 2382.2
 }

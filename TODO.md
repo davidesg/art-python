@@ -1,5 +1,76 @@
 # art-python — TODO
 
+## Arquitectura
+
+- [ ] **Revisión de arquitectura** — [`docs/ARCHITECTURE_REVIEW.md`](docs/ARCHITECTURE_REVIEW.md),
+      escrita 2026-08-27 tras la réplica del TFM de Bolivia (tres series, decenas
+      de modelos, seis defectos encontrados y arreglados).
+      Tesis: **la metodología es sólida y los instrumentos son excelentes; lo que
+      falla es todo lo que hace el método NAVEGABLE**, y eso es casi invisible
+      para un analista humano y letal para un LLM.
+      Medido: 35 herramientas MCP, **28 huérfanas** (nada las sugiere jamás), **8
+      aristas** de paso siguiente en todo el servidor; el guion es una lista plana
+      **sin campo de parentesco**, así que no puede representar una bifurcación ni
+      un callejón sin salida; y sólo `guided_identification` dice dónde estás, y
+      sólo dentro de la identificación.
+      Seis propuestas por orden de valor, de las cuales **cinco son cableado,
+      estado o texto** — el problema no es que falten herramientas, sobran sin
+      conectar.
+
+## Funcionalidad pendiente
+
+- [ ] **El carril GUIADO tampoco registra todo lo que estima** — la otra mitad de
+      BUG-0032, abierta 2026-08-27. Sólo `confirm_and_estimate` y `build_model`
+      llaman a `_record_to_guion` (4 llamadas en todo el servidor); el resto de
+      caminos que producen un modelo estimado no dejan línea.
+      Medido sobre la réplica del TFM: ITCER tiene 3 modelos en disco y 2 en el
+      guion; **RATIO tiene 5 y 2**, y los tres que faltan (m20, m30, m31) son
+      justo donde se deciden las intervenciones — es decir, donde diverge del
+      carril autónomo, que es la pregunta que el guion existe para contestar.
+      El arreglo no es recorrer una lista como en BUG-0032: hay que decidir qué
+      herramientas cuentan como «producir un modelo» y cuáles son sólo mirar, y
+      cablear las primeras. `estimate_and_diagnose` es la primera candidata (le
+      falta también el pie de estado).
+
+
+- [ ] **El pie de estado debe estampar QUÉ BUILD está sirviendo el servidor** —
+      abierto 2026-08-27, y lo abrió un episodio que costó tres corridas.
+      Se arreglaron BUG-0030 y BUG-0031 en `src/`, la batería pasó en verde, y el
+      servidor MCP siguió sirviendo el código anterior: `art-mcp` había arrancado
+      dos días antes y Python fija los módulos al importar. Las corridas
+      autónomas de la réplica salieron con la colocación vieja de las
+      intervenciones (Q3/2008 en vez de Q4/2008) y **nada en la salida lo
+      delataba** — el pie de estado, el `.inp` escrito y el guion decían todos lo
+      mismo, con convicción.
+      Lo que lo hizo visible fue comparar contra el carril guiado y bajar a leer
+      `itv.at` a mano. Eso no escala y no es reproducible.
+      Basta con una línea: versión del paquete + hash git corto (o mtime del
+      módulo más reciente de `src/art/`) en `_state_footer`, y el mismo dato en
+      el guion de cada versión. Un analista que ve un número que no coincide con
+      su árbol reconecta el servidor en cinco segundos.
+      Corolario, más incómodo: **un guion escrito por un servidor obsoleto es un
+      registro falso**, no meramente viejo. Los dos guiones de `auto/` de la
+      réplica hubo que borrarlos porque describían modelos que ya no existían en
+      disco. El guion es el registro científico; si puede mentir sobre qué código
+      lo produjo, el sello de build no es un adorno.
+
+
+- [ ] **Intervenciones como funciones de transferencia ω(B)/δ(B)** — ver
+      [`docs/TODO-interventions.md`](docs/TODO-interventions.md).
+      `fue` y el formato `.inp`/`.pre` las soportan por completo; ART sólo llega a
+      un ω escalar (`mcp_server.py:2841` fija `omega=[0.0]`). Seis puntos, con la
+      identificación de la forma (`intervention_response`) por delante de la
+      estimación. Abierto 2026-08-26 en la réplica del TFM de Bolivia, sobre el
+      episodio 2008:4–2009:2 de `ln ITCER`.
+
+- [ ] **El motor de identificación de (p,q) sólo compara FORMAS** — ver
+      [`docs/TODO-identification.md`](docs/TODO-identification.md).
+      No es un defecto: los rasgos se extraen bien y la ambigüedad se declara.
+      El hueco es que los prefiltros no miran magnitudes, y hay una cota clásica
+      —`|rho_1| <= cos(pi/(q+2))`— que discrimina justo donde la forma no puede.
+      Usarla como desempate y aviso, nunca como rechazo duro. Abierto 2026-08-26
+      sobre `ln PGAS`, donde ART pone un MA(1) primero y el AR(2) correcto cuarto.
+
 ## Bugs conocidos
 
 - [x] **ART no estima correctamente series de frecuencia ANUAL (freq=1)**

@@ -563,7 +563,14 @@ def test_export_guion_creates_html(tmp_path):
     assert os.path.exists(out_html)
     with open(out_html, encoding="utf-8") as f:
         html = f.read()
-    assert len(html) > 5_000
+    # Se comprueba CONTENIDO, no tamaño. El umbral de 5 KB medía en realidad que
+    # los PNG iban empotrados en base64; desde BUG-0043 la figura es un fichero
+    # hermano y el HTML la referencia, así que el informe correcto pesa la mitad.
+    # Un test de longitud sobre un documento habría bloqueado esa mejora sin
+    # decir por qué.
+    assert "PC1" in html and "PC2" in html
+    assert "Initial model" in html and "Added AR(1)" in html
+    assert "<img" in html, "el informe debe enlazar la figura de cada versión"
     assert "PC1" in html and "PC2" in html
     assert "<details" in html           # collapsible sections
     assert "<table" in html             # summary table

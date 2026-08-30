@@ -322,6 +322,13 @@ def test_intervention(model, itv_idx: int,
     if model._result is None:
         raise ValueError("Model is not fitted — call model.fit() first.")
     r      = model._result
+    # BUG-0027: con la semilla EXACTAMENTE en el óptimo, `niter=0` y la covarianza
+    # que vuelve es la semilla del BFGS (c·I). Los `t` que salen de ahí son
+    # ficción, y creíble. Un contraste sobre una covarianza que no existe no es un
+    # contraste: se para aquí en vez de publicar el número.
+    from art.diagnosis import covariance_is_degenerate, AVISO_COV_DEGENERADA
+    if covariance_is_degenerate(r):
+        raise ValueError("BUG-0027: " + AVISO_COV_DEGENERADA)
     params = np.asarray(r.params)
     cov    = np.asarray(r.cov_matrix)
     n_obs  = model.series.nobs if model.series else len(r.residuals)

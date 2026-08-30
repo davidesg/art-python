@@ -148,6 +148,168 @@ class DiagnosisResult:
 # Parameter labeling and correlation (Bloque I)
 # ---------------------------------------------------------------------------
 
+AVISO_COV_DEGENERADA = (
+    "provienen de la semilla del BFGS (c·I), no del hessiano — el optimizador "
+    "no actualizó esas direcciones. Dos causas: (a) la estimación arrancó ya en "
+    "el óptimo, que es lo que un `.pre` es por diseño — reestima desde el `.inp` "
+    "(semillas), porque reejecutar un `.pre` VERIFICA que los parámetros no se "
+    "mueven, no estima; (b) el modelo tiene solución cerrada y no hay nada que "
+    "optimizar — el caso de una media sola sin ARMA, cuyo estimador es la media "
+    "muestral. En (b) el parámetro es correcto y sólo su error típico es "
+    "inservible: tómalo del `.out` de un modelo estimado, o de la desviación "
+    "típica muestral. Ver bugs/BUG-0027."
+)
+
+
+def bfgs_seed_var(result) -> float | None:
+    """La varianza con que `fue` inicializa la inversa del hessiano del BFGS.
+
+    NO es una constante: es **2/n**, con n el número de residuos. Medido:
+
+        n = 83  ->  2/83  = 0.0240964     (ITCER, PGAS: 84 obs, d=1)
+        n = 119 ->  2/119 = 0.0168067     (sintético de 120 obs, d=1)
+
+    Que sea calculable es lo que permite detectar la degeneración PARCIAL: una
+    varianza que sigue valiendo exactamente 2/n es una dirección que el
+    optimizador nunca actualizó, aunque otras sí se hayan movido.
+    """
+    if result is None:
+        return None
+    res = getattr(result, "residuals", None)
+    n = len(res) if res is not None else 0
+    return (2.0 / n) if n > 0 else None
+
+
+def degenerate_variance_indices(result) -> list[int]:
+    """Qué parámetros tienen una varianza que es todavía la semilla del BFGS.
+
+    (BUG-0027) La degeneración puede ser PARCIAL, y ése es el caso peligroso.
+    Con `niter = 0` no se actualiza nada y toda la covarianza es la semilla; pero
+    con `niter = 1` el BFGS actualiza UNA dirección y deja el resto intacto —
+    medido sobre un modelo de 7 parámetros: cinco varianzas seguían en la semilla
+    y dos se habían movido. Unos errores típicos válidos y otros no, sin nada que
+    los distinga en la salida.
+    """
+    if result is None:
+        return []
+    semilla = bfgs_seed_var(result)
+    cov = getattr(result, "cov_matrix", None)
+    if cov is None or semilla is None:
+        return []
+    cov = np.asarray(cov, dtype=float)
+    if cov.ndim == 1:
+        k = int(round(cov.size ** 0.5))
+        if k * k == cov.size:
+            cov = cov.reshape(k, k)
+        else:
+            return []
+    if cov.ndim != 2 or cov.shape[0] != cov.shape[1]:
+        return []
+    d = np.diag(cov)
+    return [i for i in range(len(d)) if abs(d[i] - semilla) <= 1e-5 * semilla]
+
+
+# Distancia relativa a la semilla por debajo de la cual una varianza es
+# SOSPECHOSA aunque no sea la semilla exacta. Ver `near_seed_variance_indices`.
+BANDA_CASI_SEMILLA = 0.25
+
+AVISO_COV_CASI_SEMILLA = (
+    "están MUY CERCA de la semilla del BFGS (2/n), lo que sugiere direcciones "
+    "que el optimizador apenas movió. No es prueba de que sean inválidos —una "
+    "varianza puede valer eso legítimamente— pero conviene contrastarlos antes "
+    "de apoyar una decisión en ellos: el `.out` del modelo trae la covarianza "
+    "completa, y para una media sin ARMA el error típico correcto es la "
+    "desviación típica residual dividida por √n."
+)
+
+
+def near_seed_variance_indices(result, tol: float = BANDA_CASI_SEMILLA) -> list[int]:
+    """Varianzas SOSPECHOSAMENTE cerca de la semilla del BFGS, sin ser la semilla.
+
+    (BUG-0041) `degenerate_variance_indices` compara con tolerancia `1e-5`, o
+    sea igualdad: caza la dirección que el optimizador no tocó NUNCA (`niter=0`)
+    y nada más. Pero una dirección que se movió un 7% tampoco lleva información
+    del hessiano, y no dispara ningún aviso.
+
+    Medido sobre ITCER de la réplica del TFM, un modelo de dos parámetros con
+    `niter=2`: la varianza de μ salió 0.022473 contra una semilla de 0.024096 —
+    el 93% de ella. El error típico publicado fue 0.1499 cuando el correcto,
+    para un modelo sin ARMA, es la desviación típica residual sobre √n = 0.2864.
+    **La mitad de lo que debía, sin ningún aviso.** El mismo modelo con `niter=5`
+    dio 0.2687, que sí coincide.
+
+    Esto es una SOSPECHA y no un veredicto, y por eso va aparte: una varianza
+    puede valer 2/n legítimamente, y marcarla como inválida sería un falso
+    positivo caro. Lo que se publica es la distancia relativa, para que quien lea
+    decida.
+
+    Devuelve los índices cuya varianza está dentro de `tol` (relativo) de la
+    semilla **excluyendo** las que ya son la semilla exacta — ésas las reporta
+    `degenerate_variance_indices` con un veredicto más fuerte.
+    """
+    if result is None:
+        return []
+    semilla = bfgs_seed_var(result)
+    cov = getattr(result, "cov_matrix", None)
+    if cov is None or semilla is None or semilla <= 0:
+        return []
+    cov = np.asarray(cov, dtype=float)
+    if cov.ndim == 1:
+        k = int(round(cov.size ** 0.5))
+        if k * k != cov.size:
+            return []
+        cov = cov.reshape(k, k)
+    if cov.ndim != 2 or cov.shape[0] != cov.shape[1]:
+        return []
+    exactas = set(degenerate_variance_indices(result))
+    d = np.diag(cov)
+    return [i for i in range(len(d))
+            if i not in exactas and abs(d[i] - semilla) <= tol * semilla]
+
+
+def near_seed_distances(result) -> dict[int, float]:
+    """Distancia relativa a la semilla de cada varianza sospechosa (BUG-0041)."""
+    semilla = bfgs_seed_var(result)
+    if semilla is None or semilla <= 0:
+        return {}
+    cov = np.asarray(getattr(result, "cov_matrix", None), dtype=float)
+    if cov.ndim == 1:
+        k = int(round(cov.size ** 0.5))
+        cov = cov.reshape(k, k)
+    d = np.diag(cov)
+    return {i: (d[i] - semilla) / semilla for i in near_seed_variance_indices(result)}
+
+
+def covariance_is_degenerate(result) -> bool:
+    """¿Hay errores típicos que son la semilla del BFGS y no el hessiano? (BUG-0027)
+
+    `fue` inicializa la inversa del hessiano como `c·I` y la actualiza en cada
+    iteración. Lo que no se actualiza vuelve como covarianza siendo la semilla.
+    Y el resultado se declara `converged=True`, así que nada avisa.
+
+    Dos formas, y la segunda se escapaba al primer arreglo:
+
+    * **Total** — `niter = 0`: no se actualizó nada. Ocurre al arrancar
+      EXACTAMENTE en el óptimo, que es lo que un `.pre` es por diseño; y también
+      en el modelo más simple de todos, media sola sin ARMA, porque su estimador
+      máximo-verosímil es la media muestral y el optimizador no tiene nada que
+      hacer. Es decir: en la línea base de cualquier análisis.
+    * **Parcial** — alguna varianza sigue en `BFGS_SEED_VAR`: el optimizador
+      actualizó unas direcciones y otras no.
+
+    El primer arreglo exigía diagonal constante y fuera de la diagonal nula, y
+    además excluía `npar = 1` para no marcar un caso indistinguible. Las dos
+    decisiones estaban mal: con `npar = 1` el modelo de media sola cae de lleno
+    aquí, y la degeneración parcial no tiene la diagonal constante.
+    """
+    if result is None:
+        return False
+    if int(getattr(result, "niter", -1) or 0) == 0 and \
+            getattr(result, "cov_matrix", None) is not None:
+        return True
+    return bool(degenerate_variance_indices(result))
+
+
 def _build_param_labels(model) -> list[str]:
     """Human-readable label for each free parameter in model.params order.
 
@@ -593,3 +755,80 @@ def save_diagnosis_report(model, path: str, z_threshold: float = 3.0) -> Diagnos
         fh.write(html)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Admisibilidad de los operadores estimados (BUG-0062)
+# ---------------------------------------------------------------------------
+
+def _raices_factor(coefs) -> list[float]:
+    """Módulos de las raíces de `(1 − c₁B − c₂B² − … − c_pBᵖ)`.
+
+    Es la convención de `fue` para AR y MA por igual, comprobada contra la
+    ecuación que imprime ART: `ar=[0.7647, −0.2640]` se renderiza
+    `(1 − 0.7647·B + 0.2640·B²)`, y `ma=[−0.7879, −0.2760]` como
+    `(1 + 0.7879·B + 0.2760·B²)`.
+
+    Para un factor ESTACIONAL el polinomio va en `u = Bˢ`; comprobar |u|>1 basta,
+    porque |B| = |u|^(1/s) y la desigualdad se conserva.
+    """
+    import numpy as np
+    c = [float(x) for x in (coefs or [])]
+    if not c:
+        return []
+    # np.roots quiere potencias decrecientes: [−c_p, …, −c₁, 1]
+    poly = [-x for x in reversed(c)] + [1.0]
+    try:
+        r = np.roots(poly)
+    except Exception:
+        return []
+    return [float(abs(z)) for z in r]
+
+
+def admissibility_problems(model, tol: float = 1e-6) -> list[tuple[str, float]]:
+    """Operadores cuyas raíces caen DENTRO del círculo unidad.
+
+    Un AR con raíz dentro no es estacionario; un MA con raíz dentro no es
+    invertible. Las dos cosas invalidan la lectura del modelo, y ninguna se
+    anunciaba: `fue` declara «Check for invertibility: constrained search» en la
+    cabecera del `.out` y aun así devolvió Θ₄ = −2.0989 tras 45 iteraciones —
+    módulo de la raíz 0.831 — presentado como cualquier otro resultado. Sólo la
+    diagnosis rota (Q) delataba que algo iba mal.
+
+    Devuelve [(etiqueta, módulo mínimo de raíz, "dentro"|"frontera"), …], vacío
+    si todo es admisible.
+
+    **`ar_f`/`ma_f` quedan FUERA a propósito.** El testigo del MEG vive ahí y
+    apunta deliberadamente a la frontera (λ → −1): marcarlo sería avisar de lo
+    que el contraste está buscando.
+    """
+    # El módulo se devuelve SIEMPRE en B, para que se compare con el mismo
+    # círculo unidad en los cuatro casos. En un factor estacional el polinomio va
+    # en u = Bˢ, así que |B| = |u|^(1/s): sobre Θ₄ = −2.0989 eso es |u| = 0.4764
+    # y |B| = 0.831 — las dos por dentro, pero sólo la segunda es la que el
+    # analista compara con 1 al leer la ecuación en B.
+    s_freq = getattr(getattr(model, "series", None), "freq", 1) or 1
+    problemas = []
+    for attr, etq, estacional in (("ar", "AR", False), ("ma", "MA", False),
+                                  ("ar_s", "AR estacional", True),
+                                  ("ma_s", "MA estacional", True)):
+        factores = getattr(model, attr, None) or []
+        for k, fac in enumerate(factores):
+            mods = _raices_factor(fac)
+            if not mods:
+                continue
+            m = min(mods)
+            if estacional and s_freq > 1:
+                m = m ** (1.0 / s_freq)
+            if m <= 1.0 + tol:
+                sufijo = f" #{k + 1}" if len(factores) > 1 else ""
+                # DENTRO y EN LA FRONTERA no significan lo mismo y no se
+                # arreglan igual. Barridos los 214 modelos de la réplica salen
+                # los dos casos, uno de cada:
+                #   Θ₄ = −2.0989  →  |raíz| = 0.831, DENTRO: no invertible.
+                #   MA(4) con dos raíces de módulo 1.000000 y d=1  →  FRONTERA:
+                #     el MA ha absorbido la diferencia, que es la firma de la
+                #     sobrediferenciación, no un operador inutilizable.
+                donde = "frontera" if abs(m - 1.0) <= 1e-4 else "dentro"
+                problemas.append((f"{etq}{sufijo}", m, donde))
+    return problemas
