@@ -54,8 +54,15 @@ def modelo_testigo_negativo():
 
 
 def test_la_configuracion_es_la_que_dispara_el_bloque(modelo_testigo_negativo):
+    """El asunto de BUG-0022 es el TESTIGO, no el veredicto del lado AR.
+
+    La versión anterior exigía además `shin_fuller(m).stationary is True`, y ese
+    «estacionario» sobre una serie I(1) por construcción era precisamente el
+    veredicto equivocado que corrigió BUG-0065. Lo que este bloque prueba —un
+    testigo en θ̂<0 midiendo Nyquist— no depende de él, y ligarlo a un error
+    ajeno hacía que el test defendiera ese error.
+    """
     m = modelo_testigo_negativo
-    assert shin_fuller(m).stationary is True          # lado AR: "d basta"
     assert dcd_overdiff_regular(m).coef_free < 0.0    # lado MA: fuera del eje
 
 

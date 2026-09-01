@@ -53,3 +53,23 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0011](BUG-0011-dcd-overdiff-recommends-d2-on-seasonal-price-index.md) | partially fixed — pair reported; the two calibration items remain | medium | formal-tests | dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so | — |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | closed — not a defect | none (el defecto estaba en el pin) | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 
+
+
+## El contador de números es COMPARTIDO, y no hay reserva
+
+El 2026-09-01 dos ejercicios distintos —la réplica del TFM de Bolivia y el
+benchmark guiado de SF_MEG— escribieron informes en este mismo directorio con
+horas de diferencia y **colisionaron dos veces**: BUG-0066 y BUG-0067 existieron
+por duplicado.
+
+No fue un descuido de nadie: cada sesión mira `ls bugs/`, toma el siguiente
+número libre y escribe. Entre ese `ls` y el fichero pasan minutos u horas, y la
+otra sesión no se ve.
+
+Se resolvió renumerando los que llegaron después (→ BUG-0069 y BUG-0070), con la
+nota correspondiente dentro de cada informe. Pero conviene saberlo:
+
+* **Antes de escribir, vuelve a mirar** el directorio; el número que reservaste
+  al empezar puede estar tomado al terminar.
+* Si dos ejercicios van a correr en paralelo, lo limpio es **repartir rangos** por
+  adelantado, no confiar en el siguiente hueco.

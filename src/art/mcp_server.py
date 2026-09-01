@@ -4307,6 +4307,20 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         start = list(ts.start)
         s0y, s0p = start[0], (start[1] if freq > 1 else 1)
 
+        # BUG-0067. Hay DOS espacios de índices en juego y este bloque los
+        # mezclaba en tres sitios. Los residuos de un modelo diferenciado empiezan
+        # `d + D·s` observaciones después que la serie, así que el «obs 19» del
+        # escaneo de anómalos es la observación 20 de la serie.
+        #
+        # Medido sobre el ITCER de la réplica (d=1): el escaneo dice —bien—
+        # «Q4/2008», y el auto-select colocaba la intervención en **Q3/2008**. Un
+        # trimestre antes del desplome de Lehman, en silencio, y sobre el modelo
+        # que se estima. Una fecha equivocada es un modelo equivocado.
+        #
+        # Se convierte UNA vez, aquí, y a partir de este punto todo va en índices
+        # de la SERIE.
+        _desfase = m_src.d + m_src.D * (freq if freq > 0 else 1)
+
         if not date.strip():
             # Auto-select most extreme residual not already covered by an intervention
             import numpy as np
@@ -4314,13 +4328,16 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             from art import policy
             diag_auto = diagnose(m_src, z_threshold=policy.THRESHOLDS["intervention_autoselect"])
             existing_at = {itv.at for itv in (m_src.interventions or [])}
+            # `obs` es 1-based sobre los RESIDUOS; `itv.at` es 0-based sobre la
+            # SERIE. Comparar sin convertir daba por cubierta la intervención
+            # equivocada.
             candidates = [(abs(z), obs) for obs, z in diag_auto.extreme
-                          if (obs - 1) not in existing_at]
+                          if (obs - 1 + _desfase) not in existing_at]
             if not candidates:
                 return _err("No se encontraron residuos extremos sin intervención asignada. "
                             "Proporciona date manualmente.")
             _, obs_1based = max(candidates)
-            at_0 = obs_1based - 1
+            at_0 = (obs_1based - 1) + _desfase
             # Convert obs index → calendar date string for the note
             total = (s0p - 1) + at_0
             if freq == 12:
@@ -4342,7 +4359,12 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             from art.diagnosis import diagnose
             from art import policy
             diag_tmp = diagnose(m_src, z_threshold=policy.THRESHOLDS["intervention_form"])
-            extreme_obs = {obs for obs, _ in diag_tmp.extreme}
+            # BUG-0067: `decide_form` mira si un vecino también es extremo, así
+            # que los dos argumentos tienen que estar en el MISMO espacio. Los
+            # extremos vienen en índices de residuo y `at_0` está en la serie:
+            # se suben los extremos, no se baja `at_0` --que es el que va a ir al
+            # modelo--. En la rama de fecha manual el desajuste existía igual.
+            extreme_obs = {obs + _desfase for obs, _ in diag_tmp.extreme}
             form = policy.decide_form(at_0 + 1, extreme_obs)
 
         # Create new Intervention with correct at= (0-based index)

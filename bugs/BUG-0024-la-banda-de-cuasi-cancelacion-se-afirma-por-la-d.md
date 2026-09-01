@@ -1,7 +1,7 @@
 ---
 id: BUG-0024
 title: La banda de cuasi-cancelacion se afirma por la DISCREPANCIA, nunca por la distancia: r en la tabla del paper ES el modulo del factor MA, y el codigo lo tiene delante
-status: open
+status: fixed
 severity: medium
 component: formal-tests
 found_in: 0.1.11
@@ -145,3 +145,41 @@ distancia; y que con un testigo de verdad en la banda (`θ̂ ≳ 0.90`) el texto
 se conserve palabra por palabra. Y reetiquetar
 `test_la_banda_legitima_se_sigue_informando`, cuya realización (semilla 7) es
 precisamente el contraejemplo.
+
+
+---
+
+## Arreglado el 2026-09-02
+
+`quasi_cancellation` deja de ser «discrepan» y pasa a ser «discrepan **y** el
+testigo está a ≤ 0.10 de la frontera θ=+1», que es la banda que el propio rótulo
+nombra (r≈0.90–0.95 en `tab:compare`). La constante queda declarada en
+`describe.BANDA_CUASI_CANCELACION`.
+
+Cuando discrepan **fuera** de la banda, el informe lo dice y no arrastra la
+conclusión que sólo la banda autorizaba —la equivalencia en previsión—, sino que
+manda estimar el candidato rival y enumera las causas a descartar en orden:
+modelo aún inadecuado, deterministas resonantes en f=0, y el testigo evaluado
+donde el perfil de verosimilitud salta.
+
+### Efecto lateral de BUG-0065, que conviene registrar
+
+Al corregir la nula de Shin-Fuller **desaparecieron las discrepancias** de los
+casos reales: **0 de 39 modelos** de las dos réplicas alcanzan hoy esta rama,
+frente al caso documentado en este informe. Tiene sentido —el Shin-Fuller roto
+producía veredictos «estacionario» equivocados, y un veredicto equivocado en un
+lado del par es una discrepancia espuria— pero significa dos cosas:
+
+1. **Parte de las discrepancias que este bloque explicaba no eran reales.** La
+   banda de cuasi-cancelación existe, pero se estaba invocando también para
+   desacuerdos fabricados por el contraste roto.
+2. El repro original ya no alcanza la rama. Los tests se construyen ahora sobre
+   casos sintéticos que sí la alcanzan, uno dentro de la banda (I(1), distancia
+   0.039) y otro fuera (AR(1) φ=0.5, distancia 0.118).
+
+### El argumento de fondo, que sigue en pie
+
+La tabla `tab:compare` del paper muestra que la discrepancia **no es exclusiva**
+de r≈0.90–0.95: a r=0.80 ocurre el 87 % de las veces y a r=0.50 todavía el 20 %.
+Un desacuerdo, por sí solo, no localiza el proceso en la banda — hace falta la
+magnitud, que es justamente lo que el código tenía delante y no consultaba.

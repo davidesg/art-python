@@ -1,7 +1,110 @@
 # TODO — intervenciones como funciones de transferencia en ART
 
-**Estado:** abierto · **Abierto el** 2026-08-26 · **Origen:** réplica del TFM de
-Bolivia, nodo A4 de `ITCER` (episodio 2008:4–2009:2)
+**Estado:** abierto · **PRIORIDAD MÁXIMA** · **Abierto el** 2026-08-26 ·
+**Reordenado el** 2026-09-02 tras medir las cuatro corridas · **Origen:** réplica
+del TFM de Bolivia, nodo A4 de `ITCER` (episodio 2008:4–2009:2)
+
+---
+
+## ⚑ Por qué esto va primero — la medida
+
+Cerradas las cuatro corridas (dos LLM × cuatro runs), **el nodo de intervención es
+el mayor pozo de mejora medido del proyecto**, y por un margen que no admite
+discusión:
+
+| corrida | ITCER interv. | ΔAIC | PGAS interv. | ΔAIC |
+|---|---|---|---|---|
+| benchmark guiado | 1 · ω(B) | — | 1 | — |
+| runs 1, 2 y 4 (los dos carriles) | 1 | **+6,15 a +8,84** | 1 | −0,93 |
+| **run 3 claude** | **2** | **−1,09** | **2** | **−16,24** |
+| runs 2-4 ds | 1 | +6,15 | 1–2 | −0,31 / +6,66 |
+
+**Encontrar la segunda intervención del episodio 2008-09 vale entre 7 y 15 puntos
+de AIC, y sólo una de ocho corridas la encontró en las dos series.** Ninguna otra
+palanca del ejercicio —ni la ruta estacional, ni los órdenes ARMA, ni la
+transformación— movió tanto.
+
+Y un matiz que cambia el diseño: `run3 ds` y `run4 ds` **también** pusieron dos
+intervenciones en PGAS y salieron PEOR (−0,31 y +6,66). El problema no es contar
+dos: es **encontrar las dos correctas, en la fecha y la forma correctas**.
+
+### Corrección de rumbo: el ω(B) no era la prioridad
+
+Este TODO se abrió por el ω(B), y la medida lo desmiente. En el RUN 3, **dos
+escalones escalares batieron al ω(B) del benchmark** —379,91 contra 381,00— con
+los mismos tres parámetros.
+
+Lo que falta no es la forma rica del operador: es **buscar el segundo evento**. El
+ω(B) sigue siendo deseable (§2-§5 de este documento), pero **detrás** del nodo por
+episodios.
+
+---
+
+## ⚑ 0. Nodo de intervención por EPISODIOS — lo primero de todo
+
+Hoy `suggest_intervention_form` propone la forma de **un** residuo extremo. Nadie
+sugiere que un episodio pueda necesitar **dos**, ni ofrece el contraste entre las
+especificaciones rivales.
+
+**Lo que debe hacer.** Cuando dos o más residuos extremos caen a distancia ≤ 2-3
+períodos, son **un episodio**, y el nodo ofrece las especificaciones rivales y las
+estima:
+
+| candidato | qué es |
+|---|---|
+| A | una intervención (escalón o impulso) en el primer punto |
+| B | **dos intervenciones escalares, una por punto** |
+| C | una intervención con ω(B) de orden 1 |
+
+Las tres son comparables —misma serie, misma `d`, misma transformación— así que el
+AIC decide y el LR contrasta A ⊂ C y A ⊂ B donde estén anidadas. Es exactamente lo
+que hizo a mano el analista del RUN 3, y le valió los dos únicos ΔAIC negativos
+grandes del ejercicio.
+
+**Por qué el nodo y no el analista.** En ocho corridas, siete no lo intentaron. No
+es falta de criterio: es que **nada en la salida sugiere que la pregunta exista**.
+El escaneo de anómalos enumera puntos, no episodios.
+
+### Piezas concretas
+
+1. **`agrupa_episodios(residuos, z, ventana=3)`** — de la lista de residuos
+   extremos a una lista de episodios. Un episodio es un evento con posible
+   estructura interna; un punto aislado sigue tratándose como hoy.
+2. **El nodo estima los rivales y los presenta juntos**, con AIC, LR donde aplique
+   y diagnosis de cada uno. No elige: pone los tres delante.
+3. **La forma se decide por la aritmética de la diferencia**, que ya está escrita
+   en las instrucciones: un escalón en el nivel deja UN pico en ∇y; un impulso
+   deja un pico y otro de signo opuesto detrás. El nodo debe **calcular** esa
+   firma sobre los datos, no dejarla al ojo.
+4. **Y debe decir cuándo NO hay episodio**: dos puntos lejanos no son un episodio,
+   y ofrecer los tres candidatos ahí sería ruido.
+
+### Lo que hay que medir antes de darlo por bueno
+
+* Sobre los cuatro episodios conocidos (ITCER 2008:4–2009:2, PGAS 2009:1–2009:2,
+  RATIO 2020:2 y 2008:4): ¿propone el conjunto correcto?
+* **Falsos episodios**: sobre series sin evento múltiple, ¿cuántas veces agrupa
+  dos anómalos independientes? Es el riesgo simétrico y hay que acotarlo.
+* ¿Cuánto cuesta? Tres estimaciones por episodio, y hay que ver si el carril
+  autónomo las paga o las esquiva.
+
+---
+
+## ⚑ 0.b Mejorar el análisis de intervención en general
+
+Por debajo del nodo por episodios, la misma revisión tiene tres piezas más que la
+réplica dejó documentadas:
+
+* **La forma auto-seleccionada no compensa el desfase de la diferencia**
+  (BUG-0067 del ejercicio SF_MEG): con un modelo diferenciado, la fecha del
+  residuo extremo no es la fecha de la intervención. Está arreglado allí; hay que
+  comprobar que el nodo por episodios lo hereda.
+* **La FLT se imprime con el signo crudo** (BUG-0066 de SF_MEG): el display dice
+  ω₀+ω₁B cuando el motor estima ω₀−ω₁B. Cualquier presentación nueva de
+  intervenciones tiene que fijar la convención de signo **una vez** y que todo la
+  use.
+* **La cabecera cuenta los armónicos como intervenciones** (visto en RATIO del
+  RUN 4): cosmético, pero confunde determinista-de-calendario con evento.
 
 ---
 

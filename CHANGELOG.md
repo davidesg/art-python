@@ -4,10 +4,10 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
-## art-tseries 0.1.12 — 2026-08-30
+## art-tseries 0.1.12 — 2026-09-02
 
-**44 defectos cerrados (BUG-0021…0064), cada uno con repro determinista, arreglo
-y test.** La suite pasa de 787 a 901 tests.
+**50 defectos cerrados (BUG-0021…0070), cada uno con repro determinista, arreglo
+y test.** La suite pasa de 787 a 929 tests.
 
 Salieron de replicar un TFM de econometría por tres caminos independientes: el
 modo guiado, y dos LLM distintos trabajando en chats sin contexto previo sobre
@@ -67,12 +67,60 @@ se amplía de «errores típicos» a **toda la covarianza**, con el caso medido.
 añade la regla de recorrido: **con varias series, una detrás de otra, nunca en
 paralelo**, con el mecanismo y lo que cuesta.
 
+### El orden de integración, revisado a fondo (BUG-0065…0070)
+
+Una conjetura del analista sobre un modelo del RUN 4 —«factoriza el AR(2) y
+contrasta el AR(1)»— resultó ser **la construcción del propio paper** (Shin &
+Fuller 1998, ec. 2.2-2.3) y destapó que la nula implementada no era la suya.
+
+* **BUG-0065.** La nula imponía ρₘ en el primer coeficiente de **cada** factor y
+  anulaba el resto. Tres consecuencias: el contraste **no era invariante a la
+  parametrización** —el mismo modelo daba Φ̂₁ᵤ = 25.746 o 7.632 según cómo se
+  escribiera el AR—, medía «¿el AR completo ajusta mejor que un AR(1) en ρₘ?» en
+  vez de «¿la raíz dominante es 1?», y **no tenía dirección**: un paseo aleatorio
+  puro salía «estacionario». Ahora se aísla **una** raíz real con el resto libre
+  (df=1) y `Φ̂₁ᵤ = 0` cuando ρ̂ > ρₘ, que es la ecuación (3.5) literal.
+  Con raíces **complejas** la reparametrización no existe y el contraste se
+  declara no aplicable: forzarla deflactaba por una raíz compleja y `float()`
+  descartaba la parte imaginaria **en silencio**.
+* **BUG-0068.** Y como eso deja al par sin su lado AR, se recupera sobreajustando
+  a AR(p+1) y contrastando el AR(1) que aparece al factorizar — **rama de
+  diagnóstico, nunca un modelo candidato**. Medido: tamaño 0/77, potencia 88-91 %,
+  y el ΔAIC del propio sobreajuste dice si la raíz añadida es espuria.
+* **BUG-0069, 0070.** Al arreglarlo se apagaron dos avisos de otros contrastes,
+  porque vivían dentro de un `if` que no era el suyo: el de «testigo fuera del eje
+  f=0» estaba atado a la discrepancia del par, y la cota inferior de `d` al bloque
+  del par. Además, «Shin-Fuller no aplica» daba una razón **falsa** —«no tiene AR
+  regular libre»— sobre modelos con AR(2).
+* **BUG-0024.** La banda de cuasi-cancelación se afirmaba por la **discrepancia**,
+  sin mirar nunca la **distancia** del testigo a la frontera, y el rótulo nombra
+  una banda concreta (r≈0.90–0.95). Ahora se exige ≤ 0.10.
+
+### El nodo de intervención (BUG-0066, 0067)
+
+* **BUG-0067.** El auto-select mapeaba el índice del **residuo** como si fuera el
+  de la **serie**: sobre un modelo diferenciado colocaba la intervención en el
+  período equivocado —Q3/2008 en vez de Q4/2008 en la réplica de Bolivia—
+  mientras el escaneo de anómalos mostraba, bien, la fecha correcta. Eran **tres**
+  usos del mismo desajuste, y uno afectaba también a la rama de fecha manual.
+* **BUG-0066.** El polinomio ω(B) se imprimía con el signo **crudo**, pero el
+  motor lo resta (`nu[j] = Σδ·nu[j−i] − ω[j]`, `calcnu()` en `fue_api.c`). Sobre
+  `ITCER_m10`, ω = [−8.9851, +8.9352] se dibujaba como si los términos se
+  cancelaran cuando la respuesta real es [−8.9851, −8.9352] — **se suman**, y la
+  ganancia pasa de un aparente −0.05 a **−17.92**. Un signo invertido no da una
+  lectura peor: da la contraria.
+
 ### Tests
 
 Los que fijan un comportamiento sobre un caso real leen la ruta de los datos de
 `ART_TEST_DATA` en vez de tenerla escrita. Sin esa variable hacen `skip`: antes
 eran dieciséis ficheros que sólo podían ejecutarse en una máquina y aun así
 viajaban en el sdist.
+
+Y una lección que costó una tarde: **un test no debe atar su premisa al veredicto
+de otro módulo.** Uno exigía `shin_fuller(m).stationary is True` sobre una serie
+I(1) por construcción, o sea que fijaba como premisa el error que BUG-0065 vino a
+corregir, y defendió ese error hasta que se reescribió.
 
 ## art-tseries 0.1.11 — 2026-08-13
 

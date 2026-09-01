@@ -34,6 +34,7 @@ from .seasonal_detection import detect_seasonality, plot_seasonality
 from .model_detection import suggest_orders
 from .diagnosis import diagnose, plot_diagnosis
 from .formal_tests import (dcd, dcd_f, rv, meg, shin_fuller, dcd_overdiff_regular,
+                           shin_fuller_sobreajuste,
                             dcd_underdiff_regular)
 from .interventions import diagnose_interventions
 from .full_report import _meg_suitable, _try
@@ -898,8 +899,33 @@ def model_equation(ts, model) -> str:
         return f"({se:.4f})"
 
     def _sign_det(v: float) -> str:
-        """Sign for deterministic terms: raw coefficient sign."""
+        """Signo de un término determinista SUELTO: el crudo del coeficiente.
+
+        Vale para ω₀, para una intervención de un solo coeficiente y para los
+        armónicos: todos entran en la parte determinista tal cual.
+
+        NO vale para ω₁, ω₂… — ver `_sign_omega_lag` (BUG-0066).
+        """
         return "+" if v >= 0 else "−"
+
+    def _sign_omega_lag(v: float) -> str:
+        """Signo de ω en un retardo ≥ 1: el motor los RESTA (BUG-0066).
+
+        `fue` calcula la respuesta como `nu[j] = Σ δ_i·nu[j−i] − ω[j]`
+        (`calcnu()` en `fue_api.c`), o sea ω₀ − ω₁B − ω₂B² − … — la misma
+        convención que usa para AR y MA. Imprimir el signo crudo invierte el
+        término B.
+
+        Medido sobre el ITCER de la réplica, ω = [−8.9851, +8.9352]:
+
+            display crudo   (−8.9851 + 8.9352·B)   → parece que se cancelan
+            respuesta real  ν = [−8.9851, −8.9352] → **se suman**, v(1) = −17.92
+
+        La diferencia no es cosmética: el display sugería un efecto neto de
+        −0.05 y el real es −17.92, con la lectura económica invertida
+        (reversión frente a un segundo escalón en la misma dirección).
+        """
+        return "−" if v >= 0 else "+"
 
     def _sign_arma(v: float) -> str:
         """Sign for ARMA terms: fue stores value to subtract, so positive→−, negative→+."""
@@ -1079,7 +1105,7 @@ def model_equation(ts, model) -> str:
                         tl.add(_fv(v), _fse(se) if free else "", align_dot=True)
                     else:
                         bpow = "·B" if i == 1 else f"·B{_sup(i)}"
-                        tl.add(f"  {_sign_det(v)} ")
+                        tl.add(f"  {_sign_omega_lag(v)} ")   # BUG-0066
                         tl.add(_fv(abs(v)), _fse(se) if free else "", align_dot=True)
                         tl.add(bpow)
                 if dlt:
@@ -1835,6 +1861,12 @@ def describe_diagnosis(model) -> Description:
 # Formal tests
 # ---------------------------------------------------------------------------
 
+# Distancia máxima a la frontera θ=+1 para poder AFIRMAR la banda de
+# cuasi-cancelación. El paper la sitúa en r≈0.90–0.95 (`tab:compare`), o sea
+# entre 0.05 y 0.10 de distancia; se toma el extremo generoso (BUG-0024).
+BANDA_CUASI_CANCELACION = 0.10
+
+
 def describe_formal_tests(model, run_meg: bool = True) -> Description:
     """Run Shin-Fuller, DCD, DCD_f, RV, MEG and summarize for the LLM."""
     if model._result is None:
@@ -1889,7 +1921,24 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
                 f"{len(_dg.extreme)} residuo(s) extremo(s), el mayor obs "
                 f"{_peor[0]} con z = {_peor[1]:+.2f}")
 
-    sf_res    = _try(lambda: shin_fuller(model), None)
+    # BUG-0070: hay DOS motivos distintos por los que Shin-Fuller puede faltar
+    # --sin AR libre, o sin raíz REAL que aislar (BUG-0065)-- y el informe daba
+    # siempre el primero. Sobre un AR(2) de raíces complejas eso publicaba «este
+    # modelo no tiene AR regular libre», que es falso: lo tiene, y con dos
+    # parámetros. Una razón equivocada es peor que ninguna, porque se cree.
+    sf_motivo = ""
+    try:
+        sf_res = shin_fuller(model)
+    except Exception as _e_sf:
+        sf_res = None
+        sf_motivo = str(_e_sf)
+    # BUG-0068. Si Shin-Fuller falta porque el AR sólo tiene raíces COMPLEJAS, el
+    # lado AR del par se recupera sobreajustando a AR(p+1) y contrastando el
+    # AR(1) que aparece al factorizar — la salida de la escuela, medida en
+    # `docs/TODO-shin-fuller-raices-complejas.md`: tamaño 0/77 y potencia 88-91%.
+    # Es una rama de DIAGNÓSTICO y se presenta como tal.
+    sf_sobre = (_try(lambda: shin_fuller_sobreajuste(model), None)
+                if (sf_res is None and "raíz REAL" in sf_motivo) else None)
     dcd_res   = _try(lambda: dcd(model),   [])
     od_res    = _try(lambda: dcd_overdiff_regular(model), None)
     ud_res    = _try(lambda: dcd_underdiff_regular(model), None)
@@ -1954,6 +2003,21 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
             f" 1%={sf_res.crit_1pct:.2f})"
             f" → {sf_verdict}"
         )
+        # BUG-0065: el estadístico crece al alejarse de ρₘ EN LOS DOS SENTIDOS.
+        # Cuando la raíz dominante queda POR ENCIMA de la nula, un Φ̂₁ᵤ grande no
+        # es evidencia de estacionariedad — es lo contrario — y hay que decirlo,
+        # porque el número solo invita a leerlo como rechazo.
+        if getattr(sf_res, "mas_integrado_que_la_nula", False):
+            lines.append(
+                f"  ⚠ La raíz dominante (φ̂={sf_res.phi_dominant:.4f}) está POR "
+                f"ENCIMA de la nula ρₘ={sf_res.phi_null:.4f}: los datos son al "
+                f"menos tan integrados como H₀. Un Φ̂₁ᵤ grande aquí mide "
+                f"distancia, no estacionariedad.")
+        elif sf_res.phi_dominant is not None:
+            lines.append(
+                f"  ℹ Raíz dominante φ̂={sf_res.phi_dominant:.4f} "
+                f"(por debajo de ρₘ={sf_res.phi_null:.4f}: la dirección del "
+                f"contraste es la buena).")
 
     # DCD
     if dcd_res:
@@ -2040,12 +2104,48 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
                 "debería revisarse con la verosimilitud exacta bandeada.")
         if sf_res is None:
             lines.append(
-                "  ⚠ **Sin par confirmatorio.** Este modelo no tiene AR regular "
-                "libre, así que Shin-Fuller no es aplicable y el lado AR —la nula "
-                "opuesta— no existe en esta corrida. El veredicto de arriba es UN "
-                "SOLO lado, y los contrastes de frontera se leen en pareja. Antes "
-                "de mover `d`, estima el candidato d+1 y compáralo por diagnosis y "
-                "criterios de información.")
+                "  ⚠ **Sin par confirmatorio.** "
+                + ("Este modelo no tiene ninguna raíz AR **real** que aislar "
+                   "—su AR es un par conjugado—, y la reparametrización de "
+                   "Shin-Fuller (m − ρ)·A(m) exige ρ real. Una raíz compleja "
+                   "cerca del círculo unidad es no estacionariedad en ω≠0: eso "
+                   "lo contrastan el MEG y el DCD_f."
+                   if "raíz REAL" in sf_motivo else
+                   "Este modelo no tiene AR regular libre, así que Shin-Fuller "
+                   "no es aplicable")
+                + (" El lado AR —la nula opuesta— no está disponible "
+                   "DIRECTAMENTE, y los contrastes de frontera se leen en "
+                   "pareja. Se recupera abajo por sobreajuste."
+                   if (sf_sobre is not None and sf_sobre.convergido) else
+                   " El lado AR —la nula opuesta— no existe en esta corrida, así "
+                   "que el veredicto de arriba es UN SOLO lado, y los contrastes "
+                   "de frontera se leen en pareja. Antes de mover `d`, estima el "
+                   "candidato d+1 y compáralo por diagnosis y criterios de "
+                   "información."))
+            if sf_sobre is not None and sf_sobre.convergido:
+                _s = sf_sobre.sf
+                _v = ("estacionario ✓ — d basta por el lado AR" if _s.stationary
+                      else "**raíz unitaria → d+1** por el lado AR")
+                lines += [
+                    "",
+                    f"  **Lado AR recuperado por SOBREAJUSTE** (rama de "
+                    f"diagnóstico, no un modelo): estimado un "
+                    f"AR({sf_sobre.p_ampliado}) en lugar del "
+                    f"AR({sf_sobre.p_original}), su factorización sí ofrece una "
+                    f"raíz real (φ̂={sf_sobre.phi_real:.4f}) y sobre ella el "
+                    f"contraste existe.",
+                    f"  - Φ̂₁ᵤ={_s.phi_1u:.3f} (crít 5%={_s.crit_5pct:.2f}) → {_v}",
+                    f"  - ΔAIC del sobreajuste = {sf_sobre.delta_aic:+.2f}"
+                    + ("  → la raíz añadida **no compra nada**: es espuria, que "
+                       "es lo esperado si no hay raíz unitaria."
+                       if sf_sobre.la_raiz_parece_espuria else
+                       "  → el AR ampliado **mejora**, lo que apunta a que la "
+                       "raíz añadida captura algo real."),
+                    "  ⚠ **No adoptes este modelo.** Existe para poder preguntar; "
+                    "su última raíz es espuria por construcción cuando no hay "
+                    "raíz unitaria. Con esto el par queda recuperado: DCD por el "
+                    "lado MA, y este contraste por el lado AR.",
+                ]
 
     # BUG-0045: el lado `d−1`. Shin-Fuller y el DCD de sobrediferenciación
     # miran los DOS hacia arriba —«¿basta d, o hace falta d+1?»— y ninguno
@@ -2080,6 +2180,32 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
                      f"{'d basta ✓' if sf_says_enough else 'raíz unitaria → d+1'}")
         lines.append(f"- lado MA (DCD sobrediferenciación, H₀: θ=1): "
                      f"{'raíz genuina → d+1' if od_says_more else 'la ∇ extra sobra → d basta ✓'}")
+        # BUG-0069. El aviso de «testigo fuera del eje» vivía DENTRO de la rama
+        # de discrepancia, y estar fuera del eje no depende de que los dos lados
+        # discrepen: un testigo en θ̂<0 mide Nyquist tanto si coinciden como si
+        # no. Es más, coincidir con el lado MA midiendo otra frecuencia es PEOR
+        # que discrepar — es un acuerdo que no significa lo que parece.
+        #
+        # Se vio al corregir Shin-Fuller (BUG-0065): sobre el caso sintético I(1)
+        # de BUG-0022, con SF ya diciendo lo correcto los dos lados pasaron a
+        # coincidir, el testigo siguió en θ̂=−0.5702 y el aviso desapareció.
+        fuera_del_eje = od_res.coef_free < 0.0
+        if fuera_del_eje and sf_says_enough == (not od_says_more):
+            lines += [
+                "",
+                f"  ⚠ **El testigo se salió del eje f=0.** θ̂="
+                f"{od_res.coef_free:+.4f} es NEGATIVO: su raíz apunta a B=−1, así "
+                f"que mide la frecuencia de Nyquist, no la frecuencia cero. "
+                f"Está a {1.0 - od_res.coef_free:.4f} de la frontera θ=+1 — no es "
+                f"la banda de cuasi-cancelación, es otro eje. Los dos lados "
+                f"coinciden, pero el MA lo hace midiendo OTRA frecuencia: es un "
+                f"acuerdo que no significa lo que parece.",
+                "  **El lado MA no es interpretable como veredicto sobre d** en "
+                "esta corrida. Vuelve a correrlo sobre la línea base determinista "
+                "(armónicos, SIN ARMA regular compitiendo), que es donde el "
+                "testigo aísla f=0.",
+            ]
+
         if sf_says_enough != (not od_says_more):
             # BUG-0022: el testigo de sobrediferenciación sólo mide f=0 mientras
             # se mantenga en el eje POSITIVO. Si θ̂ < 0 su raíz apunta a B=−1 y
@@ -2109,24 +2235,68 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
                     "claramente POSITIVA, la diferencia no sobra.",
                 ]
             else:
-                quasi_cancellation = True
-                lines += [
-                    "",
-                    f"  ⚠ **DISCREPAN, y eso es el diagnóstico.** Con θ̂="
-                    f"{od_res.coef_free:+.4f} el testigo está a "
-                    f"{dist:.4f} de la frontera: es la "
-                    "**banda de cuasi-cancelación** (r≈0.90–0.95 en la tabla del "
-                    "paper), donde el lado MA detecta que r<1 y el lado AR ve un "
-                    "proceso casi estacionario. Los dos tienen razón.",
-                    "  En esa banda las representaciones son **equivalentes en "
-                    "previsión**, así que la decisión no se toma con estos "
-                    "estadísticos: se toma por parsimonia, o comparando previsiones "
-                    "fuera de muestra.",
-                    "  **No leas «considerar d+1» como una conclusión.**",
-                ]
+                # BUG-0024. La banda de cuasi-cancelación se afirmaba SÓLO porque
+                # los dos lados discreparan, sin mirar nunca a qué distancia de
+                # la frontera está el testigo. Y el rótulo que emite es concreto:
+                # «r≈0.90–0.95 en la tabla del paper», que exige una distancia de
+                # 0.05–0.10. Medido: con θ̂=+0.7780 (distancia 0.222) el informe
+                # afirmaba igualmente esa banda y la equivalencia en previsión.
+                #
+                # En `tab:compare` la familia es N = φ_f(B)⁻¹ θ_f(B;r)a y **r es
+                # el módulo del factor MA** — en el caso regular |θ̂|, que el
+                # código tiene delante en `od_res.coef_free` y no consultaba.
+                #
+                # Es la misma especie que BUG-0022 un escalón más abajo: allí se
+                # borraba el SIGNO del testigo, aquí se ignoraba su MAGNITUD.
+                en_la_banda = dist <= BANDA_CUASI_CANCELACION
+                quasi_cancellation = en_la_banda
+                if en_la_banda:
+                    lines += [
+                        "",
+                        f"  ⚠ **DISCREPAN, y eso es el diagnóstico.** Con θ̂="
+                        f"{od_res.coef_free:+.4f} el testigo está a "
+                        f"{dist:.4f} de la frontera: es la "
+                        "**banda de cuasi-cancelación** (r≈0.90–0.95 en la tabla "
+                        "del paper), donde el lado MA detecta que r<1 y el lado "
+                        "AR ve un proceso casi estacionario. Los dos tienen "
+                        "razón.",
+                        "  En esa banda las representaciones son **equivalentes "
+                        "en previsión**, así que la decisión no se toma con estos "
+                        "estadísticos: se toma por parsimonia, o comparando "
+                        "previsiones fuera de muestra.",
+                        "  **No leas «considerar d+1» como una conclusión.**",
+                    ]
+                else:
+                    lines += [
+                        "",
+                        f"  ⚠ **DISCREPAN, y NO es la banda de cuasi-cancelación.** "
+                        f"Con θ̂={od_res.coef_free:+.4f} el testigo está a "
+                        f"{dist:.4f} de la frontera θ=+1, y la banda del paper "
+                        f"(r≈0.90–0.95) exige una distancia de "
+                        f"{BANDA_CUASI_CANCELACION:.2f} o menos. Aquí los dos "
+                        f"lados discrepan por otra razón, y el desacuerdo NO es "
+                        f"el diagnóstico.",
+                        "  Sin la banda, tampoco vale la equivalencia en "
+                        "previsión: las dos representaciones difieren de verdad. "
+                        "Antes de mover `d`, estima el candidato rival y "
+                        "compáralo por diagnosis y criterios de información.",
+                        "  Causas que hay que descartar en este orden: modelo "
+                        "todavía inadecuado (los contrastes no son legibles), "
+                        "deterministas resonantes en f=0 que suben el crítico "
+                        "real del lado MA, y el testigo evaluado donde el perfil "
+                        "de verosimilitud salta.",
+                    ]
         else:
-            lines.append("  ✓ Los dos coinciden: el orden de integración no está "
-                         "en la banda ambigua.")
+            # BUG-0069: con el testigo fuera del eje, «coinciden» no confirma
+            # nada — uno de los dos está midiendo otra frecuencia, y afirmarlo
+            # contradice el aviso que acaba de imprimirse tres líneas antes.
+            if fuera_del_eje:
+                lines.append("  ⚠ Coinciden, pero NO es confirmación: el lado MA "
+                             "está midiendo Nyquist (ver arriba). Queda el lado "
+                             "AR solo.")
+            else:
+                lines.append("  ✓ Los dos coinciden: el orden de integración no "
+                             "está en la banda ambigua.")
             # BUG-0045: esa frase afirmaba más de lo que los dos contrastes
             # sostenían — ambos miran hacia d+1. Acotarlo por los dos lados
             # requiere el de sub-diferenciación.
@@ -2150,6 +2320,28 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
                              "d−1 habría bastado, así que esta conclusión acota "
                              "el orden por un lado.")
 
+    # BUG-0070. La cota INFERIOR vivía sólo dentro del bloque del par, que
+    # requiere Shin-Fuller. Pero el lado d−1 no depende de él: lo da el DCD de
+    # sub-diferenciación por su cuenta. Sin par --sin AR libre, o con un AR de
+    # raíces complejas donde SF no aplica-- se perdía una conclusión que sí
+    # estaba calculada, justo en los modelos donde más falta hace, porque son los
+    # que se quedan con un solo lado.
+    if ud_res is not None and not (sf_res is not None and od_res is not None):
+        c5u = ud_res._crit['5%']
+        _sin_lado_ar = not (sf_sobre is not None and sf_sobre.convergido)
+        lines.append("\n**Cota inferior del orden de integración**"
+                     + (" (sin par: el lado AR no está disponible)"
+                        if _sin_lado_ar else
+                        " (el lado AR está arriba, recuperado por sobreajuste)"))
+        if ud_res.lr >= c5u:
+            lines.append(f"  ✓ Queda acotado por ABAJO: la última ∇ es genuina "
+                         f"(sub-diferenciación LR={ud_res.lr:.3f} ≥ {c5u:.2f}), "
+                         f"así que d−1 no habría bastado.")
+        else:
+            lines.append(f"  ⚠ Pero por ABAJO no cierra: el testigo se apila en θ=+1 "
+                         f"(LR={ud_res.lr:.3f} < {c5u:.2f}), o sea que la última "
+                         f"∇ está cancelada y con d−1 bastaba. Estima el "
+                         f"candidato d−1 y compáralo.")
 
     # DCD_f
     if dcd_f_res:

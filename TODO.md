@@ -55,13 +55,46 @@
       lo produjo, el sello de build no es un adorno.
 
 
-- [ ] **Intervenciones como funciones de transferencia ω(B)/δ(B)** — ver
+- [ ] **⚑ PRIORIDAD MÁXIMA — el nodo de intervención, por EPISODIOS** — ver
       [`docs/TODO-interventions.md`](docs/TODO-interventions.md).
-      `fue` y el formato `.inp`/`.pre` las soportan por completo; ART sólo llega a
-      un ω escalar (`mcp_server.py:2841` fija `omega=[0.0]`). Seis puntos, con la
-      identificación de la forma (`intervention_response`) por delante de la
-      estimación. Abierto 2026-08-26 en la réplica del TFM de Bolivia, sobre el
-      episodio 2008:4–2009:2 de `ln ITCER`.
+      **Es el mayor pozo de mejora medido del proyecto.** Cerradas las cuatro
+      corridas de la réplica (dos LLM × cuatro runs): encontrar la SEGUNDA
+      intervención del episodio 2008-09 vale entre **7 y 15 puntos de AIC**, y
+      sólo **una de ocho corridas** la encontró en las dos series. Ninguna otra
+      palanca —ruta estacional, órdenes ARMA, transformación— movió tanto.
+
+      Hoy `suggest_intervention_form` propone la forma de UN residuo; nada sugiere
+      que un episodio pueda necesitar DOS. Lo que falta es agrupar los residuos
+      extremos en episodios y poner delante las tres especificaciones rivales
+      —una intervención, dos escalares, o una con ω(B)— estimadas y comparables.
+
+      **Corrección de rumbo:** este TODO se abrió por el ω(B) y la medida lo
+      desmiente. En el RUN 3, dos escalones escalares batieron al ω(B) del
+      benchmark (379,91 contra 381,00) con los mismos tres parámetros. El ω(B)
+      sigue siendo deseable, pero **detrás** del nodo por episodios.
+
+      Y con él, la revisión general del análisis de intervención: el desfase de la
+      fecha en modelos diferenciados, la convención de signo de la FLT, y los
+      armónicos contados como intervenciones en la cabecera.
+
+      Abierto 2026-08-26; reordenado y priorizado 2026-09-02 con la medida de las
+      cuatro corridas.
+
+- [ ] **La sobreparametrización que nadie mira** — ver
+      [`docs/TODO-overparameterization.md`](docs/TODO-overparameterization.md).
+      `overparameterization_analysis` existe y en tres corridas de la réplica
+      recibió **cero llamadas de 361**. Sólo llegó al analista cuando su aviso
+      pasó a salir inline en la diagnosis. Con la cautela escrita dentro: un
+      ARMA(2,1) de raíces complejas casi siempre tiene correlaciones altas y no
+      sobra nada, así que `|r|>0.7` es una PREGUNTA, no un veredicto.
+      Abierto 2026-08-29.
+
+- [ ] **Orden de integración con un AR de raíces complejas** — ver
+      [`docs/TODO-shin-fuller-raices-complejas.md`](docs/TODO-shin-fuller-raices-complejas.md).
+      Shin-Fuller exige una raíz REAL que aislar. La rama de sobreajuste
+      (BUG-0068) cubre el caso práctico —tamaño 0/77, potencia 88-91 % medidos—;
+      lo que queda es el **contraste de módulo a frecuencia libre**, que es
+      investigación y va ligada a SF_MEG. Abierto 2026-09-01.
 
 - [ ] **El motor de identificación de (p,q) sólo compara FORMAS** — ver
       [`docs/TODO-identification.md`](docs/TODO-identification.md).

@@ -274,6 +274,7 @@ class ShinFullerResult:
     pvalue: float            # chi²(df) p-value of 2·Φ̂₁ᵤ (conservative approx.)
     n: int
     s: int
+    phi_dominant: float | None = None   # raíz dominante en forma AR (BUG-0065)
 
     @property
     def lr(self) -> float:
@@ -282,8 +283,28 @@ class ShinFullerResult:
 
     @property
     def stationary(self) -> bool:
-        """True if Φ̂₁ᵤ > 5% critical value (H₀ unit-root rejected)."""
+        """H₀ (raíz unitaria) rechazada: estadístico grande Y en la dirección buena.
+
+        BUG-0065. Φ̂₁ᵤ = L_libre − L_restringido crece cuando ρ̂ se aleja de ρₘ
+        **en cualquiera de los dos sentidos**, y se leía como si sólo creciera
+        hacia la estacionariedad. Un paseo aleatorio puro --ρ̂ = 0.9973 contra una
+        nula de 0.98, o sea MÁS integrado que la nula-- daba Φ̂₁ᵤ = 4.883 y se
+        declaraba «Estacionario ✓».
+
+        La dirección la da la raíz DOMINANTE: sólo hay evidencia de
+        estacionariedad si está por DEBAJO de ρₘ. Por encima, los datos son al
+        menos tan poco estacionarios como la nula, y el tamaño del estadístico no
+        cambia eso.
+        """
+        if self.mas_integrado_que_la_nula:
+            return False
         return self.phi_1u > self.crit_5pct
+
+    @property
+    def mas_integrado_que_la_nula(self) -> bool:
+        """ρ̂ dominante por ENCIMA de ρₘ: el estadístico no apunta a estacionario."""
+        return (self.phi_dominant is not None
+                and self.phi_dominant >= self.phi_null)
 
     def summary(self) -> str:
         phi_str = ", ".join(f"{v:.4f}" for v in self.phi_free)
@@ -394,27 +415,111 @@ def shin_fuller(model) -> ShinFullerResult:
     phi_free = _extract_ar_params(model)
     df = len(phi_free)
 
-    # --- constrained model: fix AR at phi_null for first coef, 0 elsewhere ---
+    # --- modelo bajo H₀ -----------------------------------------------------
+    # BUG-0065. La nula de Shin-Fuller es UNA raíz en ρₘ **con el resto de la
+    # estructura AR libre** — es la forma aumentada de Dickey-Fuller. El código
+    # anterior hacía otra cosa: recorría TODOS los factores poniendo el primer
+    # coeficiente de cada uno en ρₘ y los demás en cero.
+    #
+    # Dos consecuencias, y la primera basta para invalidar el contraste:
+    #
+    # (a) NO ERA INVARIANTE A LA PARAMETRIZACIÓN. El mismo modelo ajustado, con
+    #     idéntica verosimilitud, daba estadísticos distintos según se escribiera
+    #     el AR de una forma o de otra. Medido sobre PGAS (logL = −291.073 en las
+    #     dos escrituras):
+    #         (1 − 1.6390B + 0.6668B²)      → nula [ρ, 0]       → Φ̂₁ᵤ = 25.746
+    #         (1 − 0.8890B)(1 − 0.7500B)    → nula [ρ][ρ]       → Φ̂₁ᵤ =  7.632
+    #     La segunda nula impone DOS raíces casi unitarias, que no es H₀.
+    #
+    # (b) AL ANULAR EL RESTO DE LA ESTRUCTURA, el contraste dejaba de medir «¿la
+    #     raíz dominante es 1?» y pasaba a medir «¿el AR completo ajusta mejor que
+    #     un AR(1) en ρₘ?». Con una raíz cerca de 1 y otra claramente
+    #     estacionaria, la segunda infla el estadístico y tapa a la primera.
+    #     Con la nula correcta ese mismo modelo da Φ̂₁ᵤ = 0.298 — por debajo del
+    #     crítico al 10% (1.07): NO se rechaza la raíz unitaria, o sea d=1.
+    #
+    # Y no es académico: en el RUN 4 de la réplica un analista se quedó en d=0
+    # sobre PGAS apoyándose en este veredicto, con un modelo cuya Q fallaba en
+    # cuatro retardos. Con el contraste corregido, el nodo se cierra en d=1, que
+    # es donde los otros carriles encontraron modelos adecuados.
+    #
+    # Cómo se impone UNA raíz: en un factor de orden 1 el coeficiente ES la raíz,
+    # así que basta fijarlo. En un factor de orden p ≥ 2 una raíz no es un
+    # coeficiente --es una función no lineal de todos--, así que el factor se
+    # PARTE para el contraste: (1 − ρₘB) por un factor libre de orden p−1,
+    # sembrado con la factorización del original. Es exactamente la conjetura de
+    # «factorizar y luego contrastar», y es lo que hace la nula expresable.
     mc = copy.deepcopy(model)
     mc._result = None
 
-    for i in range(len(mc.ar)):
-        order = len(mc.ar[i])
-        null_coefs = [phi_null if j == 0 else 0.0 for j in range(order)]
-        mc.ar[i] = null_coefs
-        if mc.ar_free is None:
-            mc.ar_free = [[False] * order for _ in mc.ar]
-        else:
-            mc.ar_free[i] = [False] * order
+    import numpy as _np
 
+    facs = [list(f) for f in mc.ar]
+    frees = ([list(f) for f in mc.ar_free] if mc.ar_free
+             else [[True] * len(f) for f in facs])
+
+    def _raices(coefs):
+        return _np.roots([-c for c in reversed(coefs)] + [1.0])
+
+    # LA RAÍZ QUE SE AÍSLA: la REAL más cercana al círculo unidad, en cualquier
+    # factor. Tiene que ser real porque la reparametrización del paper la exige:
+    # (m − ρ)·A(m) con ρ ∈ (−1, 1].
+    TOL = 1e-8
+    cand = None
+    for i, f in enumerate(facs):
+        for z in _raices(f):
+            if abs(z.imag) <= TOL * max(1.0, abs(z.real)) and z.real != 0:
+                if cand is None or abs(z.real) < cand[0]:
+                    cand = (abs(z.real), i, float(z.real))
+    if cand is None:
+        raise ValueError(
+            "Shin-Fuller no aplica: el AR no tiene ninguna raíz REAL que aislar. "
+            "Su reparametrización (Shin-Fuller 1998, ec. 2.2-2.3) escribe el "
+            "operador como (m − ρ)·A(m) con ρ real, y un par conjugado no admite "
+            "esa forma. Una raíz compleja cerca del círculo unidad es no "
+            "estacionariedad en una frecuencia ω≠0: eso lo contrastan el MEG y "
+            "el DCD_f, no este test.")
+
+    _mod, dom, raiz_dom = cand
+    phi_dom = 1.0 / _mod
+
+    nuevos_f, nuevos_l = [], []
+    for i, f in enumerate(facs):
+        if i != dom:
+            nuevos_f.append(f)                       # intacto y LIBRE
+            nuevos_l.append(frees[i])
+            continue
+        if len(f) == 1:
+            nuevos_f.append([phi_null])              # la raíz ES el coeficiente
+            nuevos_l.append([False])
+        else:
+            # deflación por la raíz REAL: el cociente tiene coeficientes reales,
+            # así que el factor restante existe de verdad. Deflactar por una raíz
+            # COMPLEJA daría coeficientes complejos cuya parte imaginaria
+            # `float()` descarta EN SILENCIO — un factor que no es el del modelo.
+            num = _np.array([1.0] + [-c for c in f])          # 1 − φ₁B − …
+            den = _np.array([1.0, -1.0 / raiz_dom])           # 1 − (1/raíz)B
+            coc, _res = _np.polydiv(num, den)
+            coc = _np.real_if_close(coc)
+            semilla = [float(-c) for c in (coc / coc[0])[1:]]
+            nuevos_f.append([phi_null]);  nuevos_l.append([False])
+            nuevos_f.append(semilla);     nuevos_l.append([True] * len(semilla))
+
+    mc.ar = nuevos_f
+    mc.ar_free = nuevos_l
     mc.fit()
     L_constrained = float(mc._result.loglik)
 
-    phi_1u = L_free - L_constrained           # Φ̂₁ᵤ — eq. (3.5)
-    pvalue = float(sp_stats.chi2.sf(2.0 * phi_1u, df))  # conservative chi² approx.
+    # Ecuación (3.5) al pie de la letra: el estadístico es CERO cuando ρ̂ está por
+    # encima de ρₘ. En esa dirección los datos son al menos tan integrados como
+    # la nula, y la distancia no es evidencia de estacionariedad.
+    phi_1u = 0.0 if phi_dom > phi_null else (L_free - L_constrained)
+    df = 1                                    # UNA restricción: la raíz
+    pvalue = float(sp_stats.chi2.sf(2.0 * phi_1u, df))
     c10, c5, c1 = _sf_crit(n)
 
     return ShinFullerResult(
+        phi_dominant=phi_dom,
         phi_null=phi_null,
         phi_free=phi_free,
         loglik_free=L_free,
@@ -427,6 +532,133 @@ def shin_fuller(model) -> ShinFullerResult:
         pvalue=pvalue,
         n=n,
         s=s,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shin-Fuller por sobreajuste — rama de DIAGNÓSTICO (BUG-0065 / TODO complejas)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SobreajusteSFResult:
+    """Shin-Fuller recuperado sobre un AR(p+1), cuando el AR(p) es complejo.
+
+    **Es una rama de DIAGNÓSTICO, no un modelo candidato.** Su última raíz es
+    espuria por construcción cuando no hay raíz unitaria, y adoptarla
+    contaminaría la selección.
+    """
+    sf: "ShinFullerResult"
+    p_original: int
+    p_ampliado: int
+    aic_original: float
+    aic_ampliado: float
+    phi_real: float | None        # la raíz real aislada, en forma AR
+    convergido: bool
+
+    @property
+    def delta_aic(self) -> float:
+        """ΔAIC del sobreajuste — y es el segundo dato, no un detalle.
+
+        Con la verdad estacionaria la raíz añadida es espuria y se paga como un
+        parámetro de más (medido: +0.6 a +1.1). Con raíz unitaria el AR(p+1)
+        captura algo real y MEJORA (medido: −3.8 a −23.6). O sea que el propio
+        coste del sobreajuste dice en qué mundo se está.
+        """
+        return self.aic_ampliado - self.aic_original
+
+    @property
+    def la_raiz_parece_espuria(self) -> bool:
+        """ΔAIC ≥ 0: el sobreajuste no compra nada, la raíz nueva sobra."""
+        return self.delta_aic >= 0.0
+
+
+def shin_fuller_sobreajuste(model) -> SobreajusteSFResult:
+    """Recupera el lado AR del par cuando el AR sólo tiene raíces complejas.
+
+    La reparametrización de Shin-Fuller exige una raíz REAL que aislar
+    (ec. 2.2-2.3). Un par conjugado no la tiene, así que el contraste no existe
+    sobre ese modelo — y quedarse sólo con el DCD pierde el par, que es lo que da
+    valor a los contrastes de frontera: dos nulas OPUESTAS.
+
+    La salida de la escuela es sobreajustar: si el AR(p) no ofrece una raíz real,
+    se estima un AR(p+1), se factoriza en AR(1)·AR(p), y se contrasta el AR(1).
+
+    Medido sobre 40 réplicas por celda (n=83), condicionado a que el AR(2) salga
+    complejo, que es donde la pregunta se plantea:
+
+        verdad                       AR(3)+SF → d+1   DCD solo → d+1   ΔAIC
+        estacionario complejo 1.95        0/37             3/37       +1.10
+        estacionario complejo 1.30        0/40             3/40       +0.62
+        I(1) × complejo       1.95       14/16            13/16       −3.79
+        I(1) × complejo       1.30       32/35            33/35      −23.64
+
+    Tamaño 0/77 y potencia 88-91%: mejor que el DCD solo en falsos positivos e
+    igual de potente. Y la raíz espuria se queda lejos del uno — φ ≈ 0.12-0.31 de
+    media, máximo 0.76 en 75 réplicas.
+
+    **Lo que devuelve es un CONTRASTE, no un modelo.** El AR(p+1) existe para
+    poder preguntar; su última raíz es espuria por construcción cuando no hay
+    raíz unitaria, y el `delta_aic` lo delata.
+
+    Lanza ValueError si el modelo no está en el caso que motiva esta rama.
+    """
+    import numpy as _np
+
+    if not model.ar or _count_free_ar(model) == 0:
+        # BUG-0068b. Un `.inp` puede declarar `1 1 / 0.000000 0` --un AR(1)
+        # FIJADO en cero-- como artificio del formato cuando no se estiman
+        # parámetros ARMA. `model.ar` sale entonces truthy con [[0.0]], su
+        # polinomio es la constante 1 y no tiene raíces, así que la comprobación
+        # de «raíces complejas» pasaba de largo y esta rama se ponía a
+        # sobreajustar un modelo SIN estructura AR: no recupera nada, estima un
+        # AR(2) desde cero. Es el mismo artificio de BUG-0057 mordiendo en un
+        # tercer sitio (ver docs/TODO-identification.md).
+        #
+        # Una función pública no debe depender de que quien la llame haya
+        # filtrado antes.
+        raise ValueError(
+            "Sin AR regular LIBRE: no hay ninguna raíz que aislar, y sobreajustar "
+            "aquí no recupera el lado AR — estima una estructura que el modelo no "
+            "tiene.")
+    if len(model.ar) > 1:
+        raise ValueError(
+            "El AR ya está factorizado en varios factores: si alguno tuviera "
+            "raíz real, `shin_fuller` la aísla directamente.")
+
+    coefs = list(model.ar[0])
+    raices = _np.roots([-c for c in reversed(coefs)] + [1.0])
+    if len(raices) == 0:
+        raise ValueError(
+            "El operador AR no tiene raíces (es la constante 1): no hay "
+            "estructura que sobreajustar.")
+    if any(abs(z.imag) <= 1e-8 * max(1.0, abs(z.real)) for z in raices):
+        raise ValueError(
+            "El AR ya tiene una raíz REAL: usa `shin_fuller` directamente. "
+            "Esta rama es sólo para el caso de raíces exclusivamente complejas.")
+
+    mc = copy.deepcopy(model)
+    mc._result = None
+    mc.ar = [coefs + [0.0]]                       # AR(p) → AR(p+1), semilla 0
+    mc.ar_free = [[True] * (len(coefs) + 1)]
+    mc.fit()
+
+    r = mc._result
+    convergido = bool(getattr(r, "converged", True))
+    sf = shin_fuller(mc)                          # ahora sí hay raíz real
+
+    raices_amp = _np.roots([-c for c in reversed(mc.ar[0])] + [1.0])
+    reales = [abs(z.real) for z in raices_amp
+              if abs(z.imag) <= 1e-8 * max(1.0, abs(z.real))]
+    phi_real = (1.0 / min(reales)) if reales else None
+
+    return SobreajusteSFResult(
+        sf=sf,
+        p_original=len(coefs),
+        p_ampliado=len(coefs) + 1,
+        aic_original=float(model._result.aic),
+        aic_ampliado=float(r.aic),
+        phi_real=phi_real,
+        convergido=convergido,
     )
 
 
