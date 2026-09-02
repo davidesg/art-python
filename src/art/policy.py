@@ -74,6 +74,16 @@ THRESHOLDS = {
     # 0.910. Es "observar el gráfico" y no "contrastar la pendiente": una
     # pendiente puede ser significativa sin dominar nada.
     "trend_dominates": 0.5,
+    # Hueco máximo, en períodos, entre dos residuos extremos consecutivos para
+    # que cuenten como el MISMO suceso. 1 = estrictamente adyacentes; 2 admite
+    # un período tranquilo dentro del episodio; 3, dos.
+    #
+    # Está aquí y no enterrado en un `if` porque es la decisión que gobierna
+    # todo el nodo de intervención: es la que separa "tres atípicos sueltos" de
+    # "un suceso que duró tres períodos", y el analista tiene que poder verla y
+    # moverla. Sobre la réplica, el choque de 2008-09 duró DOS trimestres y
+    # encontrarlo valía 16,24 puntos de AIC.
+    "ventana_episodio": 2,
 }
 
 
@@ -609,6 +619,23 @@ def decide_interventions(extreme, existing_ats,
     return new
 
 
+def decide_episodios(extreme, ventana: int | None = None, d: int = 0):
+    """Agrupa los residuos extremos en EPISODIOS.
+
+    Un suceso puede durar más de un período, y hasta el nodo de episodios cada
+    período extremo se trataba como un atípico independiente. Ésta es la
+    decisión que separa «tres atípicos sueltos» de «un suceso que duró tres
+    períodos», y de ella cuelga qué especificaciones rivales tiene sentido
+    estimar (`art.episodes`, docs/DISENO-nodo-intervencion.md §2.2).
+
+    `ventana` por defecto sale de `THRESHOLDS["ventana_episodio"]`, y se pasa
+    explícita cuando el analista la mueve.
+    """
+    from art.episodes import agrupa_episodios
+    v = THRESHOLDS["ventana_episodio"] if ventana is None else int(ventana)
+    return agrupa_episodios(extreme, ventana=v, d=int(d))
+
+
 def should_stop(clean: bool, n_extreme: int) -> bool:
     """Stop the outlier-addition cycle when the diagnosis is clean or there are
     no extreme residuals left to model."""
@@ -709,6 +736,12 @@ class Policy:
     def decide_interventions(self, extreme, existing_ats, offset: int = 0) -> list:
         raise NotImplementedError
 
+    def decide_episodios(self, extreme, ventana: int | None = None, d: int = 0):
+        """Cómo se agrupan los extremos en sucesos. La ventana es del
+        analista: es la que decide si dos anómalos separados por un período
+        tranquilo son un suceso o dos."""
+        raise NotImplementedError
+
     def should_stop(self, clean: bool, n_extreme: int) -> bool:
         raise NotImplementedError
 
@@ -751,6 +784,9 @@ class DefaultPolicy(Policy):
 
     def decide_interventions(self, extreme, existing_ats, offset: int = 0):
         return decide_interventions(extreme, existing_ats, offset)
+
+    def decide_episodios(self, extreme, ventana=None, d=0):
+        return decide_episodios(extreme, ventana, d)
 
     def should_stop(self, clean, n_extreme):
         return should_stop(clean, n_extreme)

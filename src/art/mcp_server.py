@@ -866,6 +866,68 @@ def boxcox_analysis(inp_path: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Tool: episodios — agrupar los extremos en SUCESOS
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def residual_episodes(inp_path: str,
+                      ventana: int = 0,
+                      threshold: float = 3.0) -> list:
+    """
+    Agrupa los residuos extremos de un modelo estimado en EPISODIOS.
+
+    LA PREGUNTA DE ESTE NODO no es «cuántos atípicos hay» sino **«esto es un
+    suceso o son varios»**. Un choque puede durar más de un período, y tratado
+    como atípicos sueltos se modeliza mal: sobre la réplica, encontrar la
+    segunda intervención del episodio 2008-09 valía **16,24 puntos de AIC**, y
+    sólo 1 de 8 corridas la encontró.
+
+    QUÉ DEVUELVE. Los episodios con su tramo, duración, cohesión y la
+    ESPECIFICACIÓN GENERAL que le corresponde a cada uno: un episodio de
+    duración L son **L+1 escalones en el nivel** desde su inicio. Con ganancia
+    ω(1)=0 equivalen a L impulsos en el nivel (efecto TRANSITORIO); con ganancia
+    distinta de cero, a un cambio de nivel PERMANENTE. Cuál de las dos cosas lo
+    dice el contraste —`test_interventions`—, no la forma del grupo.
+
+    Esto sustituye a la dicotomía escalón/impulso decidida por adyacencia: deja
+    de ser una REGLA y pasa a ser un CONTRASTE.
+
+    Parameters
+    ----------
+    inp_path  : .inp de un modelo estimado
+    ventana   : hueco máximo entre extremos consecutivos para que sean el mismo
+                suceso. 0 = usar la de la política (2). 1 = estrictamente
+                adyacentes; 3 admite dos períodos tranquilos dentro.
+    threshold : |z| a partir del cual un residuo es extremo
+
+    Juzga la agrupación sobre el gráfico antes de estimar nada. Para ver qué
+    FORMA implica un episodio, `simulate_intervention_shape` la dibuja.
+    """
+    try:
+        import numpy as np
+        from art.episodes import describe_episodios
+        from art.policy import decide_episodios, THRESHOLDS
+        ts, m = _load_ts_model(inp_path)
+        m.fit()
+        if m.residuals is None:
+            return _err("el modelo no tiene residuos: ¿se estimó?")
+        r = np.asarray(m.residuals.data, dtype=float)
+        sd = r.std(ddof=0)
+        z = r / sd if sd > 0 else r
+        ext = [(i + 1, float(z[i])) for i in range(len(z))
+               if abs(z[i]) > threshold]
+        v = int(ventana) or THRESHOLDS["ventana_episodio"]
+        d_reg = int(getattr(m, "d", 0))
+        eps = decide_episodios(ext, ventana=v, d=d_reg)
+        off = int(getattr(m, "d", 0)) + int(getattr(m, "D", 0)) * int(ts.freq or 1)
+        desc = describe_episodios(r, eps, ventana=v, umbral=threshold, offset=off)
+        _show_fig(desc.figure_b64, "episodios")
+        return _result(desc)
+    except Exception as e:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
 # Tool: LTF simulator — dibujar la forma de una intervención
 # ---------------------------------------------------------------------------
 
@@ -1142,6 +1204,31 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
         _show_fig(desc.figure_b64, "residual_scan")
         cab = (f"*Escaneo sobre los RESIDUOS de `{os.path.basename(inp_path)}` "
                f"(n={len(m.residuals.data)}), no sobre la serie.*\n\n")
+
+        # Si hay extremos cerca unos de otros, DECIRLO aquí. La razón medida de
+        # que 7 de 8 corridas no encontraran el segundo choque del episodio
+        # 2008-09 —16,24 puntos de AIC— es que nada en la salida decía que esos
+        # dos anómalos eran UN suceso. Una herramienta que nadie llama no lo
+        # arregla; el aviso donde el analista ya está mirando, sí.
+        try:
+            import numpy as _np
+            from art.policy import decide_episodios as _de
+            _r = _np.asarray(m.residuals.data, dtype=float)
+            _sd = _r.std(ddof=0)
+            _z = _r / _sd if _sd > 0 else _r
+            _ext = [(i + 1, float(_z[i])) for i in range(len(_z))
+                    if abs(_z[i]) > threshold]
+            _eps = [e for e in _de(_ext, d=int(getattr(m, 'd', 0)))
+                    if not e.aislado]
+            if _eps:
+                _t = ", ".join(f"{e.inicio}–{e.fin} ({e.duracion_nivel} períodos en el nivel)"
+                               for e in _eps)
+                cab += (f"⚠ **{len(_eps)} de estos anómalos no están solos: "
+                        f"{_t}.** Un suceso que dura varios períodos modelizado "
+                        "como atípicos sueltos se ajusta mal. Llama a "
+                        "`residual_episodes` antes de decidir la forma.\n\n")
+        except Exception:
+            pass
         items = [TextContent(type="text", text=cab + desc.summary
                              + "\n\n---\n" + desc.recommendation)]
         if desc.figure_b64:

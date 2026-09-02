@@ -261,14 +261,52 @@ Lo que queda de F1:
   retardo medio dice cuándo;
 - exponerlo por MCP.
 
-### F2 · Episodios
+### F2 · Episodios — ✅ HECHO (2026-09-02)
 
-Agrupar residuos extremos separados ≤ `w` períodos en un episodio con su
-extensión. `w` es **parámetro declarado**, no número mágico enterrado; por
-defecto 2-3 y expuesto al analista.
+`src/art/episodes.py`: `agrupa_episodios(extreme, ventana, d) → [Episodio]`,
+`describe_episodios` para la figura, `policy.decide_episodios` con
+`THRESHOLDS["ventana_episodio"] = 2` **declarado**, y la herramienta MCP
+`residual_episodes`.
 
-Sustituye la comprobación de adyacencia de `decide_form`. Salida: lista de
-episodios con su duración, no lista de atípicos sueltos.
+Cada `Episodio` publica `duracion`, `duracion_nivel`, `n_extremos`, `huecos`,
+`cohesion`, `n_escalones` y `at_0based(offset)`. La unión es por
+**encadenamiento** —A-B y B-C dentro de ventana unen A, B y C— porque es la
+lectura natural de «el mismo suceso»; y por eso el episodio publica los huecos y
+la cohesión: para que una cadena larga se VEA. `parece_encadenado` avisa cuando
+la duración pasa de 4 o la cohesión baja de 0,6, porque eso es más probable que
+sea estructura no modelizada que un suceso.
+
+**Lo que esto disuelve.** La dicotomía escalón/impulso deja de ser una **regla**
+y pasa a ser un **contraste**. Un episodio aislado da dos escalones; si ω(1)=0
+es un impulso de nivel (transitorio) y si no, un cambio de nivel (permanente),
+y lo dice `test_intervention` y no una comprobación de adyacencia.
+
+**Y el aviso donde el analista ya está mirando.** La razón medida de que 7 de 8
+corridas no encontraran el segundo choque de 2008-09 es que **nada en la salida
+decía que esos dos anómalos eran un suceso**. Una herramienta que nadie llama no
+lo arregla, así que `residual_outlier_scan` lleva ahora un aviso en cabecera
+cuando hay extremos que no están solos, con el tramo y la duración en el nivel.
+
+#### La segunda conversión, que se descubrió comprobando
+
+Los residuos están **diferenciados**, y por el diccionario de §2.1 **L impulsos
+en el nivel se ven como L+d extremos**. Así que la duración medida sobre los
+residuos NO es la duración del suceso:
+
+    duración en el nivel = duración en residuos − d
+
+Salió en la comprobación de punta a punta: sobre un DGP con dos impulsos de
+nivel y d=1, el episodio salía de tres períodos y pedía **cuatro** escalones
+donde hacen falta **tres**. El defecto tenía la forma exacta de BUG-0030 —«esta
+función no recibía `d`, así que no podía hacer la conversión aunque quisiera»— y
+por eso `agrupa_episodios` la recibe y `policy.decide_episodios` la propaga.
+
+Es decir: **hay dos conversiones entre residuos y nivel, no una.** La posición
+(el desfase `d + D·s`, BUG-0030/0067) y la **duración**. La segunda no estaba
+escrita en ningún sitio hasta ahora.
+
+Verificado de punta a punta: DGP con dos impulsos de nivel y d=1 →
+`dur. resid. 3 · dur. nivel 2 · 3 escalones`.
 
 ### F3 · Las especificaciones rivales
 
