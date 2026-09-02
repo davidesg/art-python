@@ -91,20 +91,36 @@ def test_decide_form_gap_is_pulse():
 
 # ── decide_interventions ───────────────────────────────────────────────────
 
+# La tripleta `(at, forma, n_omega)` sustituyó al par en F4. `n_omega` es lo que
+# distingue un cambio de nivel de un EPISODIO, y con el par no se podía decir:
+# un suceso de varios períodos salía como varias intervenciones independientes,
+# que es el defecto que costó 16,24 puntos de AIC en la réplica.
+
 def test_intervention_pulse_isolated():
-    # single isolated extreme → pulse, at = obs-1
-    assert policy.decide_interventions([(60, 6.4)], []) == [(59, "pulse")]
+    # single isolated extreme → pulse, at = obs-1, un solo ω
+    assert policy.decide_interventions([(60, 6.4)], []) == [(59, "pulse", 1)]
 
 
-def test_intervention_step_consecutive():
-    # two adjacent extremes → both step
-    out = policy.decide_interventions([(60, 6.4), (61, -4.9)], [])
-    assert out == [(59, "step"), (60, "step")]
+def test_intervention_step_consecutive_sin_diferenciar_es_UN_episodio():
+    """Con d=0, dos extremos adyacentes son DOS períodos alterados en el nivel:
+    un episodio, y su forma general son tres escalones en una sola
+    intervención — no dos intervenciones independientes."""
+    out = policy.decide_interventions([(60, 6.4), (61, -4.9)], [], d=0)
+    assert out == [(59, "step", 3)]
+
+
+def test_intervention_step_consecutive_con_d1_siguen_siendo_dos():
+    """Con d=1, esos mismos dos extremos en ∇ son UN período alterado en el
+    nivel —el diccionario de §2.1— y ahí la lectura escalar sigue siendo la
+    respuesta. Cambiarla perdía ajuste sin ganar nada: lo delató el golden del
+    pipeline (AIC 2382,2 → 2416,2)."""
+    out = policy.decide_interventions([(60, 6.4), (61, -4.9)], [], offset=1, d=1)
+    assert out == [(60, "step", 1), (61, "step", 1)]
 
 
 def test_intervention_skips_existing():
     out = policy.decide_interventions([(60, 6.4), (120, 3.2)], existing_ats=[59])
-    assert out == [(119, "pulse")]
+    assert out == [(119, "pulse", 1)]
 
 
 def test_intervention_sorted_by_abs_z():

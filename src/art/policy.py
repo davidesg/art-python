@@ -577,7 +577,8 @@ def decide_form(target_obs: int, extreme_obs) -> str:
 
 
 def decide_interventions(extreme, existing_ats,
-                        offset: int = 0) -> list[tuple[int, str]]:
+                        offset: int = 0, d: int = 0
+                        ) -> list[tuple[int, str, int]]:
     """Which interventions to add this round, given the residual diagnosis.
 
     Parameters
@@ -608,14 +609,41 @@ def decide_interventions(extreme, existing_ats,
     Signo invertido, magnitud igual, verosimilitud indistinguible. Nada en la
     diagnosis lo delata.
     """
+    # Los EPISODIOS, no los atípicos sueltos. Un suceso que dura varios
+    # períodos modelizado como espigas independientes se ajusta mal: sobre la
+    # réplica, la segunda intervención del episodio 2008-09 valía 16,24 puntos
+    # de AIC y sólo 1 de 8 corridas la encontró.
+    #
+    # Aquí NO se corre la escalera de Ockham entera —serían tres estimaciones
+    # por atípico y por ronda, dentro del bucle— sino su parte gratis: la
+    # DURACIÓN del episodio, que fija cuántos ω lleva la intervención. Un
+    # episodio de L períodos en el nivel son L+1 escalones (§2.2 del diseño).
+    # La elección entre permanente y transitorio la sigue haciendo el contraste
+    # de ganancia sobre el modelo ya estimado.
+    eps = decide_episodios(extreme, d=int(d))
+
     ext_obs = {obs for obs, _ in extreme}
     already = set(existing_ats)
-    new: list[tuple[int, str]] = []
+    cubiertos: set[int] = set()      # obs que ya cubre una forma de episodio
+    new: list[tuple[int, str, int]] = []
     for obs, z in sorted(extreme, key=lambda x: -abs(x[1])):
         at_0 = obs - 1 + int(offset)
-        if at_0 in already:
+        if at_0 in already or obs in cubiertos:
             continue
-        new.append((at_0, decide_form(obs, ext_obs)))
+        ep = next((e for e in eps if e.inicio <= obs <= e.fin), None)
+
+        # Sólo se cambia de forma cuando el episodio dura más de un período EN
+        # EL NIVEL. Un episodio de dos extremos con d=1 es UN período alterado
+        # en el nivel —el diccionario de §2.1— y para ése la lectura escalar
+        # sigue siendo la respuesta: cambiarla ahí perdía ajuste sin ganar nada.
+        if ep is not None and ep.duracion_nivel > 1:
+            at_ini = ep.inicio - 1 + int(offset)
+            if at_ini not in already:
+                # forma general del episodio: L+1 escalones en el NIVEL
+                new.append((at_ini, "step", ep.n_escalones))
+                cubiertos.update(range(ep.inicio, ep.fin + 1))
+        else:
+            new.append((at_0, decide_form(obs, ext_obs), 1))
     return new
 
 
@@ -733,7 +761,8 @@ class Policy:
     def decide_form(self, target_obs: int, extreme_obs) -> str:
         raise NotImplementedError
 
-    def decide_interventions(self, extreme, existing_ats, offset: int = 0) -> list:
+    def decide_interventions(self, extreme, existing_ats, offset: int = 0,
+                             d: int = 0) -> list:
         raise NotImplementedError
 
     def decide_episodios(self, extreme, ventana: int | None = None, d: int = 0):
@@ -782,8 +811,8 @@ class DefaultPolicy(Policy):
     def decide_form(self, target_obs, extreme_obs):
         return decide_form(target_obs, extreme_obs)
 
-    def decide_interventions(self, extreme, existing_ats, offset: int = 0):
-        return decide_interventions(extreme, existing_ats, offset)
+    def decide_interventions(self, extreme, existing_ats, offset: int = 0, d: int = 0):
+        return decide_interventions(extreme, existing_ats, offset, d)
 
     def decide_episodios(self, extreme, ventana=None, d=0):
         return decide_episodios(extreme, ventana, d)

@@ -3411,7 +3411,7 @@ def _round_decision_text(rd) -> str:
         return (f"Ronda {rd.round_num}: quedan {n} extremo(s) pero ninguno NUEVO "
                 f"que añadir; el bucle para sin diagnosis limpia.")
     if getattr(rd, "added", None):
-        etq = ", ".join(f"{f.upper()} obs {at + 1}" for at, f in rd.added[:5])
+        etq = ", ".join(_etiqueta_itv(t) for t in rd.added[:5])
         return (f"Ronda {rd.round_num}: la diagnosis marca "
                 f"{len(rd.diag.extreme)} extremo(s) → se añade {etq}.")
     return f"Ronda {rd.round_num}."
@@ -3433,6 +3433,105 @@ def _round_problems_text(rd) -> str:
         partes.append("extremos: " + ", ".join(
             f"obs {o} (z={z:+.2f})" for o, z in dg.extreme[:4]))
     return " · ".join(partes)
+
+
+def _etiqueta_itv(t) -> str:
+    """Etiqueta de una intervención decidida: `(at, forma)` o `(at, forma, nω)`.
+
+    Los `n_omega > 1` se enseñan porque son la diferencia entre un cambio de
+    nivel y un EPISODIO: "STEP(3) obs 61" dice que el suceso duró dos períodos,
+    y "STEP obs 61" que el nivel se desplazó. Con el par antiguo no se podía
+    distinguir, y ése era el defecto.
+    """
+    at, forma = t[0], t[1]
+    n = int(t[2]) if len(t) > 2 else 1
+    marca = f"({n})" if n > 1 else ""
+    return f"{forma.upper()}{marca} obs {at + 1}"
+
+
+def _texto_escalera(esc, rec: str) -> str:
+    """Una línea por peldaño y las razones, para la salida de la herramienta."""
+    L = ["", "---", "", "**Escalera de Ockham** — peldaños estimados:", ""]
+    for p in esc.peldanos:
+        if not p.estimado:
+            L.append(f"- `{p.nivel}` {p.nombre} — *no estimable: {p.error}*")
+            continue
+        marca = "**◀ elegido**" if p.nivel == rec else ""
+        est = ("se sostiene" if p.se_sostiene else
+               f"deja vecino ({p.treadway[0].vecino_anomalo})" if p.deja_vecino
+               else "inadecuado")
+        w1 = f"ω(1)={p.omega_1:+.4f}" if p.omega_1 is not None else ""
+        L.append(f"- `{p.nivel}` {p.nombre} · AIC {p.aic:.2f} · {w1} · "
+                 f"{est} {marca}")
+    if esc.razones_para_subir:
+        L += ["", "Se subió de peldaño por:"]
+        L += [f"  - {r}" for r in esc.razones_para_subir]
+    else:
+        L += ["", "**No hubo razón para subir**: la lectura simple absorbe su "
+              "fecha, no deja vecino y el modelo es adecuado. El AIC no arbitra "
+              "la subida — subir aquí sería añadir parámetros a un problema "
+              "resuelto."]
+    L += ["", "❓ " + esc.pregunta_extramuestral]
+    return "\n".join(L)
+
+
+def _alternativas_escalera(esc, rec: str) -> str:
+    """Los peldaños DESCARTADOS con su razón, para el `alternativas` del guion.
+
+    Es lo que convierte un nodo en un argumento en vez de una etiqueta: sin
+    esto el guion dice qué se eligió y no qué se descartó ni por qué, que es
+    justo lo que hace falta para no volver a intentarlo.
+    """
+    partes = []
+    for p in esc.peldanos:
+        if p.nivel == rec:
+            continue
+        if not p.estimado:
+            partes.append(f"{p.nivel} ({p.nombre}): no estimable")
+            continue
+        pega = (f"deja vecino {p.treadway[0].vecino_anomalo}" if p.deja_vecino
+                else "no deja ruido blanco" if not p.adecuado
+                else "se sostiene, pero no había razón para subir a él")
+        partes.append(f"{p.nivel} ({p.nombre}): AIC {p.aic:.2f}, {pega}")
+    return " · ".join(partes)
+
+
+def _record_node_to_guion(guion_path: str, nodo: str, decidido: str,
+                          razon: str, evidencia: str = "",
+                          alternativas: str = "",
+                          decidido_por: str = "analista+LLM") -> str:
+    """Escribe un NODO de decisión en el guion. Versión interna de `guion_node`.
+
+    Existe para que una herramienta que TOMA una decisión pueda dejarla escrita
+    sin obligar al operador a llamar aparte — y sobre todo para que
+    `alternativas` venga rellena de verdad, con lo que se estimó y descartó, en
+    vez de quedarse vacía porque nadie se acordó.
+    """
+    from art.guion import (Guion, GuionEntry, load_guion, save_guion,
+                           infer_parent)
+    from datetime import datetime
+    gp = os.path.expanduser(guion_path)
+    os.makedirs(os.path.dirname(gp) or ".", exist_ok=True)
+    if os.path.exists(gp):
+        g = load_guion(gp)
+    else:
+        serie = os.path.basename(gp).replace("_guion.json", "").replace("guion.json", "")
+        g = Guion(series=serie or "serie", analyst="",
+                  created=datetime.now().strftime("%Y-%m-%d"))
+    version = (max(e.version for e in g.entries) + 1) if g.entries else 1
+    g.entries.append(GuionEntry(
+        version=version, name=nodo, inp_path="",
+        timestamp=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        spec={}, stats=None, equation="",
+        decision=f"{nodo} = {decidido}", rationale=razon,
+        problems_found="", next_version="",
+        parent=infer_parent(g), kind="node",
+        node={"nodo": nodo, "decidido": decidido, "evidencia": evidencia,
+              "alternativas": alternativas},
+        decided_by=decidido_por,
+    ))
+    save_guion(g, gp)
+    return f"◆ nodo n{version} — **{nodo} = {decidido}**"
 
 
 def _record_to_guion(
@@ -4599,7 +4698,14 @@ def suggest_intervention_form(inp_path: str, output_path: str,
     output_path       : path to write the updated .inp
     date              : observation date "MM/YYYY" or "QN/YYYY" or "YYYY".
                         Leave empty ("") to auto-select the most extreme residual.
-    form              : "pulse", "step", "ramp" or "auto" (heuristic)
+    form              : "pulse", "step", "ramp" — o **"auto"**, que corre la
+                        ESCALERA DE OCKHAM: estima los peldaños en orden (1a
+                        escalón permanente, 1b impulso transitorio, 2 episodio
+                        de L+1 escalones) y sube sólo cuando algo lo justifica
+                        —Treadway, inadecuación, duración del episodio o
+                        dominio—. **El AIC no arbitra la subida.** Deja el nodo
+                        de decisión en el guion con las alternativas descartadas
+                        y la razón de cada descarte.
     context_hint      : free-text note about the economic event (for logging)
     include_histogram : return histogram PNG (default False — saves tokens
                         during the outlier cycle; set True for final round)
@@ -4688,25 +4794,51 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                 raise ValueError(f"Date {date} gives obs={at_0+1}, outside series range [1, {ts.nobs}].")
             date_note = f"Fecha: **{date}**"
 
+        n_omega = 1
+        escalera_txt = ""
+        escalera_alt = ""
         if form == "auto":
-            # Same step/pulse rule as the autonomous loop (policy.decide_form)
+            # LA ESCALERA DE OCKHAM (F3), no la vieja comprobación de adyacencia.
+            # `decide_form` devolvía "step" o "pulse" mirando si un vecino era
+            # extremo — dos formas elegidas por una regla, sin estimar ninguna
+            # alternativa. La escalera ESTIMA los peldaños en orden y sube sólo
+            # cuando algo lo justifica: Treadway, inadecuación, duración del
+            # episodio o dominio. El AIC no arbitra.
             from art.diagnosis import diagnose
             from art import policy
+            from art.escalera import escalera_de_ockham
             diag_tmp = diagnose(m_src, z_threshold=policy.THRESHOLDS["intervention_form"])
-            # BUG-0067: `decide_form` mira si un vecino también es extremo, así
-            # que los dos argumentos tienen que estar en el MISMO espacio. Los
-            # extremos vienen en índices de residuo y `at_0` está en la serie:
-            # se suben los extremos, no se baja `at_0` --que es el que va a ir al
-            # modelo--. En la rama de fecha manual el desajuste existía igual.
-            extreme_obs = {obs + _desfase for obs, _ in diag_tmp.extreme}
-            form = policy.decide_form(at_0 + 1, extreme_obs)
+            # BUG-0067: los extremos vienen en índices de RESIDUO y `at_0` está
+            # en la serie. Se suben los extremos, no se baja `at_0`, que es el
+            # que va al modelo.
+            eps = policy.decide_episodios(diag_tmp.extreme, d=int(m_src.d))
+            obs_res = at_0 + 1 - _desfase
+            ep = next((e for e in eps if e.inicio <= obs_res <= e.fin), None)
+            if ep is None:
+                # fecha fuera de todo episodio detectado: se cae a la regla
+                # simple, que para un suceso aislado es la respuesta correcta
+                extreme_obs = {obs + _desfase for obs, _ in diag_tmp.extreme}
+                form = policy.decide_form(at_0 + 1, extreme_obs)
+                escalera_txt = ("\n\n*La fecha no cae en ningún episodio "
+                                "detectado; forma decidida por la regla simple.*")
+            else:
+                try:
+                    dom = policy.decide_domain(ts)
+                except Exception:
+                    dom = "generic"
+                esc = escalera_de_ockham(m_src, ep, dominio=dom)
+                rec = esc.recomendado or "1b"
+                form, n_omega = {"1a": ("step", 1), "1b": ("impulse", 1),
+                                 "2": ("step", ep.n_escalones)}[rec]
+                escalera_txt = _texto_escalera(esc, rec)
+                escalera_alt = _alternativas_escalera(esc, rec)
 
         # Create new Intervention with correct at= (0-based index)
         itv = fue.Intervention(
             type=form,
             at=at_0,
-            omega=[0.0],
-            omega_free=[True],
+            omega=[0.0] * n_omega,
+            omega_free=[True] * n_omega,
         )
 
         # Build updated model with the new intervention appended
@@ -4745,6 +4877,30 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         # se revierten: si no queda registrada con su padre, la vuelta atrás
         # pierde el punto al que volver.
         guion_note = ""
+        # EL NODO DE DECISIÓN, antes del modelo. Sin él el guion registra el
+        # modelo estimado y no la DECISIÓN de forma que lo precede — y esa
+        # decisión, con sus alternativas descartadas y la razón de cada
+        # descarte, es lo que hace que el recorrido se pueda discutir después.
+        if escalera_alt:
+            try:
+                gp_nodo = guion_path or _derive_guion_path(output_path, m_fit)
+                _record_node_to_guion(
+                    gp_nodo, nodo="intervenciones",
+                    decidido=(f"{form}"
+                              + (f" con {n_omega} escalones" if n_omega > 1 else "")
+                              + f" en obs {at_0 + 1}"),
+                    razon=(guion_rationale or
+                           ("; ".join(esc.razones_para_subir)
+                            if escalera_alt and esc.razones_para_subir
+                            else "la lectura simple se sostiene: absorbe su "
+                                 "fecha, no deja vecino y el modelo es adecuado")),
+                    evidencia=" · ".join(
+                        f"{p.nivel} AIC {p.aic:.2f}" for p in esc.peldanos
+                        if p.estimado) if escalera_alt else "",
+                    alternativas=escalera_alt,
+                    decidido_por="analista+LLM")
+            except Exception:
+                pass
         try:
             lam_fit = float(getattr(m_fit, "boxlam", 0.0) or 0.0)
             guion_note = _record_to_guion(
@@ -4789,9 +4945,12 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             inp_path=inp_path, pre_path=new_pre_path,
         )
 
+        _forma_txt = form.upper() + (f" ({n_omega} escalones en el nivel)"
+                                     if n_omega > 1 else "")
         text = (
-            f"**Intervención añadida:** {form.upper()}  {date_note}{context_str}\n\n"
+            f"**Intervención añadida:** {_forma_txt}  {date_note}{context_str}\n\n"
             + eq_text
+            + escalera_txt
             + "\n\n---\n\n"
             + diag.summary + "\n\n---\n" + diag.recommendation
             + scan_section
@@ -5023,7 +5182,7 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
             if rd.stop_reason == "no_new":
                 log.append("  Sin nuevas intervenciones que añadir.")
             elif rd.added:
-                itv_labels = ", ".join(f"{f.upper()} obs {at+1}" for at, f in rd.added[:5])
+                itv_labels = ", ".join(_etiqueta_itv(t) for t in rd.added[:5])
                 log.append(f"  → Añadidas: {itv_labels}")
 
         round_num = result.rounds[-1].round_num if result.rounds else 0

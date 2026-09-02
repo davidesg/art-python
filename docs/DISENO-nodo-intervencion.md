@@ -581,11 +581,67 @@ espigas, no cambios de nivel. En ∇, en cambio, un escalón de nivel es UN impu
 —el diccionario de §2.1— y por eso se ve en la práctica, donde estas series se
 trabajan diferenciadas. Queda anotado en las pruebas.
 
-### F4 · El nodo en el protocolo
+### F4 · El nodo en el protocolo — ✅ HECHO (2026-09-03)
 
-Cablear en `suggest_intervention_form` y en `guided_identification`, con su nodo
-de guion (`node = {nodo, decidido, evidencia, alternativas}`) y las alternativas
-rellenas de verdad — que es justo lo que las hace un argumento y no una etiqueta.
+#### Carril guiado
+
+`suggest_intervention_form(form="auto")` corre **la escalera de Ockham** en vez
+de la comprobación de adyacencia de `decide_form`. La salida enseña los tres
+peldaños con su AIC, su ω(1) y su veredicto de Treadway, marca el elegido, y
+—esto es lo que importa— **dice por qué se subió**, o dice que no hubo razón.
+
+Y deja el **nodo de decisión** en el guion, antes de la entrada del modelo, con
+las alternativas rellenas de verdad:
+
+```
+ nodo        : intervenciones = step con 3 escalones en obs 61
+ razón       : **Treadway**: la lectura simple deja un anómalo de vecino…
+ evidencia   : 1a AIC 643.00 · 1b AIC 584.55 · 2 AIC 540.22
+ ALTERNATIVAS: 1a (escalón permanente): AIC 643.00, deja vecino después ·
+               1b (impulso transitorio): AIC 584.55, deja vecino después
+```
+
+Es lo que convierte un nodo en un **argumento** y no en una etiqueta: sin
+`alternativas` el guion dice qué se eligió y no qué se descartó ni por qué, que
+es justamente lo que hace falta para no volver a intentarlo.
+
+Una forma explícita (`form="pulse"`) es una orden del analista y **no** dispara
+la escalera.
+
+#### Carril autónomo
+
+`decide_interventions` devuelve ahora **`(at, forma, n_omega)`**. Ahí no se
+corre la escalera entera —serían tres estimaciones por atípico y por ronda,
+dentro del bucle— sino su parte gratis: la **duración del episodio**, que fija
+cuántos ω lleva la intervención.
+
+`_make_model` acepta la tripleta y sigue aceptando el par, y las etiquetas de
+ronda enseñan el número: `STEP(3) obs 61` es un episodio, `STEP obs 61` es un
+cambio de nivel. Con el par no se podía distinguir, y ése era el defecto.
+
+#### La regresión que la suite cazó, y que enseña la regla
+
+La primera versión cambiaba la forma **siempre que hubiera dos extremos
+adyacentes**. El golden del pipeline lo rechazó con números: **AIC 2382,2 →
+2416,2**, tres rondas en vez de dos, cuatro intervenciones en vez de tres.
+
+La causa era el diccionario otra vez. Con `d=1`, dos extremos adyacentes en ∇
+son **UN** período alterado en el nivel, no dos. La rama de episodio los
+agrupaba, resolvía a forma escalar por `duracion_nivel == 1`, **y descartaba el
+segundo extremo** por considerarlo cubierto. Perdía una intervención.
+
+La regla que queda, conservadora y comprobada en las cuatro lecturas:
+
+| caso | resultado |
+|---|---|
+| atípico suelto | `(at, 'pulse', 1)` — como siempre |
+| d=0, dos adyacentes → 2 períodos en el nivel | `(at, 'step', 3)` — **un** episodio |
+| d=1, dos adyacentes → 1 período en el nivel | dos formas escalares — como siempre |
+| d=1, tres adyacentes → 2 períodos en el nivel | `(at, 'step', 3)` — **un** episodio |
+
+**Sólo se cambia de forma cuando el episodio dura más de un período EN EL
+NIVEL.** Y el golden hizo aquí exactamente su trabajo: rechazar un cambio que
+parecía una mejora conceptual y era una pérdida medida.
 
 ### Orden y dependencias
 

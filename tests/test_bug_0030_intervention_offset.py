@@ -88,9 +88,12 @@ def test_el_pipeline_pasa_el_desfase(monkeypatch, caso):
     vistos = []
     original = pol.DefaultPolicy.decide_interventions
 
-    def espia(self, extreme, existing_ats, offset=0):
-        vistos.append(offset)
-        return original(self, extreme, existing_ats, offset)
+    # F4 añadió `d` a la firma: la posición necesita el desfase `d + D·s` y la
+    # DURACIÓN del episodio necesita `d` — son las DOS conversiones entre el
+    # espacio de residuos y el del nivel, y las dos tienen que llegar aquí.
+    def espia(self, extreme, existing_ats, offset=0, d=0):
+        vistos.append((offset, d))
+        return original(self, extreme, existing_ats, offset, d)
 
     monkeypatch.setattr(pol.DefaultPolicy, "decide_interventions", espia)
 
@@ -99,8 +102,10 @@ def test_el_pipeline_pasa_el_desfase(monkeypatch, caso):
                      decision_policy=pol.DefaultPolicy())
 
     assert vistos, "el bucle no llegó a pedir intervenciones"
+    assert all(dd == vistos[0][1] for _, dd in vistos), \
+        "la diferenciación tiene que llegar igual en todas las rondas"
     esperado = int(res.d) + int(res.D) * int(ts.freq)
-    assert all(o == esperado for o in vistos), (
+    assert all(o == esperado for o, _ in vistos), (
         f"el llamador no pasa el desfase correcto: esperaba {esperado}, "
         f"vistos {vistos}")
     assert esperado >= 1, "un modelo con d>=1 tiene desfase, no cero"

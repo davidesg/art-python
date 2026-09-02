@@ -577,7 +577,10 @@ def _make_model(ts, lam: float, d: int, D: int,
     (BUG-0005). When `seasonal is None` it defaults to `n_harmonics>0`, correct
     for the common freq>=4 case; callers that know the seasonality decision
     (decision != "A") should pass `seasonal` explicitly to cover freq=2.
-    extra_itvs : list of (at_0based, form_str) tuples for pulse/step/ramp
+    extra_itvs : list of (at_0based, form_str) or (at_0based, form_str, n_omega)
+                 tuples for pulse/step/ramp. `n_omega`     extra_itvs : list of (at_0based, form_str) tuples for pulse/step/rampgt; 1 es la forma general
+                 de un EPISODIO: L+1 escalones en el nivel para un suceso de L
+                 períodos (docs/DISENO-nodo-intervencion.md §2.2).
 
     Known fue C backend bug: combining ar_s (P≥1) AND ma_s (Q≥1) simultaneously
     crashes the C estimator (Aborted/segfault — see fue/TODO.md, AR_s+MA_s entry).
@@ -680,8 +683,14 @@ def _make_model(ts, lam: float, d: int, D: int,
         ma_sf_val = [[True] * Q]  if Q > 0 else []
 
     if extra_itvs:
-        for at_0, form in extra_itvs:
-            itvs.append(fue.Intervention(form, at=int(at_0), omega=[0.0], omega_free=[True]))
+        for spec_itv in extra_itvs:
+            # (at, form) o (at, form, n_omega). El par se sigue aceptando para
+            # que los `extra_itvs` construidos a mano sigan funcionando.
+            at_0, form = spec_itv[0], spec_itv[1]
+            n_om = int(spec_itv[2]) if len(spec_itv) > 2 else 1
+            itvs.append(fue.Intervention(form, at=int(at_0),
+                                         omega=[0.0] * n_om,
+                                         omega_free=[True] * n_om))
 
     return fue.Model(
         ts,
@@ -825,8 +834,9 @@ def _outlier_loop(ts, pol, spec_base, output_path, z_threshold, max_rounds):
         # `d + D*s` observaciones después de la original. Sin ese desfase toda
         # intervención cae antes del anómalo que la disparó.
         new_itvs = pol.decide_interventions(
-            diag.extreme, [at for at, _ in extra_itvs],
-            offset=int(spec_base.d) + int(spec_base.D) * int(ts.freq))
+            diag.extreme, [t[0] for t in extra_itvs],
+            offset=int(spec_base.d) + int(spec_base.D) * int(ts.freq),
+            d=int(spec_base.d))
         if not new_itvs:
             rounds.append(RoundResult(round_num, m_fit, diag, [], "no_new"))
             break
