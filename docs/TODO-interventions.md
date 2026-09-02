@@ -6,6 +6,16 @@ del TFM de Bolivia, nodo A4 de `ITCER` (episodio 2008:4–2009:2)
 
 ---
 
+## Esto es lo que cierra 0.2.0
+
+Decidido el 2026-09-02: **0.1.12 queda en pruebas** y el ciclo no se da por
+cerrado hasta que este nodo esté. Cuando lo esté, la versión sube a **0.2.0** —
+el cambio mayor que el conjunto de la sesión merecía y que 0.1.12 no llevó.
+
+Mientras tanto, 0.1.12 es la versión que se usa y se observa; no la que cierra.
+
+---
+
 ## ⚑ Por qué esto va primero — la medida
 
 Cerradas las cuatro corridas (dos LLM × cuatro runs), **el nodo de intervención es

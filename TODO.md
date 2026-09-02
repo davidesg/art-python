@@ -77,6 +77,10 @@
       fecha en modelos diferenciados, la convención de signo de la FLT, y los
       armónicos contados como intervenciones en la cabecera.
 
+      **Esto es lo que cierra 0.2.0.** 0.1.12 queda en pruebas: el ciclo no se
+      da por cerrado hasta que el nodo esté, y entonces la versión sube con el
+      cambio mayor que el conjunto merece.
+
       Abierto 2026-08-26; reordenado y priorizado 2026-09-02 con la medida de las
       cuatro corridas.
 

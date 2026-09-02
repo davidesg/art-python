@@ -26,6 +26,18 @@ y test.** La suite pasa de 787 a 929 tests.
 > la versión —187 ficheros, +24.481 líneas, 4.366 de ellas en `src/`— dice lo
 > mismo: por alcance esto habría merecido un 0.2.0.
 
+> ### Esta versión es un escalón, no un destino
+>
+> **0.1.12 queda EN PRUEBAS.** El ciclo que abre no está cerrado: falta el nodo
+> de intervención por episodios, que es la palanca de mayor valor medido del
+> proyecto —entre 7 y 15 puntos de AIC, y sólo una de ocho corridas de la réplica
+> encontró la segunda intervención del episodio 2008-09 (ver
+> `docs/TODO-interventions.md`, prioridad máxima).
+>
+> **Cuando ese nodo esté, el ciclo se completa y la versión sube a 0.2.0**, con
+> el cambio mayor que el conjunto merece. Hasta entonces 0.1.12 se usa y se
+> observa: es la que hay, no la que cierra.
+
 Salieron de replicar un TFM de econometría por tres caminos independientes: el
 modo guiado, y dos LLM distintos trabajando en chats sin contexto previo sobre
 las mismas tres series. **Seis los encontraron esos analistas**, y uno de ellos
