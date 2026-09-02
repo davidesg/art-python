@@ -294,3 +294,201 @@ def describe_ltf(omega: Sequence[float],
                   nu_nivel=niv.nu.tolist(), srf_nivel=niv.srf.tolist(),
                   nu_dif=dif.nu.tolist(), srf_dif=dif.srf.tolist()),
     )
+
+
+# ---------------------------------------------------------------------------
+# Superposición: la hipótesis ENCIMA de lo observado
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Superposicion:
+    """Cómo de bien explica una forma hipotética lo que se ve en el entorno.
+
+    Tres números que separan tres preguntas distintas, y que se leen sin
+    necesidad de mirar la figura —así sirven también al carril autónomo:
+
+    `escala`  cuánto hay que multiplicar la respuesta simulada para que encaje.
+              Lejos de 1 con ω estimados dice que la AMPLITUD no es la que se
+              creía; con ω unitarios es simplemente la magnitud del suceso.
+    `r2`      qué fracción de la suma de cuadrados del entorno explica la forma
+              ya escalada. Bajo = la FORMA no es ésa, por mucho que la amplitud
+              cuadre.
+    `z_resto` el mayor residuo que queda en el entorno después de quitar la
+              forma escalada, en unidades de desviación típica global. Es el
+              más interpretable: si tras ajustar la forma sigue habiendo un 4,
+              la hipótesis no cubre lo que hay.
+    """
+
+    k: np.ndarray                  # posiciones 1-based de la ventana mostrada
+    observado: np.ndarray
+    simulado: np.ndarray           # ya escalado
+    resto: np.ndarray              # observado − simulado
+    at: int
+    escala: float
+    r2: float
+    z_resto: float
+    sd: float
+    entrada: str
+
+    @property
+    def la_forma_explica(self) -> bool:
+        """Criterio de lectura, no veredicto: la forma cubre lo que hay si
+        explica la mayor parte del entorno y no deja nada extremo detrás."""
+        return self.r2 >= 0.70 and abs(self.z_resto) < 3.0
+
+
+def superpone(observado: Sequence[float],
+              at: int,
+              omega: Sequence[float],
+              delta: Sequence[float] = (),
+              b: int = 0,
+              d: int = 0,
+              ventana: int = 8,
+              entrada: str = "escalon") -> Superposicion:
+    """Pone la respuesta simulada encima de lo observado, en el ENTORNO.
+
+    Parameters
+    ----------
+    observado : la serie sobre la que se mira — normalmente los RESIDUOS de un
+                modelo SIN la intervención, que es exactamente la parte que la
+                intervención tiene que explicar.
+    at        : posición 1-based donde arranca el suceso, en el índice de
+                `observado`.
+    omega,
+    delta, b  : la hipótesis de forma, con la convención de fue.
+    d         : diferenciación del modelo. `observado` está diferenciado, así
+                que la respuesta hay que diferenciarla igual para compararlas.
+    ventana   : períodos a mostrar antes y después del soporte de la respuesta.
+    entrada   : "escalon" usa la respuesta al escalón (el camino del nivel, que
+                es el lenguaje homogeneizado del nodo); "impulso" usa la IRF.
+
+    La escala se ajusta por mínimos cuadrados por el origen, y por eso `escala`
+    y `r2` separan dos preguntas: la amplitud y la forma. Un ajuste de forma
+    bueno con escala 3 dice «es esta forma, tres veces más grande»; una escala
+    1 con r2 bajo dice «esta forma no es».
+    """
+    y = np.asarray(observado, dtype=float)
+    n = len(y)
+    if not (1 <= at <= n):
+        raise ValueError(f"at={at} fuera de la serie observada (1..{n}).")
+
+    s = len(omega) - 1
+    K = max(s + ventana, 2 * ventana)
+    r = respuesta_flt(omega, delta, b=b, K=K, d=d)
+    base = r.srf if entrada == "escalon" else r.nu
+    if entrada not in ("escalon", "impulso"):
+        raise ValueError(f"entrada={entrada!r}: 'escalon' o 'impulso'.")
+
+    # soporte efectivo: hasta donde la respuesta deja de moverse
+    nz = np.nonzero(np.abs(base) > 1e-12)[0]
+    fin_sop = int(nz[-1]) if len(nz) else 0
+
+    ini = max(1, at - ventana)
+    fin = min(n, at + fin_sop + ventana)
+    k = np.arange(ini, fin + 1)
+    obs = y[ini - 1:fin]
+
+    sim = np.zeros_like(obs)
+    for j in range(fin_sop + 1):
+        pos = at + j
+        if ini <= pos <= fin:
+            sim[pos - ini] = base[j]
+
+    den = float(sim @ sim)
+    escala = float(obs @ sim) / den if den > 1e-15 else 0.0
+    sim_esc = escala * sim
+    resto = obs - sim_esc
+
+    ss_tot = float(obs @ obs)
+    r2 = 1.0 - float(resto @ resto) / ss_tot if ss_tot > 1e-15 else 0.0
+    sd = float(np.std(y, ddof=0)) or 1.0
+    z_resto = float(np.max(np.abs(resto)) / sd)
+
+    return Superposicion(k=k, observado=obs, simulado=sim_esc, resto=resto,
+                         at=at, escala=escala, r2=r2, z_resto=z_resto,
+                         sd=sd, entrada=entrada)
+
+
+def describe_superposicion(observado: Sequence[float],
+                           at: int,
+                           omega: Sequence[float],
+                           delta: Sequence[float] = (),
+                           b: int = 0,
+                           d: int = 0,
+                           ventana: int = 8,
+                           entrada: str = "escalon",
+                           etiqueta: str = ""):
+    """La superposición, presentada. Figura para el carril guiado; los tres
+    números de `Superposicion` sirven en los dos."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from art.describe import Description, _fig_b64
+
+    sp = superpone(observado, at, omega, delta, b=b, d=d,
+                   ventana=ventana, entrada=entrada)
+
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(10, 5.4), sharex=True,
+                                 gridspec_kw=dict(height_ratios=[2.2, 1]))
+    a1.axhline(0, color="#111", lw=0.8)
+    a1.axvline(sp.at, color="#f59e0b", lw=8, alpha=0.30)
+    a1.plot(sp.k, sp.observado, color="#1d4ed8", lw=1.2, marker="o", ms=4,
+            label="observado", zorder=3)
+    a1.plot(sp.k, sp.simulado, color="#b91c1c", lw=1.6, ls="--", marker="s",
+            ms=4, label=f"hipótesis × {sp.escala:.3g}", zorder=2)
+    a1.legend(fontsize=8, loc="best")
+    a1.set_ylabel("nivel" if d == 0 else "∇")
+    a1.grid(alpha=0.25)
+    a1.set_title(etiqueta or f"Superposición en el entorno de obs {sp.at}",
+                 fontsize=10)
+
+    a2.axhline(0, color="#111", lw=0.8)
+    for u in (-3, 3):
+        a2.axhline(u * sp.sd, color="#b91c1c", ls=":", lw=0.9)
+    a2.bar(sp.k, sp.resto, color="#6b7280", width=0.65)
+    a2.set_ylabel("resto")
+    a2.set_xlabel("observación")
+    a2.grid(alpha=0.25)
+    fig.tight_layout()
+    b64 = _fig_b64(fig)
+    plt.close(fig)
+
+    if sp.la_forma_explica:
+        lectura = ("**La forma cubre lo que hay.** Explica la mayor parte del "
+                   "entorno y no deja nada extremo detrás.")
+    elif sp.r2 < 0.70:
+        lectura = (f"**La FORMA no encaja** (R² = {sp.r2:.2f}). No es cuestión "
+                   "de amplitud: el perfil observado es otro. Prueba otro "
+                   "número de escalones, o mira si hay denominador.")
+    else:
+        lectura = (f"La forma encaja pero **deja un residuo de z = "
+                   f"{sp.z_resto:+.2f}** en el entorno: hay algo más que esta "
+                   "hipótesis no recoge.")
+
+    lineas = [
+        f"### Superposición — entorno de la observación {sp.at}",
+        "",
+        f"escala **{sp.escala:.4g}** · forma explicada **R² = {sp.r2:.3f}** · "
+        f"mayor resto **z = {sp.z_resto:+.2f}**",
+        "",
+        lectura,
+        "",
+        "*La escala y el R² separan dos preguntas: la AMPLITUD y la FORMA. Un "
+        "R² alto con escala 3 dice «es esta forma, tres veces mayor»; una "
+        "escala 1 con R² bajo dice «esta forma no es».*",
+    ]
+
+    return Description(
+        summary="\n".join(lineas),
+        figure_b64=b64,
+        recommendation=(
+            "Si la forma no encaja, no la estimes: cambia la hipótesis y vuelve "
+            "a superponer. Estimar una forma que ya se ve incompatible gasta un "
+            "modelo para confirmar lo que el gráfico decía gratis."),
+        data=dict(at=sp.at, escala=sp.escala, r2=sp.r2, z_resto=sp.z_resto,
+                  entrada=sp.entrada, d=d, omega=list(omega),
+                  delta=list(delta), b=b,
+                  k=sp.k.tolist(), observado=sp.observado.tolist(),
+                  simulado=sp.simulado.tolist(), resto=sp.resto.tolist(),
+                  la_forma_explica=sp.la_forma_explica),
+    )

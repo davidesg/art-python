@@ -147,4 +147,4 @@ def test_describe_avisa_de_la_ganancia_no_acotada():
 
 def test_la_herramienta_mcp_esta_registrada():
     import art.mcp_server as srv
-    assert hasattr(srv, "simulate_intervention_shape")
+    assert hasattr(srv, "intervention_plot")

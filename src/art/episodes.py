@@ -312,7 +312,7 @@ def describe_episodios(residuals: Sequence[float],
             "Juzga la AGRUPACIÓN sobre el gráfico: ¿los sombreados son sucesos "
             "o son varias cosas cosidas? Si no te convence, mueve la ventana "
             f"(ahora {ventana}). Para ver qué forma implica cada episodio, "
-            "`simulate_intervention_shape` la dibuja antes de estimar nada."),
+            "el `intervention_plot` la dibuja antes de estimar nada."),
         data=dict(
             ventana=ventana, umbral=umbral, offset=offset,
             episodios=[dict(inicio=e.inicio, fin=e.fin, duracion=e.duracion,

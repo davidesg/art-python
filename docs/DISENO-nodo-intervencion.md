@@ -213,7 +213,8 @@ permanente tiene que llegar al final de la serie.
 
 `src/art/ltf.py`. Función pura
 `respuesta_flt(omega, delta, b, K, d) → RespuestaFLT`, con `describe_ltf`
-encima para la figura y la herramienta MCP `simulate_intervention_shape`.
+encima para la figura y la herramienta MCP `intervention_plot` — el
+**gráfico de intervención**, que es el nombre de este tipo de gráfico.
 
 **Validado al dígito contra el C.** `tests/ltf_referencia/harness.c` lleva el
 bloque numérico de `ltf.c` **copiado verbatim** —copiado y no reescrito a
@@ -239,6 +240,45 @@ misma respuesta en las dos escalas a la vez.
 Guardas: `d≥2` levanta `ValueError` nombrando la rampa; también `K ≤ s` y `b<0`.
 Con δ(1)=0 la ganancia vuelve NaN y la presentación dice **INADMISIBLE** en vez
 de dibujar una convergencia que no existe.
+
+### F0b · El gráfico de intervención superpuesto — ✅ HECHO (2026-09-02)
+
+`art.ltf.superpone` y `describe_superposicion`. Pone la hipótesis **encima de
+lo observado**, en el ENTORNO del suceso y no sobre la serie entera: sobre 120
+residuos la estructura interna de un suceso es ilegible; recortada a ±8 se lee.
+
+**Tres números que separan tres preguntas**, y que se leen sin mirar la figura
+—así sirven también al carril autónomo, que era la duda al plantearlo:
+
+| | qué contesta | cómo se lee mal si se confunde |
+|---|---|---|
+| `escala` | la **amplitud** | — |
+| `r2` | la **forma** | un R² bajo NO es falta de tamaño: es otro perfil |
+| `z_resto` | lo que queda sin explicar | el más interpretable de los tres |
+
+Medido sobre un DGP de dos impulsos de nivel (9 y 6) con d=1:
+
+| hipótesis | escala | R² | mayor resto | |
+|---|---|---|---|---|
+| ω=(9, 3, 6) — la correcta | **1,071** | 0,887 | z=+1,62 | cubre |
+| ω=(9, 3, 3) — deja cola | 1,183 | 0,851 | z=+1,62 | cubre |
+| ω=(1) — un escalón | 9,491 | 0,559 | z=+3,85 | no cubre |
+| ω=(1,1) — un impulso | 7,065 | 0,618 | z=+3,85 | no cubre |
+
+Sobre el modelo **ajustado** con el DGP verdadero, la escala sale **0,9919**.
+
+**El límite, escrito como prueba y no como nota al pie.** La superposición **no
+distingue (9,3,6) de (9,3,3)** —la correcta de la que deja cola permanente—:
+0,887 contra 0,851. La diferencia está en la **ganancia a largo plazo**, que es
+una propiedad del comportamiento futuro y no de la forma local. Eso lo dirime el
+contraste ω(1)=0. El reparto es el bueno: **el gráfico descarta lo incompatible
+barato, y el contraste ve lo que el gráfico no puede.**
+
+**Nombre.** El tipo de gráfico se llama **gráfico de intervención**
+(*intervention plot*), y con ese nombre las dos herramientas que había —la
+hipótesis sola y la superpuesta— son la misma cosa: se funden en
+**`intervention_plot`**, con `inp_path` opcional. Sin él dibuja la hipótesis;
+con él y con `at`, la superpone.
 
 ### F1 · La ganancia y su contraste — *en buena parte hecha por la auditoría*
 
@@ -396,7 +436,7 @@ antes de aceptarse. Es una regla de dominio y su sitio es `policy`.
 ### Y el simulador es el árbitro de la compatibilidad
 
 Cuál sea la configuración de nivel compatible con una forma observada en
-diferencias no se decide de memoria: se dibuja. `simulate_intervention_shape`
+diferencias no se decide de memoria: se dibuja. El `intervention_plot`
 (F0) está exactamente para eso — poner la hipótesis al lado de lo observado
 antes de estimar nada.
 

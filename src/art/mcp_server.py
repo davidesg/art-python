@@ -866,6 +866,126 @@ def boxcox_analysis(inp_path: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Tool: gráfico de intervención
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def intervention_plot(omega: list[float],
+                      delta: list[float] | None = None,
+                      b: int = 0,
+                      inp_path: str = "",
+                      at: int = 0,
+                      ventana: int = 8,
+                      K: int = 24,
+                      entrada: str = "escalon",
+                      sobre: str = "residuos",
+                      label: str = "") -> list:
+    """
+    GRÁFICO DE INTERVENCIÓN — la forma de una intervención, sola o superpuesta
+    a lo observado.
+
+    Dos modos, según se pase `inp_path` y `at`:
+
+      SIN inp_path  → dibuja la HIPÓTESIS SOLA: respuesta al impulso y al
+                      escalón, en el nivel y en primeras diferencias, con la
+                      ganancia a largo plazo. Para razonar sobre una forma antes
+                      de tener modelo.
+      CON inp_path
+      y `at`        → SUPERPONE esa hipótesis sobre lo observado en el ENTORNO
+                      del suceso, y devuelve tres números que dicen si encaja.
+
+    POR QUÉ EXISTE. La forma de una intervención no se identifica a ojo: `fue`
+    permite modelizar un suceso con varios parámetros (FLT), y en cuanto `s`
+    crece la figura deja de tener lectura obvia. Se usa ANTES de estimar — si la
+    forma ya se ve incompatible, estimarla gasta un modelo para confirmar lo que
+    el gráfico decía gratis.
+
+    EL CONVENIO. Toda intervención se especifica **en el nivel de la serie**,
+    sea cual sea la d con la que se trabaje:
+
+      · escalón en el nivel  → efecto PERMANENTE  → un impulso en ∇
+      · impulso en el nivel  → efecto TRANSITORIO → dos impulsos en ∇ que suman 0
+      · N escalones en el nivel con ganancia NULA ≡ N−1 impulsos en el nivel,
+        es decir un EPISODIO de duración N−1
+
+    LA CONVENCIÓN DE SIGNO, que es donde se cae: fue guarda el numerador como
+    ω(B) = ω₀ − ω₁B − ⋯, así que la ganancia es (ω₀−ω₁−⋯−ω_s)/(1−δ₁−⋯−δ_r) y
+    NO la suma de los ω. Pásalos tal como salen del `.out`.
+
+    LOS TRES NÚMEROS del modo superpuesto separan tres preguntas, y se leen sin
+    mirar la figura — así sirven también al carril autónomo:
+
+      escala       cuánto hay que multiplicar la forma para que encaje. Cerca de
+                   1 con ω estimados: la amplitud era la que se creía. Muy
+                   lejos: se está estirando una forma que no da.
+      R²           qué fracción del entorno explica la forma YA escalada. Bajo
+                   con escala buena ⇒ el problema no es la amplitud, es el
+                   PERFIL.
+      mayor resto  el pico que sobrevive a quitar la forma, en desviaciones
+                   típicas. Si tras ajustar sigue habiendo un 4, la hipótesis no
+                   cubre lo que hay.
+
+    DÓNDE NO LLEGA: la superposición **no** distingue una forma correcta de otra
+    que deja una cola permanente pequeña — el R² apenas se mueve, porque la
+    diferencia está en la GANANCIA A LARGO PLAZO, propiedad del comportamiento
+    futuro y no de la forma local. Eso lo dirime el contraste ω(1)=0 de
+    `test_interventions`. El gráfico descarta lo incompatible barato; el
+    contraste ve lo que el gráfico no puede.
+
+    Parameters
+    ----------
+    omega    : ω₀…ω_s del numerador, en el orden del `.out`
+    delta    : δ₁…δ_r del denominador; vacío o None si no hay
+    b        : retardo muerto en períodos
+    inp_path : (superposición) .inp de un modelo estimado SIN la intervención
+               que se hipotetiza — sus residuos son justo lo que ella debe
+               explicar
+    at       : (superposición) posición 1-based donde arranca el suceso
+    ventana  : (superposición) períodos a mostrar antes y después del soporte
+    K        : (hipótesis sola) hasta qué retardo simular
+    entrada  : "escalon" usa la respuesta al escalón —el camino del nivel, que
+               es el lenguaje homogeneizado del nodo—; "impulso" usa la IRF
+    sobre    : (superposición) "residuos" (por defecto) o "serie"
+    label    : etiqueta para el título
+
+    Alcance: d = 0 y d = 1. Con d=2 un impulso en la serie transformada es una
+    RAMPA en el nivel y el diccionario de arriba tiene otra fila.
+    """
+    try:
+        from art.ltf import describe_ltf, describe_superposicion
+        if not inp_path:
+            desc = describe_ltf(omega, delta or (), b=b, K=K, etiqueta=label)
+            _show_fig(desc.figure_b64, "intervention_plot")
+            return _result(desc)
+
+        import numpy as np
+        if not at:
+            return _err("con `inp_path` hay que dar `at`: dónde arranca el "
+                        "suceso, 1-based, en el índice de aquello sobre lo que "
+                        "se mira (ver `sobre`).")
+        ts, m = _load_ts_model(inp_path)
+        m.fit()
+        if sobre == "residuos":
+            if m.residuals is None:
+                return _err("el modelo no tiene residuos: ¿se estimó?")
+            y = np.asarray(m.residuals.data, dtype=float)
+            d_eff = int(getattr(m, "d", 0))
+        elif sobre == "serie":
+            y = np.asarray(ts.data, dtype=float)
+            d_eff = 0
+        else:
+            return _err(f"sobre={sobre!r}: 'residuos' o 'serie'.")
+        desc = describe_superposicion(
+            y, int(at), omega, delta or (), b=b, d=d_eff,
+            ventana=int(ventana), entrada=entrada,
+            etiqueta=label or f"{os.path.basename(inp_path)} — entorno de obs {at}")
+        _show_fig(desc.figure_b64, "intervention_plot")
+        return _result(desc)
+    except Exception as e:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
 # Tool: episodios — agrupar los extremos en SUCESOS
 # ---------------------------------------------------------------------------
 
@@ -901,7 +1021,7 @@ def residual_episodes(inp_path: str,
     threshold : |z| a partir del cual un residuo es extremo
 
     Juzga la agrupación sobre el gráfico antes de estimar nada. Para ver qué
-    FORMA implica un episodio, `simulate_intervention_shape` la dibuja.
+    FORMA implica un episodio, el `intervention_plot` la dibuja.
     """
     try:
         import numpy as np
@@ -922,60 +1042,6 @@ def residual_episodes(inp_path: str,
         off = int(getattr(m, "d", 0)) + int(getattr(m, "D", 0)) * int(ts.freq or 1)
         desc = describe_episodios(r, eps, ventana=v, umbral=threshold, offset=off)
         _show_fig(desc.figure_b64, "episodios")
-        return _result(desc)
-    except Exception as e:
-        return _err(traceback.format_exc())
-
-
-# ---------------------------------------------------------------------------
-# Tool: LTF simulator — dibujar la forma de una intervención
-# ---------------------------------------------------------------------------
-
-@mcp.tool()
-def simulate_intervention_shape(omega: list[float],
-                                delta: list[float] | None = None,
-                                b: int = 0,
-                                K: int = 24,
-                                label: str = "") -> list:
-    """
-    Simula la RESPUESTA de una intervención especificada como FLT y la dibuja
-    en el NIVEL y en primeras diferencias, con su ganancia a largo plazo.
-
-    PARA QUÉ. La forma de una intervención no se identifica a ojo: en cuanto la
-    FLT tiene varios parámetros, la figura del gráfico deja de tener lectura
-    obvia — dos impulsos en el nivel pueden aparecer, en diferencias, con un
-    aspecto que no sugiere dos impulsos. Esta herramienta DIBUJA LA HIPÓTESIS
-    para ponerla al lado del patrón observado y ver si son compatibles.
-
-    No decide nada y no mira los datos: es un simulador.
-
-    EL CONVENIO. Toda intervención se especifica **en el nivel de la serie**,
-    sea cual sea la d con la que se trabaje:
-
-      · escalón en el nivel   → efecto PERMANENTE  → un impulso en ∇
-      · impulso en el nivel   → efecto TRANSITORIO → dos impulsos en ∇ que suman 0
-      · N escalones en el nivel con ganancia NULA ≡ N−1 impulsos en el nivel,
-        es decir un EPISODIO de duración N−1.
-
-    LA CONVENCIÓN DE SIGNO, que es donde se cae: fue guarda el numerador como
-    ω(B) = ω₀ − ω₁B − ⋯, así que la ganancia es (ω₀−ω₁−⋯−ω_s)/(1−δ₁−⋯−δ_r) y
-    NO la suma de los ω. Pásalos tal como salen del `.out`.
-
-    Parameters
-    ----------
-    omega : coeficientes del numerador ω₀…ω_s, en el orden del `.out`
-    delta : coeficientes del denominador δ₁…δ_r; vacío o None si no hay
-    b     : retardo muerto en períodos
-    K     : hasta qué retardo simular
-    label : etiqueta para el título de la figura
-
-    Alcance: d = 0 y d = 1. Con d=2 un impulso en la serie transformada es una
-    RAMPA en el nivel y el diccionario de arriba tiene otra fila.
-    """
-    try:
-        from art.ltf import describe_ltf
-        desc = describe_ltf(omega, delta or (), b=b, K=K, etiqueta=label)
-        _show_fig(desc.figure_b64, "ltf")
         return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
