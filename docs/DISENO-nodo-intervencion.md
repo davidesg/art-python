@@ -308,6 +308,100 @@ escrita en ningún sitio hasta ahora.
 Verificado de punta a punta: DGP con dos impulsos de nivel y d=1 →
 `dur. resid. 3 · dur. nivel 2 · 3 escalones`.
 
+## 2bis. La navaja de Ockham gobierna el nodo
+
+Añadido el 2026-09-02, y **reordena F3**.
+
+### El principio
+
+**Lo más obvio primero.** El análisis de intervención sube por una escalera de
+sofisticación, y sólo se sube un escalón cuando el de abajo no se sostiene.
+
+El caso que lo enseña: se observa un escalón negativo enorme en primeras
+diferencias de un índice de precios.
+
+1. **Lectura de dominio.** Por dominio es poco usual que los precios bajen de
+   forma permanente de esa manera. La forma simple ya es sospechosa.
+2. **Información extramuestral.** Se busca lo que explicaría la forma SIMPLE:
+   una reducción de impuestos, una caída considerable del precio de los
+   combustibles, un cambio de metodología del índice.
+3. **Sólo si no aparece**, se empieza a buscar un episodio — que es la forma más
+   sofisticada. Dos impulsos en el nivel pueden dar esa configuración en
+   primeras diferencias.
+
+### La escalera
+
+| escalón | forma | se sube cuando |
+|---|---|---|
+| **0** | nada — el anómalo no lo es | *(punto de partida)* |
+| **1** | UNA intervención escalar | el residuo es extremo de verdad |
+| **2** | **episodio**: L impulsos en el nivel | la 1 no tiene explicación extramuestral **y** no es adecuada |
+| **3** | FLT con denominador | la respuesta decae y el 2 no lo recoge |
+
+El escalón 0 no es retórico: la sobre-intervención en meses estacionales fue una
+de las causas raíz del run 1 de SF_MEG. Intervenir la señal no es modelizarla.
+
+### Lo que esto PROHÍBE, y es lo importante
+
+**El AIC no arbitra la subida de escalón.** Compara *dentro* de un escalón, o
+confirma una subida ya justificada por otra cosa. Una F3 que estime las
+rivales y se quede con el mejor AIC sube siempre que ajuste mejor, y eso es
+exactamente lo contrario de la navaja: el modelo más sofisticado casi siempre
+ajusta mejor, porque tiene más parámetros.
+
+Lo que justifica subir es (a) implausibilidad de dominio de la forma simple,
+(b) ausencia de explicación extramuestral, o (c) inadecuación — no Δ AIC.
+
+### La explicación tiene que explicar la FORMA, no sólo la fecha
+
+Refinamiento que hace la regla operativa. Una bajada de impuestos explica un
+escalón **permanente**. Una huelga de una semana explica un impulso
+**transitorio**. Si el analista aporta una explicación de suceso permanente pero
+el contraste de ganancia dice transitorio, **la explicación no aplica** y se
+sube igual.
+
+De modo que el registro extramuestral y el contraste de ganancia tienen que
+**concordar**, y cuando no concuerdan eso es información y hay que enseñarla:
+
+| explicación aportada | contraste de ganancia | lectura |
+|---|---|---|
+| permanente (impuesto, metodología) | rechaza ganancia nula | **concuerdan** → escalón 1, cerrado |
+| permanente | no rechaza | **discrepan** → la explicación no cubre lo que hay: subir |
+| transitoria (huelga, temporal) | no rechaza | **concuerdan** → impulso de nivel, cerrado |
+| ninguna | cualquiera | subir al escalón 2 y mirar el episodio |
+
+### Lo que esto exige de la herramienta, y hoy no existe
+
+**Una pregunta cuya respuesta no está en los datos.** Todos los nodos actuales
+leen evidencia de la serie. Éste necesita lo que el analista sabe del mundo:
+«esto es una caída permanente del 4,2 % en un índice de precios en 2008Q4 —
+¿hay un suceso conocido?». Es evidencia, y sólo la tiene el analista; encaja con
+«evidencia ≠ juicio» pero **por un canal que la herramienta no tiene abierto**.
+
+Va al guion como `evidencia` del nodo, que es exactamente para lo que está el
+campo.
+
+*Nota para el carril autónomo, y es medible:* un LLM puede **saber** que Bolivia
+subió los carburantes en diciembre de 2010, o que España subió el IVA en 2012.
+Es una asimetría real entre carriles —el guiado pregunta, el autónomo a veces ya
+lo sabe y a veces lo inventa— y es contrastable. Interesa al nodo y al artículo.
+
+### La lectura de dominio, que ART ya puede hacer
+
+`policy.decide_domain` devuelve `price_index`. Con eso la herramienta puede
+decir, sin preguntar a nadie, que **una caída permanente de nivel en un índice
+de precios es poco usual**, y por tanto que la forma simple necesita respaldo
+antes de aceptarse. Es una regla de dominio y su sitio es `policy`.
+
+### Y el simulador es el árbitro de la compatibilidad
+
+Cuál sea la configuración de nivel compatible con una forma observada en
+diferencias no se decide de memoria: se dibuja. `simulate_intervention_shape`
+(F0) está exactamente para eso — poner la hipótesis al lado de lo observado
+antes de estimar nada.
+
+---
+
 ### F3 · Las especificaciones rivales
 
 Para un episodio de duración k, presentar la familia anidada estimada:
