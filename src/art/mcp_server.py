@@ -2244,8 +2244,16 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
     and skipped by default). Identifies which interventions are non-significant
     and can be removed to simplify the model.
 
-    For interventions with a transfer function (delta ≠ 0), also computes
-    a Wald joint test H₀: g = α·ω = 0.
+    Para cualquier intervención con más de un ω libre, además el Wald conjunto
+    de GANANCIA NULA, H₀: ω(1) = ω₀−ω₁−⋯−ω_s = 0 — que es lo que separa un
+    efecto transitorio de uno permanente (BUG-0071/0072).
+
+    Y LA REGLA DE TREADWAY, que es diagnosis y no bloqueo: si intervienes en una
+    fecha no puedes tener un anómalo de vecino, ni antes ni después; y que la
+    intervención haya funcionado se ve en que los residuos EN LAS FECHAS
+    intervenidas están en la media de los residuos. Un vecino anómalo tiene dos
+    lecturas, las dos errores de representación: la FORMA se queda corta (hay
+    episodio) o la FECHA está desplazada.
 
     Parameters
     ----------
@@ -2272,12 +2280,40 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
         n_sig     = sum(1 for r in results if r.significant)
         n_nosig   = len(results) - n_sig
 
+        # La regla de Treadway. Va AQUÍ, donde el analista ya está juzgando la
+        # intervención, y no en una herramienta aparte: un contraste que dice
+        # que ω es significativa no dice que la REPRESENTACIÓN sea la correcta,
+        # y ésa es justamente la pregunta que queda abierta después del t.
+        treadway = ""
+        try:
+            from art.interventions import check_intervention_fit
+            chks = check_intervention_fit(m)
+            if chks:
+                malas = [c for c in chks if not c.funciona]
+                cab = (f"**{len(chks) - len(malas)} de {len(chks)}** intervenciones "
+                       "pasan la regla de Treadway")
+                treadway = ("\n\n---\n\n### ¿Funcionó la intervención? "
+                            "(regla de Treadway)\n\n" + cab + "\n\n```\n"
+                            + "\n".join(c.summary() for c in chks) + "\n```\n")
+                if malas:
+                    treadway += (
+                        "\nUn vecino anómalo es **evidencia de que la "
+                        "representación elegida es errónea**. Dos lecturas: la "
+                        "FORMA se queda corta —mira `residual_episodes`— o la "
+                        "FECHA está desplazada, que la verosimilitud casi no "
+                        "distingue (BUG-0030: Δ logL = 0,03). El "
+                        "`intervention_plot` superpone la hipótesis sobre el "
+                        "entorno y lo resuelve antes de reestimar.\n")
+        except Exception as _tw:
+            treadway = f"\n\n*[regla de Treadway no disponible: {_tw}]*\n"
+
         text = (
             f"### Contraste de intervenciones — {m.series.name or 'modelo'}\n\n"
             + f"**{n_sig} significativas**, **{n_nosig} prescindibles**"
             + f" (α={alpha:.2f},  df={results[0].df})\n\n"
             + eq_text
             + "\n\n---\n\n" + summary
+            + treadway
         )
         return [TextContent(type="text", text=text)]
 

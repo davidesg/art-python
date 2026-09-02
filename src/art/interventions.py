@@ -543,3 +543,177 @@ def _format_date(year: int, period: int, freq: int) -> str:
         return f"{period:02d}/{year}"
     else:
         return f"{period}/{year}"
+
+
+# ---------------------------------------------------------------------------
+# La regla de Treadway: ¿funcionó la intervención?
+# ---------------------------------------------------------------------------
+#
+# Dos reglas de la escuela, y las dos salen de la misma ecuación:
+#
+#   1. Si intervienes en una fecha, NO puedes tener un anómalo de vecino, ni
+#      antes ni después. Un vecino anómalo es evidencia de que la
+#      REPRESENTACIÓN elegida es errónea.
+#   2. Que la intervención haya funcionado se ve en que los residuos EN LAS
+#      FECHAS de intervención están en la media de los residuos, que es cero.
+#
+# No bloquea nada: es diagnosis.
+#
+# ── Por qué, con la matemática ──────────────────────────────────────────────
+#
+# El modelo es  z_t = ν(B)ξ_t + N_t,  con N_t el ruido ARIMA y a_t sus
+# innovaciones. Sea π(B) = θ(B)⁻¹φ(B)∇^d el filtro que blanquea, de modo que
+#
+#     a_t = π(B)·[ z_t − ν(B)ξ_t ]
+#
+# Con ν(B) = ω(B)/δ(B) y la convención de fue ω(B) = ω₀ − ω₁B − ⋯, la derivada
+# respecto de cada ω_j da el REGRESOR FILTRADO
+#
+#     x_t^(j) = π(B)·[ B^j / δ(B) ]·ξ_t
+#
+# y la condición de primer orden de la verosimilitud, ∂ℓ/∂ω_j = 0, es
+#
+#     Σ_t  a_t · x_t^(j) = 0     para todo j libre
+#
+# Es decir: **los residuos quedan ORTOGONALES a cada regresor filtrado de la
+# intervención.** Son las ecuaciones normales de una regresión, y lo son porque
+# con ARMA y δ fijos la intervención entra LINEALMENTE.
+#
+# **De ahí la regla 2.** En el caso más simple —un impulso puro, s=0, r=0— el
+# regresor es x_t = π_{t−T}, y la condición queda
+#
+#     a_T = − Σ_{k≥1} π_k · a_{T+k}
+#
+# Sin ARMA y con d=0 se tiene π(B)=1, luego π_k = 0 para k≥1 y **a_T = 0
+# EXACTAMENTE**: un ω libre en una fecha absorbe esa observación entera, igual
+# que una variable ficticia en regresión. Con ARMA, a_T es una combinación
+# pequeña de los residuos siguientes — de ahí que la regla se enuncie como
+# «están en la media» y no como «son cero»: es exacta sin filtro y aproximada
+# con él, y el filtro dice cuánto.
+#
+# **Y de ahí la regla 1.** La condición de primer orden sólo obliga a
+# ortogonalidad frente a los regresores QUE SE HAN AJUSTADO. Si el suceso real
+# ocupa T y T+1 y sólo se ajusta un impulso en T, el ω absorbe T y la parte de
+# T+1 no tiene dónde ir: cae entera en a_{T+1}. El vecino anómalo ES la parte no
+# modelizada del mismo suceso.
+#
+# Simétricamente, si se coloca la intervención en T−1 cuando el suceso está en
+# T, el ω absorbe la fecha equivocada y queda un residuo grande en T — que es
+# BUG-0030, donde además la verosimilitud casi no distingue (Δ logL = 0,03).
+#
+# Así que un vecino anómalo tiene exactamente dos lecturas, y las dos son
+# errores de representación: **la forma se queda corta** (hay episodio) o **la
+# fecha está desplazada**.
+
+@dataclass
+class InterventionFitCheck:
+    """Si una intervención hizo su trabajo, según la regla de Treadway."""
+
+    itv_index: int
+    itv_type: str
+    at_0based: int                       # índice en la SERIE
+    fechas: list[int]                    # obs 1-based en los RESIDUOS
+    z_en_fechas: list[float]
+    z_antes: float | None
+    z_despues: float | None
+    umbral_vecino: float
+    umbral_absorcion: float
+    # El residuo CRUDO, porque el enunciado exacto de la escuela es sobre él:
+    # a_T = 0, y por tanto z_T = −media/sd — el tipificado se queda EN LA MEDIA
+    # de los residuos, no en cero. Comprobado: a_T = −3,5·10⁻⁸ sobre ruido
+    # blanco con un impulso libre. Si μ se estima, la media es ~0 y coinciden.
+    residuo_en_fechas: list[float] = field(default_factory=list)
+
+    @property
+    def absorbido(self) -> bool:
+        """Los residuos en las fechas intervenidas están en la media."""
+        return all(abs(v) <= self.umbral_absorcion for v in self.z_en_fechas)
+
+    @property
+    def vecino_anomalo(self) -> str | None:
+        a = self.z_antes is not None and abs(self.z_antes) > self.umbral_vecino
+        d = self.z_despues is not None and abs(self.z_despues) > self.umbral_vecino
+        return ("ambos" if a and d else "antes" if a else
+                "después" if d else None)
+
+    @property
+    def funciona(self) -> bool:
+        return self.absorbido and self.vecino_anomalo is None
+
+    def summary(self) -> str:
+        et = (f"{self.itv_type}[obs {self.at_0based + 1}]")
+        marca = "✓" if self.funciona else "✗"
+        L = [f"  [{self.itv_index:2d}] {et:<22} {marca}"]
+        zs = "  ".join(f"{v:+.2f}" for v in self.z_en_fechas)
+        L.append(f"       z en las fechas: {zs}"
+                 + ("   (en la media de los residuos)" if self.absorbido
+                    else "   ← NO absorbido"))
+        if self.residuo_en_fechas:
+            rs = "  ".join(f"{v:+.3g}" for v in self.residuo_en_fechas)
+            L.append(f"       residuo crudo:   {rs}")
+        vs = []
+        if self.z_antes is not None:
+            vs.append(f"antes {self.z_antes:+.2f}")
+        if self.z_despues is not None:
+            vs.append(f"después {self.z_despues:+.2f}")
+        if vs:
+            L.append(f"       vecinos: {'  ·  '.join(vs)}"
+                     + (f"   ← ANÓMALO ({self.vecino_anomalo})"
+                        if self.vecino_anomalo else ""))
+        if self.vecino_anomalo:
+            L.append("       ⇒ la representación es errónea: o la FORMA se "
+                     "queda corta (hay episodio) o la FECHA está desplazada.")
+        return "\n".join(L)
+
+
+def check_intervention_fit(model,
+                           umbral_vecino: float = 3.0,
+                           umbral_absorcion: float = 1.5
+                           ) -> list[InterventionFitCheck]:
+    """La regla de Treadway sobre cada intervención de un modelo ajustado.
+
+    Diagnosis, no bloqueo: dice si cada intervención hizo su trabajo y, cuando
+    no, cuál de los dos errores de representación es más probable.
+
+    Parameters
+    ----------
+    model            : `fue.Model` ya ajustado
+    umbral_vecino    : |z| a partir del cual un vecino cuenta como anómalo
+    umbral_absorcion : |z| por debajo del cual un residuo está «en la media»
+    """
+    if model._result is None:
+        raise RuntimeError("Model has not been fitted — call model.fit() first.")
+
+    res = np.asarray(model._result.residuals, dtype=float)
+    n = len(res)
+    std = float(res.std(ddof=0))
+    if std < 1e-20:
+        return []
+    z = (res - float(res.mean())) / std
+
+    freq = int(getattr(model.series, "freq", 1) or 1)
+    desfase = int(getattr(model, "d", 0)) + int(getattr(model, "D", 0)) * freq
+
+    fuera = []
+    for idx, itv in enumerate(model.interventions or []):
+        if itv.type not in ("pulse", "impulse", "step", "ramp", "compimp"):
+            continue                       # cos/sin/alter no son sucesos
+        s = max(len(itv.omega or [1]) - 1, 0)
+        # obs 1-based en RESIDUOS de la primera fecha intervenida
+        ini = int(itv.at) + 1 - desfase
+        fechas = [ini + k for k in range(s + 1)]
+        dentro = [p for p in fechas if 1 <= p <= n]
+        if not dentro:
+            continue
+        antes = dentro[0] - 1
+        despues = dentro[-1] + 1
+        fuera.append(InterventionFitCheck(
+            itv_index=idx, itv_type=itv.type, at_0based=int(itv.at),
+            fechas=dentro,
+            z_en_fechas=[float(z[p - 1]) for p in dentro],
+            residuo_en_fechas=[float(res[p - 1]) for p in dentro],
+            z_antes=float(z[antes - 1]) if 1 <= antes <= n else None,
+            z_despues=float(z[despues - 1]) if 1 <= despues <= n else None,
+            umbral_vecino=umbral_vecino, umbral_absorcion=umbral_absorcion,
+        ))
+    return fuera

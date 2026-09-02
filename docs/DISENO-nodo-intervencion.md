@@ -442,6 +442,77 @@ antes de estimar nada.
 
 ---
 
+## 2ter. La regla de Treadway — cómo se sabe si funcionó
+
+Aportada el 2026-09-02, y cierra el bucle: §2bis dice cómo ELEGIR la
+representación, ésta dice cómo saber si la elegida **era la buena**.
+
+> «Si intervienes en una fecha o fechas, no puedes tener de vecino un anómalo,
+> ni antes ni después. Básicamente esa es evidencia de que la representación que
+> has elegido es errónea. Una característica de que la intervención ha
+> funcionado bien es que los residuos en fechas de intervención están en la
+> media de los residuos, que debería ser cero. No es algo que bloquea, es
+> diagnosis.»
+
+### Las dos reglas salen de la misma ecuación
+
+El modelo es `z_t = ν(B)ξ_t + N_t`. Sea `π(B) = θ(B)⁻¹φ(B)∇^d` el filtro que
+blanquea. La derivada de la verosimilitud respecto de cada ω_j da el **regresor
+filtrado** `x_t^(j) = π(B)·[B^j/δ(B)]·ξ_t`, y la condición de primer orden es
+
+    Σ_t  a_t · x_t^(j) = 0     para todo j libre
+
+**Los residuos quedan ortogonales a cada regresor filtrado de la intervención** —
+las ecuaciones normales de una regresión, y lo son porque con ARMA y δ fijos la
+intervención entra linealmente.
+
+**De ahí la regla 2.** Para un impulso puro el regresor es `x_t = π_{t−T}` y la
+condición queda `a_T = −Σ_{k≥1} π_k·a_{T+k}`. Sin ARMA y con d=0 se tiene
+π(B)=1, luego **a_T = 0 EXACTAMENTE**: un ω libre absorbe esa observación
+entera, igual que una variable ficticia en regresión. Con ARMA es una
+combinación pequeña de los residuos siguientes.
+
+**De ahí la regla 1.** La condición sólo obliga a ortogonalidad frente a los
+regresores **que se han ajustado**. Si el suceso ocupa T y T+1 y sólo se ajusta
+un impulso en T, la parte de T+1 no tiene dónde ir: cae entera en `a_{T+1}`.
+**El vecino anómalo ES la parte no modelizada del mismo suceso.**
+
+### Verificado, y el enunciado de la escuela es el preciso
+
+Sobre ruido blanco con un impulso libre, d=0 y sin ARMA:
+
+| | |
+|---|---|
+| residuo **crudo** en la fecha | **−3,5·10⁻⁸** — cero |
+| media de los residuos | +0,017612 |
+| z en la fecha | **−0,019097** = −media/sd |
+
+Es decir: `a_T = 0` exacto, y el **tipificado se queda en la media de los
+residuos**, no en cero. Por eso la escuela lo enuncia «están en la media» y no
+«son cero» — con μ estimado la media es ~0 y coinciden, con μ fijado no. El
+`InterventionFitCheck` publica los dos, el crudo y el tipificado.
+
+### Las dos lecturas de un vecino anómalo
+
+Las dos son errores de representación:
+
+1. **La forma se queda corta** — hay episodio. Es el caso de §2.2.
+2. **La fecha está desplazada** — y la verosimilitud casi no lo distingue
+   (BUG-0030: ω = +4,347 mal colocado frente a −4,353 bien colocado, con
+   Δ logL = 0,03). **Este contraste ve lo que el ajuste no.**
+
+### Dónde vive
+
+`interventions.check_intervention_fit(model)`, y se presenta dentro de
+`test_interventions` —donde el analista ya está juzgando la intervención— y no
+en una herramienta aparte: **un t significativo sobre ω no dice que la
+representación sea la correcta**, y ésa es justo la pregunta que queda abierta
+después del contraste. Demostrado de punta a punta: un impulso sobre un episodio
+de dos períodos da residuo crudo −2,5·10⁻⁷ en su fecha y un vecino de **+6,49**
+detrás.
+
+---
+
 ### F3 · Las especificaciones rivales
 
 Para un episodio de duración k, presentar la familia anidada estimada:
