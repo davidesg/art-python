@@ -866,6 +866,60 @@ def boxcox_analysis(inp_path: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Tool: LTF simulator — dibujar la forma de una intervención
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def simulate_intervention_shape(omega: list[float],
+                                delta: list[float] | None = None,
+                                b: int = 0,
+                                K: int = 24,
+                                label: str = "") -> list:
+    """
+    Simula la RESPUESTA de una intervención especificada como FLT y la dibuja
+    en el NIVEL y en primeras diferencias, con su ganancia a largo plazo.
+
+    PARA QUÉ. La forma de una intervención no se identifica a ojo: en cuanto la
+    FLT tiene varios parámetros, la figura del gráfico deja de tener lectura
+    obvia — dos impulsos en el nivel pueden aparecer, en diferencias, con un
+    aspecto que no sugiere dos impulsos. Esta herramienta DIBUJA LA HIPÓTESIS
+    para ponerla al lado del patrón observado y ver si son compatibles.
+
+    No decide nada y no mira los datos: es un simulador.
+
+    EL CONVENIO. Toda intervención se especifica **en el nivel de la serie**,
+    sea cual sea la d con la que se trabaje:
+
+      · escalón en el nivel   → efecto PERMANENTE  → un impulso en ∇
+      · impulso en el nivel   → efecto TRANSITORIO → dos impulsos en ∇ que suman 0
+      · N escalones en el nivel con ganancia NULA ≡ N−1 impulsos en el nivel,
+        es decir un EPISODIO de duración N−1.
+
+    LA CONVENCIÓN DE SIGNO, que es donde se cae: fue guarda el numerador como
+    ω(B) = ω₀ − ω₁B − ⋯, así que la ganancia es (ω₀−ω₁−⋯−ω_s)/(1−δ₁−⋯−δ_r) y
+    NO la suma de los ω. Pásalos tal como salen del `.out`.
+
+    Parameters
+    ----------
+    omega : coeficientes del numerador ω₀…ω_s, en el orden del `.out`
+    delta : coeficientes del denominador δ₁…δ_r; vacío o None si no hay
+    b     : retardo muerto en períodos
+    K     : hasta qué retardo simular
+    label : etiqueta para el título de la figura
+
+    Alcance: d = 0 y d = 1. Con d=2 un impulso en la serie transformada es una
+    RAMPA en el nivel y el diccionario de arriba tiene otra fila.
+    """
+    try:
+        from art.ltf import describe_ltf
+        desc = describe_ltf(omega, delta or (), b=b, K=K, etiqueta=label)
+        _show_fig(desc.figure_b64, "ltf")
+        return _result(desc)
+    except Exception as e:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
 # Tool: Seasonal detection
 # ---------------------------------------------------------------------------
 

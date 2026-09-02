@@ -209,21 +209,36 @@ permanente tiene que llegar al final de la serie.
 
 ## 5. Plan de trabajo
 
-### F0 · El simulador FLT en Python — *primero, y es la clave*
+### F0 · El simulador FLT en Python — ✅ HECHO (2026-09-02)
 
-Puerto de `generate_plots` a `art/ltf.py`: función pura
-`(b, r, s, K, d, ω, δ) → (irf, srf)`, con el trazado encima y separado. Falla
-explícitamente en `d≥2`.
+`src/art/ltf.py`. Función pura
+`respuesta_flt(omega, delta, b, K, d) → RespuestaFLT`, con `describe_ltf`
+encima para la figura y la herramienta MCP `simulate_intervention_shape`.
 
-**Por qué va primero aunque no sea lo más vistoso:** se convierte en el
-**oráculo de contraste** de todo lo demás. Cualquier afirmación del tipo «un
-episodio de dos impulsos se ve así» pasa a ser comprobable contra una figura
-generada, y las pruebas de F1-F3 se escriben contra ella en vez de contra mi
-aritmética. Además da al analista lo que hoy no tiene: **dibujar la hipótesis al
-lado del patrón observado** y ver si son compatibles — evidencia, no veredicto,
-que es la filosofía de la casa.
+**Validado al dígito contra el C.** `tests/ltf_referencia/harness.c` lleva el
+bloque numérico de `ltf.c` **copiado verbatim** —copiado y no reescrito a
+propósito: así una divergencia es del puerto y no de una re-derivación de lo que
+el C «quería decir»— y de él sale
+`tests/fixtures/ltf_c_reference.json`. **18 casos, 0 divergencias, igualdad
+exacta al bit** (escalones, impulsos, episodios, FLT con y sin denominador,
+retardo muerto, δ oscilante, ω negativo, respuesta casi no acotada, y todos
+también en primeras diferencias).
 
-Validación: al dígito contra el binario en C sobre una batería de casos.
+**Y el diccionario de §2.1 quedó comprobado por una vía independiente**, no
+sólo escrito en prosa. `tests/test_ltf_port.py` lo tiene como afirmaciones
+ejecutables, y el simulador reproduce la tabla exactamente: con ω=(6,2,4), que
+da ω(1)=0, el camino del nivel es 6, 4, 0, 0, … —dos impulsos en el nivel— y en
+primeras diferencias +6, −2, −4, que es `+ω₀, ω₁−ω₀, −ω₁` con ω₀=6 y ω₁=4.
+
+Detalle de lectura que el puerto deja claro y conviene retener: **`srf` con d=0
+ES el camino del nivel**, y es la columna que contesta la pregunta del nodo. La
+figura lleva cuatro paneles —IRF y SRF × nivel y diferencias— porque la pregunta
+del analista, «¿lo que veo es compatible con esto?», sólo se contesta viendo la
+misma respuesta en las dos escalas a la vez.
+
+Guardas: `d≥2` levanta `ValueError` nombrando la rampa; también `K ≤ s` y `b<0`.
+Con δ(1)=0 la ganancia vuelve NaN y la presentación dice **INADMISIBLE** en vez
+de dibujar una convergencia que no existe.
 
 ### F1 · La ganancia y su contraste — *en buena parte hecha por la auditoría*
 
