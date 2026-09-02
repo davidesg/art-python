@@ -866,6 +866,97 @@ def boxcox_analysis(inp_path: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Tool: la escalera de Ockham
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def intervention_ladder(inp_path: str,
+                        at: int = 0,
+                        ventana: int = 0,
+                        threshold: float = 3.0,
+                        umbral_vecino: float = 3.0) -> list:
+    """
+    ESCALERA DE OCKHAM — estima las especificaciones rivales de un suceso EN
+    ORDEN de sofisticación, y dice qué justifica subir de peldaño.
+
+      peldaño 1   UNA intervención escalar. Dos lecturas del MISMO coste —un
+                  parámetro cada una— y no anidadas entre sí:
+                    1a  escalón en el nivel  → efecto PERMANENTE
+                    1b  impulso en el nivel  → efecto TRANSITORIO
+      peldaño 2   EPISODIO: L+1 escalones en el nivel, con el contraste de
+                  ganancia ω(1)=0 que separa transitorio de permanente.
+
+    LO QUE ESTA HERRAMIENTA PROHÍBE, y es su razón de ser: **el AIC no arbitra
+    la subida de peldaño**. Compara dentro de uno, o confirma una subida ya
+    justificada. Una escalera que se quedase con el mejor AIC subiría siempre,
+    porque el modelo más sofisticado casi siempre ajusta mejor — tiene más
+    parámetros. Eso es lo contrario de la navaja.
+
+    LO QUE SÍ JUSTIFICA SUBIR, en este orden:
+      1. **Treadway** — la forma de abajo deja un anómalo de vecino. Evidencia
+         objetiva: la parte no modelizada del suceso cae entera ahí.
+      2. **Inadecuación** — la forma de abajo no deja ruido blanco.
+      3. **Dominio** — la lectura simple es implausible para esta clase de
+         serie (una caída PERMANENTE en un índice de precios es poco usual).
+      4. **Ausencia de explicación extramuestral** — y ésta la herramienta NO
+         la sabe: la pregunta y espera respuesta del analista.
+
+    LA EXPLICACIÓN TIENE QUE EXPLICAR LA FORMA, no sólo la fecha. Una bajada de
+    impuestos explica un escalón permanente; una huelga, un impulso
+    transitorio. Si el analista aporta una explicación de suceso permanente y el
+    contraste de ganancia dice transitorio, no cubre lo que hay y se sube igual.
+
+    Parameters
+    ----------
+    inp_path      : .inp de un modelo estimado **SIN** la intervención en
+                    cuestión — sus residuos son justo lo que ella debe explicar
+    at            : obs 1-based (espacio de RESIDUOS) donde arranca el suceso.
+                    0 = tomar el episodio de mayor |z| que detecte el escaneo
+    ventana       : ventana de agrupación en episodios; 0 usa la de la política
+    threshold     : |z| para marcar un residuo como extremo
+    umbral_vecino : |z| a partir del cual un vecino cuenta como anómalo
+    """
+    try:
+        import numpy as np
+        from art.episodes import describe_episodios
+        from art.escalera import escalera_de_ockham, describe_escalera
+        from art.policy import decide_episodios, decide_domain, THRESHOLDS
+        ts, m = _load_ts_model(inp_path)
+        m.fit()
+        if m.residuals is None:
+            return _err("el modelo no tiene residuos: ¿se estimó?")
+        r = np.asarray(m.residuals.data, dtype=float)
+        sd = r.std(ddof=0)
+        z = r / sd if sd > 0 else r
+        ext = [(i + 1, float(z[i])) for i in range(len(z))
+               if abs(z[i]) > threshold]
+        if not ext:
+            return _err(f"no hay residuos con |z| > {threshold:g}: no hay "
+                        "suceso que escalonar.")
+        d_reg = int(getattr(m, "d", 0))
+        v = int(ventana) or THRESHOLDS["ventana_episodio"]
+        eps = decide_episodios(ext, ventana=v, d=d_reg)
+        if at:
+            ep = next((e for e in eps if e.inicio <= int(at) <= e.fin), None)
+            if ep is None:
+                return _err(f"at={at} no cae en ningún episodio detectado: "
+                            + ", ".join(f"{e.inicio}–{e.fin}" for e in eps))
+        else:
+            ep = max(eps, key=lambda e: e.z_max)
+        try:
+            dom = decide_domain(ts)
+        except Exception:
+            dom = "generic"
+        esc = escalera_de_ockham(m, ep, dominio=dom,
+                                 umbral_vecino=umbral_vecino)
+        desc = describe_escalera(esc)
+        _show_fig(desc.figure_b64, "escalera")
+        return _result(desc)
+    except Exception as e:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
 # Tool: gráfico de intervención
 # ---------------------------------------------------------------------------
 

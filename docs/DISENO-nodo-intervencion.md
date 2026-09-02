@@ -513,16 +513,73 @@ detrás.
 
 ---
 
-### F3 · Las especificaciones rivales
+### F3 · Las especificaciones rivales — ✅ HECHO (2026-09-02)
 
-Para un episodio de duración k, presentar la familia anidada estimada:
+`src/art/escalera.py`: `escalera_de_ockham(model_base, episodio, dominio)` y
+`describe_escalera`, con la herramienta MCP **`intervention_ladder`**.
 
-- **general:** k+1 escalones en el nivel;
-- **restringida:** ganancia cero ⟹ k impulsos en el nivel;
-- y la lectura escalar simple, para el caso k=1.
+Estima los peldaños **en orden** sobre el mismo modelo base:
 
-Estimadas todas, con su AIC, su ganancia y su contraste, y **comparables** —
-que es lo que hoy no hay. Aquí es donde se recuperan los 7-15 puntos de AIC.
+| peldaño | forma | parámetros |
+|---|---|---|
+| **1a** | escalón en el nivel — efecto PERMANENTE | 1 |
+| **1b** | impulso en el nivel — efecto TRANSITORIO | 1 |
+| **2** | episodio: L+1 escalones en el nivel | L+1 |
+
+1a y 1b cuestan **lo mismo** y **no están anidadas entre sí**: son las dos
+lecturas simples, y cuál es la buena no lo decide el ajuste sino el dominio y lo
+que se sepa del suceso.
+
+#### Lo que la implementación PROHÍBE
+
+`razones_para_subir` es una lista, y si está vacía **la escalera se queda
+abajo aunque el peldaño 2 ajuste mejor**. Las razones son, en orden: Treadway
+(vecino anómalo), inadecuación (Q o JB), duración del episodio > 1, y dominio
+(caída permanente en un `price_index`). El AIC **no está** en la lista; sale en
+el texto con su aviso al lado.
+
+#### Medido
+
+Episodio verdadero de dos impulsos de nivel (9 y 6), d=0:
+
+| peldaño | AIC | ω(1) | vecino | adecuado | se sostiene |
+|---|---|---|---|---|---|
+| 1a escalón | 643,00 | +0,156 | después | ✗ | no |
+| 1b impulso | 584,55 | +8,750 | después | ✗ | no |
+| **2 episodio** | **540,22** | +0,045 (p=0,562) | ninguno | ✓ | **sí** |
+
+Sube por tres razones —Treadway, inadecuación y duración— y el ΔAIC de 44,3
+**no participa en la decisión**. El contraste de ganancia lee TRANSITORIO, que
+es el DGP.
+
+Escalón permanente verdadero, d=1:
+
+| peldaño | AIC | ω(1) | vecino | adecuado | se sostiene |
+|---|---|---|---|---|---|
+| **1a escalón** | **535,59** | +8,750 | ninguno | ✓ | **sí** |
+| 1b impulso | 582,11 | +3,984 | después | ✗ | no |
+| 2 episodio | 536,88 | +9,531 | ninguno | ✓ | sí |
+
+**Razones para subir: ninguna ⇒ recomendado 1a**, aunque el peldaño 2 también
+se sostiene. Es la navaja funcionando cuando más fácil sería saltársela. Y
+ω(1)=+8,75 recupera el escalón real de 9, lo que confirma que la intervención se
+aplica **en el nivel** aunque el modelo lleve d=1.
+
+#### La pregunta que no está en los datos
+
+La presentación cierra preguntando por la **información extramuestral**, y
+adapta la pregunta a la forma que la lectura simple sugiere. Es el único nodo de
+`art` cuya evidencia no sale de la serie. La recomendación lo dice con todas las
+letras: *si hay un suceso conocido que explique la FORMA simple, la simple gana
+aunque ajuste peor*.
+
+#### Un hallazgo lateral, de las pruebas
+
+**Con `d=0` un escalón permanente NO aparece como atípico.** Sube la media y la
+varianza de los residuos y ningún |z| pasa de 3: el escaneo de anómalos busca
+espigas, no cambios de nivel. En ∇, en cambio, un escalón de nivel es UN impulso
+—el diccionario de §2.1— y por eso se ve en la práctica, donde estas series se
+trabajan diferenciadas. Queda anotado en las pruebas.
 
 ### F4 · El nodo en el protocolo
 
