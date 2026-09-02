@@ -22,6 +22,47 @@ jobs:
         run: |
           pip install build
           python -m build atsw-suite --outdir dist
+      # INSTALAR LO QUE SE VA A PUBLICAR, QUE AQUÍ ES *TODO* EL PAQUETE.
+      #
+      # `publish-art.yml` tiene este paso desde que 0.1.3 se publicó rota por un
+      # problema de RESOLUCIÓN, no de empaquetado. atsw no lo tenía — y atsw es
+      # **sólo** resolución: su contenido entero son cotas de dependencia y un
+      # script de consola. Construirlo sin instalarlo no comprueba nada de lo
+      # único que hace.
+      #
+      # Su propio CHANGELOG 1.2.6 documenta un fallo de esta especie: la pareja
+      # (art 0.1.10, fue 0.1.11) «instala limpiamente y luego aborta». Ese es
+      # exactamente el caso que este paso caza y el `build` solo no.
+      - name: Smoke-test — que las cotas RESUELVAN y la suite arranque
+        run: |
+          WHL=$(ls dist/atsw-*-py3-none-any.whl)
+          python -m pip install "$WHL"
+          # 1. las versiones resueltas satisfacen lo declarado
+          python - <<'PY'
+          from importlib.metadata import version, requires
+          from packaging.requirements import Requirement
+          fallos = []
+          for spec in requires("atsw") or []:
+              r = Requirement(spec)
+              if r.marker and not r.marker.evaluate():
+                  continue
+              v = version(r.name)
+              ok = r.specifier.contains(v, prereleases=True)
+              print(f"  {r.name:12s} {v:10s} {'OK' if ok else 'FALLA ' + str(r.specifier)}")
+              if not ok:
+                  fallos.append(f"{r.name} {v} no satisface {r.specifier}")
+          assert not fallos, fallos
+          print("atsw", version("atsw"), "— cotas satisfechas")
+          PY
+          # 2. los tres asistentes levantan de verdad
+          python - <<'PY'
+          import asyncio
+          from art.mcp_server import mcp as art_mcp
+          n = len(asyncio.run(art_mcp.list_tools()))
+          print("art tools:", n); assert n >= 30, n
+          PY
+          # 3. el único script de consola que el paraguas expone
+          atsw-mcp --help > /dev/null && echo "atsw-mcp: OK"
       - uses: actions/upload-artifact@v4
         with:
           name: dist
