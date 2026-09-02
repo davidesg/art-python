@@ -385,3 +385,113 @@ VisTrails, Yao et al. (ToT, NeurIPS 2023).
 Pendientes de confirmar autoría antes de enviar: ARIMAID (*AIIE Transactions*
 14(3), 1982) y Liu et al. (CHI 2020, arXiv 1910.13602). Título, revista y año
 sí están comprobados en ambos.
+
+---
+
+## 8. Evidencia oportunista frente a evidencia diseñada
+
+Decidido en la discusión del 2026-09-02, y es una corrección de encuadre que
+afecta a toda la §6.3.
+
+**El problema.** Bolivia y SF_MEG son datos **oportunistas**: los experimentos
+se diseñaron para cazar defectos y evaluar la herramienta para nuestro propio
+uso. Las mediciones que queríamos presentar como resultado —el colapso de la
+dispersión, sobre todo— son subproductos de corridas hechas para otra cosa. Un
+evaluador lo ve enseguida, y tiene razón.
+
+**La solución estructural.** Bolivia y SF_MEG bajan de «Resultados» a **«Caso
+aplicado»**. Los datos oportunistas son una ilustración excelente y una
+afirmación causal pésima: enseñan la herramienta funcionando sobre un problema
+real, que es mucho, pero no sostienen el porqué.
+
+**Lo que salva el año de depuración.** El *debugging* fue el trabajo
+exploratorio que localizó las celdas difíciles: raíces complejas del AR(2) que
+Shin-Fuller no puede factorizar, episodios de dos intervenciones a ≤3 períodos,
+frecuencias estacionales de frontera, μ sin ARMA libre. Eso no es evidencia —
+es **dónde poner el diseño experimental**. Exploración ⟹ hipótesis; experimento
+diseñado ⟹ evidencia. La rejilla de E1 se construye alrededor de esas celdas.
+
+### 8.1 El comparador no es `auto.arima`
+
+`auto.arima`/`pmdarima` no pueden añadir intervenciones: son una rejilla sobre
+(p,d,q)(P,D,Q). Compararlos con ART es comparar un protocolo de modelización con
+una búsqueda de órdenes. **No son un rival: son un suelo.**
+
+Su incapacidad no los excluye, los sitúa: sobre una serie con intervención
+**conocida**, la distancia entre `auto.arima` y ART *es* el valor del nodo de
+intervención, medido. Requiere datos sintéticos, y por eso E1 va primero.
+
+**El comparador real es el mismo LLM sin el protocolo.**
+
+### 8.2 El salto metodológico: verdad conocida
+
+Con series reales, el «acierto» lo define un oráculo experto y es discutible.
+Con simulación lo define el proceso generador y no lo es. La maquinaria de
+generación sintética determinista ya está escrita y ejercitada (cincuenta repros
+de defectos).
+
+### 8.3 Los experimentos
+
+**E1 · Recuperación sobre verdad conocida.** Rejilla diseñada alrededor de las
+celdas difíciles de §8. Métrica: tasa de recuperación por componente (λ, d, D,
+órdenes, intervenciones) y distancia en espacio de especificación. Da
+**corrección**, no acuerdo.
+
+**E2 · Dispersión bajo replicación.** K corridas × tres brazos:
+
+| brazo | qué recibe el LLM |
+|---|---|
+| **A** | ART completo: protocolo + evaluación externalizada + guion |
+| **B** | motor crudo, sin protocolo, sin guion, sin puerta de adecuación |
+| **C** | sandbox de Python (`statsmodels`) — el escenario de Bertran et al. |
+
+Métrica: tasa de desacuerdo por pares **y por nodo** (generalización del «0 de
+36 oscilantes»), más dispersión de la previsión a origen fijo.
+
+**E3 · Ablación — el que carga con la tesis, y el primero que yo haría.**
+Apagar piezas de una en una: sin puerta de adecuación; sin memoria de
+callejones; con el LLM autoevaluándose al estilo ToT. Hoy *afirmamos* que la
+evaluación externalizada causa el colapso; la ablación lo **enseña**. Es la
+diferencia entre «construimos algo y funciona» y «sabemos qué pieza hace el
+trabajo».
+
+**E4 · Coste.** Tokens y llamadas por serie y por brazo. Ya instrumentado; se
+pega a cualquiera de los anteriores casi gratis.
+
+### 8.4 Métricas, explícitas
+
+- **Recuperación:** acierto exacto por nodo, y por componente.
+- **Dispersión:** desacuerdo por pares entre las K corridas, por nodo.
+- **Adecuación:** fracción de modelos finales que pasan Q y JB. *Ya tenemos un
+  negativo honesto que hay que reportar:* 11 de 18 finales fallaban en el run 3
+  de SF_MEG.
+- **Coste:** tokens, llamadas, tiempo.
+- **Predicción:** RMSE/MAE a horizonte H, y su **dispersión entre corridas**
+  (el tipo 3 de §5).
+
+---
+
+## 9. Estructura del documento
+
+1. **Introducción** — la modelización aplicada es una búsqueda con
+   bifurcaciones; los agentes LLM ya la hacen y dispersan; qué ocurre si se fija
+   el protocolo.
+2. **Trabajo relacionado** — las seis literaturas de §2, condensadas a cuatro
+   hilos.
+3. **La arquitectura** ← *la contribución*: protocolo de nodos, evaluación de
+   estado externalizada, decisor intercambiable, mapa anotado, puerta de
+   adecuación.
+4. **Instanciación: ART**, con `drtran` y `drvarma` como evidencia de
+   portabilidad.
+5. **Metodología de evaluación** — brazos, métricas, preregistro, el problema
+   del oráculo.
+6. **Experimentos E1–E4** ← *la evidencia causal, sintética*.
+7. **Caso aplicado: Bolivia y SF_MEG** ← *aquí es donde valen, y valen mucho*.
+8. **Limitaciones** — el nodo de intervención frente al IIS de Autometrics; los
+   fallos de adecuación; la ausencia de patrón externo.
+9. **Conclusión.**
+
+**Versión preliminar** (para visualizar el artículo y discutirlo): §1-5, §7, §8,
+con Bolivia y SF_MEG haciendo de evidencia provisional.
+**Versión depurada** (para enviar): §6 construida y con las afirmaciones
+causales trasladadas a ella.
