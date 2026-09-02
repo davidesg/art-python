@@ -150,32 +150,62 @@ descubra dos meses después.
 | **Ganancia en `art`** | — | **No existe** |
 | **Especificaciones rivales estimadas y comparadas** | — | **No existe** |
 
-### 4.1 Auditoría pendiente ANTES de construir
+### 4.1 Auditoría del Wald — RESUELTA (2026-09-02)
 
-El Wald de `test_intervention` tiene dos cosas que hay que resolver, y caen
-justo en medio de lo que vamos a construir:
+Los tres defectos previstos se confirmaron, se levantaron y se arreglaron:
+**BUG-0071**, **BUG-0072**, **BUG-0073**. Repro determinista sin datos y sin
+`fue` en `bugs/BUG-0071-repro/repro.py`; pruebas en
+`tests/test_bug_0071_wald_es_la_ganancia.py`.
 
-**(a) El contraste no es la ganancia.** Usa
-`alpha_vec = [1.0] + [-d for d in free_dl[:k-1]]`, es decir
-$\alpha=(1,-\delta_1,-\delta_2,\dots)$ — los coeficientes del **denominador**
-puestos sobre el numerador. Eso no es $\omega(1)$, no es la ganancia, y no
-reconozco qué cantidad es. Hay que decidir si es un contraste deliberado con
-una lectura que se nos escapa, o un error.
+**BUG-0071 — el contraste no era ninguna cantidad reconocible.** Usaba
+α=(1,−δ₁,−δ₂,…), metiendo el denominador dentro de un contraste sobre el
+numerador. Con ω=(0,80, −0,30) y δ=(0,50): la ganancia vale 2,20, el numerador
+ω(1) vale 1,10, y devolvía 0,95. Ni νₖ, ni suma parcial de la respuesta, ni
+nada. Del commit inicial, nunca revisado. Corregido a α=(1,−1,…,−1), con el
+signo fijado por la **posición** en el vector ω completo (fijar ω₀ desplazaba
+todos los signos un hueco) y los ω fijos entrando como constante.
 
-**(b) Sólo dispara si hay δ libres.** La guarda es
-`if k > 1 and any(f for f in dlf)`. Para el caso de §2.2 —N escalones **sin**
-denominador— el Wald **no se ejecuta nunca**. Es exactamente el contraste que
-necesitamos y hoy no está disponible.
+**BUG-0072 — no corría en el caso que nos ocupa.** La guarda exigía δ libres, de
+modo que N escalones sin denominador —la forma general del episodio— no recibían
+contraste conjunto, sin aviso. Guarda reducida a `k > 1`.
 
-**(c) La etiqueta miente.** `summary()` imprime `Wald χ²({len(self.omega)})`
-mientras el cálculo usa `df=1` (correctamente, porque `g` es escalar). El número
-está bien y el rótulo mal — la clase de defecto que fue 12 de 25 en la sesión
-anterior.
+**BUG-0073 — el rótulo decía χ²(k) con df=1.** El p-valor estaba bien; el rótulo
+invitaba a la tabla equivocada (χ²(1)=3,84 frente a χ²(3)=7,81 al 5%).
 
-Los tres se levantan como defectos numerados con repro sintético, según el
-convenio de `bugs/`.
+### 4.2 El hallazgo que simplifica F1
 
----
+Buscando cómo portar el método delta de `drtran` apareció que **para este
+contraste no hace falta**:
+
+> La ganancia es ν(1) = ω(1)/δ(1). Para **H₀: ν(1) = 0** el denominador es
+> irrelevante: un cociente es cero exactamente cuando lo es su numerador,
+> siempre que δ(1) ≠ 0. El contraste de ganancia nula es por tanto un **Wald
+> lineal EXACTO sobre ω**, sin aproximación.
+
+El método delta sigue haciendo falta para **un intervalo** sobre la ganancia, o
+para contrastar una ganancia distinta de cero — no para la pregunta
+permanente/transitorio, que es la del nodo. F1 se reduce en consecuencia.
+
+Y con δ(1) → 0 el modelo es inadmisible (ganancia no acotada): `gain` vuelve
+NaN, y quien habla de eso es `admissibility_problems` en `diagnosis.py`.
+
+### 4.3 Comprobación sobre serie sintética
+
+Con `step` de tres ω sobre ruido blanco, n=240, efecto en T=120:
+
+| nivel impuesto | ω(1) | Wald χ²(1) | p | lectura |
+|---|---|---|---|---|
+| `[6, 4, 0]` — dos impulsos | −0,142 | 2,51 | 0,113 | **transitorio** ✓ |
+| `[6, 6, 6, …]` — escalón sostenido | +5,858 | 4071,4 | 0,0000 | **permanente** ✓ |
+
+La premisa de §2.2 queda comprobada, y medida como **tasa** sobre 15
+realizaciones y no sobre un sorteo: potencia ≥ 0,80 y tamaño ≤ 0,20.
+
+*Nota de método:* la primera versión de esa prueba parametrizaba el caso
+permanente como `[6,6,6]`, que deja el nivel en 6 tres períodos y vuelve a
+cero — un episodio transitorio de tres, no un cambio de nivel. La prueba falló
+con potencia 0,07 y tenía razón: el fallo estaba en la prueba. El escalón
+permanente tiene que llegar al final de la serie.
 
 ## 5. Plan de trabajo
 
@@ -195,18 +225,26 @@ que es la filosofía de la casa.
 
 Validación: al dígito contra el binario en C sobre una batería de casos.
 
-### F1 · La ganancia y su contraste
+### F1 · La ganancia y su contraste — *en buena parte hecha por la auditoría*
 
-`nu(1) = ω(1)/δ(1)` con la convención de signo de §3, su error típico y el
-contraste de ganancia cero.
+Lo que la auditoría (§4.1-4.2) ya dejó en pie:
 
-- Caso sin δ (el de §2.2): **lineal en ω**, Wald con $\alpha=(1,-1,\dots,-1)$.
-  Reutiliza la maquinaria de `interventions.py` una vez resuelta la auditoría §4.1.
-- Caso con δ: **razón**, método delta. Se porta de `drtran/irf.py`, que ya lo
-  tiene resuelto y verificado.
+- ✅ `omega_1` = ω(1) con la convención de signo correcta;
+- ✅ `gain` = ω(1)/δ(1), NaN si δ(1) ≈ 0;
+- ✅ el contraste de **ganancia nula**, exacto y sin método delta, para
+  cualquier intervención con más de un ω, lleve denominador o no;
+- ✅ la presentación que dice **permanente** o **transitorio** con el contraste
+  y el valor de ω(1) delante, en vez de con una etiqueta heredada.
 
-Entregable: la función, y el bloque de presentación que dice **permanente** o
-**transitorio** con el contraste detrás y no con una etiqueta heredada.
+Lo que queda de F1:
+
+- el **error típico de la ganancia** por método delta, portado de
+  `drtran/irf.py`, para dar un **intervalo** sobre ν(1). No lo necesita el
+  contraste, sí el informe;
+- el **retardo medio** con su guarda de monotonía, que `drtran` ya tiene y que
+  la escuela reporta siempre junto a la ganancia — la ganancia dice cuánto y el
+  retardo medio dice cuándo;
+- exponerlo por MCP.
 
 ### F2 · Episodios
 
@@ -237,11 +275,15 @@ rellenas de verdad — que es justo lo que las hace un argumento y no una etique
 ### Orden y dependencias
 
 ```
-F0 (simulador) ──┬─→ F1 (ganancia) ──┐
-                 │                    ├─→ F3 (rivales) ──→ F4 (nodo)
-      F2 (episodios) ─────────────────┘
-   §4.1 auditoría ──→ F1
+   §4.1 auditoría ✅ ──→ F1 (ganancia) ─ parcialmente hecha ─┐
+F0 (simulador) ────────────────────────┐                     │
+                                       ├─→ F3 (rivales) ──→ F4 (nodo)
+F2 (episodios) ────────────────────────┘                     │
+                                                             │
+        (el contraste que F3 necesita YA está) ──────────────┘
 ```
 
-F0 y F2 son independientes y pueden ir en paralelo. La auditoría §4.1 bloquea
-F1. F3 necesita F1 y F2. F4 cierra.
+La auditoría está despejada, y con ella **el contraste sobre el que se apoya F3
+ya existe y está probado**. F0 y F2 son independientes y pueden ir en paralelo;
+lo que resta de F1 (intervalo sobre la ganancia, retardo medio) no bloquea a
+nadie. F3 necesita F0 —como oráculo de las formas— y F2. F4 cierra.

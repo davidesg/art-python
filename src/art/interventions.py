@@ -234,10 +234,23 @@ class InterventionTestResult:
     For a simple intervention (omega=[ω₀], no delta):
         H₀: ω₀ = 0  via t = ω₀/SE, df = n_obs - npar.
 
-    For an FLT with delta (multi-parameter transfer function):
-        Individual t-tests per free omega, plus a joint Wald test
-        H₀: g = 0  where  g = α·ω,  V(g) = α·COV(ω)·αᵀ,
-        α = (1, −δ₁, −δ₂, …) of dimension len(omega).
+    For a multi-omega intervention (an FLT, with or without delta):
+        Individual t-tests per free omega, plus a joint Wald test of
+        ZERO LONG-RUN GAIN,
+            H₀: ω(1) = 0,   ω(1) = ω₀ − ω₁ − ⋯ − ω_s,
+            g = α·ω + c,  α = (1, −1, …, −1),  V(g) = α·COV(ω)·αᵀ,
+        χ²(1). `c` carries the contribution of any FIXED omega.
+
+    Why testing the NUMERATOR is testing the GAIN (BUG-0071)
+    --------------------------------------------------------
+    The gain is ν(1) = ω(1)/δ(1). For H₀: ν(1) = 0 the denominator is
+    irrelevant: a ratio is zero exactly when its numerator is, provided
+    δ(1) ≠ 0. So the zero-gain test needs NO delta method — it is an exact
+    linear Wald on ω. The delta method is only needed for an interval on the
+    gain, or to test a gain equal to something other than zero.
+
+    δ(1) → 0 is the inadmissible case (unbounded gain); `gain` comes back NaN
+    and `admissibility_problems` in diagnosis.py is what speaks to it.
     """
     itv_index: int              # 0-based index into model.interventions
     itv_type: str               # 'pulse', 'step', 'cos', 'sin', 'alter', …
@@ -247,10 +260,12 @@ class InterventionTestResult:
     omega_se: list[float]       # standard errors
     omega_t: list[float]        # individual t-statistics
     omega_p: list[float]        # individual 2-sided p-values
-    wald_stat: float | None     # Wald χ²(k) for multi-param joint test; None if k==1
-    wald_p: float | None        # p-value of Wald test; None if k==1
+    wald_stat: float | None     # Wald χ²(1) for H₀: ω(1)=0; None if k<2
+    wald_p: float | None        # p-value of that Wald test; None if k<2
     df: int                     # degrees of freedom (n_obs - npar) for t-tests
     significant: bool           # True if ANY free omega param is significant at 5%
+    omega_1: float | None = None   # ω(1) = ω₀ − ω₁ − ⋯ − ω_s (the numerator)
+    gain: float | None = None      # ν(1) = ω(1)/δ(1); NaN if δ(1) ≈ 0
 
     def summary(self, alpha: float = 0.05) -> str:
         t = self.itv_type
@@ -268,7 +283,14 @@ class InterventionTestResult:
             lines.append(f"       ω[{i}]={v:+.4f}  SE={se:.4f}  t={tval:+.3f}  p={pv:.4f} {star}")
         if self.wald_stat is not None:
             wstar = "**" if (self.wald_p or 1) < alpha else "  "
-            lines.append(f"       Wald χ²({len(self.omega)})={self.wald_stat:.3f}  p={self.wald_p:.4f} {wstar}")
+            # BUG-0073: el rótulo decía χ²(k) mientras el cálculo usaba df=1.
+            # Es UNA restricción lineal —ω(1)=0—, así que es χ²(1), y decir k
+            # invitaba a leer el p-valor contra la tabla equivocada.
+            lines.append(f"       ganancia ω(1)={self.omega_1:+.4f}   "
+                         f"Wald χ²(1)={self.wald_stat:.3f}  p={self.wald_p:.4f} {wstar}")
+            lines.append(f"       H₀: ganancia nula ⇒ efecto TRANSITORIO"
+                         + ("  (no se rechaza)" if (self.wald_p or 1) >= alpha
+                            else "  (se RECHAZA: efecto permanente)"))
         return "\n".join(lines)
 
 
@@ -304,8 +326,13 @@ def test_intervention(model, itv_idx: int,
     For interventions with no delta (simple pulse/step/cos/sin), each free
     omega is tested individually with a t-statistic using df = n_obs − npar.
 
-    For FLTs with delta, an additional joint Wald test is performed:
-        H₀: g = α·ω = 0,  α = (1, −δ₁, −δ₂, …),  V(g) = α·COV(ω)·αᵀ.
+    For ANY intervention with more than one free omega — with or without a
+    delta denominator — an additional joint Wald test of ZERO LONG-RUN GAIN:
+        H₀: ω(1) = ω₀ − ω₁ − ⋯ − ω_s = 0,   α = (1, −1, …, −1),   χ²(1).
+
+    That is the test the episode node rests on: N consecutive level steps with
+    zero gain are N−1 level impulses, i.e. a TRANSITORY episode of length N−1
+    rather than a permanent shift (docs/DISENO-nodo-intervencion.md §2.2).
 
     Parameters
     ----------
@@ -347,15 +374,26 @@ def test_intervention(model, itv_idx: int,
     dl  = list(itv.delta      or [])
     dlf = list(itv.delta_free or [True] * len(dl))
 
-    # Collect free omega indices and values
+    # Collect free omega indices and values.
+    # `free_om_pos` keeps the position each free omega occupies in the FULL
+    # omega vector, which is what fixes the sign in α: ω(1) weights ω₀ by +1
+    # and every later lag by −1, so the sign follows the POSITION and not the
+    # rank among the free ones. Without this, fixing ω₀ silently shifts every
+    # sign by one slot.
     free_om_idx = []   # global param indices for free omega coefs
     free_om_val = []
+    free_om_pos = []   # position within the full omega vector
+    fixed_om_1  = 0.0  # contribution of the FIXED omegas to ω(1)
     local = start
-    for v, f in zip(om, omf):
+    for pos, (v, f) in enumerate(zip(om, omf)):
+        signo = 1.0 if pos == 0 else -1.0
         if f:
             free_om_idx.append(local)
             free_om_val.append(float(params[local]))
+            free_om_pos.append(pos)
             local += 1
+        else:
+            fixed_om_1 += signo * float(v)
 
     omega_est  = [float(params[i]) for i in free_om_idx]
     omega_se   = [float(np.sqrt(max(cov[i, i], 0.0))) for i in free_om_idx]
@@ -364,24 +402,37 @@ def test_intervention(model, itv_idx: int,
     omega_p    = [float(2 * sp_stats.t.sf(abs(t), df=df))
                   for t in omega_t]
 
-    # Joint Wald test for FLT (delta ≠ 0)
+    # ── Joint Wald: H₀ zero long-run gain (BUG-0071, BUG-0072) ───────────
+    # α = (1, −1, …, −1) because fue stores the numerator as
+    #     ω(B) = ω₀ − ω₁B − ⋯ − ω_sB^s
+    # so ω(1) SUBTRACTS every lag ≥ 1. Writing this contrast as a plain sum
+    # returns a plausible and systematically wrong number — the same sign
+    # convention that produced BUG-0066.
+    #
+    # No gate on delta (BUG-0072): the test is meaningful for ANY multi-omega
+    # intervention, and the case the episode node needs — N level steps with
+    # NO denominator — is precisely the one the old gate excluded.
     wald_stat = None
     wald_p    = None
+    omega_1   = None
+    gain      = None
     k = len(free_om_idx)
-    if k > 1 and any(f for f in dlf):
-        # α = (1, −δ₁, …) where δᵢ are the free delta coefs
-        # For k free omegas, α has the same length k
-        free_dl = [float(v) for v, f in zip(dl, dlf) if f]
-        alpha_vec = np.array([1.0] + [-d for d in free_dl[:k - 1]])
-        alpha_vec = alpha_vec[:k]   # trim/pad to k
-        if len(alpha_vec) < k:
-            alpha_vec = np.pad(alpha_vec, (0, k - len(alpha_vec)))
-        sub_cov = cov[np.ix_(free_om_idx, free_om_idx)]
-        g       = float(alpha_vec @ np.array(omega_est))
-        Vg      = float(alpha_vec @ sub_cov @ alpha_vec)
-        if Vg > 0:
-            wald_stat = g ** 2 / Vg          # χ²(1) under H₀: g=0
-            wald_p    = float(sp_stats.chi2.sf(wald_stat, df=1))
+
+    if om:
+        alpha_vec = np.array([1.0 if p == 0 else -1.0 for p in free_om_pos])
+        g = float(alpha_vec @ np.array(omega_est)) + fixed_om_1
+        omega_1 = g
+        # δ(1) = 1 − δ₁ − ⋯ − δ_r. At zero the gain is unbounded and the model
+        # is inadmissible; the gain is not reported rather than reported wrong.
+        delta_1 = 1.0 - sum(float(v) for v in dl)
+        gain = g / delta_1 if abs(delta_1) > 1e-10 else float("nan")
+
+        if k > 1:
+            sub_cov = cov[np.ix_(free_om_idx, free_om_idx)]
+            Vg = float(alpha_vec @ sub_cov @ alpha_vec)
+            if Vg > 0:
+                wald_stat = g ** 2 / Vg      # χ²(1) under H₀: ω(1)=0
+                wald_p    = float(sp_stats.chi2.sf(wald_stat, df=1))
 
     significant = any(pv < alpha for pv in omega_p)
 
@@ -396,6 +447,8 @@ def test_intervention(model, itv_idx: int,
         omega_p    = omega_p,
         wald_stat  = wald_stat,
         wald_p     = wald_p,
+        omega_1    = omega_1,
+        gain       = gain,
         df         = df,
         significant = significant,
     )
