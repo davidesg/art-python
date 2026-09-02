@@ -9,6 +9,23 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 **50 defectos cerrados (BUG-0021…0070), cada uno con repro determinista, arreglo
 y test.** La suite pasa de 787 a 929 tests.
 
+> ### ⚠ Al actualizar desde 0.1.11, los VEREDICTOS CAMBIAN
+>
+> Esto no es una versión de correcciones silenciosas. **BUG-0065 rehace la nula
+> del contraste de Shin-Fuller**, que es el que cierra el orden de integración, y
+> un modelo que antes recibía «Estacionario ✓» puede recibir ahora «raíz unitaria
+> → d+1». Medido sobre un caso real: Φ̂₁ᵤ pasa de 25.746 a 0.298 y el veredicto se
+> invierte.
+>
+> Cambian además la **fecha** de una intervención auto-detectada en cualquier
+> modelo diferenciado (BUG-0067, caía un período antes) y el **signo** con que se
+> dibuja ω(B) (BUG-0066, dos coeficientes que se suman parecían cancelarse).
+>
+> Quien tenga análisis cerrados con 0.1.11 y los reejecute debe esperar
+> conclusiones distintas sobre `d`, y son las nuevas las que valen. El tamaño de
+> la versión —187 ficheros, +24.481 líneas, 4.366 de ellas en `src/`— dice lo
+> mismo: por alcance esto habría merecido un 0.2.0.
+
 Salieron de replicar un TFM de econometría por tres caminos independientes: el
 modo guiado, y dos LLM distintos trabajando en chats sin contexto previo sobre
 las mismas tres series. **Seis los encontraron esos analistas**, y uno de ellos
@@ -464,6 +481,43 @@ instrucciones son el producto, y aquí había criterio escrito que no llegaba.
 - **BUG-0009 y BUG-0010 verificados y reproducidos**, ambos abiertos.
 - TODO: la pregunta del OBJETIVO (multivariante o previsión), analizada y sin
   implementar — el objetivo no manda sobre los datos, y ésa es la parte difícil.
+
+## atsw 1.3.0 — 2026-09-02
+
+Sube `art-tseries` a `>=0.1.12`, y **la razón es de otra clase que las
+anteriores**.
+
+Todas las cotas de este paquete han sido hasta ahora «la primera versión que
+instala y arranca»: por debajo, el paquete no se importa o su motor C no carga.
+**`art 0.1.11` instala y arranca perfectamente.**
+
+Lo que arregla 0.1.12 es peor que no arrancar: **arranca y contesta mal.** La
+nula del contraste de Shin-Fuller no era la de Shin-Fuller — imponía ρₘ en cada
+factor del AR y anulaba el resto, así que el contraste **no era invariante a la
+parametrización**: el mismo modelo ajustado daba Φ̂₁ᵤ = 25.746 o 7.632 según cómo
+se escribiera el operador, y un paseo aleatorio puro salía «estacionario». Es el
+contraste que cierra el **orden de integración**, o sea el nodo del que dependen
+todos los demás; un veredicto equivocado ahí no se corrige aguas abajo, se
+hereda.
+
+Con él van dos del nodo de intervención: la fecha auto-detectada caía un período
+antes en cualquier modelo diferenciado —tomaba el índice del residuo por el de la
+serie— y el polinomio ω(B) se dibujaba con el signo crudo cuando el motor lo
+resta, con lo que dos coeficientes que se suman parecían cancelarse.
+
+**Una respuesta equivocada no avisa**, y por eso la cota es dura: un entorno que
+resolviera `art 0.1.11` bajo este paraguas correría contrastes que ya sabemos mal
+calibrados, sin que nada lo indicara.
+
+**Por qué 1.3.0 y no 1.2.7.** El diff de este paquete son veinticuatro líneas
+—la cota y su comentario—, así que por contenido propio sería un parche. Pero lo
+que la cota HACE es forzar un salto que **cambia veredictos**: los mismos datos,
+con la misma especificación, pueden recibir ahora una `d` distinta. Un parche
+esconde eso; un menor lo anuncia. Y deja la línea `1.2.x` como la última que
+resuelve `art 0.1.11`, para quien necesite reproducir un análisis anterior.
+
+Detalle en `## art-tseries 0.1.12`, y los informes en `bugs/BUG-0065`, `0066`,
+`0067`.
 
 ## atsw 1.2.6 — 2026-08-14
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "1.2.6"
+version         = "1.3.0"
 description     = "ATSW — A Time Series Workshop: the Box-Jenkins-Treadway suite (univariate exact-ML estimation, graphics, model building, transfer functions and multivariate VARMA) with three MCP assistants for LLM-driven analysis"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -48,6 +48,10 @@ classifiers     = [
 #   drtran >= 0.1.0                 first stable release.
 #
 # Lowering any of them ships an umbrella that installs and does not work.
+#
+# art-tseries >= 0.1.12 is the ONE exception to that phrasing, and it is
+# deliberately stricter: 0.1.11 installs and works. What 0.1.12 fixes is a
+# formal test that ran and answered WRONG — see the comment on the pin.
 dependencies = [
     # >=0.1.11 is not housekeeping either. In fue 0.1.10 `FitResult.converged`
     # stopped meaning "ifault == 0" and started requiring that the optimiser
@@ -60,7 +64,25 @@ dependencies = [
     # broken combination out.
     "fue>=0.1.11",            # univariate estimation engine + FUF forecasting
     "pyfug>=2.0",             # Jenkins-Treadway graphics
-    "art-tseries>=0.1.11",    # model building + MCP server (art-mcp)
+    # >=0.1.12 es de una CLASE DISTINTA a las demás cotas de este fichero, y
+    # conviene decirlo en vez de disfrazarlo. Todas las anteriores son «la
+    # primera versión que instala y arranca»: por debajo, el paquete no se
+    # puede importar o su motor C no carga. art 0.1.11 instala y arranca
+    # perfectamente.
+    #
+    # Lo que arregla 0.1.12 es peor que no arrancar: **arranca y contesta mal**.
+    # La nula del contraste de Shin-Fuller no era la de Shin-Fuller (BUG-0065)
+    # — no era invariante a cómo se escribiera el AR, así que el mismo modelo
+    # daba Φ̂₁ᵤ = 25.746 o 7.632, y un paseo aleatorio puro salía «estacionario».
+    # Es el contraste que cierra el ORDEN DE INTEGRACIÓN, del que depende todo
+    # lo demás del modelo. Con él, la fecha de una intervención auto-detectada
+    # caía un período antes en cualquier modelo diferenciado (BUG-0067) y el
+    # polinomio ω(B) se dibujaba con el signo invertido (BUG-0066).
+    #
+    # Una respuesta equivocada no avisa. Por eso la cota: un entorno que
+    # resuelva art 0.1.11 bajo este paraguas correría contrastes que ya sabemos
+    # mal calibrados, sin que nada lo indique.
+    "art-tseries>=0.1.12",    # model building + MCP server (art-mcp)
     # >=0.2.0 is NOT housekeeping. Up to 0.1.1 drtran related each series
     # differenced by ITS OWN operator, so whenever the output and the input
     # carried different differencing the fitted transfer was nu(B)*Delta(B) and
