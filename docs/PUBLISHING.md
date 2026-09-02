@@ -1,69 +1,114 @@
 # Publicación de la suite ATSW en PyPI
 
-Orden de publicación (respeta dependencias): **fue → pyfug → art-tseries → atsw**.
-Validar siempre primero en TestPyPI.
+**Reescrito el 2026-09-02.** La versión anterior describía subidas manuales con
+`twine`, y **el procedimiento real es por CI desde hace tiempo**: cada paquete
+tiene su workflow, se dispara con una etiqueta, y publica con *trusted
+publishing* (OIDC) sin credenciales en ninguna máquina.
 
-## 0. Requisitos
+Se detectó al preparar art-tseries 0.1.12: el documento llevó a subir a TestPyPI
+a mano, que no es dañino pero **no valida el camino real** — se salta el smoke
+test que el workflow hace antes de publicar.
 
-```bash
-python -m pip install --upgrade build twine
+---
+
+## 0. El mapa
+
+| paquete | repositorio | workflow | etiqueta que dispara | notas |
+|---|---|---|---|---|
+| **fue** | `atws/fue/fue` | `.github/workflows/wheels.yml` | `v*` | extensión C → **cibuildwheel**, ruedas por plataforma |
+| **pyfug** | `atws/fug/pyfug` | `.github/workflows/publish.yml` | — | puro Python |
+| **art-tseries** | `ART/art-python` | `.github/workflows/publish-art.yml` | `art-v*` | **con smoke test** antes de publicar |
+| **atsw** | `ART/art-python` (`atsw-suite/`) | `.github/workflows/publish-atsw.yml` | `atsw-v*` | meta-paquete |
+
+**Orden de publicación** (respeta dependencias): `fue → pyfug → art-tseries →
+atsw`. Sólo hace falta el paquete que cambia; los demás se quedan donde están.
+
+## 1. Validar SIN publicar — `workflow_dispatch`
+
+Los cuatro workflows tienen `workflow_dispatch`, y el job que publica está
+condicionado a la etiqueta:
+
+```yaml
+if: startsWith(github.ref, 'refs/tags/art-v')
 ```
-Cuentas en https://test.pypi.org y https://pypi.org con API tokens.
 
-## 1. fue 0.1.3 (re-publicar con los fixes)
-
-fue tiene extensión C → wheels por plataforma con `cibuildwheel` (ya configurado
-en su `pyproject.toml`). En local se puede subir sdist + wheel local; para wheels
-multiplataforma usar CI (GitHub Actions + cibuildwheel).
+Así que **lanzarlo a mano construye y valida, y no publica nada**. Es la
+comprobación previa correcta:
 
 ```bash
-cd atws/fue/fue
-python -m build            # sdist + wheel local
-twine upload --repository testpypi dist/*
-```
-Verificar instalación limpia: `pip install -i https://test.pypi.org/simple/ fue==0.1.3`.
-
-## 2. pyfug 2.0.0 (puro-Python)
-
-```bash
-cd atws/fug/pyfug
-python -m build
-twine upload --repository testpypi dist/*
+gh workflow run publish-art.yml --ref <rama>
+gh run watch                     # o: gh run list --workflow=publish-art.yml
 ```
 
-## 3. art-tseries 0.1.0
+Qué comprueba el job `build` de art-tseries, y por qué importa:
 
-Depende de `fue>=0.1.3` y `pyfug>=2.0` (ya en TestPyPI tras los pasos 1-2).
+* construye sdist y rueda;
+* **instala la rueda recién construida en un entorno limpio**, la importa, y
+  levanta el servidor MCP comprobando que expone ≥ 30 herramientas.
+
+Ese paso no existía. Su ausencia es exactamente cómo se publicó 0.1.3 rota:
+declaraba `mcp>=1.0` sin cota, `mcp 2.0.0` quitó `mcp.server.fastmcp`, y
+`art-mcp` no podía importarse en un entorno limpio. `python -m build` no lo
+habría cazado, porque **el empaquetado estaba bien; lo que fallaba era la
+resolución**.
+
+## 2. Publicar — etiqueta y empujón
+
 ```bash
-cd ART/art-python
-python -m build
-twine upload --repository testpypi dist/*
-# probar resolución de dependencias desde TestPyPI:
+git tag art-v0.1.12
+git push origin art-v0.1.12
+```
+
+El workflow construye, hace el smoke test, y sólo entonces publica con OIDC. Si
+el smoke test falla, la publicación **se detiene**, que es lo correcto: mejor una
+versión bloqueada que una publicada que nadie puede instalar.
+
+Para `fue` la etiqueta es `v*`; para `atsw`, `atsw-v*`.
+
+## 3. TestPyPI: cuándo sí y cuándo no
+
+TestPyPI sigue sirviendo para probar **la resolución de dependencias desde cero**
+en una máquina limpia, que el smoke test del CI no cubre del todo:
+
+```bash
+python -m twine upload --repository testpypi dist/*
 pip install -i https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ art-tseries
-art-mcp --help   # comprobar que el script existe
+            --extra-index-url https://pypi.org/simple/ art-tseries==X.Y.Z
 ```
 
-## 4. atsw 1.0.0 (meta-paquete)
+El `--extra-index-url` no es opcional: TestPyPI **no tiene las versiones actuales
+de las dependencias** —a 2026-09-02 tiene `fue` hasta 0.1.4 mientras art-tseries
+exige `>=0.1.10`—, así que sin él la instalación falla por una razón que no tiene
+que ver con el paquete que se prueba.
 
-```bash
-cd ART/art-python/atsw-suite
-python -m build
-twine upload --repository testpypi dist/*
-pip install -i https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ atsw
-```
+Y una advertencia que cuesta cara: **una versión subida a TestPyPI no se puede
+reemplazar**. Si se sube 0.1.12 y luego hay que corregir algo, ese número queda
+quemado allí. Por eso la validación normal es el `workflow_dispatch`, y TestPyPI
+se reserva para cuando de verdad se quiere probar la instalación.
 
-## 5. Promoción a PyPI
+## 4. El meta-paquete `atsw`
 
-Cuando TestPyPI valide (instalación + `claude mcp add art -- art-mcp` funciona),
-repetir `twine upload dist/*` (sin `--repository testpypi`) en el mismo orden.
+`atsw-suite/pyproject.toml` **fija las versiones mínimas** de los tres paquetes.
+Publicar una versión nueva de `art-tseries` no obliga a tocar `atsw`, pero si se
+quiere que la suite arrastre los arreglos hay que:
 
-## Checklist previo a cada subida
+1. subir el pin (`art-tseries>=X.Y.Z`),
+2. versionar `atsw`,
+3. etiquetar `atsw-v*`.
 
-- [ ] Versión bumpeada (pyproject + `__init__`/`__version__` donde aplique).
-- [ ] `dependencies` correctas y mínimas.
-- [ ] `README.md` presente y referenciado en `readme`.
-- [ ] `license` declarada (GPL-2.0-or-later en toda la suite).
-- [ ] `python -m build` sin warnings; `twine check dist/*` OK.
-- [ ] Instalación limpia en un venv vacío.
+Los comentarios de ese `pyproject` explican por qué cada cota mínima es la que
+es. **No las subas sin leerlos**: varias no son mantenimiento sino la frontera de
+un fallo concreto.
+
+## Checklist previo a cada publicación
+
+- [ ] Versión subida en `pyproject` (y en `__version__` donde aplique).
+- [ ] Entrada de `CHANGELOG.md` escrita, con la fecha del día.
+- [ ] `dependencies` correctas y mínimas, con su porqué comentado.
+- [ ] Suite completa en verde.
+- [ ] `python -m build` sin avisos; `twine check dist/*` OK.
+- [ ] **Ninguna ruta personal en el sdist**: `tar xzf` y `grep -r /home/`.
+- [ ] `bugs/` NO viaja (lo garantiza `prune bugs` en `MANIFEST.in`; compruébalo
+      construyendo, no leyendo).
+- [ ] `workflow_dispatch` del workflow correspondiente, en verde.
+- [ ] Y sólo entonces, la etiqueta.

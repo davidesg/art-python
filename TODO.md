@@ -1292,9 +1292,16 @@ nula raíz unitaria estacional).
       el optimizador libre). Ref: `research/sf_meg/final_table.py`.
 
 ### Tarea 2 — Factorizar AR(p) e identificar AR_f (migrar Root a Python)
-- [ ] Migrar `/home/david/Dropbox/SRC/Root/**Root-1.01**` (la versión BUENA;
-      `root-1.02` tiene `malloc(orden-1)` → overflow = segfault en orden alto) a
-      `src/art/roots.py`. Usar `np.roots` (robusto). Factorizar el AR(p) normalizado
+- [ ] Migrar el código C de **Root-1.01** (la versión BUENA; `root-1.02` tiene
+      `malloc(orden-1)` → overflow = segfault en orden alto) a
+      `src/art/roots.py`.
+
+      *Parcialmente hecho el 2026-09-01 por otra vía:* `formal_tests` ya factoriza
+      el AR con `np.roots` para aislar la raíz real de Shin-Fuller y para deflactar
+      el factor dominante (BUG-0065, BUG-0068), y `diagnosis.admissibility_problems`
+      calcula módulos de raíces para AR y MA (BUG-0062). Lo que sigue faltando es
+      la parte de **identificación de AR_f** —ω, armónico, periodo— y unificar esas
+      tres implementaciones en un módulo. Usar `np.roots` (robusto). Factorizar el AR(p) normalizado
       `1−c₁B−…−cₚBᵖ` en factores reales `(1−a₁B)` y complejos `(1−a₁B−a₂B²)`.
       Para cada par complejo (raíz z): `r=1/|z|`, `ω=|arg(z)|` (CORREGIR la fórmula
       buggy `atan(...)/(2π)` de la versión C), armónico `k=ω·s/(2π)`, periodo
