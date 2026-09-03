@@ -569,9 +569,17 @@ _Z_USER = policy.THRESHOLDS["outlier_user"]  # user-facing scan default (3.5)
 # ---------------------------------------------------------------------------
 
 def _result(desc) -> list:
-    """Convert a Description to MCP content list (text + optional image)."""
+    """Convert a Description to MCP content list (text + optional image).
+
+    BUG-0078: la nota con la RUTA de la figura va aquí, que es por donde pasan
+    todas las herramientas. Sin ella, cuando la ventana del visor no aparece no
+    hay nada a lo que agarrarse — y la herramienta reporta éxito igual.
+    """
     from mcp.types import TextContent, ImageContent
-    items = [TextContent(type="text", text=desc.summary + "\n\n---\n" + desc.recommendation)]
+    txt = desc.summary + "\n\n---\n" + desc.recommendation
+    if desc.figure_b64:
+        txt += _nota_figura(_ULTIMA_FIGURA)
+    items = [TextContent(type="text", text=txt)]
     if desc.figure_b64:
         items.append(ImageContent(type="image", data=desc.figure_b64, mimeType="image/png"))
     return items
@@ -650,22 +658,117 @@ def _equation_for_prompt(ts, model) -> str:
     )
 
 
-def _show_fig(b64: str | None, label: str = "art") -> None:
-    """Save figure to /tmp and open with xdg-open (non-blocking)."""
+# BUG-0078. La versión anterior no podía fallar de forma visible: mandaba
+# stdout y stderr del visor a /dev/null, lanzaba el proceso en un hilo daemon
+# del que nadie recogía el resultado, usaba una ruta estable POR ETIQUETA —así
+# que dos herramientas con la misma etiqueta se pisaban el fichero— y nunca
+# decía dónde había escrito. Cuando la ventana no aparecía no había nada a lo
+# que agarrarse, y la herramienta reportaba éxito igual.
+_ULTIMA_FIGURA: str = ""
+
+
+def _show_fig(b64: str | None, label: str = "art") -> str:
+    """Escribe la figura y trata de abrirla. **Devuelve la ruta**, o "".
+
+    Devolver la ruta es la mitad del arreglo: quien llama puede decirla, y
+    cuando el visor no aparece el analista tiene el fichero.
+
+    **No abre ventana bajo pytest** ni con `ART_NO_VIEWER` en el entorno. La
+    versión con `Popen` en hilo daemon fallaba tan deprisa que casi nunca
+    llegaba a abrir nada; al hacerla síncrona —para poder detectar sus fallos—
+    la suite empezó a abrir una ventana por figura, cientos y en blanco.
+    """
+    global _ULTIMA_FIGURA
     if not b64:
-        return
-    import base64, subprocess, tempfile, threading
+        return ""
+    import base64, os, subprocess
     data = base64.b64decode(b64)
-    # Use a stable path per label so repeated calls replace the same window.
-    path = f"/tmp/art_{label.replace(' ', '_').replace('/', '_')}.png"
-    with open(path, "wb") as fh:
-        fh.write(data)
-    threading.Thread(
-        target=lambda: subprocess.Popen(["xdg-open", path],
-                                        stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.DEVNULL),
-        daemon=True,
-    ).start()
+    etq = label.replace(" ", "_").replace("/", "_")
+    # Discriminante por proceso: dos herramientas con la misma etiqueta ya no se
+    # sobrescriben la figura. Sigue siendo estable dentro de una sesión, que es
+    # lo que hace que la ventana se reemplace en vez de multiplicarse.
+    import tempfile
+    # `/tmp` no existe en Windows: el directorio temporal lo da el sistema.
+    path = os.path.join(tempfile.gettempdir(), f"art_{etq}_{os.getpid()}.png")
+    try:
+        with open(path, "wb") as fh:
+            fh.write(data)
+    except Exception:
+        return ""
+    _ULTIMA_FIGURA = path
+
+    # NO se abre ventana bajo pytest ni si se pide lo contrario. Sin esta
+    # guarda, la suite abre una ventana por cada figura que genera: son cientos,
+    # y las de prueba van en blanco. El fichero se escribe igual, que es lo que
+    # una prueba necesita comprobar.
+    global _ULTIMO_VISOR_ERROR
+    _ULTIMO_VISOR_ERROR = ""
+    import sys
+    if os.environ.get("ART_NO_VIEWER") or "pytest" in sys.modules:
+        return path
+
+    _ULTIMO_VISOR_ERROR = _abrir_visor(path)
+    return path
+
+
+def _abrir_visor(path: str) -> str:
+    """Lanza el visor sobre `path`. Devuelve el motivo del fallo, o "".
+
+    Va aparte de `_show_fig` para poder ejercitarla: `_show_fig` no llega aquí
+    bajo pytest —no abriría ventanas en la pantalla de nadie— y sin separarlas
+    el camino de fallo quedaba sin probar, que es justamente el que este bug
+    venía a arreglar.
+
+    CAPTURA la salida del visor. No levanta excepción: no poder abrir una
+    ventana no debe tumbar un análisis, pero tampoco debe pasar inadvertido.
+
+    Y es **multiplataforma**, que no lo era. La versión anterior llamaba a
+    `xdg-open` sin más, que existe sólo en Linux/freedesktop: en Windows y en
+    macOS esta vía no ha funcionado nunca, y nadie se enteró porque el
+    `FileNotFoundError` se lo tragaba el hilo daemon con la salida a
+    `/dev/null` — el mismo defecto que este bug viene a arreglar.
+
+    Conviene tener presente que **ésta no es la vía principal**. La figura viaja
+    además como `ImageContent` en la respuesta MCP, y eso lo renderiza el
+    cliente en cualquier sistema. La ventana del escritorio es un extra.
+    """
+    import subprocess, sys
+    if sys.platform.startswith("win"):
+        try:
+            os.startfile(path)          # type: ignore[attr-defined]
+            return ""
+        except Exception as e:
+            return f"{type(e).__name__}: {e}"
+    abridor = "open" if sys.platform == "darwin" else "xdg-open"
+    try:
+        pr = subprocess.run([abridor, path], capture_output=True,
+                            text=True, timeout=5)
+        if pr.returncode != 0:
+            return (pr.stderr or pr.stdout or
+                    f"{abridor} salió con código {pr.returncode}").strip()
+    except FileNotFoundError:
+        return f"{abridor} no está instalado"
+    except subprocess.TimeoutExpired:
+        # El visor arrancó y se quedó en primer plano: es lo NORMAL con muchos
+        # visores, y no es un fallo.
+        pass
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"
+    return ""
+
+
+_ULTIMO_VISOR_ERROR: str = ""
+
+
+def _nota_figura(path: str) -> str:
+    """La línea que dice dónde quedó la figura, y si el visor falló."""
+    if not path:
+        return ""
+    nota = f"\n\n*Figura: `{path}`*"
+    if _ULTIMO_VISOR_ERROR:
+        nota += (f"  ⚠ *no se pudo abrir sola ({_ULTIMO_VISOR_ERROR}); "
+                 "ábrela desde esa ruta.*")
+    return nota
 
 
 def _persist_pre_out(m, output_path: str) -> str:
