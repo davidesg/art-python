@@ -58,7 +58,9 @@ def _conj(*specs, dominio="generic", info=None):
     """specs: (etiqueta, aic, omega_1, se, wald_p, arranque)."""
     cs = []
     for et, aic, w1, se, p, arr in specs:
-        c = Candidato(arranque_resid=arr, n_escalones=2, etiqueta=et,
+        fecha, _, n = et.partition("×")
+        c = Candidato(arranque_resid=arr, n_escalones=int(n) if n else 2,
+                      etiqueta=et, fecha=fecha,
                       model=object(), aic=aic, omega_1=w1, se_omega_1=se,
                       wald_p=p)
         cs.append(c)
@@ -139,7 +141,11 @@ def test_la_fecha_declarada_fija_la_configuracion():
     assert c.fijado_por_lo_extramuestral.etiqueta == "Q3/2008×4"
     d = describe_configuraciones(c)
     assert "fija la configuración" in d.summary
-    assert "Q3/2008×4" in d.recommendation
+    # La recomendación habla, no da un código: «Q3/2008×4» no le dice nada a
+    # quien ve la herramienta por primera vez.
+    assert "escalones consecutivos en el nivel" in d.recommendation
+    assert "Q3/2008" in d.recommendation
+    assert "×4" not in d.recommendation
 
 
 def test_avisa_si_la_fecha_declarada_no_es_ningun_candidato():
@@ -210,3 +216,32 @@ def test_sobre_datos_sinteticos_con_la_subida_por_debajo_del_umbral():
 def test_la_herramienta_mcp_esta_registrada():
     import art.mcp_server as srv
     assert hasattr(srv, "incident_configurations")
+
+
+
+# ───────────── la sugerencia tiene que decir QUÉ sugiere ─────────────
+
+def test_la_sugerencia_se_entiende_sin_conocer_la_convencion():
+    """«Q2/2008×5» es un código. Alguien que ve la herramienta por primera vez
+    no puede saber si son cinco escalones, cinco impulsos, o un escalón de
+    orden cinco."""
+    c = _conj(("Q2/2008×5", -389.2, -0.157, 0.050, 0.002, 18))
+    d = describe_configuraciones(c)
+    assert "5 escalones consecutivos en el nivel" in d.summary
+    assert "a partir de **Q2/2008**" in d.summary
+    assert "s=4" in d.summary, "y también en la notación del operador"
+    assert "PERMANENTE" in d.summary
+
+
+def test_y_dice_lo_que_implica_cuando_la_ganancia_es_nula():
+    c = _conj(("Q2/2008×3", -389.2, -0.001, 0.050, 0.9, 18))
+    d = describe_configuraciones(c)
+    assert "vuelve a la línea base" in d.summary
+    assert "TRANSITORIO" in d.summary
+
+
+def test_la_tabla_lleva_su_leyenda():
+    """Para que el código corto de la tabla se pueda decodificar."""
+    c = _conj(("Q2/2008×5", -389.2, -0.157, 0.050, 0.002, 18))
+    assert "N escalones consecutivos en el nivel" in \
+        describe_configuraciones(c).summary

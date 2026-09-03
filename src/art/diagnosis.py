@@ -459,18 +459,40 @@ def _compute_param_corr(model,
 # ---------------------------------------------------------------------------
 
 def _npar(model) -> int:
-    """Count free ARMA + mu parameters (used for Q df correction)."""
+    """Coeficientes ARMA **LIBRES**. Es la corrección de g.l. del Ljung-Box.
+
+    BUG-0077. La versión anterior contaba dos cosas que no van:
+
+    **Coeficientes FIJOS.** `len(factor)` ignora los flags `*_free`, y hay un
+    caso que aparece constantemente: el artificio `ar=[[0.0]]` con
+    `ar_free=[[False]]` que la interfaz mete cuando no hay ARMA que estimar. Un
+    coeficiente clavado en cero no consume grado de libertad ninguno.
+
+    **La media.** La corrección clásica es `m − p − q`: los órdenes ARMA. El
+    motor no resta μ, y el `.out` es el árbitro — para ITCER m01 (μ libre, sin
+    ARMA) reporta DF = 4, 8, 12, 15, sin restar nada; para PGAS m20 (AR(1)
+    libre, sin μ) reporta `lags − 1`.
+
+    El sesgo era sistemático y crecía con el modelo: cada determinista y cada
+    coeficiente fijo restaba un grado de libertad de más, así que **cuantos más
+    deterministas llevaba un modelo, más inadecuado parecía**. Sobre ITCER m01
+    invertía el veredicto: p=0,0337 con df=2 frente a p=0,1478 con df=4.
+    """
     n = 0
-    for factor in (model.ar or []):
-        n += len(factor)
-    for factor in (model.ar_s or []):
-        n += len(factor)
-    for factor in (model.ma or []):
-        n += len(factor)
-    for factor in (model.ma_s or []):
-        n += len(factor)
-    if model.mu0 != 0.0:
-        n += 1
+    for factores, libres in ((model.ar, model.ar_free),
+                             (model.ar_s, model.ar_s_free),
+                             (model.ma, model.ma_free),
+                             (model.ma_s, model.ma_s_free)):
+        for i, factor in enumerate(factores or []):
+            flags = None
+            if libres is not None and i < len(libres):
+                flags = libres[i]
+            for j in range(len(factor)):
+                libre = True
+                if flags is not None and j < len(flags):
+                    libre = bool(flags[j])
+                if libre:
+                    n += 1
     return n
 
 

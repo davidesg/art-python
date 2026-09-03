@@ -1498,7 +1498,6 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
             name=f"Resid {ts.name or ''}".strip(),
         )
         desc = describe_prelim_scan(res_ts, d=0, D=0, lam=1.0, threshold=threshold)
-        _show_fig(desc.figure_b64, "residual_scan")
         cab = (f"*Escaneo sobre los RESIDUOS de `{os.path.basename(inp_path)}` "
                f"(n={len(m.residuals.data)}), no sobre la serie.*\n\n")
 
@@ -1541,13 +1540,21 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
         except Exception as _ce:
             cal_txt = f"\n\n*[calibración del correlograma no disponible: {_ce}]*"
 
+        # P8: la figura que ABRE VENTANA es la de calibración, no la vieja de
+        # contribución a la ACF. Antes era al revés: la nueva —dos paneles, PACF
+        # arriba y ACF abajo, con los retardos que cambian de veredicto— llegaba
+        # como ImageContent pero SIN `_show_fig`, así que nunca abría ventana;
+        # y la vieja, que sólo enseña la ACF, sí la abría. El analista tenía en
+        # pantalla justo la que sobra, y no veía la calibración de la PACF —que
+        # es la mitad que decide el orden AR.
+        #
+        # La vieja se retira: está enteramente contenida en la nueva, que además
+        # da la PACF y el veredicto por retardo.
+        _show_fig(cal_b64 or desc.figure_b64, "calibracion")
         items = [TextContent(type="text", text=cab + desc.summary
                              + "\n\n---\n" + desc.recommendation + cal_txt)]
         if cal_b64:
             items.append(ImageContent(type="image", data=cal_b64,
-                                      mimeType="image/png"))
-        if desc.figure_b64:
-            items.append(ImageContent(type="image", data=desc.figure_b64,
                                       mimeType="image/png"))
         return items
     except Exception:
@@ -3589,6 +3596,7 @@ def _record_spec_nodes(result, overrides: dict, gpath: str) -> None:
             decision=f"{nombre} = {valor}", rationale=razon,
             problems_found="", next_version="",
             parent=infer_parent(g), kind="node",
+            instrumento=_version_instr(),
             node={"nodo": nombre, "decidido": str(valor),
                   "evidencia": evid, "alternativas": ""},
             decided_by=por,
@@ -3696,6 +3704,15 @@ def _alternativas_escalera(esc, rec: str) -> str:
     return " · ".join(partes)
 
 
+def _version_instr() -> str:
+    """La versión del instrumento, para que el guion se pueda releer."""
+    try:
+        from art.guion import version_instrumento
+        return version_instrumento()
+    except Exception:
+        return ""
+
+
 def _record_node_to_guion(guion_path: str, nodo: str, decidido: str,
                           razon: str, evidencia: str = "",
                           alternativas: str = "",
@@ -3726,6 +3743,7 @@ def _record_node_to_guion(guion_path: str, nodo: str, decidido: str,
         decision=f"{nodo} = {decidido}", rationale=razon,
         problems_found="", next_version="",
         parent=infer_parent(g), kind="node",
+        instrumento=_version_instr(),
         node={"nodo": nodo, "decidido": decidido, "evidencia": evidencia,
               "alternativas": alternativas},
         decided_by=decidido_por,
@@ -3796,6 +3814,7 @@ def _record_to_guion(
         next_version=next_version,
         figure_b64=figure_b64,
         parent=parent,
+        instrumento=_version_instr(),
     )
     # BUG-0043: la figura va a un fichero hermano, no dentro del guion.
     if entry.figure_b64:
@@ -4238,6 +4257,37 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
             dibuja(r, "", i == len(raices) - 1)
 
         lines += ["", "◆ nodo de decisión · ✓ adoptada · ✗ callejón sin salida · · en exploración"]
+
+        # El guion guarda VEREDICTOS, y un veredicto sólo significa algo junto al
+        # instrumento que lo produjo. Si alguna entrada se calculó con otra
+        # versión, el mapa lo dice — porque si no, presenta como estado actual
+        # algo que puede venir de una versión con un defecto ya corregido.
+        try:
+            actual = _version_instr()
+            viejos = sorted({e.instrumento for e in g.entries
+                             if getattr(e, "instrumento", "") and
+                             e.instrumento != actual})
+            sin = [e.version for e in g.entries
+                   if not getattr(e, "instrumento", "")]
+            if viejos or sin:
+                lines += ["", "⚠ **No todo se calculó con el mismo instrumento.**"]
+                if viejos:
+                    lines.append(f"   actual: `{actual}` · también hay: "
+                                 + ", ".join(f"`{v}`" for v in viejos))
+                if sin:
+                    lines.append(f"   sin registrar: v"
+                                 + ", v".join(str(v) for v in sin)
+                                 + " — anteriores a que el guion guardara la versión")
+                lines.append("   Los veredictos `Q✓`/`JB✓` de esas entradas son "
+                             "los que dio SU instrumento, no el de ahora. Los "
+                             "p-valores están guardados: `export_guion` los "
+                             "vuelca para releerlos.")
+        except Exception as _vi:
+            # Un `pass` aquí ya ocultó un NameError durante el desarrollo. Una
+            # guarda que calla convierte un fallo en una ausencia, y una
+            # ausencia se lee como «no hay nada que avisar».
+            lines += ["", f"*[aviso de instrumento no disponible: "
+                      f"{type(_vi).__name__}: {_vi}]*"]
         if _cortes[0]:
             lines.append(
                 f"⋯ {_cortes[0]} textos recortados para que el mapa quepa. "

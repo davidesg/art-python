@@ -120,7 +120,8 @@ class Candidato:
 
     arranque_resid: int          # obs 1-based en los RESIDUOS
     n_escalones: int
-    etiqueta: str = ""
+    etiqueta: str = ""           # código corto para tablas: "Q2/2008×5"
+    fecha: str = ""              # la fecha sola: "Q2/2008"
     model: Any = None
     aic: float = float("nan")
     omega_1: float | None = None
@@ -136,6 +137,27 @@ class Candidato:
     @property
     def transitorio(self) -> bool | None:
         return None if self.wald_p is None else self.wald_p >= 0.05
+
+    @property
+    def en_palabras(self) -> str:
+        """Qué ES esta configuración, dicho para alguien que la ve por primera
+        vez. `Q2/2008×5` es un código, no una frase: quien no conozca la
+        convención no puede saber si son cinco escalones, cinco impulsos, o un
+        escalón de orden cinco.
+        """
+        n = self.n_escalones
+        base = (f"**{n} escalones consecutivos en el nivel** a partir de "
+                f"**{self.fecha}**")
+        if n > 1:
+            base += f" — un `step` con ω de orden s={n-1}"
+        if self.transitorio is None:
+            return base
+        if self.transitorio:
+            return (base + f", y como la ganancia no se distingue de cero, el "
+                    f"nivel **vuelve a la línea base** tras {n-1} período(s): "
+                    f"efecto TRANSITORIO")
+        return (base + f", con ganancia ω(1)={self.omega_1:+.4f}: el nivel "
+                f"**se queda desplazado** — efecto PERMANENTE")
 
     @property
     def ic95(self) -> tuple[float, float] | None:
@@ -235,8 +257,10 @@ class ConjuntoCandidatos:
         """El candidato cuyo arranque coincide con la fecha declarada."""
         if not self.info.desde:
             return None
-        return next((c for c in self.vivos
-                     if c.etiqueta.startswith(self.info.desde)), None)
+        # Se empareja por FECHA y no por prefijo de la etiqueta: la etiqueta es
+        # un código compuesto («Q3/2008×4») y un `startswith` sobre ella ata la
+        # lógica al formato de presentación, que es justo lo que se ha cambiado.
+        return next((c for c in self.vivos if c.fecha == self.info.desde), None)
 
 
 def arranques_candidatos(z: Sequence[float], extremos_idx: Sequence[int],
@@ -308,6 +332,7 @@ def evalua_configuraciones(model_base, candidatos: Sequence[tuple[int, int]],
     out = []
     for at_r, n_om in candidatos:
         c = Candidato(arranque_resid=at_r + 1, n_escalones=n_om,
+                      fecha=etiqueta(at_r),
                       etiqueta=f"{etiqueta(at_r)}×{n_om}")
         try:
             itv = fue.Intervention("step", at=at_r + desfase,
@@ -357,7 +382,9 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
             figure_b64=None, recommendation="Revisa el episodio detectado.",
             data=dict(identificado=False, candidatos=[]))
 
-    L += ["| configuración | AIC | ΔAIC | ω(1) | SE | IC 95% | vecino | lectura |",
+    L += ["*Se lee «fecha×N» como **N escalones consecutivos en el nivel a "
+          "partir de esa fecha**, es decir un `step` con ω de orden N−1.*", "",
+          "| configuración | AIC | ΔAIC | ω(1) | SE | IC 95% | vecino | lectura |",
           "|---|---|---|---|---|---|---|---|"]
     m0 = conj.mejor.aic
     for c in sorted(conj.vivos, key=lambda x: x.aic):
@@ -374,7 +401,8 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
 
     if conj.identificado:
         u = emp[0] if emp else conj.mejor
-        L += [f"#### El dato **sí** identifica la configuración: {u.etiqueta}", "",
+        L += [f"#### El dato **sí** identifica la configuración", "",
+              f"→ {u.en_palabras}", "",
               "Sólo una cae dentro de la banda de AIC; las demás quedan fuera."]
     else:
         rg = conj.rango_ganancia
@@ -442,11 +470,11 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
                      "ganancia.")
 
     if conj.identificado:
-        rec = f"Configuración **{emp[0].etiqueta}**: el dato la identifica."
+        rec = f"El dato identifica la configuración: {emp[0].en_palabras}."
     elif conj.fijado_por_lo_extramuestral is not None \
             and conj.concuerda_con_lo_extramuestral is not False:
-        rec = (f"El dato no identifica, pero la información extramuestral sí: "
-               f"**{conj.fijado_por_lo_extramuestral.etiqueta}**.")
+        rec = ("El dato no identifica, pero la información extramuestral sí: "
+               + conj.fijado_por_lo_extramuestral.en_palabras + ".")
     else:
         rec = ("**No elijas por AIC.** El dato no identifica la configuración y "
                "las empatadas discrepan en la lectura. Aporta la fecha de "
@@ -470,6 +498,7 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
             candidatos=[dict(etiqueta=c.etiqueta, aic=c.aic, omega_1=c.omega_1,
                              se_omega_1=c.se_omega_1, wald_p=c.wald_p,
                              ic95=list(c.ic95) if c.ic95 else None,
+                             fecha=c.fecha, en_palabras=c.en_palabras,
                              deja_vecino=c.deja_vecino,
                              transitorio=c.transitorio,
                              en_banda=c in emp, error=c.error)

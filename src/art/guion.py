@@ -23,6 +23,22 @@ class GuionStats:
     jb_pass: bool | None
     n_extreme: int
     extreme: list[dict[str, Any]] = field(default_factory=list)
+    # ── Los DATOS, no sólo el veredicto ─────────────────────────────────
+    # El guion guardaba `q_pass`/`jb_pass` como booleanos calculados en el
+    # momento de registrar. Cuando el instrumento se corrige —y hoy se corrigió
+    # tres veces sobre el mismo estadístico: BUG-0074, BUG-0075, BUG-0077— el
+    # registro conserva el veredicto del instrumento VIEJO y el mapa lo presenta
+    # sin fecha, como si fuera el estado actual. Sobre ITCER llegó a decir que
+    # añadir la media EMPEORABA el ruido blanco.
+    #
+    # Guardar los p-valores no deshace el problema —el registro sigue siendo
+    # histórico, que es lo que un guion es— pero permite RELEERLO: con los
+    # retardos, los p-valores y la versión del instrumento se puede saber qué se
+    # vio y con qué, y decidir si vuelve a mirarse.
+    q_lags: list[int] = field(default_factory=list)
+    q_pvalues: list[float] = field(default_factory=list)
+    jb_pvalue: float | None = None
+    npar: int | None = None          # la corrección de g.l. que se usó
 
 
 @dataclass
@@ -88,6 +104,12 @@ class GuionEntry:
     parent: int | None = None
     status: str = "exploring"          # exploring | adopted | dead-end
     why_abandoned: str = ""
+
+    # Con QUÉ instrumento se calculó lo de arriba. Un guion sin esto no se puede
+    # releer: no hay forma de saber si un veredicto viene de una versión con un
+    # defecto ya corregido. Y es lo que hace comparables —o no— dos guiones de
+    # runs distintos.
+    instrumento: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -487,7 +509,64 @@ def _extract_stats(model, diag_result) -> GuionStats:
         jb_pass=diag_result.normal,
         n_extreme=len(extreme_list),
         extreme=extreme_list,
+        q_lags=[int(x) for x in (diag_result.q_lags or [])],
+        q_pvalues=[float(x) for x in (diag_result.q_pvalues or [])],
+        jb_pvalue=float(diag_result.jb_pvalue),
+        npar=int(diag_result.npar),
     )
+
+
+def version_instrumento() -> str:
+    """Con qué se calculó: versión de `art`, commit, y si el árbol estaba sucio.
+
+    Un guion sin esto no se puede releer — no hay forma de saber si un veredicto
+    viene de una versión con un defecto ya corregido.
+
+    Dos trampas que hay que esquivar, y las dos aparecieron al escribir esto:
+
+    **`art.__version__` miente en instalación editable.** Lee la metadata del
+    paquete INSTALADO, que no se regenera al subir la versión en
+    `pyproject.toml`. Daba «0.1.11» sobre un árbol que ya iba por 0.1.12. Así
+    que se prefiere la versión del FUENTE cuando el árbol está delante.
+
+    **Y el commit no basta si hay cambios sin commitear.** Con el árbol sucio,
+    el SHA identifica el último commit, no el código que corrió. Se marca con
+    `+sucio`, que es lo honesto: dice que ese registro no es reproducible a
+    partir del SHA solo.
+    """
+    import os, subprocess
+    raiz = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+
+    # la versión del FUENTE, si el árbol está delante
+    v = ""
+    try:
+        with open(os.path.join(raiz, "pyproject.toml"), encoding="utf-8") as fh:
+            for ln in fh:
+                if ln.strip().startswith("version"):
+                    v = ln.split("=", 1)[1].strip().strip('"\'')
+                    break
+    except Exception:
+        pass
+    if not v:
+        try:
+            from art import __version__ as v
+        except Exception:
+            v = "?"
+
+    def _git(*args, tiempo=3):
+        try:
+            return subprocess.run(["git", "-C", raiz, *args], capture_output=True,
+                                  text=True, timeout=tiempo).stdout.strip()
+        except Exception:
+            return ""
+
+    sha = _git("rev-parse", "--short", "HEAD")
+    sucio = bool(_git("status", "--porcelain")) if sha else False
+    out = f"art {v}"
+    if sha:
+        out += f" @{sha}" + ("+sucio" if sucio else "")
+    return out
 
 
 # ---------------------------------------------------------------------------
