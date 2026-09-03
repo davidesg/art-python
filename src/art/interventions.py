@@ -264,12 +264,54 @@ class InterventionTestResult:
     wald_p: float | None        # p-value of that Wald test; None if k<2
     df: int                     # degrees of freedom (n_obs - npar) for t-tests
     significant: bool           # True if ANY free omega param is significant at 5%
+    # BUG-0076: la lectura de la ganancia DEPENDE DEL TIPO DE ENTRADA, y sin
+    # este campo se leía todo como si fuera un escalón.
+    #
+    #   escalón  ν(1) es el DESPLAZAMIENTO PERMANENTE del nivel
+    #   impulso  ν(1) es el ÁREA acumulada de la respuesta, y el efecto
+    #            permanente es CERO por construcción: la entrada no persiste,
+    #            así que la respuesta vuelve a la base sea cual sea ω
+    #
+    # De ahí una consecuencia de diseño: **elegir input impulso ES imponer la
+    # restricción de ganancia nula**. Escalón con s+1 coeficientes e impulso con
+    # s son el mismo modelo con y sin esa restricción, y la comparación entre
+    # ellos es un LR de un grado de libertad.
+    entrada: str = "escalon"       # "impulso" | "escalon" | "rampa" | "otro"
     omega_1: float | None = None   # ω(1) = ω₀ − ω₁ − ⋯ − ω_s (the numerator)
     # Error típico de ω(1). Se publica en vez de dejar que el consumidor lo
     # despeje del Wald como |g|/√χ², que revienta justo cuando la ganancia es
     # ≈0 — que es el caso interesante.
     se_omega_1: float | None = None
     gain: float | None = None      # ν(1) = ω(1)/δ(1); NaN if δ(1) ≈ 0
+
+    @property
+    def efecto_permanente(self) -> float | None:
+        """Lo que queda en el NIVEL cuando pasa el suceso.
+
+        Con input escalón es la ganancia. Con impulso es **cero exacto**, y no
+        por estimación sino por construcción de la entrada: no persiste.
+        """
+        if self.entrada == "impulso":
+            return 0.0
+        return self.gain
+
+    @property
+    def lectura_de_ganancia(self) -> str:
+        """Qué ES el número que `gain` publica, en este caso."""
+        if self.entrada == "impulso":
+            return "área acumulada de la respuesta"
+        if self.entrada == "escalon":
+            return "desplazamiento permanente del nivel"
+        return "ν(1)"
+
+    @property
+    def contrasta_permanencia(self) -> bool:
+        """Si H₀: ω(1)=0 está contrastando permanente frente a transitorio.
+
+        Sólo con input escalón. Con impulso contrasta si el ÁREA es nula, que
+        es aproximadamente «si la intervención vale algo» — otra pregunta.
+        """
+        return self.entrada == "escalon"
 
     def summary(self, alpha: float = 0.05) -> str:
         t = self.itv_type
@@ -290,11 +332,21 @@ class InterventionTestResult:
             # BUG-0073: el rótulo decía χ²(k) mientras el cálculo usaba df=1.
             # Es UNA restricción lineal —ω(1)=0—, así que es χ²(1), y decir k
             # invitaba a leer el p-valor contra la tabla equivocada.
-            lines.append(f"       ganancia ω(1)={self.omega_1:+.4f}   "
+            lines.append(f"       ω(1)={self.omega_1:+.4f} "
+                         f"[{self.lectura_de_ganancia}]   "
                          f"Wald χ²(1)={self.wald_stat:.3f}  p={self.wald_p:.4f} {wstar}")
-            lines.append(f"       H₀: ganancia nula ⇒ efecto TRANSITORIO"
-                         + ("  (no se rechaza)" if (self.wald_p or 1) >= alpha
-                            else "  (se RECHAZA: efecto permanente)"))
+            if self.contrasta_permanencia:
+                lines.append(f"       H₀: ganancia nula ⇒ efecto TRANSITORIO"
+                             + ("  (no se rechaza)" if (self.wald_p or 1) >= alpha
+                                else "  (se RECHAZA: efecto permanente)"))
+            elif self.entrada == "impulso":
+                # BUG-0076: con impulso la entrada no persiste, así que el
+                # efecto permanente es cero SIEMPRE. El Wald aquí contrasta si
+                # el área es nula, no si el efecto es permanente.
+                lines.append("       efecto permanente en el nivel: **0 por "
+                             "construcción** (la entrada no persiste)")
+                lines.append("       el Wald contrasta si el ÁREA es nula, NO "
+                             "la permanencia — para eso hace falta input escalón")
         return "\n".join(lines)
 
 
@@ -371,6 +423,9 @@ def test_intervention(model, itv_idx: int,
         raise IndexError(f"itv_idx={itv_idx} out of range (0..{len(itvs)-1})")
 
     itv  = itvs[itv_idx]
+    _ENTRADA = {"pulse": "impulso", "impulse": "impulso", "compimp": "impulso",
+                "step": "escalon", "ramp": "rampa"}
+    entrada = _ENTRADA.get(itv.type, "otro")
     start = _intervention_param_start(model, itv_idx)
 
     om  = list(itv.omega      or [])
@@ -445,6 +500,7 @@ def test_intervention(model, itv_idx: int,
     return InterventionTestResult(
         itv_index  = itv_idx,
         itv_type   = itv.type,
+        entrada    = entrada,
         itv_at     = int(itv.at),
         harmonic   = float(itv.harmonic) if hasattr(itv, "harmonic") else None,
         omega      = omega_est,
