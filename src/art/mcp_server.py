@@ -866,6 +866,108 @@ def boxcox_analysis(inp_path: str) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Tool: qué configuraciones del incidente admite el dato
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def incident_configurations(inp_path: str,
+                            threshold: float = 2.5,
+                            umbral_activo: float = 1.0,
+                            evento_desde: str = "",
+                            evento_naturaleza: str = "",
+                            evento_fuente: str = "",
+                            aportada_por: str = "") -> list:
+    """
+    Enumera las CONFIGURACIONES del incidente compatibles con el dato, y dice
+    si el dato las identifica o no.
+
+    EL PROBLEMA. Con d=1 un spike observado en ∇ puede ser el ARRANQUE de un
+    suceso o la COLA de uno que empezó un período antes: un impulso de nivel en
+    T da +ω en T y −ω en T+1. Si la serie deambula, el primer spike puede quedar
+    tapado y sólo cruzar el umbral el segundo — y la intervención cae un período
+    tarde, con Δ logL de 0,03 entre la fecha buena y la mala (BUG-0030).
+
+    Y el arranque no es un detalle de fecha: DECIDE LA LÍNEA BASE. Arrancar
+    antes absorbe parte del movimiento previo y encoge la ganancia estimada.
+
+    LO QUE ESTA HERRAMIENTA NO HACE, y es su razón de ser: **no elige cuando el
+    dato no identifica**. Medido sobre una serie real, tres configuraciones
+    dentro de 2 puntos de AIC, ninguna dejando vecino anómalo, con ganancias de
+    −0,27 a −0,58 y el veredicto permanente/transitorio invertido entre ellas.
+    Publicar una y su error típico sería fabricar una precisión que no existe.
+
+    LA TRAMPA que avisa: la configuración de arranque MÁS TARDÍO tiende a tener
+    el intervalo MÁS ESTRECHO y a ser la única que excluye el cero. No es suerte
+    — acortar la ventana quita parámetros y aprieta la identificación dentro del
+    modelo mientras empeora la línea base. La lectura más segura es la más
+    sospechosa.
+
+    EL CONJUNTO ESTÁ ACOTADO POR EL MECANISMO, no por rejilla: se anda hacia
+    atrás desde el primer extremo mientras los residuos contiguos sigan ACTIVOS
+    (|z| ≥ `umbral_activo`), y cada arranque determina UNA longitud. No hay
+    barrido, que es lo que sobre-elaboraría.
+
+    INFORMACIÓN EXTRAMUESTRAL — LÉASE ANTES DE RELLENARLA.
+    Es lo único que identifica de verdad, y **la herramienta no la sabe ni debe
+    inventarla**: entra por estos parámetros y queda registrada con quién la
+    aportó. Si eres un LLM y no te consta el suceso, **deja los campos vacíos**;
+    no rellenes `evento_fuente` con un recuerdo. `naturaleza` sin `fuente` se
+    rechaza: afirmar que un suceso fue permanente exige decir por qué se sabe.
+
+    Parameters
+    ----------
+    inp_path          : .inp de un modelo estimado SIN la intervención
+    threshold         : |z| para marcar un residuo como extremo
+    umbral_activo     : |z| a partir del cual un residuo contiguo cuenta como
+                        parte del suceso aunque no sea extremo (1,0)
+    evento_desde      : fecha declarada de inicio, "QN/AAAA" — fija el arranque
+    evento_naturaleza : "permanente" | "transitorio" | "" — se contrasta contra
+                        la ganancia: la explicación debe explicar la FORMA
+    evento_fuente     : qué se está citando. Obligatorio si hay `naturaleza`
+    aportada_por      : "analista" | "LLM"
+    """
+    try:
+        import numpy as np
+        from art.configuracion import (arranques_candidatos,
+                                       evalua_configuraciones,
+                                       describe_configuraciones,
+                                       InfoExtramuestral)
+        from art.policy import decide_domain
+        ts, m = _load_ts_model(inp_path)
+        m.fit()
+        if m.residuals is None:
+            return _err("el modelo no tiene residuos: ¿se estimó?")
+        r = np.asarray(m.residuals.data, dtype=float)
+        sd = r.std(ddof=0)
+        z = (r - r.mean()) / sd if sd > 0 else r
+        ext = [i for i in range(len(z)) if abs(z[i]) > threshold]
+        if not ext:
+            return _err(f"no hay residuos con |z| > {threshold:g}.")
+        d_reg = int(getattr(m, "d", 0))
+        cands = arranques_candidatos(z, ext, d=d_reg,
+                                     umbral_activo=umbral_activo)
+        try:
+            info = InfoExtramuestral(desde=evento_desde.strip(),
+                                     naturaleza=evento_naturaleza.strip(),
+                                     fuente=evento_fuente.strip(),
+                                     aportada_por=aportada_por.strip())
+        except ValueError as ve:
+            return _err(str(ve))
+        try:
+            dom = decide_domain(ts)
+        except Exception:
+            dom = "generic"
+        conj = evalua_configuraciones(
+            m, cands, d=d_reg, dominio=dom, info=info,
+            freq=int(ts.freq or 4),
+            start_year=int(getattr(ts, "start", (2000, 1))[0]),
+            start_per=int(getattr(ts, "start", (2000, 1))[1]))
+        return _result(describe_configuraciones(conj))
+    except Exception as e:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
 # Tool: la escalera de Ockham
 # ---------------------------------------------------------------------------
 

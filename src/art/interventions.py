@@ -265,6 +265,10 @@ class InterventionTestResult:
     df: int                     # degrees of freedom (n_obs - npar) for t-tests
     significant: bool           # True if ANY free omega param is significant at 5%
     omega_1: float | None = None   # ω(1) = ω₀ − ω₁ − ⋯ − ω_s (the numerator)
+    # Error típico de ω(1). Se publica en vez de dejar que el consumidor lo
+    # despeje del Wald como |g|/√χ², que revienta justo cuando la ganancia es
+    # ≈0 — que es el caso interesante.
+    se_omega_1: float | None = None
     gain: float | None = None      # ν(1) = ω(1)/δ(1); NaN if δ(1) ≈ 0
 
     def summary(self, alpha: float = 0.05) -> str:
@@ -416,6 +420,7 @@ def test_intervention(model, itv_idx: int,
     wald_p    = None
     omega_1   = None
     gain      = None
+    se_om1    = None
     k = len(free_om_idx)
 
     if om:
@@ -431,6 +436,7 @@ def test_intervention(model, itv_idx: int,
             sub_cov = cov[np.ix_(free_om_idx, free_om_idx)]
             Vg = float(alpha_vec @ sub_cov @ alpha_vec)
             if Vg > 0:
+                se_om1 = float(np.sqrt(Vg))
                 wald_stat = g ** 2 / Vg      # χ²(1) under H₀: ω(1)=0
                 wald_p    = float(sp_stats.chi2.sf(wald_stat, df=1))
 
@@ -448,6 +454,7 @@ def test_intervention(model, itv_idx: int,
         wald_stat  = wald_stat,
         wald_p     = wald_p,
         omega_1    = omega_1,
+        se_omega_1 = se_om1,
         gain       = gain,
         df         = df,
         significant = significant,
