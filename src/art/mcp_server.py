@@ -871,6 +871,7 @@ def boxcox_analysis(inp_path: str) -> list:
 
 @mcp.tool()
 def incident_configurations(inp_path: str,
+                            at: int = 0,
                             threshold: float = 2.5,
                             umbral_activo: float = 1.0,
                             evento_desde: str = "",
@@ -917,6 +918,10 @@ def incident_configurations(inp_path: str,
     Parameters
     ----------
     inp_path          : .inp de un modelo estimado SIN la intervención
+    at                : obs 1-based (espacio de RESIDUOS) dentro del episodio a
+                        analizar. 0 = el de mayor |z|. **Se analiza UN episodio
+                        por llamada**: las configuraciones son de un suceso, no
+                        del conjunto de anómalos de la serie
     threshold         : |z| para marcar un residuo como extremo
     umbral_activo     : |z| a partir del cual un residuo contiguo cuenta como
                         parte del suceso aunque no sea extremo (1,0)
@@ -940,11 +945,28 @@ def incident_configurations(inp_path: str,
         r = np.asarray(m.residuals.data, dtype=float)
         sd = r.std(ddof=0)
         z = (r - r.mean()) / sd if sd > 0 else r
-        ext = [i for i in range(len(z)) if abs(z[i]) > threshold]
+        ext = [(i + 1, float(z[i])) for i in range(len(z))
+               if abs(z[i]) > threshold]
         if not ext:
             return _err(f"no hay residuos con |z| > {threshold:g}.")
         d_reg = int(getattr(m, "d", 0))
-        cands = arranques_candidatos(z, ext, d=d_reg,
+
+        # AGRUPAR EN EPISODIOS PRIMERO. Sin esto, dos sucesos separados por años
+        # se toman como UNO y la enumeración le busca el arranque a un engendro
+        # de dieciocho trimestres: sobre PGAS m10 salía «Q1/2015 × 23 escalones».
+        # Las configuraciones son de UN suceso, no del conjunto de anómalos.
+        from art.policy import decide_episodios
+        eps = decide_episodios(ext, d=d_reg)
+        if at:
+            ep = next((e for e in eps if e.inicio <= int(at) <= e.fin), None)
+            if ep is None:
+                return _err(f"at={at} no cae en ningún episodio: "
+                            + ", ".join(f"{e.inicio}–{e.fin}" for e in eps))
+        else:
+            ep = max(eps, key=lambda e: e.z_max)
+        otros = [e for e in eps if e is not ep]
+        idx_ep = [o - 1 for o, _ in ep.extremos]
+        cands = arranques_candidatos(z, idx_ep, d=d_reg,
                                      umbral_activo=umbral_activo)
         try:
             info = InfoExtramuestral(desde=evento_desde.strip(),
@@ -962,7 +984,23 @@ def incident_configurations(inp_path: str,
             freq=int(ts.freq or 4),
             start_year=int(getattr(ts, "start", (2000, 1))[0]),
             start_per=int(getattr(ts, "start", (2000, 1))[1]))
-        return _result(describe_configuraciones(conj))
+        desc = describe_configuraciones(conj)
+        if otros:
+            aviso = ("\n\n---\n\n*Hay **" + str(len(otros)) + "** episodio(s) "
+                     "más en estos residuos, sin analizar aquí: "
+                     + ", ".join(f"obs {e.inicio}" + ("" if e.aislado
+                                 else f"–{e.fin}") + f" (|z|máx {e.z_max:.2f})"
+                                 for e in otros)
+                     + ". Se analiza UN episodio por llamada — pásale `at` para "
+                       "ir a otro.*")
+            desc = type(desc)(summary=desc.summary + aviso,
+                              figure_b64=desc.figure_b64,
+                              recommendation=desc.recommendation,
+                              data={**desc.data,
+                                    "otros_episodios": [
+                                        dict(inicio=e.inicio, fin=e.fin,
+                                             z_max=e.z_max) for e in otros]})
+        return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
 

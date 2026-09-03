@@ -499,11 +499,47 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
     pacf_r = np.asarray(_fue_pacf(r, lags=lags), dtype=float)
 
     # --- Ljung-Box Q-test at standard lags ---
+    #
+    # BUG-0075. El conjunto anterior era `[s//2, s, 2s, 3s]`, y tenía dos
+    # problemas que se pagaron juntos.
+    #
+    # `s//2` es el retardo 2 en trimestral: tras restar los parámetros ARMA
+    # quedan UNO o CERO grados de libertad. Como el veredicto de ruido blanco
+    # se toma con `min(q_pvalues)`, ese punto —el más frágil de todos— decidía
+    # casi siempre.
+    #
+    # Y el conjunto se paraba en `3s`, sin llegar al punto de decisión de la
+    # convención, que para datos trimestrales y mensuales es **f·3+3** — 15 y
+    # 39— y para series anuales o sin estacionalidad, 10.
+    #
+    # El motor tampoco estaba de acuerdo: el `.out` de `fue` reporta el
+    # Ljung-Box en {4, 8, 12, 15} para un trimestral, con sus DF corregidos. La
+    # diagnosis de Python y el motor evaluaban la adecuación en sitios
+    # distintos.
+    #
+    # Lo que costó, medido sobre PGAS: dos especificaciones rivales de la misma
+    # intervención daban Q(2) de 0,0655 y 0,0392 —la simplificada se descartaba
+    # por inadecuada— mientras que a la convención dan 0,3599 y **0,4421**: la
+    # simplificada es la mejor de las dos. El veredicto se invertía.
+    #
+    # Es un Portmanteau y el número de retardos es hasta cierto punto
+    # arbitrario; mirarlos todos siempre es bueno. Lo que no puede ser es que
+    # el punto donde se DECIDE tenga un grado de libertad.
+    # Nota: `_default_lags_fug` devuelve `3*(freq+1)` para series
+    # estacionales, que ES f·3+3. La longitud del correlograma del motor ya era
+    # la convención; lo único que faltaba era EVALUAR ahí.
     if s > 1:
-        q_check_lags = [s // 2, s, 2 * s, 3 * s]
+        q_check_lags = [s, 2 * s, 3 * s, 3 * s + 3]
     else:
-        q_check_lags = [6, 12, 24]
-    q_check_lags = [l for l in q_check_lags if l <= lags]
+        # Sin estacionalidad, 9. Y no es una adaptación a lo que hay: es que
+        # `_default_lags_fug` devuelve 9 para freq=1 porque es lo que hace
+        # `diagnose.c` de `fug`, así que **el 9 ES la convención del motor**.
+        # Una décima de retardo arriba o abajo no cambia nada en un Portmanteau;
+        # lo que importa es que Python y el motor decidan en el mismo sitio.
+        q_check_lags = [5, 9]
+    q_check_lags = sorted({l for l in q_check_lags if 1 <= l <= lags})
+    if not q_check_lags:                       # serie muy corta
+        q_check_lags = [max(1, min(lags, npar + 1))]
 
     lb = ljung_box(r, q_check_lags, df_correction=npar)
     q_stats   = [float(x) for x in lb['statistic']]

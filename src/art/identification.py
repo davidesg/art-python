@@ -145,7 +145,18 @@ class SeriesStats:
     lags: int
 
 
-def compute_stats(w: np.ndarray, lags: int | None = None) -> SeriesStats:
+def compute_stats(w: np.ndarray, lags: int | None = None,
+                  npar: int = 0) -> SeriesStats:
+    """Estadísticos de una serie o de unos residuos.
+
+    `npar` son los parámetros ARMA libres del modelo del que salen los
+    residuos. BUG-0074: sin él, la etiqueta del gráfico imprimía el número de
+    RETARDOS donde van los GRADOS DE LIBERTAD. Sobre residuos de un modelo
+    estimado los grados de libertad de un Ljung-Box son `retardos − npar`, y el
+    `.out` del motor ya lo reportaba bien — la discrepancia entre las dos
+    salidas era la señal. Con `npar=0` (una serie cruda, sin modelo) las dos
+    cantidades coinciden y no hay nada que restar.
+    """
     n = len(w)
     if lags is None:
         lags = min(3 * 13, n - 1)  # default, overridden per-panel
@@ -167,7 +178,8 @@ def compute_stats(w: np.ndarray, lags: int | None = None) -> SeriesStats:
     return SeriesStats(
         n=n, mean=mu, se_mean=se_mean, variance=var, std=std,
         skewness=skew, kurtosis=kurt, jarque_bera=jb,
-        ljung_box_stat=float(lb["statistic"][-1]), ljung_box_df=int(lb["lags"][-1]),
+        ljung_box_stat=float(lb["statistic"][-1]),
+        ljung_box_df=max(int(lb["lags"][-1]) - int(npar), 1),
         acf=r, pacf=p, lags=lags,
     )
 
