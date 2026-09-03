@@ -1386,8 +1386,26 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
                         "`residual_episodes` antes de decidir la forma.\n\n")
         except Exception:
             pass
+        # LA CALIBRACIÓN DEL CORRELOGRAMA — las DOS funciones.
+        # La PACF decide el orden AR y la ACF el orden MA; calibrar sólo una
+        # deja media identificación a ciegas, y no porque una prediga a la otra
+        # sino porque NO la predice: pueden cambiar de veredicto en sentidos
+        # opuestos en el mismo retardo.
+        cal_txt, cal_b64 = "", None
+        try:
+            from art.calibracion import calibra_correlograma, describe_calibracion
+            _cal = calibra_correlograma(m._result.residuals, umbral=threshold)
+            _d = describe_calibracion(_cal, nombre=os.path.basename(inp_path))
+            cal_txt = "\n\n---\n\n" + _d.summary + "\n\n" + _d.recommendation
+            cal_b64 = _d.figure_b64
+        except Exception as _ce:
+            cal_txt = f"\n\n*[calibración del correlograma no disponible: {_ce}]*"
+
         items = [TextContent(type="text", text=cab + desc.summary
-                             + "\n\n---\n" + desc.recommendation)]
+                             + "\n\n---\n" + desc.recommendation + cal_txt)]
+        if cal_b64:
+            items.append(ImageContent(type="image", data=cal_b64,
+                                      mimeType="image/png"))
         if desc.figure_b64:
             items.append(ImageContent(type="image", data=desc.figure_b64,
                                       mimeType="image/png"))
@@ -2550,15 +2568,57 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
         if level != "strong":
             if n_out == 0:
                 note = "anómalos revisados, ninguno significativo"
+                nxt = ("procede a la identificación ARMA" if not has_arma
+                       else "procede a contrastes formales")
+                return ("\n\n---\n\n*✓ Escaneo de anómalos (latente): " + note
+                        + " → " + nxt + ".*"), None
+
+            # BUG: la versión anterior AFIRMABA "no distorsionan la ACF/PACF"
+            # con distorsión «moderada», mientras `residual_outlier_scan` sobre
+            # el MISMO modelo decía «puede merecer la pena intervenir · punto de
+            # decisión del analista». Dos veredictos opuestos con los mismos
+            # números, y el que cerraba la decisión era el que iba embutido aquí.
+            #
+            # Ya no se afirma nada: se CALIBRA. La pregunta «¿distorsiona?» es
+            # «¿cambia algún retardo de dentro a fuera de banda, en la ACF o en
+            # la PACF?», y eso se calcula.
+            try:
+                from art.calibracion import calibra_correlograma
+                cal = calibra_correlograma(m._result.residuals,
+                                           umbral=_autoscan_z)
+            except Exception:
+                cal = None
+            lvl = "moderada" if level == "moderate" else "leve"
+            cab = (f"anómalos revisados ({n_out}): distorsión {lvl} "
+                   f"(var_outlier={var_o:.1f}%, ACF_max={acf_o:.0f}%)")
+            if cal is None:
+                cuerpo = (cab + " — no se pudo calibrar el correlograma; "
+                          "llama a `residual_outlier_scan` antes de fijar órdenes")
+            elif cal.cambia_la_identificacion:
+                ar = ", ".join(f"PACF({d.lag})" for d in cal.flips_ar)
+                ma = ", ".join(f"ACF({d.lag})" for d in cal.flips_ma)
+                que = " y ".join(x for x in (ar, ma) if x)
+                cuerpo = (f"⚠ {cab} — **SÍ cambian la identificación**: al "
+                          f"calibrarlos, {que} cambia(n) de veredicto dentro/"
+                          "fuera de banda. Los órdenes que elegirías ahora no "
+                          "son los del proceso → `residual_outlier_scan` "
+                          "para verlo, e interviene ANTES de identificar")
             else:
-                lvl = "moderada" if level == "moderate" else "leve"
-                note = (f"anómalos revisados ({n_out}): distorsión {lvl} "
-                        f"(var_outlier={var_o:.1f}%, ACF_max={acf_o:.0f}%), no distorsionan "
-                        "la ACF/PACF")
-            nxt = ("procede a la identificación ARMA" if not has_arma
-                   else "procede a contrastes formales")
-            return ("\n\n---\n\n*✓ Escaneo de anómalos (latente): " + note + " → " + nxt
-                    + ". Intervenir sigue siendo opción del analista.*"), None
+                cuerpo = (cab + " — calibrado: **ningún retardo cambia de "
+                          "veredicto** en la ACF ni en la PACF, así que no "
+                          "deciden los órdenes. Intervenir aquí sería "
+                          "sobre-intervenir; sigue siendo opción del analista "
+                          "por adecuación o por el suceso en sí")
+            # El siguiente paso depende del veredicto, no del sitio del flujo:
+            # decir "interviene ANTES de identificar → procede a identificar"
+            # sería la misma contradicción que este arreglo viene a quitar.
+            if cal is not None and cal.cambia_la_identificacion:
+                nxt = "NO fijes p y q todavía"
+            else:
+                nxt = ("procede a la identificación ARMA" if not has_arma
+                       else "procede a contrastes formales")
+            return ("\n\n---\n\n*Escaneo de anómalos (latente): " + cuerpo
+                    + " → " + nxt + ".*"), None
 
         # Distortion STRONG → surface the decision node (calibration + A/B + figure).
         if has_arma:
