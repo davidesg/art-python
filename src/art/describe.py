@@ -622,7 +622,10 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
 def describe_identification(ts, d: int, D: int, lam: float = 0.0) -> Description:
     """Generate identification listing and suggest ARMA orders with per-candidate reasoning."""
     import numpy as np
-    specs = suggest_orders(ts, d=d, D=D, lam=lam, top_n=5)
+    # `incluir_dispersos=True` aquí y sólo aquí: la presentación es el único
+    # sitio donde tiene sentido enseñarlos, y los enseña APARTE (BUG-0095).
+    specs = suggest_orders(ts, d=d, D=D, lam=lam, top_n=5,
+                           incluir_dispersos=True)
 
     s = ts.name or "series"
 
@@ -644,7 +647,17 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0) -> Description
         "",
         "**Candidatos ARMA** (similitud ACF/PACF teórica vs empírica):",
     ]
-    for i, sp in enumerate(specs, 1):
+    # BUG-0095: el RANKING lo forman los polinomios COMPLETOS. Los dispersos
+    # —AR o MA con un solo coeficiente en el retardo k— van aparte, porque
+    # imponen de entrada una restricción que la escuela reserva al análisis de
+    # raíces a posteriori. No se eliminan: son plausibles, y a veces son la
+    # respuesta. Se ofrecen como lo que son.
+    _es_disperso = lambda x: bool(getattr(x, "sparse_ar_lag", 0)
+                                  or getattr(x, "sparse_ma_lag", 0))
+    completos = [x for x in specs if not _es_disperso(x)]
+    dispersos = [x for x in specs if _es_disperso(x)]
+
+    for i, sp in enumerate(completos, 1):
         marker = "→" if i == 1 else "  "
         label  = _pattern_label(sp)
         # BUG-0049. Un candidato DISPERSO --AR o MA con un solo coeficiente, en
@@ -665,7 +678,34 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0) -> Description
             f"{sufijo}  sim={sp.similarity:.3f}  —  {label}"
         )
 
-    # Ambiguity: top-2 gap < 0.05
+    if dispersos:
+        lines += [
+            "",
+            "**Restricciones por confirmar — NO estimar de entrada.** Un «AR sólo "
+            "en B^k» impone φ₁=…=φₖ₋₁=0 antes de estimar nada, y eso es una "
+            "restricción de identificación, no un orden. La escuela estima el "
+            "polinomio COMPLETO y descubre la estructura en las raíces después "
+            "(`ar_factorization`).",
+            "",
+            "  Y el signo decide qué son: para (1 − θB²) en datos mensuales, "
+            "θ<0 da raíces imaginarias puras en ω=π/2 —periodo 4, la frecuencia "
+            "f=3— y θ>0 da dos raíces reales y ninguna frecuencia fija. La misma "
+            "restricción es una cosa u otra según un coeficiente que aún no has "
+            "estimado.",
+            "",
+        ]
+        for sp in dispersos:
+            d_ = []
+            if getattr(sp, "sparse_ar_lag", 0):
+                d_.append(f"AR sólo en B^{sp.sparse_ar_lag}")
+            if getattr(sp, "sparse_ma_lag", 0):
+                d_.append(f"MA sólo en B^{sp.sparse_ma_lag}")
+            lines.append(
+                f"  · ARIMA({sp.p},{sp.d},{sp.q})({sp.P},{sp.D},{sp.Q})_{sp.s}"
+                f"  [{', '.join(d_)}]  sim={sp.similarity:.3f}")
+
+    # Ambiguity: top-2 gap < 0.05 — sobre el RANKING, no sobre los dispersos
+    specs = completos or specs
     ambiguous = len(specs) >= 2 and (specs[0].similarity - specs[1].similarity) < 0.05
     top_gap   = (specs[0].similarity - specs[1].similarity) if len(specs) >= 2 else 1.0
 
@@ -1072,6 +1112,22 @@ def model_equation(ts, model) -> str:
                 v, se = (om[0] if om else 0.0), 0.0
             harm_buf.setdefault(h, {})[t] = (v, se, om_f[0])
 
+        elif t in ("easter", "trend"):
+            # REGRESOR DE CALENDARIO. No tiene fecha —no es un suceso, es una
+            # variable definida sobre toda la muestra— así que no lleva
+            # `ξₜ^{tipo,fecha}` sino su propio símbolo.
+            etiqueta = {"easter": "ξₜ^{Easter}", "trend": "ξₜ^{t}"}[t]
+            tl = _TwoLine()
+            for i, (v0, free) in enumerate(zip(om, om_f)):
+                v, se = (pi.pop() if free else (v0, 0.0))
+                tl.add(f"  {_sign_det(v)} " if i == 0
+                       else f"  {_sign_omega_lag(v)} ")
+                tl.add(_fv(abs(v)), _fse(se) if free else "", align_dot=True)
+                if i:
+                    tl.add("·B" if i == 1 else f"·B{_sup(i)}")
+            tl.add(f" {etiqueta}")
+            itv_rows.append((tl.val(), tl.se_line()))
+
         elif t in ("step", "pulse", "impulse", "ramp", "compimp"):
             date_str = _obs_to_date(itv.at)
             xi_sup   = {"step": "S", "pulse": "I", "impulse": "I",
@@ -1116,6 +1172,25 @@ def model_equation(ts, model) -> str:
                 else:
                     tl.add(f") {xi_str}")
                 itv_rows.append((tl.val(), tl.se_line()))
+
+        else:
+            # CUALQUIER OTRO TIPO, incluidos los que aún no existen. Sin esta
+            # rama su ω se queda en `_seq` sin consumir y **todo lo que viene
+            # después se desplaza una posición**, arrastrando además el error
+            # típico del anterior: cada coeficiente sale con la etiqueta del
+            # siguiente. No es que falte un término, es que el modelo mostrado
+            # no existe (BUG-0097). Consumir siempre, aunque el nombre no se
+            # conozca, es lo que impide que vuelva a ocurrir.
+            tl = _TwoLine()
+            for i, (v0, free) in enumerate(zip(om, om_f)):
+                v, se = (pi.pop() if free else (v0, 0.0))
+                tl.add(f"  {_sign_det(v)} " if i == 0
+                       else f"  {_sign_omega_lag(v)} ")
+                tl.add(_fv(abs(v)), _fse(se) if free else "", align_dot=True)
+                if i:
+                    tl.add("·B" if i == 1 else f"·B{_sup(i)}")
+            tl.add(f" ξₜ^{{{t}}}")
+            itv_rows.append((tl.val(), tl.se_line()))
 
     # Flush harmonics in sorted order (pairs cos+sin on one line)
     for h_idx in sorted(harm_buf.keys()):
@@ -1430,6 +1505,27 @@ def model_equation(ts, model) -> str:
         if se_line:
             lines.append(se_line)
 
+    # ── EL CUADRE DEL CURSOR ──────────────────────────────────────────────
+    # La ecuación es la presentación AUTORITATIVA del modelo: el analista lee
+    # esto y no el `.out`. Se construye consumiendo `_seq` —los parámetros en
+    # orden de render— con un cursor, y si alguna rama no consume lo suyo, el
+    # resto sale corrido: cada coeficiente con el valor y el error típico del
+    # siguiente. Bien formateado, plausible y falso.
+    #
+    # Las ramas de arriba cierran los tipos que hoy existen. Esto cierra los que
+    # no: si el cursor no ha agotado la secuencia, el desajuste se DICE en vez
+    # de imprimirse disfrazado de modelo. Un aviso feo es infinitamente mejor
+    # que una ecuación limpia que miente (BUG-0097).
+    if pi.i != len(_seq):
+        lines += ["", f"  ⚠ **LA ECUACIÓN DE ARRIBA NO CUADRA** — se han "
+                      f"colocado {pi.i} de {len(_seq)} parámetros estimados.",
+                  "     Los coeficientes mostrados pueden estar desplazados y "
+                  "llevar el error típico",
+                  "     de otro. **No los leas**: el `.out` es la constancia "
+                  "fiel (`get_out_report`).",
+                  "     Causa: algún término determinista no tiene rama de "
+                  "render (art/bugs/BUG-0097)."]
+
     lines += ["", stat_line]
 
     # BUG-0062. Un operador cuyas raíces caen DENTRO del círculo unidad invalida
@@ -1533,6 +1629,35 @@ def _two_cos(f_idx: int, freq: int) -> tuple[float, str]:
 # Diagnosis
 # ---------------------------------------------------------------------------
 
+def _residuos_en_fraccion(model):
+    """Los residuos en unidades de FRACCIÓN, que es lo que `pyfug` espera.
+
+    BUG-0084 §1. `pyfug.graphics` rotula el pie de la figura multiplicando por
+    100 —`σ̂_w = {std*100:.2f}%`—, y eso es correcto **si lo que recibe está en
+    fracción**. Los residuos de la suite no lo están: se estima sobre
+    `refactor`·log(y) con refactor=100, así que ya vienen en tanto por ciento y
+    el ×100 de `pyfug` los deja cien veces más grandes.
+
+    Medido sobre FOOD_UEM, el mismo modelo y el mismo número:
+
+        ecuación            σ̂ₐ = 0.2124%     ← correcto
+        figura de residuos  σ̂_w = 21.24%     ← ×100
+        el .out             Standard deviation: 0.212417
+
+    Y la figura de ∇ln del paso anterior rotulaba 0.29%, que también es
+    correcto: ese camino sí entrega fracción. Dos figuras de la misma sesión con
+    escalas distintas bajo el mismo rótulo.
+
+    Dividir aquí no cambia el DIBUJO: `plot_combined` tipifica la serie antes de
+    pintarla, así que un factor constante sólo mueve el rótulo — que es
+    justamente lo que está mal.
+    """
+    import numpy as _np
+    rf = float(getattr(model, "refactor", None) or 1.0)
+    d = _np.asarray(model.residuals.data, dtype=float)
+    return (d / rf) if rf != 1.0 else d
+
+
 def describe_diagnosis(model) -> Description:
     """Run diagnosis on a fitted model and summarize results for the LLM."""
     if model._result is None:
@@ -1549,7 +1674,8 @@ def describe_diagnosis(model) -> Description:
         # stem (e.g. IPC_ES_m00); fall back to the series name.
         mname = getattr(model, "_inp_stem", None) or model.series.name or ""
         rtitle = f"A.{mname}" if mname else "Residuos"
-        pf   = _pyfug_ts(res.data, res.freq, _resid_start(model), name=rtitle)
+        pf   = _pyfug_ts(_residuos_en_fraccion(model), res.freq,
+                         _resid_start(model), name=rtitle)
         title_acf  = rtitle
         title_hist = f"Histograma {rtitle}" if mname else "Histograma residuos"
         fig_acf  = _pyfug_combined(pf, d=0, title=title_acf)
@@ -2543,7 +2669,8 @@ def describe_interventions(model, threshold: float = 3.5) -> Description:
             # fue convention: residuals titled "A.<nombre del modelo>".
             mname = getattr(model, "_inp_stem", None) or model.series.name or ""
             rtitle = f"A.{mname}" if mname else "Residuos"
-            pf   = _pyfug_ts(res.data, res.freq, _resid_start(model), name=rtitle)
+            pf   = _pyfug_ts(_residuos_en_fraccion(model), res.freq,
+                             _resid_start(model), name=rtitle)
             fig_diag = _pyfug_combined(pf, d=0, title=rtitle)
             b64_diag = _fig_b64(fig_diag)
             plt.close(fig_diag)
@@ -2712,6 +2839,27 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
     contribs = _acf_outlier_contributions(w_std, outl_idx, n_lags)
     total_contrib = contribs.sum(axis=0)  # (n_lags,) — summed over all outliers
 
+    # La PACF, y la parte de ella que ponen los anómalos. La ACF admite una
+    # descomposición exacta por pares; la PACF no —es una transformación NO
+    # LINEAL de la ACF (Durbin-Levinson)— así que su «contribución» se obtiene
+    # por diferencia: observada menos la que sale al OMITIR los anómalos.
+    #
+    # Y hace falta las dos: la PACF decide el orden AR y la ACF el MA. Con sólo
+    # la ACF, media identificación queda a ciegas — y no porque una prediga a la
+    # otra sino porque NO la predice: sobre PGAS, en el mismo retardo, la ACF
+    # SALIÓ de banda al calibrar mientras la PACF ENTRABA.
+    pacf_full = np.zeros(n_lags)
+    pacf_contrib = np.zeros(n_lags)
+    try:
+        from art.calibracion import _acf_pacf
+        _, pacf_full = _acf_pacf(w_std, n_lags)
+        if outliers:
+            om = {int(i) - 1 for i, _z, _d in outliers}
+            _, pacf_cal = _acf_pacf(w_std, n_lags, omitir=om)
+            pacf_contrib = pacf_full - pacf_cal
+    except Exception:
+        pass
+
     # Lags whose |contribution| is meaningful (> half CI)
     affected_lags = [
         {"lag": k + 1,
@@ -2728,13 +2876,18 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
     xs    = np.arange(n_w)
 
     if outliers:
-        fig, (ax, ax2) = plt.subplots(
-            2, 1, figsize=(13, 6.5),
-            gridspec_kw={"height_ratios": [2, 1.2]}
+        # TRES paneles: la serie arriba, y debajo la ACF y la PACF. La versión
+        # de dos —serie + ACF— se sustituyó un día entero por una de dos paneles
+        # SIN los datos, y eso fue una pérdida: el panel de la serie es donde el
+        # analista ve DÓNDE está el suceso. Lo que faltaba era añadir la PACF,
+        # no quitar los datos.
+        fig, (ax, ax2, ax3) = plt.subplots(
+            3, 1, figsize=(13, 8.6),
+            gridspec_kw={"height_ratios": [2, 1.2, 1.2]}
         )
     else:
         fig, ax = plt.subplots(figsize=(13, 3.5))
-        ax2 = None
+        ax2 = ax3 = None
 
     # Top panel — standardised series
     ax.axhline(0,          color="black",   lw=0.7)
@@ -2765,14 +2918,32 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         ax2.axhline(0,       color="black",   lw=0.6)
         ax2.axhline(+ci_val, color="#888888", lw=0.8, ls="--")
         ax2.axhline(-ci_val, color="#888888", lw=0.8, ls="--")
-        ax2.set_xlabel("Retardo k", fontsize=9)
         ax2.set_ylabel("r(k)", fontsize=9)
         ax2.set_title(
-            "Contribución de outlier(s) a la ACF  (rojo = parte debida al outlier)",
+            "ACF — decide el orden MA  ·  rojo = parte debida al outlier",
             fontsize=9, fontweight="bold"
         )
         ax2.legend(fontsize=7, loc="upper right", framealpha=0.7)
         ax2.tick_params(axis="both", labelsize=8)
+
+    # Tercer panel — lo mismo para la PACF, que es la que decide el orden AR
+    if ax3 is not None:
+        lags_x = np.arange(1, n_lags + 1)
+        ax3.bar(lags_x, pacf_full, color="#9ecae1", alpha=0.85,
+                label="PACF(k)", zorder=2)
+        ax3.bar(lags_x, pacf_contrib, color="#e74c3c", alpha=0.75,
+                label="Contribución outlier(s)", zorder=3)
+        ax3.axhline(0,       color="black",   lw=0.6)
+        ax3.axhline(+ci_val, color="#888888", lw=0.8, ls="--")
+        ax3.axhline(-ci_val, color="#888888", lw=0.8, ls="--")
+        ax3.set_xlabel("Retardo k", fontsize=9)
+        ax3.set_ylabel("φ(k)", fontsize=9)
+        ax3.set_title(
+            "PACF — decide el orden AR  ·  rojo = parte debida al outlier",
+            fontsize=9, fontweight="bold"
+        )
+        ax3.legend(fontsize=7, loc="upper right", framealpha=0.7)
+        ax3.tick_params(axis="both", labelsize=8)
 
     fig.tight_layout()
     b64 = _fig_b64(fig)
@@ -2945,6 +3116,12 @@ def describe_seasonal_params(model) -> Description:
     # ── extract harmonic parameters in model.params order ──────────────────
     params = list(model.params)
     ses    = list(model.std_errors)
+    # BUG-0090: si el modelo vino de un `.pre`, estas SE no son fiables.
+    try:
+        from art.pipeline import aviso_se_no_fiable
+        _origen = aviso_se_no_fiable(model)
+    except Exception:
+        _origen = ""
     pi_idx = 0
     harmonic_data: dict[int, dict] = {}   # k → {component: (v, se)}
 
@@ -2966,7 +3143,12 @@ def describe_seasonal_params(model) -> Description:
             component = "cos" if t in ("cos", "alter") else "sin"
             harmonic_data.setdefault(k, {})[component] = (v, se)
 
-        elif t in ("step", "pulse", "impulse", "ramp", "compimp"):
+        else:
+            # El MISMO agujero que en `model_equation`, en el otro recorrido de
+            # la misma secuencia: aquí había ramas para `step/pulse/...` y para
+            # nada más, así que un `easter` —o cualquier tipo nuevo— no avanzaba
+            # el cursor y los armónicos que vinieran DESPUÉS se leían corridos.
+            # Un `else` que consume siempre cierra la clase entera (BUG-0097).
             for free in om_f:
                 if free:
                     pi_idx += 1
@@ -3171,7 +3353,7 @@ def describe_seasonal_params(model) -> Description:
         )
 
     return Description(
-        summary="\n".join(summary_lines),
+        summary="\n".join(summary_lines) + _origen,
         figure_b64=b64,
         recommendation=rec,
         data={"freq": freq, "harmonics": table_data,

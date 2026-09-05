@@ -185,11 +185,11 @@ def test_una_serie_anual_no_inventa_estacionalidad(caso):
 
 def test_el_orden_meg_antes_de_podar_esta_declarado():
     """El texto ES el comportamiento: quien lo lee hace lo que dice."""
-    import inspect
+    from tests._fuente import fuente_de
 
     from art import describe
 
-    src = inspect.getsource(describe.describe_seasonal_params)
+    src = fuente_de(describe.describe_seasonal_params)
     assert "Considera eliminarlos" not in src
     assert "MEG" in src and "ifadf" in src
 

@@ -4,6 +4,121 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.2.0.dev0 — SIN PUBLICAR
+
+> **`dev0` es deliberado y no es un descuido.** El árbol lleva demasiados
+> cambios para publicarlos sin haber conducido los dos carriles —guiado y
+> autónomo— a mano. La etiqueta lo dice a simple vista: esto NO es la 0.1.12 de
+> PyPI y tampoco es todavía la 0.2.0.
+>
+> Lo que sí hace este commit es quitar el `+sucio` del sello del guion. Con el
+> árbol sin cometer, `version_instrumento()` marcaba cada entrada como no
+> reproducible a partir del SHA — y eso incluía las corridas de prueba que
+> vienen ahora. El sello pasa a ser `art 0.2.0.dev0 @<sha>`, que identifica
+> exactamente el código que produjo cada número.
+
+## art-tseries 0.2.0 — 2026-09-05
+
+**El nodo de intervención por episodios, que es lo que 0.1.12 declaró pendiente.**
+Con él se cierra el ciclo que aquella versión abrió, y por eso ésta es el cambio
+mayor que allí se anunció.
+
+14 defectos cerrados (BUG-0079…0092, más BUG-0089 documentado como falencia),
+cada uno con repro determinista, arreglo y test. La suite pasa de 1.192 a 1.303.
+
+> ### ⚠ Al actualizar desde 0.1.12, los VEREDICTOS CAMBIAN
+>
+> No son correcciones silenciosas. Un análisis reejecutado puede llegar a otra
+> forma de intervención y a otro modelo final.
+>
+> | qué cambia | antes | ahora | por qué |
+> |---|---|---|---|
+> | umbral del vecino (Treadway) | 3.0 | **2.0** | es el contraste al 5%: sin ARMA el residuo del vecino ES el estadístico de puntuación de un ω más. Con 3.0 la potencia era la mitad — 36% frente a 75%, sobre 200 réplicas (BUG-0087) |
+> | lectura escalar de la escalera | por AIC | por la firma del residuo | `1a` y `1b` no están anidadas y cuestan lo mismo: el AIC no puede compararlas (BUG-0086) |
+> | R² de `intervention_plot` | sobre la ventana | sobre el suceso | el ruido de la ventana ponía un techo al R² por perfecto que fuera el ajuste. Sobre FOOD_UEM 12/2004: 0.419 → 0.876 (BUG-0084 §2) |
+> | configuraciones del incidente | marcha sólo hacia atrás | simétrica | un suceso con la cola bajo el umbral no generaba nunca la configuración larga (BUG-0083) |
+> | AIC de las configuraciones | escala 1 | escala 100 | el clonador perdía el factor de reescala: 1994 puntos de AIC entre el modelo base y las configuraciones que salen de él (BUG-0085) |
+> | λ en el carril guiado | sólo la regla índice | las cuatro categorías | la copia de la regla implementaba una de cuatro, así que `multiplicative` y `ratio` no llegaban ni declarándolas (BUG-0080) |
+> | `get_out_report` | reestimaba | **lee el `.out`** | es el registro, no una reestimación. Con un `.pre` devolvía un informe 247% desviado del fichero de al lado (BUG-0091) |
+> | `estimate_and_diagnose` | `.pre` + `.out` | + `.inp` + guion | la terna quedaba rota y el guion apuntaba al vacío (BUG-0088, BUG-0092) |
+>
+> Y **un guion escrito por 0.2.0 no se abre con 0.1.12**: lleva tres campos
+> nuevos (`out_path`, `hist_path`, `refactor`). Al revés sí.
+
+### El nodo de intervención, cerrado
+
+`guided_intervention` es la puerta que faltaba, paralela a
+`guided_identification`. El nodo tenía nueve instrumentos —el que más de toda la
+suite— y era el único sin entrada secuenciada: ninguno remitía a otro, y tres
+contestaban «¿qué forma?» con criterios distintos y sin árbitro.
+
+* **Llamada 1** — ¿hay que intervenir? Calibra el correlograma omitiendo los
+  anómalos y dice si la identificación cambia. Si no cambia, avisa de que
+  intervenir ahí es sobre-intervenir, y dice por qué la escalada no se detiene
+  sola: cada intervención encoge σ̂ y promueve al siguiente residuo.
+* **Llamada 2** — ¿qué forma admite el dato? Episodio, configuraciones y escalera
+  de Ockham en una respuesta, con el árbitro dicho: `incident_configurations`
+  gobierna sobre `residual_episodes` para la forma.
+* **Llamada 3** — construye, estima y verifica Treadway y la ganancia.
+
+**La FLT ya se puede construir.** `suggest_intervention_form` acepta `n_omega`, y
+con eso el contraste de ganancia nula —el que separa transitorio de permanente—
+deja de ser inalcanzable desde el carril guiado (BUG-0079). Sobre FOOD_UEM la
+vía MCP alcanza ahora ℓ=27.88 / AIC=−25.75, el mismo óptimo que antes había que
+escribir a mano.
+
+**El convenio de signo, cableado donde se usa.** fue guarda ω(B) = ω₀ − ω₁B − ⋯,
+y esa resta se falla: está en tres docstrings y se falló igual dos veces en una
+sesión. Ahora, donde entra o sale un ω, aparece al lado el **camino del nivel**
+que producen. Un signo cambiado se ve antes de estimar.
+
+### El contrato de ficheros, hecho cumplir
+
+Las instrucciones ya decían la regla —*«los parámetros y sus errores típicos se
+leen del `.out`, NUNCA de reejecutar un `.pre`»*— y el código la incumplía en
+varios sitios. La covarianza no es una propiedad del óptimo: es un subproducto
+del **camino** del optimizador, así que un fichero que sólo guarda el óptimo no
+puede llevarla. Medido: las SE de un `.pre` van entre **0.46× y 3.47×**, en las
+dos direcciones; las del `.out`, exactas.
+
+* `_load_fitted` sella el origen y avisa **donde se imprime una SE**, no donde se
+  carga el fichero: así el aviso responde su propia pregunta (BUG-0090).
+* Tres operaciones con contratos distintos: `estimar(inp)` promete SE válidas,
+  `mirar(inp|pre)` no las promete **y no avisa**, `outfile.lee_out` lee el
+  registro sin tocar el motor.
+* **`art/outfile.py`** — el lector que faltaba. art apuntaba al `.out` en sus
+  propios avisos y no tenía con qué leerlo.
+
+### El guion, navegable
+
+`guion_evidencia(guion, version)` devuelve la evidencia de un nodo **sin
+reestimar**: la ecuación con sus errores típicos leídos del `.out`, la diagnosis
+registrada, y las figuras. Es la pareja de `guion_map`: el mapa dice a dónde
+volver, la evidencia dice qué hay allí. Antes, ver el último modelo para decidir
+el camino siguiente costaba una reestimación dirigida por el LLM.
+
+El guion guarda además el `.out` y el histograma como artefactos de primera
+clase, y el mapa avisa cuando un nodo no se puede releer: otra versión del
+instrumento, otra escala de ℓ/AIC, o sus ficheros ausentes.
+
+### Higiene
+
+* Las figuras se discriminan por el CONTENIDO, no por el pid: dos series por los
+  mismos nodos ya no se pisan el fichero (BUG-0081).
+* La suite deja de sembrar `/tmp` de PNG en blanco indistinguibles del producto
+  (BUG-0082).
+* `_INSTRUCTIONS` cubre las 46 herramientas. Medido antes: **23 no aparecían**,
+  entre ellas las dos que esta versión añade. Hay una prueba que lo mantiene.
+
+### Documentos
+
+`docs/ESTUDIO-contrato-de-ficheros-y-semillas.md`,
+`docs/REVISION-antes-de-0.2.0.md`,
+`docs/DISENO-arquitectura-del-nodo-de-intervencion.md`, y §2ter de
+`docs/DISENO-nodo-intervencion.md` con la derivación del umbral de Treadway.
+
+---
+
 ## art-tseries 0.1.12 — 2026-09-02
 
 **50 defectos cerrados (BUG-0021…0070), cada uno con repro determinista, arreglo

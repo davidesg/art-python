@@ -84,6 +84,62 @@ THRESHOLDS = {
     # moverla. Sobre la réplica, el choque de 2008-09 duró DOS trimestres y
     # encontrarlo valía 16,24 puntos de AIC.
     "ventana_episodio": 2,
+    # |z| a partir del cual un VECINO de una intervención cuenta como anómalo
+    # (regla de Treadway). El 2.0 NO es una convención heredada ni una analogía
+    # con los otros umbrales de esta tabla: **es el contraste al 5%**, y se
+    # deriva.
+    #
+    # La condición de primer orden deja los residuos ortogonales a cada regresor
+    # filtrado de la intervención, Σ_t a_t·x_t^(j) = 0 con
+    # x_t^(j) = π(B)[B^j/δ(B)]ξ_t. Preguntar «¿queda masa del suceso en el
+    # vecino?» es preguntar si hace falta un ω MÁS, y eso es el contraste de
+    # puntuación:
+    #
+    #     LM = (Σ_t a_t x_t^(k+1))² / (σ̂² Σ_t (x_t^(k+1))²)   ~   χ²(1)
+    #
+    # Sin ARMA el regresor filtrado es una FICTICIA —π(B)=1— así que la suma
+    # colapsa en un único término y el estadístico se reduce a `LM = a²/σ̂² = z²`.
+    # El residuo tipificado del vecino ES el contraste. De ahí el 2:
+    #
+    #     z = 2.0  →  χ²(1) = 4.00  →  p = 0.0455     el 5% de toda la vida
+    #     z = 3.0  →  χ²(1) = 9.00  →  p = 0.0027
+    #
+    # Comprobado sobre 200 réplicas (ruido blanco, un suceso de dos períodos y
+    # un solo ω ajustado): la razón z²/LR tiene mediana 1.001 [p10 0.996, p90
+    # 1.012], y el tamaño empírico de `z>2` sale 5.0% frente al 5.5% del LR.
+    #
+    # Y lo que costaba el 3.0 no era «un punto ciego»: era la MITAD de la
+    # potencia — 36% frente a 75% en ese mismo experimento (BUG-0087).
+    #
+    # AVISO, y está medido: con ARMA el regresor filtrado deja de ser una
+    # ficticia y la equivalencia se rompe. Con AR(1) φ=0.6 la razón z²/LR baja a
+    # mediana 0.527 y el vecino crudo pierde 30 puntos de potencia (47% frente
+    # al 77.5% del LR). El umbral sigue siendo el correcto para el estadístico
+    # que se está mirando; lo que se queda corto es mirar UN residuo. Ver
+    # BUG-0089.
+    "intervention_vecino": 2.0,
+    # |z| a partir del cual un vecino que NO llega a anómalo merece una NOTA —
+    # y sólo si el modelo lleva ARMA. No es el umbral de Treadway: la regla se
+    # queda en `intervention_vecino` = 2.0, con ARMA y sin él.
+    #
+    # Por qué existe la nota: con ARMA el regresor filtrado de la intervención
+    # deja de ser una ficticia y el residuo crudo del vecino deja de ser el
+    # contraste exacto — pierde potencia (47% frente al 77.5% del LR, medido con
+    # AR(1) φ=0.6; ver BUG-0089). Ahí, un vecino que no cruza 2σ puede ser la
+    # cola del suceso y no ruido.
+    #
+    # Por qué 1.5 y no el `UMBRAL_ACTIVO` = 1.0 del episodio: son dos preguntas
+    # distintas y el número lo decide la nula gaussiana.
+    #
+    #     |z| > 1.0  →  p = 0.317   uno de cada 3    ← eso es ruido
+    #     |z| > 1.5  →  p = 0.134   uno de cada 7.5
+    #     |z| > 2.0  →  p = 0.046   uno de cada 22   ← la regla
+    #
+    # A 1.0 la nota saldría en un tercio de las intervenciones y no diría nada.
+    # A 1.5 sigue siendo probable bajo la nula —uno de cada siete— y por eso es
+    # una NOTA y no una razón para subir de peldaño: el riesgo de
+    # sobre-intervenir es real, y la sobre-intervención no se detiene sola.
+    "intervention_cola_activa": 1.5,
 }
 
 

@@ -520,6 +520,7 @@ def test_intervention(model, itv_idx: int,
 def simplify_interventions(model,
                             alpha: float = 0.05,
                             skip_types: tuple[str, ...] = ("cos", "sin", "alter"),
+                            fallos: list | None = None,
                             ) -> list[InterventionTestResult]:
     """
     Test all model interventions and identify which are non-significant.
@@ -530,6 +531,12 @@ def simplify_interventions(model,
     alpha      : significance level (default 0.05)
     skip_types : intervention types to skip (default: harmonics + alter,
                  which are structural and should not be removed automatically)
+
+    fallos     : lista OPCIONAL donde se recogen las intervenciones que no se
+                 pudieron contrastar, como `(índice, tipo, motivo)`. Pásala
+                 siempre que vayas a presentar el resultado: sin ella, una
+                 intervención que falla desaparece de la lista y el lector no
+                 distingue «no hay» de «no se pudo» (BUG-0090).
 
     Returns
     -------
@@ -547,8 +554,24 @@ def simplify_interventions(model,
             continue
         try:
             results.append(test_intervention(model, i, alpha=alpha))
-        except Exception:
-            pass
+        except Exception as e:
+            # BUG-0090. Aquí había un `except Exception: pass`, y lo que se
+            # tragaba era la guarda de BUG-0027 —la que detecta que la
+            # covarianza viene de la semilla y no del hessiano—, que
+            # `test_intervention` levanta con un mensaje que nombra esta
+            # situación exacta: «la estimación arrancó ya en el óptimo, que es
+            # lo que un `.pre` es por diseño».
+            #
+            # Consecuencia medida: sobre un modelo estimado desde un `.pre`,
+            # `test_interventions` respondía «No hay intervenciones
+            # no-estructurales en el modelo» — que es FALSO, y además borra la
+            # razón. art sabía lo que pasaba y lo tiraba a la basura tres
+            # líneas más allá.
+            #
+            # Una guarda que calla convierte un fallo en una ausencia, y una
+            # ausencia se lee como «no hay nada que ver».
+            if fallos is not None:
+                fallos.append((i, itv.type, f"{type(e).__name__}: {e}"))
     return results
 
 
@@ -668,6 +691,25 @@ def _format_date(year: int, period: int, freq: int) -> str:
 # errores de representación: **la forma se queda corta** (hay episodio) o **la
 # fecha está desplazada**.
 
+def _p_de_z_normal(z: float) -> float:
+    """P(|Z| > z) bajo la normal estándar. Para decir cuán probable es que un
+    vecino sub-umbral sea sólo ruido."""
+    try:
+        from scipy import stats
+        return float(2.0 * (1.0 - stats.norm.cdf(float(z))))
+    except Exception:                                    # pragma: no cover
+        return float("nan")
+
+
+def _p_de_z(z: float) -> float:
+    """El umbral en |z|, dicho como p-valor de χ²(1). Ver `p_vecino`."""
+    try:
+        from scipy import stats
+        return float(stats.chi2.sf(float(z) ** 2, 1))
+    except Exception:                                    # pragma: no cover
+        return float("nan")
+
+
 @dataclass
 class InterventionFitCheck:
     """Si una intervención hizo su trabajo, según la regla de Treadway."""
@@ -681,6 +723,12 @@ class InterventionFitCheck:
     z_despues: float | None
     umbral_vecino: float
     umbral_absorcion: float
+    # ¿Había ARMA ajustado cuando se hizo este diagnóstico? Cambia lo que el
+    # contraste del vecino ES, no sólo su precisión (BUG-0089).
+    con_arma: bool = False
+    #: |z| a partir del cual un vecino sub-umbral merece una nota (sólo con
+    #: ARMA). Ver `cola_activa`. No es el umbral de la regla.
+    umbral_cola: float = 1.5
     # El residuo CRUDO, porque el enunciado exacto de la escuela es sobre él:
     # a_T = 0, y por tanto z_T = −media/sd — el tipificado se queda EN LA MEDIA
     # de los residuos, no en cero. Comprobado: a_T = −3,5·10⁻⁸ sobre ruido
@@ -703,6 +751,67 @@ class InterventionFitCheck:
     def funciona(self) -> bool:
         return self.absorbido and self.vecino_anomalo is None
 
+    @property
+    def cola_activa(self) -> str | None:
+        """Un vecino que no llega a anómalo pero tampoco es plano, CON ARMA.
+
+        Devuelve «antes», «después», «ambos» o None. **No cambia `funciona`**, y
+        eso es deliberado: la regla de Treadway se queda en 2σ, con ARMA y sin
+        él. Esto es una NOTA.
+
+        Por qué sólo con ARMA: sin él, el residuo crudo del vecino ES el
+        contraste exacto de «¿hace falta un ω más?» —el regresor filtrado es una
+        ficticia— y un vecino sub-umbral es exactamente lo que dice ser, ruido.
+        Con ARMA el estadístico pierde potencia (47% frente al 77.5% del LR,
+        medido) y ahí un vecino a 1.6σ puede ser la cola del suceso.
+
+        Por qué no es una razón para subir de peldaño: bajo la nula, |z|>1.5
+        pasa el 13.4% de las veces —uno de cada 7.5—. Convertir eso en evidencia
+        abriría la puerta a sobre-intervenir, que es el modo de fallo que no se
+        detiene solo (BUG-0089, BUG-0096).
+        """
+        if not self.con_arma:
+            return None
+        lo = self.umbral_cola
+        hi = self.umbral_vecino
+        a = (self.z_antes is not None and lo <= abs(self.z_antes) < hi)
+        d = (self.z_despues is not None and lo <= abs(self.z_despues) < hi)
+        return ("ambos" if a and d else "antes" if a else
+                "después" if d else None)
+
+    @property
+    def p_vecino(self) -> float | None:
+        """p-valor del contraste «¿hace falta un ω más?» sobre el peor vecino.
+
+        No es una cifra nueva: es la que el umbral ya estaba usando, dicha en
+        vez de implícita. La condición de primer orden deja los residuos
+        ortogonales a los regresores filtrados de la intervención, así que
+        preguntar si queda masa del suceso en el vecino es el contraste de
+        puntuación de un ω más:
+
+            LM = (Σ_t a_t·x_t^(k+1))² / (σ̂² Σ_t (x_t^(k+1))²)  ~  χ²(1)
+
+        y **sin ARMA el regresor filtrado es una ficticia**, con lo que la suma
+        colapsa en un término y `LM = z²`. De ahí el umbral: z=2 es p=0.0455, el
+        5% de siempre. Comprobado sobre 200 réplicas, z²/LR = 1.001.
+
+        Publicarlo quita la arbitrariedad de la cifra —«2.37 pasa de 2.0» dice
+        menos que «p=0.018»— y **no cambia ningún veredicto**: `vecino_anomalo`
+        sigue decidiéndose por el umbral.
+
+        Con ARMA la equivalencia se rompe y este p es CONSERVATIVO: el
+        estadístico exacto pondera una ventana por el filtro π y tiene más
+        potencia (BUG-0089). Se dice en la salida en vez de callarlo.
+        """
+        zs = [abs(v) for v in (self.z_antes, self.z_despues) if v is not None]
+        if not zs:
+            return None
+        try:
+            from scipy import stats
+            return float(stats.chi2.sf(max(zs) ** 2, 1))
+        except Exception:
+            return None
+
     def summary(self) -> str:
         et = (f"{self.itv_type}[obs {self.at_0based + 1}]")
         marca = "✓" if self.funciona else "✗"
@@ -723,6 +832,31 @@ class InterventionFitCheck:
             L.append(f"       vecinos: {'  ·  '.join(vs)}"
                      + (f"   ← ANÓMALO ({self.vecino_anomalo})"
                         if self.vecino_anomalo else ""))
+            pv = self.p_vecino
+            if pv is not None:
+                L.append(f"       ¿hace falta un ω más?  p={pv:.4f}  "
+                         f"(χ²(1) sobre el peor vecino; umbral |z|>"
+                         f"{self.umbral_vecino:g} ⇔ p<"
+                         f"{_p_de_z(self.umbral_vecino):.4f})")
+                if self.cola_activa:
+                    zz = max((abs(v) for v in (self.z_antes, self.z_despues)
+                              if v is not None and abs(v) < self.umbral_vecino),
+                             default=0.0)
+                    L.append(
+                        f"       nota: vecino {self.cola_activa} a {zz:.2f}σ — "
+                        f"no llega a anómalo ({self.umbral_vecino:g}σ, la regla "
+                        f"de Treadway) pero tampoco es plano. Con ARMA el "
+                        f"residuo crudo pierde potencia, así que puede ser la "
+                        f"COLA del suceso. Es una nota, no evidencia: bajo la "
+                        f"nula un |z|>{self.umbral_cola:g} pasa el "
+                        f"{_p_de_z_normal(self.umbral_cola):.0%} de las veces.")
+                if self.con_arma:
+                    L.append("       nota: este modelo lleva ARMA, así que el "
+                             "p de arriba es CONSERVADOR — sobre residuos sin "
+                             "ARMA el vecino es el contraste exacto y tiene "
+                             "más potencia (medido: 75% frente a 47%). No "
+                             "invalida el veredicto; dice que si no marca, "
+                             "puede ser el orden y no la forma.")
         if self.vecino_anomalo:
             L.append("       ⇒ la representación es errónea: o la FORMA se "
                      "queda corta (hay episodio) o la FECHA está desplazada.")
@@ -730,7 +864,7 @@ class InterventionFitCheck:
 
 
 def check_intervention_fit(model,
-                           umbral_vecino: float = 3.0,
+                           umbral_vecino: float | None = None,
                            umbral_absorcion: float = 1.5
                            ) -> list[InterventionFitCheck]:
     """La regla de Treadway sobre cada intervención de un modelo ajustado.
@@ -741,9 +875,19 @@ def check_intervention_fit(model,
     Parameters
     ----------
     model            : `fue.Model` ya ajustado
-    umbral_vecino    : |z| a partir del cual un vecino cuenta como anómalo
+    umbral_vecino    : |z| a partir del cual un vecino cuenta como anómalo.
+                       `None` toma `policy.THRESHOLDS["intervention_vecino"]`
+                       (2.0). Estaba clavado a 3.0 —el umbral de los anómalos
+                       SUELTOS— y eso dejaba un punto ciego en (2, 3)σ: un
+                       vecino ahí se daba por bueno cuando la regla de la
+                       escuela lo marca (BUG-0087). Un residuo a 2.3σ aislado no
+                       dice nada; pegado a una fecha recién intervenida, sí.
     umbral_absorcion : |z| por debajo del cual un residuo está «en la media»
     """
+    from art.policy import THRESHOLDS
+    if umbral_vecino is None:
+        umbral_vecino = THRESHOLDS["intervention_vecino"]
+    umbral_cola = THRESHOLDS["intervention_cola_activa"]
     if model._result is None:
         raise RuntimeError("Model has not been fitted — call model.fit() first.")
 
@@ -778,5 +922,23 @@ def check_intervention_fit(model,
             z_antes=float(z[antes - 1]) if 1 <= antes <= n else None,
             z_despues=float(z[despues - 1]) if 1 <= despues <= n else None,
             umbral_vecino=umbral_vecino, umbral_absorcion=umbral_absorcion,
+            con_arma=_lleva_arma(model),
+            umbral_cola=umbral_cola,
         ))
     return fuera
+
+
+def _lleva_arma(model) -> bool:
+    """¿Hay algún coeficiente ARMA en el modelo, libre o fijo?
+
+    No es una comprobación de estilo: cambia lo que el diagnóstico del vecino
+    ES. Sin ARMA el regresor filtrado de la intervención es una ficticia y el
+    residuo tipificado es el contraste exacto; con ARMA es la forma del filtro
+    π y el residuo solo se queda corto (BUG-0089).
+    """
+    for atr in ("ar", "ma", "ar_s", "ma_s"):
+        for factor in (getattr(model, atr, None) or []):
+            vals = factor if isinstance(factor, (list, tuple)) else [factor]
+            if any(v is not None for v in vals):
+                return True
+    return False

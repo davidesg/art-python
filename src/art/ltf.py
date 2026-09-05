@@ -63,7 +63,8 @@ from typing import Sequence
 
 import numpy as np
 
-__all__ = ["RespuestaFLT", "respuesta_flt", "describe_ltf"]
+__all__ = [
+    "operador_en_palabras","RespuestaFLT", "respuesta_flt", "describe_ltf"]
 
 
 @dataclass
@@ -329,12 +330,110 @@ class Superposicion:
     z_resto: float
     sd: float
     entrada: str
+    # ── BUG-0084 §2: lo mismo, medido donde la hipótesis dice algo ────────
+    # `r2` y `z_resto` se calculaban sobre TODA la ventana (±8 o ±10), que son
+    # ~20 períodos de ruido ordinario ajenos al suceso. Ese ruido pone un techo
+    # al R² por perfecto que sea el ajuste EN el incidente, y el veredicto
+    # binario se disparaba con formas que sí encajan. Medido sobre el episodio
+    # 02/2017 de FOOD_UEM:
+    #
+    #   2 escalones con ganancia forzada a 0 (INCORRECTA)  escala 0.690  R² 0.606
+    #   2 escalones con ganancia libre (CORRECTA)          escala 0.9996 R² 0.638
+    #
+    # El R² apenas distingue los dos casos; la escala los separa limpiamente. Y
+    # en 12/2004 el mayor resto de la ventana (z=+2.65) era OTRO anómalo
+    # conocido, siete meses después y sin relación con el suceso.
+    #
+    # El soporte es el de la respuesta MÁS UN VECINO a cada lado, y el vecino no
+    # es un margen de cortesía: es la regla de Treadway —lo que la forma no
+    # modeliza cae entero ahí—, así que tiene que entrar en la medida.
+    r2_soporte: float = float("nan")
+    z_resto_soporte: float = float("nan")
+    resto_max_en: int = 0          # offset respecto a `at` del mayor resto
 
     @property
     def la_forma_explica(self) -> bool:
         """Criterio de lectura, no veredicto: la forma cubre lo que hay si
-        explica la mayor parte del entorno y no deja nada extremo detrás."""
-        return self.r2 >= 0.70 and abs(self.z_resto) < 3.0
+        explica lo que hay EN el suceso y no deja nada extremo ahí.
+
+        Se lee sobre el soporte, no sobre la ventana (BUG-0084 §2). La ventana
+        está para MIRARLA; medir sobre ella es medir ruido ajeno al suceso.
+        """
+        import math as _m
+        r2 = self.r2_soporte if not _m.isnan(self.r2_soporte) else self.r2
+        zz = (self.z_resto_soporte if not _m.isnan(self.z_resto_soporte)
+              else self.z_resto)
+        return r2 >= 0.70 and abs(zz) < 3.0
+
+    @property
+    def el_resto_grande_es_ajeno(self) -> bool:
+        """El mayor resto de la ventana cae FUERA del suceso.
+
+        Cuando pasa, no es un fallo de la hipótesis: es otra cosa que estaba ahí
+        —otro anómalo, estructura sin modelizar— y conviene decirlo en vez de
+        cargárselo a la forma que se está probando.
+        """
+        import math as _m
+        if _m.isnan(self.z_resto_soporte):
+            return False
+        return (abs(self.z_resto) > abs(self.z_resto_soporte) + 0.5
+                and abs(self.z_resto) >= 2.0)
+
+
+def operador_en_palabras(omega, delta=(), b: int = 0, K: int = 6) -> str:
+    """El operador escrito, y el CAMINO DEL NIVEL que produce.
+
+    El convenio de fue es el de Box-Jenkins, y es el mismo para todo operador
+    —AR, MA, δ y ω—: los coeficientes de retardo entran **restando**.
+
+        ω(B) = ω₀ − ω₁B − ω₂B² − ⋯ − ω_sB^s
+
+    Es una convención consistente y no se toca. El problema no es la convención:
+    es que obliga a hacer una resta mental cada vez que se lee o se escribe un ω,
+    y esa resta se falla. En esta sesión se falló dos veces seguidas
+    construyendo una hipótesis a mano, y el `.inp` de la réplica necesitó que un
+    −0.7236 entrara como **+0.7236**.
+
+    Así que el remedio no es repetir la regla: es **calcularla**. Donde aparezca
+    un ω, aparece al lado el camino del nivel —que es lo que el analista quiere
+    decir— y la ganancia. Nadie tiene que hacer la resta.
+
+    `K` es cuántos períodos del camino se muestran.
+    """
+    om = [float(x) for x in omega]
+    dl = [float(x) for x in (delta or ())]
+    if not om:
+        return ""
+    r = respuesta_flt(om, dl, b=b, K=max(K, len(om) + 1), d=0)
+
+    partes = [f"{om[0]:+.4f}"]
+    for i, v in enumerate(om[1:], start=1):
+        signo = "−" if v >= 0 else "+"
+        partes.append(f" {signo} {abs(v):.4f}·B" + ("" if i == 1 else f"^{i}"))
+    op = "ω(B) = " + "".join(partes)
+
+    camino = ", ".join(f"{v:+.3f}" for v in r.srf[:K])
+    L = [
+        "**El operador, y lo que hace en el NIVEL**  "
+        "*(convenio Box-Jenkins: los retardos RESTAN)*",
+        "```",
+        f"  coeficientes (como en el .out) : "
+        + "  ".join(f"ω[{i}]={v:+.4f}" for i, v in enumerate(om)),
+        f"  el operador                    : {op}",
+        f"  camino del NIVEL               : {camino}"
+        + (", …" if len(r.srf) > K else ""),
+        f"  ganancia ν(1) = ω(1)/δ(1)      : {r.gain:+.4f}"
+        + ("   → vuelve a la línea base (TRANSITORIO)"
+           if abs(r.gain) < 1e-9 else
+           "   → el nivel se queda desplazado (PERMANENTE)"),
+        "```",
+    ]
+    if len(om) > 1:
+        suma = sum(om)
+        L.append(f"*Ojo con la suma: ω₀+ω₁+⋯ = {suma:+.4f}, que **no** es la "
+                 f"ganancia ({r.gain:+.4f}). La ganancia es ω₀−ω₁−⋯ porque los "
+                 "retardos restan.*")
+    return "\n".join(L)
 
 
 def superpone(observado: Sequence[float],
@@ -399,14 +498,44 @@ def superpone(observado: Sequence[float],
     sim_esc = escala * sim
     resto = obs - sim_esc
 
+    sd = float(np.std(y, ddof=0)) or 1.0
     ss_tot = float(obs @ obs)
     r2 = 1.0 - float(resto @ resto) / ss_tot if ss_tot > 1e-15 else 0.0
-    sd = float(np.std(y, ddof=0)) or 1.0
     z_resto = float(np.max(np.abs(resto)) / sd)
+    resto_max_en = int(k[int(np.argmax(np.abs(resto)))] - at)
+
+    # El soporte sobre el que se mide es el del SUCESO, no el de la hipótesis
+    # (BUG-0084 §2). Medir sobre el soporte propio favorece a las hipótesis
+    # cortas: un escalón de un solo ω mira tres puntos y difícilmente falla en
+    # ellos — sobre la fixture de dos impulsos, `[1.0]` sacaba R²=0.80 en su
+    # soporte y 0.56 en la ventana, y la conclusión honrada es la segunda.
+    #
+    # Así que el soporte arranca en el de la hipótesis y se extiende hacia
+    # delante mientras lo OBSERVADO siga activo (|y| ≥ 1σ), con el mismo
+    # criterio que usa el nodo de episodios. Una hipótesis que se queda corta
+    # queda medida contra todo el suceso, que es lo que tiene que explicar.
+    #
+    # Y un vecino a cada lado, que no es margen de cortesía: es la regla de
+    # Treadway — lo que la forma no modeliza cae entero ahí.
+    fin_ev = fin_sop
+    j = fin_sop + 1
+    while j <= ventana and (at + j) <= n and abs(y[at + j - 1]) >= sd:
+        fin_ev = j
+        j += 1
+    en_sop = (k >= at - 1) & (k <= at + fin_ev + 1)
+    if en_sop.any():
+        o_s, r_s = obs[en_sop], resto[en_sop]
+        ss_s = float(o_s @ o_s)
+        r2_soporte = (1.0 - float(r_s @ r_s) / ss_s) if ss_s > 1e-15 else 0.0
+        z_resto_soporte = float(np.max(np.abs(r_s)) / sd)
+    else:                                              # pragma: no cover
+        r2_soporte = z_resto_soporte = float("nan")
 
     return Superposicion(k=k, observado=obs, simulado=sim_esc, resto=resto,
                          at=at, escala=escala, r2=r2, z_resto=z_resto,
-                         sd=sd, entrada=entrada)
+                         sd=sd, entrada=entrada, r2_soporte=r2_soporte,
+                         z_resto_soporte=z_resto_soporte,
+                         resto_max_en=resto_max_en)
 
 
 def describe_superposicion(observado: Sequence[float],
@@ -454,29 +583,48 @@ def describe_superposicion(observado: Sequence[float],
     plt.close(fig)
 
     if sp.la_forma_explica:
-        lectura = ("**La forma cubre lo que hay.** Explica la mayor parte del "
-                   "entorno y no deja nada extremo detrás.")
-    elif sp.r2 < 0.70:
-        lectura = (f"**La FORMA no encaja** (R² = {sp.r2:.2f}). No es cuestión "
-                   "de amplitud: el perfil observado es otro. Prueba otro "
-                   "número de escalones, o mira si hay denominador.")
+        lectura = ("**La forma cubre lo que hay.** Explica lo que pasa EN el "
+                   "suceso y no deja nada extremo ahí.")
+    elif sp.r2_soporte < 0.70:
+        lectura = (f"**La FORMA no encaja** (R² en el suceso = "
+                   f"{sp.r2_soporte:.2f}). No es cuestión de amplitud: el "
+                   "perfil observado es otro. Prueba otro número de escalones, "
+                   "o mira si hay denominador.")
     else:
         lectura = (f"La forma encaja pero **deja un residuo de z = "
-                   f"{sp.z_resto:+.2f}** en el entorno: hay algo más que esta "
-                   "hipótesis no recoge.")
+                   f"{sp.z_resto_soporte:+.2f}** en el propio suceso: hay algo "
+                   "más que esta hipótesis no recoge.")
 
     lineas = [
         f"### Superposición — entorno de la observación {sp.at}",
         "",
-        f"escala **{sp.escala:.4g}** · forma explicada **R² = {sp.r2:.3f}** · "
-        f"mayor resto **z = {sp.z_resto:+.2f}**",
+        f"escala **{sp.escala:.4g}** · forma explicada **R² = "
+        f"{sp.r2_soporte:.3f}** · mayor resto en el suceso **z = "
+        f"{sp.z_resto_soporte:+.2f}**",
         "",
         lectura,
         "",
         "*La escala y el R² separan dos preguntas: la AMPLITUD y la FORMA. Un "
         "R² alto con escala 3 dice «es esta forma, tres veces mayor»; una "
         "escala 1 con R² bajo dice «esta forma no es».*",
+        "",
+        f"*Los dos números se miden sobre el SOPORTE de la hipótesis y sus "
+        f"vecinos inmediatos, no sobre la ventana entera: la ventana está para "
+        f"mirarla. Sobre los {len(sp.k)} períodos dibujados, R² = {sp.r2:.3f} y "
+        f"el mayor resto es z = {sp.z_resto:+.2f} — pero eso incluye ruido "
+        f"ordinario ajeno al suceso, que pone un techo al R² por perfecto que "
+        f"sea el ajuste (BUG-0084 §2).*",
     ]
+    if sp.el_resto_grande_es_ajeno:
+        lineas += [
+            "",
+            f"⚠ **El mayor resto de la ventana (z = {sp.z_resto:+.2f}) cae "
+            f"{abs(sp.resto_max_en)} período(s) "
+            f"{'después' if sp.resto_max_en > 0 else 'antes'} del arranque, "
+            "fuera del suceso.** No es un fallo de esta hipótesis: es otra "
+            "cosa que ya estaba ahí —otro anómalo, o estructura sin "
+            "modelizar—. Míralo aparte.",
+        ]
 
     return Description(
         summary="\n".join(lineas),
@@ -486,6 +634,9 @@ def describe_superposicion(observado: Sequence[float],
             "a superponer. Estimar una forma que ya se ve incompatible gasta un "
             "modelo para confirmar lo que el gráfico decía gratis."),
         data=dict(at=sp.at, escala=sp.escala, r2=sp.r2, z_resto=sp.z_resto,
+                  r2_soporte=sp.r2_soporte, z_resto_soporte=sp.z_resto_soporte,
+                  resto_max_en=sp.resto_max_en,
+                  resto_grande_ajeno=sp.el_resto_grande_es_ajeno,
                   entrada=sp.entrada, d=d, omega=list(omega),
                   delta=list(delta), b=b,
                   k=sp.k.tolist(), observado=sp.observado.tolist(),

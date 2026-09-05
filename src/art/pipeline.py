@@ -83,15 +83,136 @@ def _write_bare_inp(ts, path: str) -> None:
         fh.write("\n".join(lines) + "\n")
 
 
-def _load_fitted(path: str):
-    """Load and fit a model from .pre or .inp file."""
+#: Sello que deja `_load_fitted` en el modelo: de qué clase de fichero viene.
+#: Va en el OBJETO y no en una global porque una global mutable ya se demostró
+#: el canal equivocado para esto mismo (BUG-0081): con llamadas intercaladas,
+#: quien la lee no sabe si es la suya.
+ATRIBUTO_ORIGEN = "_art_origen"
+
+AVISO_SE_DESDE_PRE = (
+    "⚠ **Este modelo se estimó desde un `.pre`, así que estas desviaciones "
+    "típicas NO son fiables.** Reestimar desde el óptimo hace que BFGS no itere "
+    "y la covarianza se quede en la semilla. Medido, la desviación llega **al "
+    "menos a 4.23×** del valor correcto y va **en las dos direcciones** (se han "
+    "observado desde 0.46× hasta 4.23× sobre modelos distintos), así que no hay "
+    "corrección posible ni cota conocida.\n\n"
+    "**Y cambia decisiones, no sólo números.** Sobre un modelo real, dos "
+    "armónicos pasan de |t| = 3.02 y 2.83 —se conservan— a 1.31 y 1.28 —se "
+    "podan—: es exactamente la decisión del nodo estacional. En ese modelo, 11 "
+    "de 13 parámetros son significativos según el `.out` y 9 de 13 según el "
+    "`.pre`.\n\n"
+    "Los **valores** sí son exactos (la verosimilitud coincide a seis "
+    "decimales), y por eso residuos, figuras y diagnosis no están afectados. "
+    "Lo que está afectado es todo lo que lleve un error típico: razones t, "
+    "Wald, intervalos.\n\n"
+    "Para tenerlas bien: reestima desde el `.inp` correspondiente, o lee el "
+    "`.out` del modelo, que trae la covarianza exacta (BUG-0090)."
+)
+
+
+# ── LAS TRES OPERACIONES DEL CONTRATO ────────────────────────────────────────
+#
+# `_load_fitted` significaba dos cosas a la vez —«estima esto» y «déjame mirar
+# esto»— y el contrato de ficheros distingue tres. Que sean tres funciones no es
+# ceremonia: hace que **el sitio que llama declare lo que necesita**, y con eso
+# el aviso deja de ser genérico.
+#
+#     estimar(inp)        exige `.inp`; promete desviaciones típicas válidas.
+#     mirar(inp|pre)      acepta los dos; NO promete SE. Residuos, figuras,
+#                         diagnosis, previsión: todo eso depende de los VALORES,
+#                         que en un `.pre` son exactos.
+#     art.outfile.lee_out el registro, sin tocar el motor. Es la operación que
+#                         no existía y que el `.out` legible hizo posible.
+#
+# La consecuencia práctica: `mirar` NO avisa, porque no promete nada que el
+# `.pre` estropee. Avisar ahí sería ruido, y el ruido cuesta tokens —que es lo
+# que abrió esta línea de trabajo—. `estimar` sí avisa (BUG-0090).
+
+
+def estimar(path: str):
+    """Carga y ESTIMA un modelo. Acepta `.inp` y `.pre`, y no son lo mismo.
+
+    El convenio es `.inp(t−1) → .pre(t−1) → .inp(t) → .pre(t)`: **sólo el `.inp`
+    se usa para estimar**; el `.pre` sirve para modificar y crear el `.inp`
+    siguiente.
+
+    Estimar desde un `.pre` arranca EN el óptimo, así que BFGS no itera y la
+    covarianza se queda en la semilla (2/n) — BUG-0027, BUG-0090. Los valores
+    salen exactos y las desviaciones típicas no, lo que hace el fallo invisible:
+    el fichero parece hacer round-trip.
+
+    Esta función **no lo prohíbe** —hay usos legítimos, como mirar residuos, y
+    para eso está `mirar()`— pero sella el modelo con `_art_origen` para que
+    quien imprima un error típico pueda decirlo. El aviso se emite donde se
+    IMPRIME la SE y no aquí, que es lo que hace que responda su propia pregunta:
+    si estás viendo una SE, te afecta.
+    """
     import fue
     path = os.path.expanduser(path)
     if not os.path.exists(path):
         raise FileNotFoundError(f"File not found: {path}")
     ts, m = fue.load(path)
     m.fit()
+    origen = "pre" if path.lower().endswith(".pre") else "inp"
+    try:
+        setattr(m, ATRIBUTO_ORIGEN, origen)
+    except Exception:                                    # pragma: no cover
+        pass
+    if origen == "pre":
+        import warnings
+        warnings.warn(
+            f"art: se estimó desde {os.path.basename(path)} (un `.pre`). Los "
+            "VALORES son exactos; las desviaciones típicas NO —la covarianza se "
+            "queda en la semilla del BFGS—. Para SE fiables usa el `.inp` o lee "
+            "el `.out` (art/bugs/BUG-0090).",
+            RuntimeWarning, stacklevel=2)
     return ts, m
+
+
+def mirar(path: str):
+    """Carga y ajusta para MIRAR: residuos, figuras, diagnosis, previsión.
+
+    Acepta `.inp` y `.pre` sin avisar, y eso es lo que la distingue de
+    `estimar()`. No es laxitud: es que lo que se va a mirar **depende de los
+    valores**, y en un `.pre` los valores son exactos —la verosimilitud coincide
+    a seis decimales—. Lo único que un `.pre` estropea es la covarianza, y quien
+    llama aquí declara que no la va a usar.
+
+    Avisar igualmente sería ruido, y el ruido cuesta tokens: el LLM tiene que
+    parar a averiguar si el aviso le concierne. Ése es exactamente el coste que
+    este contrato viene a quitar.
+
+    Si acabas necesitando un error típico, no es esta función: es `estimar()`
+    sobre el `.inp`, o `art.outfile.lee_out` sobre el `.out`.
+    """
+    import fue
+    path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"File not found: {path}")
+    ts, m = fue.load(path)
+    m.fit()
+    try:
+        setattr(m, ATRIBUTO_ORIGEN,
+                "pre" if path.lower().endswith(".pre") else "inp")
+    except Exception:                                    # pragma: no cover
+        pass
+    return ts, m
+
+
+#: Nombre histórico de `estimar`. Se conserva porque lo usan 17 herramientas y
+#: renombrarlas todas de golpe mezclaría dos cambios en un commit; el contrato
+#: ya está declarado en los nombres nuevos.
+_load_fitted = estimar
+
+
+def viene_de_pre(model) -> bool:
+    """¿Este modelo se estimó desde un `.pre`? Ver `_load_fitted`."""
+    return getattr(model, ATRIBUTO_ORIGEN, None) == "pre"
+
+
+def aviso_se_no_fiable(model) -> str:
+    """El aviso, o "" si no procede. Para pegarlo junto a una tabla de SE."""
+    return ("\n\n" + AVISO_SE_DESDE_PRE) if viene_de_pre(model) else ""
 
 
 def _obs_to_date(begyear, begtime, freq, at_0based):
@@ -100,13 +221,23 @@ def _obs_to_date(begyear, begtime, freq, at_0based):
     return offset % freq + 1, begyear + offset // freq
 
 
-def _write_inp(ts, model, output_path: str) -> None:
+def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> None:
     """
     Write a fue .inp file from a (ts, model) pair.
 
     Replicates the format produced by gtk_fue file_io.c:write_inp_file().
     Handles cos/sin/alter/pulse/step/ramp deterministic variables and
     AR/MA operators (regular and seasonal).
+
+    `refactor` es explícito **a propósito** (BUG-0085). La suite estima sobre
+    100·log(y) —`_RESCALE_FACTOR`— y `fue.Model` trae `refactor=1.0` por
+    defecto, así que un modelo construido a mano sin pasarlo sale en otra
+    escala y esta función lo registraba fielmente. El `getattr` con red que
+    había aquí nunca saltaba: encontraba el 1.0 del defecto, que es *truthy*.
+
+    Si no se pasa, se escribe lo que declare el modelo —no se adivina— pero se
+    AVISA cuando difiere de la convención, porque ℓ, AIC y BIC no son
+    comparables entre escalas: difieren en n·ln(refactor).
     """
     import numpy as np
     freq = ts.freq
@@ -281,14 +412,35 @@ def _write_inp(ts, model, output_path: str) -> None:
     else:
         lines.append(" 0")
 
+    if refactor is None:
+        refactor = float(getattr(model, "refactor", None) or _RESCALE_FACTOR)
+        if abs(refactor - _RESCALE_FACTOR) > 1e-9:
+            import warnings
+            warnings.warn(
+                f"art: se escribe {output_path} con factor de reescala "
+                f"{refactor:g}, y la convención de la suite es "
+                f"{_RESCALE_FACTOR:g} (estima sobre {_RESCALE_FACTOR:g}·log y, "
+                "que es lo que hace que σ̂ₐ se lea en tanto por ciento). Los "
+                "ℓ/AIC/BIC de este modelo difieren de los del resto en "
+                "n·ln(factor) y NO son comparables con ellos. Si es "
+                "deliberado, pasa `refactor=` explícito para silenciar este "
+                "aviso (art/bugs/BUG-0085).",
+                RuntimeWarning, stacklevel=2)
     lines += [
         "** ACF/PACF bands (0 Automatic) and reescaling factor:",
-        f" 0 {float(getattr(model, 'refactor', _RESCALE_FACTOR) or _RESCALE_FACTOR):.2f}",
+        f" 0 {float(refactor):.2f}",
         "** Time series (stochastic and non-standard deterministic variables):",
     ]
     for v in np.asarray(ts.data, dtype=float):
         lines.append(f"{v:.6f} ")
 
+    # BUG-0084 §3. El directorio se crea. La ruta que el propio nodo guiado
+    # sugiere en su «próximo paso» es `cases/<serie>/work/...`, que todavía no
+    # existe: la PRIMERA llamada del ciclo reventaba con un FileNotFoundError
+    # sobre una ruta que art acababa de proponer.
+    _dir = os.path.dirname(output_path)
+    if _dir:
+        os.makedirs(_dir, exist_ok=True)
     with open(output_path, "w") as fh:
         fh.write("\n".join(lines) + "\n")
 
@@ -553,12 +705,51 @@ def _build_arma_on_model(m_base, p: int, q: int,
     )
 
 
+#: EL CONVENIO DE CUENTA DE LOS ARMÓNICOS, en un solo sitio.
+#:
+#: `n_harmonics` cuenta **PARES cos/sin**, y el armónico de Nyquist —el
+#: `alter`, que es un solo término y no un par— va aparte. De ahí el tope
+#: `freq//2 - 1`: mensual 5, trimestral 1, semestral 0 (su única frecuencia
+#: estacional ES la de Nyquist).
+#:
+#: No es el único recuento que circula, y ésa era la trampa (revisión externa,
+#: hallazgo #7). En `seasonal_detection` la estacionalidad determinista completa
+#: son `freq-1` TÉRMINOS —11 en mensual— y el contraste F usa ese número como
+#: grados de libertad; en `mcp_server` se cuentan los términos cos/sin/alter de
+#: la lista de intervenciones, que también da 11. Mismo modelo, dos cifras: 5 y
+#: 11. Un bloque que dice «11 armónicos» leído como `n_harmonics=11` producía
+#: un modelo de 5 pares SIN decirlo, porque el tope se aplicaba con un `min`
+#: mudo. Medido sobre el corpus, no había ocurrido nunca (0 de 612 entradas por
+#: encima del tope), así que era una trampa armada, no una herida.
+def maximo_de_armonicos(freq: int) -> int:
+    """Cuántos PARES cos/sin caben en esta frecuencia (el Nyquist va aparte)."""
+    return max(int(freq) // 2 - 1, 0)
+
+
+def tope_de_armonicos(n_harmonics: int, freq: int, avisa: bool = False) -> int:
+    """`n_harmonics` recortado al máximo que cabe, DICIÉNDOLO."""
+    import warnings
+    tope = maximo_de_armonicos(freq)
+    n = min(int(n_harmonics), tope)
+    if avisa and int(n_harmonics) > tope:
+        warnings.warn(
+            f"art: se han pedido {int(n_harmonics)} armónicos y en frecuencia "
+            f"{freq} sólo caben {tope} pares cos/sin (el de Nyquist va aparte, "
+            f"como `alter`). Se estiman {n}. Si la cifra {int(n_harmonics)} "
+            f"viene de un bloque que cuenta TÉRMINOS (freq-1), el equivalente "
+            f"en pares es {tope}.",
+            RuntimeWarning, stacklevel=3,
+        )
+    return n
+
+
 def _make_model(ts, lam: float, d: int, D: int,
                 p: int, q: int, n_harmonics: int,
                 extra_itvs: list | None = None,
                 P: int = 0, Q: int = 0,
                 estimate_mu: bool = False,
-                seasonal: bool | None = None):
+                seasonal: bool | None = None,
+                easter: bool = False):
     """
     Build a fue.Model from SARIMA(p,d,q)(P,D,Q)_s spec.
 
@@ -605,7 +796,7 @@ def _make_model(ts, lam: float, d: int, D: int,
     # so the seasonal-AR seed carries the sign of the noise, not of the deterministic
     # seasonality. For D=1 (no harmonics) the ∇^d∇_s series is already clean.
     _seasonal = (n_harmonics > 0) if seasonal is None else seasonal
-    _n_harm   = min(n_harmonics, max(freq // 2 - 1, 0))
+    _n_harm   = tope_de_armonicos(n_harmonics, freq, avisa=True)
     resid_ref = None
     try:
         yv = np.asarray(getattr(ts, "data", getattr(ts, "values", None)), float)
@@ -662,8 +853,11 @@ def _make_model(ts, lam: float, d: int, D: int,
             seasonal = n_harmonics > 0
         itvs = []
         if seasonal:
-            max_pairs = max(freq // 2 - 1, 0)
-            n_harm    = min(n_harmonics, max_pairs)
+            # El mismo tope que arriba, y ÉSTA es la copia que construye los
+            # armónicos de verdad: la de arriba sólo prepara la semilla. Estaban
+            # las dos escritas a mano con el mismo `min` mudo (BUG-0100). Aquí no
+            # avisa porque ya avisó allí, en la misma llamada.
+            n_harm = tope_de_armonicos(n_harmonics, freq)
             for k in range(1, n_harm + 1):
                 itvs.append(fue.Intervention("cos", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
                 itvs.append(fue.Intervention("sin", at=0, omega=[0.0], omega_free=[True], harmonic=float(k)))
@@ -691,6 +885,23 @@ def _make_model(ts, lam: float, d: int, D: int,
             itvs.append(fue.Intervention(form, at=int(at_0),
                                          omega=[0.0] * n_om,
                                          omega_free=[True] * n_om))
+
+    # SEMANA SANTA. Es un determinista más —el motor lo genera él mismo: 1,0 en
+    # el mes del Domingo de Resurrección, repartido 0,5 marzo + 0,5 abril cuando
+    # el Viernes Santo cae en marzo— pero no es un SUCESO: no tiene fecha, es
+    # una variable de calendario sobre toda la muestra. Por eso entra aquí, con
+    # los armónicos y la media, y no por el nodo de intervenciones, que pide
+    # fecha y forma.
+    #
+    # Sólo tiene sentido en series mensuales: es donde el motor lo construye.
+    if easter:
+        if int(freq) != 12:
+            raise ValueError(
+                f"el efecto Semana Santa sólo existe en series MENSUALES "
+                f"(freq=12); ésta tiene freq={freq}."
+            )
+        itvs.append(fue.Intervention("easter", at=0, omega=[0.0],
+                                     omega_free=[True]))
 
     return fue.Model(
         ts,

@@ -493,6 +493,7 @@ def suggest_orders(
     Q_max: int = 1,
     top_n: int = 5,
     n_harmonics: int = -1,
+    incluir_dispersos: bool = False,
 ) -> list[ModelSpec]:
     """
     Suggest SARIMA orders (p,q,P,Q) by matching theoretical ACF/PACF patterns
@@ -508,6 +509,13 @@ def suggest_orders(
     n_harmonics  : harmonic pairs to subtract before ACF/PACF.
                    -1 (default) = auto: s//2 when D==0 and s>1, else 0.
                    0 = no subtraction.
+    incluir_dispersos : incluir los candidatos con un solo coeficiente en el
+                   retardo k (φ₁=…=φₖ₋₁=0). **False por defecto** (BUG-0095):
+                   eso no es un orden, es una RESTRICCIÓN de identificación
+                   impuesta antes de estimar, y la escuela estima el polinomio
+                   completo y descubre la estructura en las raíces después
+                   (`ar_factorization`). Quien los quiera —para OFRECERLOS
+                   aparte, marcados— los pide explícitamente.
 
     Returns
     -------
@@ -620,8 +628,37 @@ def suggest_orders(
     for lag in range(2, min(eff_q, q_max) + 1):
         _add_candidate(0, lag, 0, 0, sparse_ma=lag)
 
-    candidates.sort(key=lambda m: m.similarity, reverse=True)
-    return candidates[:top_n]
+    # LOS SPARSE VAN DETRÁS, NO MEZCLADOS (BUG-0095).
+    #
+    # Un candidato «AR sólo en B^k» impone φ₁=…=φₖ₋₁=0 **de entrada**, y eso es
+    # una restricción de identificación, no un orden. La práctica Box-Jenkins
+    # estima el polinomio COMPLETO y reserva las restricciones —frecuencia fija,
+    # ceros intermedios— para el análisis de raíces a posteriori
+    # (`ar_factorization`), donde la estructura se DESCUBRE en vez de imponerse.
+    #
+    # Y no es purismo: el significado de la forma sparse **depende del signo del
+    # coeficiente que aún no se ha estimado**. Para (1 − θB²) en datos
+    # mensuales:
+    #
+    #     θ < 0  →  raíces imaginarias puras, ω = π/2, periodo 4  →  f=3
+    #     θ > 0  →  dos raíces reales; no hay frecuencia fija ninguna
+    #
+    # Es decir: la misma restricción es un factor estacional de f=3 o no lo es
+    # según un signo. Imponerla antes de estimar es comprometerse con una lectura
+    # que todavía no se puede hacer. Después, `ar_factorization` la lee sola —y
+    # fue tiene operadores AR(2)/MA(2) de frecuencia fija para expresarla bien.
+    #
+    # No se ELIMINAN: son plausibles y a veces son la respuesta. Se sacan del
+    # ranking y se ofrecen aparte, marcados como lo que son.
+    completos = [m for m in candidates
+                 if not (m.sparse_ar_lag or m.sparse_ma_lag)]
+    completos.sort(key=lambda m: m.similarity, reverse=True)
+    if not incluir_dispersos:
+        return completos[:top_n]
+    dispersos = [m for m in candidates
+                 if (m.sparse_ar_lag or m.sparse_ma_lag)]
+    dispersos.sort(key=lambda m: m.similarity, reverse=True)
+    return completos[:top_n] + dispersos[:max(1, top_n // 2)]
 
 
 # ---------------------------------------------------------------------------

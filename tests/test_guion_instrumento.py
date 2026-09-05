@@ -112,10 +112,33 @@ def test_un_guion_viejo_sigue_cargando():
     assert e.stats.npar is None
 
 
-def test_el_mapa_avisa_de_entradas_sin_version():
+def test_el_mapa_avisa_de_entradas_sin_version(tmp_path):
     """Y el aviso importa: sin él, el mapa presenta como estado actual un
-    veredicto que puede venir de una versión con un defecto ya corregido."""
-    import inspect, art.mcp_server as srv
-    cuerpo = inspect.getsource(srv.guion_map)
-    assert "No todo se calculó con el mismo instrumento" in cuerpo
-    assert "sin registrar" in cuerpo
+    veredicto que puede venir de una versión con un defecto ya corregido.
+
+    Se comprueba sobre la SALIDA, no sobre el código fuente. La versión anterior
+    hacía `inspect.getsource(guion_map)` y buscaba la frase ahí: eso ata la
+    prueba a los desplazamientos de línea del fichero —dio tres falsos
+    positivos en una sola sesión, todos por editar `mcp_server.py` mientras la
+    suite corría— y además no comprueba que el aviso llegue a imprimirse.
+    """
+    import art.mcp_server as srv
+    from art.guion import Guion, GuionEntry, GuionStats, save_guion
+
+    def ent(v, instr):
+        return GuionEntry(
+            version=v, name=f"m{v}", inp_path="", timestamp="", spec={},
+            equation="", decision="", rationale="", problems_found="",
+            next_version="", instrumento=instr,
+            stats=GuionStats(loglik=1.0, aic=2.0, bic=3.0, sigma_a=0.1,
+                             q_pass=True, jb_pass=True, n_extreme=0,
+                             refactor=100.0))
+
+    ruta = str(tmp_path / "g.json")
+    save_guion(Guion(series="S", analyst="t", created="2026-09-04",
+                     entries=[ent(1, "art 0.0.1+viejo"), ent(2, "")]), ruta)
+    fn = getattr(srv.guion_map, "fn", srv.guion_map)
+    txt = "\n".join(getattr(c, "text", "") for c in fn(ruta))
+    assert "No todo se calculó con el mismo instrumento" in txt
+    assert "sin registrar" in txt
+    assert "0.0.1+viejo" in txt

@@ -49,13 +49,101 @@ from typing import Any, Sequence
 
 import numpy as np
 
-__all__ = ["Peldano", "Escalera", "escalera_de_ockham", "describe_escalera"]
+__all__ = ["Peldano", "Escalera", "escalera_de_ockham", "describe_escalera",
+           "lectura_escalar"]
 
 
 # Clases de serie en las que un cambio PERMANENTE de nivel es poco usual, y
 # por tanto la lectura simple necesita respaldo antes de aceptarse. No es un
 # veredicto: es la razón de dominio del punto 3 de arriba.
 DOMINIOS_SIN_CAIDA_PERMANENTE = ("price_index",)
+
+# Cuánto del pico puede quedar SIN cancelar y seguir leyéndose como un impulso
+# de nivel. El diccionario de la FLT dice que en ∇ un impulso de nivel deja
+# +ω, −ω, cuya suma es exactamente cero; lo que sobra de esa suma es lo que no
+# revierte. Es una convención declarada, no un contraste: el contraste de
+# ganancia nula se hace después, sobre los ω estimados.
+TOL_CANCELA = 0.35
+
+
+def lectura_escalar(episodio, d: int) -> tuple[str, str]:
+    """Cuál de las dos lecturas escalares dice el DATO: «1a» o «1b».
+
+    No lo decide el ajuste (BUG-0086). `1a` y `1b` no están anidadas y cuestan
+    lo mismo, así que el AIC no puede compararlas: elegir por AIC es leer ruido.
+    Lo decide la FIRMA que el suceso deja en los residuos, vía el diccionario
+    de la FLT —el mismo que usa `art.ltf`—:
+
+        en el NIVEL          en ∇                         suma en ∇
+        escalón ω en T   →   UN impulso ω en T            ω
+        impulso ω en T   →   DOS impulsos +ω, −ω          0
+
+    De ahí sale la regla, y sale sin umbral nuevo: se lee sobre los EXTREMOS
+    del episodio, que son los que la intervención tiene que explicar.
+
+    * con `d ≥ 1` los residuos viven en ∇:
+        - dos extremos contiguos de **signo opuesto y magnitud comparable** son
+          la firma de un impulso de nivel → `1b`;
+        - cualquier otra cosa —un extremo solo, o vecinos que no se cancelan—
+          es la firma de un escalón → `1a`.
+    * con `d = 0` los residuos viven en el nivel, y el diccionario se invierte:
+        - un extremo solo es un impulso de nivel → `1b`;
+        - una racha del mismo signo es un escalón → `1a`.
+
+    Un vecino por DEBAJO del umbral de extremo no cuenta aquí, y es a propósito:
+    ésa es la cola de un episodio más largo (BUG-0083), no la mitad
+    compensadora de un impulso. Lo que hace con ella la escalera es subir al
+    peldaño 2, no cambiar la lectura escalar.
+
+    Returns
+    -------
+    (nivel, razón) — el nivel recomendado y la frase que lo justifica, para que
+    el informe diga POR QUÉ y no sólo qué.
+    """
+    ext = sorted(episodio.extremos)          # [(obs_1based, z), ...]
+    if not ext:
+        return "1a", ("no hay extremos que leer; se toma el escalón, que es la "
+                      "lectura por defecto de un suceso sin firma de reversión")
+
+    if int(d) >= 1:
+        if len(ext) == 2 and ext[1][0] == ext[0][0] + 1:
+            z0, z1 = ext[0][1], ext[1][1]
+            pico = max(abs(z0), abs(z1))
+            resto = abs(z0 + z1)
+            if z0 * z1 < 0 and pico and resto <= TOL_CANCELA * pico:
+                return "1b", (
+                    f"dos extremos contiguos que se CANCELAN ({z0:+.2f} y "
+                    f"{z1:+.2f}, suma {z0 + z1:+.2f} = {resto / pico:.0%} del "
+                    "pico): en ∇ ésa es la firma de un IMPULSO de nivel, que "
+                    "revierte")
+            if z0 * z1 < 0 and pico:
+                return "1a", (
+                    f"dos extremos contiguos de signo opuesto que NO se "
+                    f"cancelan ({z0:+.2f} y {z1:+.2f}, suma {z0 + z1:+.2f} = "
+                    f"{resto / pico:.0%} del pico, por encima del "
+                    f"{TOL_CANCELA:.0%}): lo que no revierte es un ESCALÓN. El "
+                    "segundo extremo es cola del suceso, no la mitad "
+                    "compensadora de un impulso")
+        if len(ext) == 1:
+            return "1a", (
+                f"un extremo aislado ({ext[0][1]:+.2f}) sin vecino que lo "
+                "compense: en ∇ un impulso solo es la firma de un ESCALÓN de "
+                "nivel, que no revierte")
+        return "1a", (
+            f"{len(ext)} extremos que no forman un par compensado: la lectura "
+            "escalar es el escalón, y la forma de verdad está más arriba en la "
+            "escalera")
+
+    # d = 0 — los residuos ya están en el nivel
+    if len(ext) == 1:
+        return "1b", (f"un solo extremo en el NIVEL ({ext[0][1]:+.2f}), sin "
+                      "diferenciar: eso es un impulso, no un escalón")
+    signos = {1 if z > 0 else -1 for _, z in ext}
+    if len(signos) == 1:
+        return "1a", (f"{len(ext)} extremos del mismo signo en el NIVEL: una "
+                      "racha sostenida es un escalón")
+    return "1a", (f"{len(ext)} extremos de signos mezclados en el NIVEL; se "
+                  "toma el escalón como lectura por defecto")
 
 
 @dataclass
@@ -115,18 +203,47 @@ class Escalera:
     razones_para_subir: list[str]
     recomendado: str | None
     pregunta_extramuestral: str
+    # Cuál de las dos lecturas escalares dice el dato, y por qué. No es
+    # adorno: es lo que impide que el lector suponga que decidió el AIC, que es
+    # lo que decidía antes (BUG-0086).
+    nivel_simple: str = ""
+    criterio_simple: str = ""
 
     def por_nivel(self, nivel: str) -> Peldano | None:
         return next((p for p in self.peldanos if p.nivel == nivel), None)
+
+    @property
+    def subio(self) -> bool:
+        """¿La recomendación ESTÁ en un peldaño alto?
+
+        No es lo mismo que «había razones para subir». Cuando las hay pero el
+        peldaño 2 tampoco se sostiene, la escalera recomienda el bajo — y decir
+        entonces «se subió de peldaño» es afirmar algo que no pasó (BUG-0084 §4).
+        """
+        return self.recomendado == "2"
+
+    @property
+    def ningun_peldano_se_sostiene(self) -> bool:
+        """Había razones para subir y arriba tampoco se sostiene.
+
+        Es el estado que el mensaje contradictorio ocultaba, y es el que el
+        analista necesita saber: no es que se haya elegido bien, es que ninguna
+        de las formas de esta escalera resuelve el suceso.
+        """
+        return bool(self.razones_para_subir) and not self.subio
 
 
 def _clona_con(model, itvs):
     """El modelo base con OTRO juego de intervenciones y las mismas semillas."""
     import fue
     kw = {}
+    # `refactor` es parte de la lista y no un extra: `fue.Model` lo tiene a 1.0
+    # por defecto y la suite estima sobre 100·log(y), así que un clon que no lo
+    # copie sale en OTRA escala y su ℓ/AIC difieren en n·ln(100) — comparables
+    # entre clones, incomparables con el modelo del que salieron (BUG-0085).
     for a in ("ar", "ma", "ar_s", "ma_s", "ar_free", "ma_free",
               "ar_s_free", "ma_s_free", "ar_f", "ma_f", "d", "D",
-              "ifadf", "mu", "estimate_mu", "boxlam"):
+              "ifadf", "mu", "estimate_mu", "boxlam", "refactor"):
         v = getattr(model, a, None)
         if v is not None:
             kw[a] = v
@@ -141,7 +258,11 @@ def _estructurales(model):
 
 
 def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
-                       umbral_vecino: float = 3.0) -> Escalera:
+                       umbral_vecino: float = 0.0) -> Escalera:
+    # `umbral_vecino=0` significa «usa el de la política» —el mismo idioma que
+    # `ventana=0` en este nodo—. Estaba clavado a 3.0, que es el umbral de los
+    # anómalos SUELTOS, y dejaba ciego el tramo (2, 3)σ justo donde la regla de
+    # Treadway es más sensible (BUG-0087).
     """Estima los peldaños en orden y dice qué justifica subir — o no subir.
 
     Parameters
@@ -179,7 +300,7 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
             except Exception:
                 pass
             p.treadway = [c for c in check_intervention_fit(
-                m, umbral_vecino=umbral_vecino) if c.itv_index == idx]
+                m, umbral_vecino=umbral_vecino or None) if c.itv_index == idx]
             from art.diagnosis import diagnose
             dg = diagnose(m)
             # `white_noise` es el veredicto de Q y `normal` el de JB. Se leen de
@@ -205,7 +326,19 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
     # ── por qué subir, o por qué no ─────────────────────────────────────
     p1a, p1b, p2 = (peldanos[0], peldanos[1], peldanos[2])
     simples = [p for p in (p1a, p1b) if p.estimado]
-    mejor_simple = min(simples, key=lambda p: p.aic) if simples else None
+    # NO por AIC (BUG-0086). `1a` y `1b` no están anidadas y cuestan lo mismo;
+    # el hueco de AIC entre ellas es ruido, y sobre FOOD_UEM 12/2004 ese ruido
+    # —0.74 puntos, prestados de una cola sub-umbral que el impulso capturaba a
+    # medias— hacía recomendar un impulso transitorio para un escalón permanente
+    # de nivel. La lectura la da la firma del residuo.
+    nivel_simple, criterio_simple = lectura_escalar(
+        episodio, int(getattr(model_base, "d", 0)))
+    mejor_simple = next((p for p in simples if p.nivel == nivel_simple), None)
+    if mejor_simple is None:                      # el elegido no estimó
+        mejor_simple = simples[0] if simples else None
+        if mejor_simple is not None:
+            criterio_simple += (f" — pero el peldaño {nivel_simple} no estimó, "
+                                f"así que se presenta el {mejor_simple.nivel}")
 
     razones: list[str] = []
     if mejor_simple is not None:
@@ -247,7 +380,10 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
 
     return Escalera(peldanos=peldanos, episodio=episodio, dominio=dominio,
                     razones_para_subir=razones, recomendado=recomendado,
-                    pregunta_extramuestral=pregunta)
+                    pregunta_extramuestral=pregunta,
+                    nivel_simple=(mejor_simple.nivel if mejor_simple
+                                  else nivel_simple),
+                    criterio_simple=criterio_simple)
 
 
 # ---------------------------------------------------------------------------
@@ -323,11 +459,21 @@ def describe_escalera(escalera: "Escalera"):
 
     L += ["#### Peldaño 1 — una intervención escalar", "",
           "Dos lecturas del **mismo coste**, un parámetro cada una, y no "
-          "anidadas entre sí. Cuál es la buena no lo decide el ajuste: lo "
-          "deciden el dominio y lo que se sepa del suceso.", "",
+          "anidadas entre sí. Cuál es la buena no lo decide el ajuste: la "
+          "decide la firma que el suceso deja en los residuos, y después la "
+          "matizan el dominio y lo que se sepa del suceso.", "",
           "| | forma | AIC | ω(1) — ganancia | vecino anómalo | adecuado |",
           "|---|---|---|---|---|---|",
           fila(p1a), fila(p1b), ""]
+    if escalera.criterio_simple:
+        L += [f"**Se lee `{escalera.nivel_simple}`**: "
+              f"{escalera.criterio_simple}.", ""]
+    if p1a.estimado and p1b.estimado and np.isfinite(p1a.aic) \
+            and np.isfinite(p1b.aic):
+        L += [f"*La columna de AIC está para mirarla, no para arbitrar: entre "
+              f"`1a` y `1b` hay {abs(p1a.aic - p1b.aic):.2f} puntos, y no "
+              "significan nada — las dos formas no están anidadas y cuestan lo "
+              "mismo, así que su Δ mide ruido (BUG-0086).*", ""]
 
     for p, etiqueta in ((p1a, "escalón permanente"), (p1b, "impulso transitorio")):
         if p.estimado and p.treadway:
@@ -337,11 +483,37 @@ def describe_escalera(escalera: "Escalera"):
                      + (f", pero vecino **{c.vecino_anomalo}** con z = "
                         f"{(c.z_despues if c.vecino_anomalo == 'después' else c.z_antes):+.2f}"
                         if c.vecino_anomalo else ", sin vecino anómalo"))
+            # La cola activa va como NOTA, nunca en `razones_para_subir`
+            # (BUG-0096). La regla de Treadway se queda en 2σ; esto sólo dice
+            # que con ARMA el residuo crudo pierde potencia y que ahí un vecino
+            # sub-umbral PUEDE ser la cola. Meterlo en las razones convertiría
+            # un 13% de probabilidad bajo la nula en evidencia, y la
+            # sobre-intervención es el modo de fallo que no se detiene solo.
+            if c.cola_activa and not c.vecino_anomalo:
+                _zc = max((abs(v) for v in (c.z_antes, c.z_despues)
+                           if v is not None and abs(v) < c.umbral_vecino),
+                          default=0.0)
+                L.append(f"  *(vecino {c.cola_activa} a {_zc:.2f}σ: no llega a "
+                         f"anómalo, pero el modelo lleva ARMA y ahí el residuo "
+                         f"crudo pierde potencia. Nota, no razón para subir.)*")
     L.append("")
 
     L += ["#### ¿Se sube?", ""]
     if escalera.razones_para_subir:
         L += [f"- {x}" for x in escalera.razones_para_subir]
+        if escalera.ningun_peldano_se_sostiene:
+            _alto = escalera.por_nivel("2")
+            _pega = ("tampoco se estimó" if _alto is None or not _alto.estimado
+                     else f"deja vecino ({_alto.treadway[0].vecino_anomalo})"
+                     if _alto.deja_vecino else "tampoco deja ruido blanco")
+            L += ["", f"**…y aun así se recomienda `{escalera.recomendado}`, "
+                  "que es el peldaño bajo.** No es que la subida se haya "
+                  f"evaluado y descartado: es que el peldaño 2 {_pega}, así que "
+                  "**ninguna forma de esta escalera resuelve el suceso**. Lo "
+                  "que se recomienda es el menos malo, no uno que se sostenga. "
+                  "Mira si el episodio está bien delimitado "
+                  "(`incident_configurations`) o si lo que queda no es un "
+                  "suceso sino estructura sin modelizar."]
         L += ["", "#### Peldaño 2 — el episodio", "",
               "| | forma | AIC | ω(1) — ganancia | vecino anómalo | adecuado |",
               "|---|---|---|---|---|---|", fila(p2), ""]

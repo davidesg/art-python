@@ -217,6 +217,19 @@ def _section_model(model) -> str:
     names  = _param_names(model)
     params = np.asarray(model.params, dtype=float)
     se     = np.asarray(model.std_errors, dtype=float)
+    # BUG-0090: la tabla de abajo es valores CON su error típico. Si el modelo
+    # vino de un `.pre`, la mitad derecha no es fiable y hay que decirlo aquí,
+    # que es donde se lee.
+    try:
+        from art.pipeline import viene_de_pre
+        _aviso_pre = ('<p class="fail"><b>⚠ Modelo estimado desde un '
+                      '<code>.pre</code>:</b> los valores son exactos, los '
+                      'ERRORES TÍPICOS no — la covarianza se queda en la '
+                      'semilla del BFGS. Reestima desde el <code>.inp</code> o '
+                      'lee el <code>.out</code> (BUG-0090).</p>'
+                      if viene_de_pre(model) else "")
+    except Exception:
+        _aviso_pre = ""
     tstat  = params / np.where(se > 0, se, np.nan)
 
     rows = []
@@ -242,6 +255,7 @@ def _section_model(model) -> str:
   <summary>1. Modelo estimado</summary>
   <div class="sec-body">
     <p><b>{spec}</b></p>
+    {_aviso_pre}
     {table}
     <p style="font-size:11px;color:#888;margin-top:0.5em">
       *** |t|&ge;3.3 &nbsp; ** |t|&ge;2.6 &nbsp; * |t|&ge;2.0 &nbsp;

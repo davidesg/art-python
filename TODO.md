@@ -108,6 +108,26 @@
       Usarla como desempate y aviso, nunca como rechazo duro. Abierto 2026-08-26
       sobre `ln PGAS`, donde ART pone un MA(1) primero y el AR(2) correcto cuarto.
 
+- [ ] **Factorizar un AR(p) y reformularlo en AR_f: la factorización expone, nada reformula** —
+      `ar_factorization` descompone el AR regular en factores reales (primer orden) y
+      complejos (segundo orden) y mapea los complejos a `FixedFreqFactor`
+      (`coef=a2=−r², freq=k`). Pero entre exponer y reformular no hay herramienta:
+      `meg_reformulate` sólo reconstruye con RAÍZ UNITARIA (`ifadf[f]=1` + testigo MA_f),
+      no con damping libre (estacionario); y `FixedFreqFactor` es de segundo orden, así
+      que los factores reales —persistencia y Nyquist— no tienen forma ahí y deben ir al
+      AR regular.
+      Riesgo medido en FOOD_UEM (sesión guiada 2026-09-04): el AR(6) factoriza en
+      persistencia + Nyquist `(1+θB)`, primer orden negativo + f=2 + f=4, todos con
+      d≈0.7 (estacionario). Sin camino soportado, el modelo factorizado se construye a
+      mano con `fue.Model`, y el Nyquist se metió por error en un `FixedFreqFactor(freq=6)`
+      (segundo orden → raíz doble `(1+dB)²`). La corrección fue AR(2) regular para los dos
+      reales + `FixedFreqFactor` sólo para f=2 y f=4.
+      Propuesta: una herramienta `reformulate_ar_f` que, dada la factorización,
+      reconstruya —reales → AR regular, complejos → `FixedFreqFactor(free)`— y deje al
+      analista confirmar qué frecuencias conserva; el Nyquist como AR(1) regular
+      negativo, nunca como `FixedFreqFactor`. No es un bug: es funcionalidad que falta.
+      Abierto 2026-09-04.
+
 ## Bugs conocidos
 
 - [x] **ART no estima correctamente series de frecuencia ANUAL (freq=1)**

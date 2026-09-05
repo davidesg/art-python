@@ -1,0 +1,103 @@
+---
+id: BUG-0094
+title: La salida del carril guiado no está estandarizada — la presentación depende del LLM y cambia en cada sesión
+status: open
+severity: high
+component: mcp-tools
+found_in: 0.1.12
+fixed_in:
+reported: 2026-09-05
+reporter: David / sesión SERV_UEM — análisis completo 2026-09-05
+tags:
+  - presentacion
+  - guiado
+  - salida
+  - estandar
+references:
+  - src/art/mcp_server.py:246-257 (REGLA GENERAL — PRESENTAR SIEMPRE EL MODELO ESTIMADO: instrucciones en prosa dirigidas al LLM, no salida estructurada)
+  - src/art/mcp_server.py:797 ("_[Claude: muestra al analista el bloque siguiente TAL CUAL; NO construyas tu propia tabla...]")
+  - src/art/mcp_server.py:739-741 ("Claude must ...", model_equation)
+  - src/art/mcp_server.py:3279-3291 (PUNTO DE DECISIÓN (analista) ... "Claude: presenta la distorsión calibrada y SUGIERE")
+  - docs/DISENO-nodo-intervencion.md (el nodo guiado delega la presentación en el LLM)
+  - bugs/BUG-0094-repro/repro.py
+
+---
+
+## Summary
+
+Cada herramienta del carril guiado compone su salida de forma distinta y deja
+la presentación final en manos del LLM, mediante instrucciones en prosa
+("muestra el bloque TAL CUAL", "Preséntalos en ESTE ORDEN", "NUNCA construyas
+tu propia tabla"). El resultado es que la misma estimación produce salidas
+diferentes según el LLM de turno y según la sesión: cambia el orden de los
+bloques, cambia qué se destaca, cambia la redacción de conclusiones y
+sugerencias. En un flujo guiado —donde el analista decide sobre lo que LEE—
+una salida no determinista es un defecto de la herramienta, no una libertad
+del agente.
+
+## Impact
+
+El modo guiado se vuelve caótico y no reproducible. Dos sesiones sobre el
+mismo modelo muestran "la misma iteración" con estructura distinta; el
+analista no puede comparar iteraciones entre sí ni confiar en que vio todo lo
+que la herramienta calculó (el LLM puede omitir un bloque). Medido en
+SERV_UEM (1/2002-12/2019): las salidas de `guided_identification`,
+`confirm_and_estimate`, `guided_intervention` y `residual_outlier_scan` tienen
+cabeceras, secciones y ritmos distintos, y el estándar que el analista tuvo
+que dictar a mano — MODELO / GRÁFICO / CONCLUSIONES / SUGERENCIA, una
+iteración por salida — es exactamente lo que la herramienta debería emitir ya
+formateado.
+
+## Reproduction
+
+En la misma sesión SERV_UEM, tres herramientas para tres nodos del mismo
+flujo:
+
+1. `confirm_and_estimate` → título ARIMA + bloque de ecuación precedido de
+   "_[Claude: muestra ... TAL CUAL]_" + diagnosis + escaneo + PUNTO DE
+   DECISIÓN + estado + mapa del guion.
+2. `guided_identification` → "## Paso N — ..." con tabla ADF/KPSS y "Próximo
+   paso".
+3. `guided_intervention` → "## Llamada N — ..." con escalera de Ockham y
+   puertas.
+
+Cada una con su propia plantilla; el orden, los resaltados y la sugerencia
+final los compone el agente. La herramienta le pide al LLM que "presente"
+(imperativos en prosa, mcp_server.py:246-257) en vez de devolver un bloque
+estructurado (secciones fijas, ya ordenadas) que el agente solo reenvíe.
+
+## Root cause
+
+El contrato de salida de las herramientas MCP está redactado como
+**instrucciones al agente** dentro de la propia respuesta (marcas
+"[Claude: ...]", "Preséntalos en ESTE ORDEN", "PROHIBIDO: NUNCA construyas tu
+propia tabla"), no como estructura. La herramienta produce el contenido
+(ecuación, diagnosis, escaneo) pero la composición final —qué va primero, qué
+se omite, cómo se redacta la conclusión— la decide el LLM en cada llamada.
+Dos agentes distintos (o el mismo con distinto prompting) formatean distinto
+el mismo payload; no hay un esquema de salida estándar del carril guiado que
+los iguale.
+
+## Fix
+
+Definir un **esquema de salida estándar del carril guiado** y hacer que las
+herramientas lo devuelvan ya compuesto, con secciones fijas y en orden fijo:
+
+- `MODELO ESTIMADO` (ecuación verbatim)
+- `GRÁFICO` (rutas de las figuras)
+- `CONCLUSIONES` (veredicto + lecturas)
+- `SUGERENCIA SIGUIENTE` (la decisión que se pide al analista)
+
+Una iteración por salida. El agente se limita a reenviar el bloque; las
+marcas "[Claude: ...]" desaparecen de lo que ve el analista (pueden quedarse
+como metadato del protocolo, nunca como texto visible). Así la salida es
+determinista: la misma llamada produce el mismo documento con cualquier LLM.
+
+## Validation
+
+Reestimar `confirm_and_estimate` sobre SERV_UEM m00 y comprobar que la salida
+contiene las cuatro secciones en ese orden, sin texto dirigido al agente y
+con las rutas de figura pobladas; repetir con un segundo agente y verificar
+que el documento es idéntico módulo los números (que no cambian). Añadir un
+test de contrato en la suite: toda herramienta del carril guiado devuelve el
+esquema estándar.

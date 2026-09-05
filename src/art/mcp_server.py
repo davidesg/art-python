@@ -410,17 +410,56 @@ ETAPA 3 — DIAGNOSIS E INTERVENCIONES
   ⚠ TRATAR ANÓMALOS ES UN PUNTO DE DECISIÓN DEL ANALISTA, no algo que ART decida.
     En B1, esta decisión surge tras m00 (antes de ARMA): el escaneo de anómalos
     NO obliga a intervenir.
-  → Si hay residuos extremos: menciónalos SIEMPRE y CALIBRA su distorsión sobre la
-    ACF/PACF con preliminary_outlier_scan (da var_outlier %, ACF_max % y los
-    retardos afectados; el gráfico muestra la contribución de cada anómalo a la ACF).
-  → Con esa calibración, SUGIERE: si los anómalos son grandes y están "matando"
-    (distorsionando fuertemente) la ACF/PACF → sugiere añadir intervenciones ANTES
-    de ARMA; si la distorsión es leve → sugiere pasar a ARMA. Razona la sugerencia.
-  → La decisión la toma el ANALISTA: ESPERA su confirmación antes de añadir cada
-    intervención.
-  → Añade una a una con suggest_intervention_form → MUESTRA diagnosis actualizada
-  → Cuando el modelo parezca limpio: llama test_interventions para verificar
-    que todas las intervenciones son significativas
+
+  LA PUERTA DEL NODO ES guided_intervention. Igual que guided_identification en
+  la etapa 1: una entrada, la secuencia documentada, y UN veredicto por llamada.
+  El nodo tiene nueve instrumentos y elegir a ciegas entre ellos es cómo se
+  sobre-interviene.
+
+    Llamada 1  guided_intervention(inp)                    ¿HAY QUE INTERVENIR?
+      Calibra el correlograma OMITIENDO los anómalos y dice si la identificación
+      cambia: qué órdenes AR (PACF) y MA (ACF) entran o salen. Si NO cambia nada,
+      lo dice y avisa de que intervenir ahí es sobre-intervenir. Devuelve las
+      fechas candidatas. ESPERA al analista: qué fecha, o parar.
+
+    Llamada 2  guided_intervention(inp, date=…)            ¿QUÉ FORMA?
+      Episodio + configuraciones que el dato admite + escalera de Ockham, en UNA
+      respuesta y con un veredicto. Si el dato NO identifica la configuración, lo
+      dice y pide lo extramuestral en vez de elegir por AIC. ESPERA al analista.
+
+    Llamada 3  guided_intervention(inp, date=…, form=…, n_omega=…, output_path=…)
+      CONSTRUYE la forma elegida, estima, y verifica Treadway (¿queda un vecino
+      anómalo?) y la ganancia (Wald sobre ω(1)=0: ¿permanente o transitorio?).
+
+  ⚠ EL CRITERIO DE PARADA. Cada intervención encoge σ̂, con lo que el siguiente
+    residuo sube de |z| y pide su turno: la escalada NO se detiene sola. Se para
+    cuando la calibración deja de decir que los anómalos cambian la
+    identificación — que es lo que contesta la llamada 1.
+
+  ⚠ EL CONVENIO DE SIGNO de la FLT. fue guarda ω(B) = ω₀ − ω₁B − ⋯ (Box-Jenkins,
+    el mismo para TODO operador): los retardos RESTAN, así que la ganancia es
+    ω₀−ω₁−⋯ y NO la suma. No hagas la resta a mano: la respuesta trae el CAMINO
+    DEL NIVEL que producen esos ω. Si no es el que tenías en la cabeza, el signo
+    estaba mal — y lo ves antes de estimar.
+
+  INSTRUMENTOS SUELTOS del nodo, para mirar algo concreto sin avanzar el flujo:
+    residual_outlier_scan       los anómalos de un modelo ya estimado + la
+                                calibración ACF/PACF
+    preliminary_outlier_scan    los anómalos de una serie aún sin modelo
+    residual_episodes           cómo se agrupan los extremos en sucesos
+    incident_configurations     qué configuraciones del incidente admite el dato
+                                — GOBIERNA sobre residual_episodes para la FORMA:
+                                extiende el arranque por el mecanismo, el otro
+                                sólo agrupa extremos
+    intervention_ladder         los peldaños de Ockham con sus razones
+    intervention_plot           superpone una respuesta impulso sobre los datos
+    intervention_analysis       los anómalos antes de decidir nada
+    suggest_intervention_form   añade UNA intervención con forma y orden dados
+    test_interventions          si las que ya están se sostienen (t, Wald, Treadway)
+
+  → Si prefieres el paso a paso clásico: suggest_intervention_form una a una
+    (con n_omega para una FLT de varios ω) → MUESTRA la diagnosis actualizada.
+  → Cuando el modelo parezca limpio: test_interventions.
 
 ─────────────────────────────────────────────────────
 ETAPA 4 — CONTRASTES FORMALES
@@ -453,6 +492,60 @@ ETAPA 4 — CONTRASTES FORMALES
     declaró DETERMINISTAS, ahí sí procede seasonal_param_analysis +
     test_seasonal_simplification. Las que salieron ESTOCÁSTICAS no se podan: se
     reformulan con ifadf[f]=1.
+
+══════════════════════════════════════════════════════
+EL GUION — EL GRAFO, Y CÓMO SE VUELVE ATRÁS
+══════════════════════════════════════════════════════
+El método iterativo es una búsqueda CON VUELTA ATRÁS: tiene callejones sin
+salida, y un callejón es el método funcionando, no fallando. Lo que una
+iteración fallida produce de valor NO es el modelo que se descarta: es la RAZÓN,
+que es lo único que impide volver a intentarlo.
+
+El guion se escribe SOLO en cada estimación. No hay que pedirlo.
+
+  guion_map(guion, version=N)   EL MAPA. Quién desciende de quién, qué se adoptó,
+                                qué es callejón y por qué, y cuál es el ancestro
+                                seguro al que volver. Avisa además cuando el
+                                registro no se puede releer entero: entradas con
+                                otra versión del instrumento, con otra ESCALA de
+                                ℓ/AIC, o sin sus artefactos en disco.
+  guion_evidencia(guion, N)     LA EVIDENCIA de ese nodo, y es la pareja del
+                                mapa: el mapa dice A DÓNDE volver, esto dice QUÉ
+                                HAY allí. Ecuación con sus errores típicos
+                                LEÍDOS DEL .out, la diagnosis registrada (Q con
+                                sus retardos y p-valores, JB, anómalos), y las
+                                figuras (residuos + ACF/PACF, e histograma).
+                                ⚠ NO REESTIMA. Si necesitas ver el último modelo
+                                para decidir el camino siguiente, ES ESTA — no
+                                vuelvas a estimar: cuesta llamadas y tokens, y
+                                el registro ya lo tiene todo.
+  guion_node(...)               registra un nodo de DECISIÓN (λ, d, estacional,
+                                órdenes): lo que se decidió y por qué, antes de
+                                que exista el primer modelo.
+  guion_abandon(...)            marca un callejón con su razón; poda en cascada.
+  guion_diff(a, b)              compara DOS recorridos nodo a nodo. Es lo que
+                                hace comparables dos análisis en vez de dos
+                                listas parecidas.
+  export_guion(guion)           todo el recorrido en HTML navegable.
+  record_version(...)           registra a mano un modelo estimado por otra vía.
+
+══════════════════════════════════════════════════════
+INSTRUMENTOS DE APOYO — no avanzan el flujo
+══════════════════════════════════════════════════════
+Se usan para mirar algo concreto. Ninguno sustituye a un nodo del protocolo.
+
+  DATOS      load_data · preview_data · series_info · create_inp
+  MODELO     estimate_and_diagnose (estima un .inp y persiste .inp/.pre/.out +
+             guion) · model_equation_display · model_histogram
+  REGISTRO   get_out_report — LEE el .out de un modelo estimado; es de donde
+             salen los errores típicos, NUNCA de reejecutar un .pre
+  COMPARAR   compare_versions (avisa y suprime el Δ si no son comparables:
+             distinto operador de diferenciación o distinta escala)
+  ESTRUCTURA ar_factorization · overparameterization_analysis ·
+             seasonal_param_analysis · test_seasonal_simplification
+  ESTACIONAL meg_frequency (una frecuencia) · meg_reformulate (aplica ifadf[f]=1)
+  INFORMES   full_report · sps_dashboard · save_identification_report
+  PREVISIÓN  generate_forecast · update_and_forecast
 
 ══════════════════════════════════════════════════════
 REGLAS GENERALES
@@ -554,9 +647,16 @@ if _CALL_LOG:
 # Execution layer (model construction, .inp I/O, fit and the autonomous loop)
 # lives in art.pipeline; the MCP tools below import its primitives + entry points.
 from art.pipeline import (
-    _load_ts_model, _write_bare_inp, _load_fitted, _obs_to_date,
+    # Las tres operaciones del contrato de ficheros (estudio §6-B):
+    #   estimar   exige `.inp`, promete SE válidas    → 14 herramientas
+    #   mirar     acepta `.pre`, no promete SE        → 3 herramientas
+    #   lee_out   el registro, sin motor (art.outfile)
+    # El sitio que llama declara lo que necesita, y por eso `mirar` no avisa:
+    # no promete nada que un `.pre` estropee.
+    _load_ts_model, _write_bare_inp, _load_fitted, mirar as _mirar, _obs_to_date,
     _write_inp, _build_arma_on_model, _make_model,
     ModelSpec, FitResult, build_and_fit, run_full,
+    _RESCALE_FACTOR,
 )
 # Decision rules + centralised thresholds (single source of truth).
 from art import policy
@@ -568,17 +668,50 @@ _Z_USER = policy.THRESHOLDS["outlier_user"]  # user-facing scan default (3.5)
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Registro de figuras escritas en esta sesión: huella del CONTENIDO → ruta.
+#
+# BUG-0081. `_result` publicaba `_ULTIMA_FIGURA`, una global mutable, en vez de
+# la ruta de la figura que esa llamada está devolviendo: con llamadas
+# intercaladas, la respuesta de una herramienta citaba el fichero de otra. Y la
+# nota de la ruta existe precisamente para cuando la ventana no aparece, así que
+# la red de seguridad fallaba igual que aquello que venía a cubrir.
+#
+# Se indexa por contenido y no por etiqueta porque es lo único que identifica a
+# la figura sin cambiar las ~40 llamadas: `_result` sólo tiene el `figure_b64`.
+_FIGURAS: dict[str, str] = {}
+_FIGURAS_TOPE = 256
+
+
+def _huella_figura(b64: str) -> str:
+    import hashlib
+    return hashlib.sha1(b64.encode("ascii", "ignore")).hexdigest()[:12]
+
+
+def _registra_figura(b64: str, path: str) -> None:
+    if not (b64 and path):
+        return
+    _FIGURAS[_huella_figura(b64)] = path
+    while len(_FIGURAS) > _FIGURAS_TOPE:
+        _FIGURAS.pop(next(iter(_FIGURAS)))
+
+
 def _result(desc) -> list:
     """Convert a Description to MCP content list (text + optional image).
 
     BUG-0078: la nota con la RUTA de la figura va aquí, que es por donde pasan
     todas las herramientas. Sin ella, cuando la ventana del visor no aparece no
     hay nada a lo que agarrarse — y la herramienta reporta éxito igual.
+
+    BUG-0081: la ruta se busca por el CONTENIDO de esta figura, no en la global
+    `_ULTIMA_FIGURA`. Si esta figura no se escribió, no se cita ninguna: mejor
+    ninguna nota que una que apunta al fichero de otra serie.
     """
     from mcp.types import TextContent, ImageContent
     txt = desc.summary + "\n\n---\n" + desc.recommendation
     if desc.figure_b64:
-        txt += _nota_figura(_ULTIMA_FIGURA)
+        _ruta = _FIGURAS.get(_huella_figura(desc.figure_b64), "")
+        if _ruta:
+            txt += _nota_figura(_ruta)
     items = [TextContent(type="text", text=txt)]
     if desc.figure_b64:
         items.append(ImageContent(type="image", data=desc.figure_b64, mimeType="image/png"))
@@ -651,6 +784,15 @@ def _equation_for_prompt(ts, model) -> str:
                          + AVISO_COV_CASI_SEMILLA)
     except Exception:
         pass
+    # Y el ORIGEN, que es la causa y no el síntoma. Lo de arriba detecta que la
+    # covarianza se parece a la semilla —una heurística, y sobre FOOD_UEM m06 no
+    # salta porque las SE sólo se mueven un 12%—; esto sabe de qué fichero vino
+    # el modelo, que es exacto (BUG-0090).
+    try:
+        from art.pipeline import aviso_se_no_fiable
+        aviso += aviso_se_no_fiable(model)
+    except Exception as _ae:
+        _warn("aviso de origen del modelo", _ae)
     return (
         "_[Claude: muestra al analista el bloque siguiente TAL CUAL; NO construyas "
         "tu propia tabla/ecuación de parámetros]_\n\n"
@@ -684,18 +826,32 @@ def _show_fig(b64: str | None, label: str = "art") -> str:
     import base64, os, subprocess
     data = base64.b64decode(b64)
     etq = label.replace(" ", "_").replace("/", "_")
-    # Discriminante por proceso: dos herramientas con la misma etiqueta ya no se
-    # sobrescriben la figura. Sigue siendo estable dentro de una sesión, que es
-    # lo que hace que la ventana se reemplace en vez de multiplicarse.
+    # BUG-0081. El discriminante era `os.getpid()`, y el servidor MCP es UN
+    # proceso durante toda la sesión: dentro de una sesión no discriminaba nada.
+    # Dos series por los mismos nodos guiados escribían el mismo
+    # `art_boxcox_<pid>.png`, y el analista abría el diagrama de la otra serie
+    # mientras leía los números de ésta, sin aviso de nada.
+    #
+    # Ahora discrimina el CONTENIDO. Es más fuerte que (etiqueta, serie): no
+    # colisiona nunca, y conserva la propiedad que se quería —misma figura,
+    # mismo fichero, ventana reemplazada en vez de multiplicada— porque una
+    # figura idéntica da la misma huella.
     import tempfile
+    # BUG-0082. `ART_FIG_DIR` saca las figuras del temporal COMPARTIDO. La suite
+    # sembraba `/tmp` de PNG en blanco con el mismo patrón de nombre que la
+    # salida real: 49 ficheros de 651 bytes indistinguibles del producto, y
+    # costó una sesión averiguar que art no renderizaba en blanco.
     # `/tmp` no existe en Windows: el directorio temporal lo da el sistema.
-    path = os.path.join(tempfile.gettempdir(), f"art_{etq}_{os.getpid()}.png")
+    dest = os.environ.get("ART_FIG_DIR") or tempfile.gettempdir()
+    path = os.path.join(dest, f"art_{etq}_{_huella_figura(b64)}.png")
     try:
+        os.makedirs(dest, exist_ok=True)
         with open(path, "wb") as fh:
             fh.write(data)
     except Exception:
         return ""
     _ULTIMA_FIGURA = path
+    _registra_figura(b64, path)
 
     # NO se abre ventana bajo pytest ni si se pide lo contrario. Sin esta
     # guarda, la suite abre una ventana por cada figura que genera: son cientos,
@@ -769,6 +925,181 @@ def _nota_figura(path: str) -> str:
         nota += (f"  ⚠ *no se pudo abrir sola ({_ULTIMO_VISOR_ERROR}); "
                  "ábrela desde esa ruta.*")
     return nota
+
+
+def _asegura_inp_de_la_terna(inp_path: str, output_path: str) -> str:
+    """Deja el `.inp` de la versión junto a su `.pre` y su `.out`.
+
+    El convenio hace de cada versión una terna con el mismo basename: el `.inp`
+    que se estimó, el `.pre` con el óptimo y el `.out` con el registro. Cuando
+    `output_path` no es el fichero de origen, el `.inp` de esa terna no existe y
+    el guion queda apuntando al vacío (BUG-0092).
+
+    Se copia el fichero **tal cual**. Reserializar el modelo ajustado escribiría
+    las estimaciones donde van las semillas, que es la trampa de BUG-0027.
+
+    Si el destino ya existe con OTRO contenido no se toca: un `.pre` o un `.out`
+    se rehacen estimando, pero una especificación perdida no se recupera.
+    """
+    import shutil
+    src = os.path.expanduser(inp_path)
+    dst = os.path.expanduser(output_path)
+    if os.path.abspath(src) == os.path.abspath(dst):
+        return ""                                   # ya es la misma terna
+    try:
+        if os.path.exists(dst):
+            with open(src, "rb") as a, open(dst, "rb") as b:
+                if a.read() == b.read():
+                    return ""
+            return (f"\n\n⚠ *`{os.path.basename(dst)}` ya existe con otro "
+                    f"contenido y NO se ha tocado: una especificación perdida no "
+                    f"se recupera. El `.pre` y el `.out` sí se han reescrito, así "
+                    f"que esta terna queda descuadrada — comprueba a qué `.inp` "
+                    f"corresponde.*")
+        os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
+        shutil.copyfile(src, dst)
+        return ""
+    except Exception as e:
+        _warn("copia del .inp de la terna", e)
+        return (f"\n\n⚠ *No se pudo dejar el `.inp` junto a los artefactos "
+                f"({type(e).__name__}: {e}). El guion apuntará a un fichero que "
+                f"no existe.*")
+
+
+# ---------------------------------------------------------------------------
+# EL SOBRE DE LA ITERACIÓN — las cuatro etapas, siempre, en orden
+# ---------------------------------------------------------------------------
+
+#: Las cuatro etapas del proceso iterativo consciente, con los nombres de la
+#: escuela. No las inventa esta capa: son las de la metodología —Box y Jenkins
+#: en su forma extendida— y las que el guion ya registra entrada a entrada.
+ETAPAS_ITERACION = ("ESPECIFICACIÓN", "ESTIMACIÓN", "DIAGNOSIS", "REFORMULACIÓN")
+
+
+def _reformulacion_desde(diag, guion_next: str = "") -> str:
+    """La 4ª etapa, deducida de la diagnosis y de lo que declare el analista.
+
+    No la inventa: recoge lo que la diagnosis ya ha dictaminado —qué contraste
+    falla y qué implica— y lo que el analista haya escrito en `guion_next`. Si
+    no hay nada, devuelve "" y el sobre pone «no procede reformular» de forma
+    explícita, que es lo que obliga a pronunciarse (BUG-0094).
+    """
+    partes = []
+    try:
+        d = getattr(diag, "data", None) or {}
+        fallos = []
+        if d.get("q_pass") is False:
+            fallos.append("la Q rechaza el ruido blanco")
+        if d.get("jb_pass") is False:
+            fallos.append("el Jarque-Bera rechaza la normalidad")
+        n_ext = int(d.get("n_extreme") or 0)
+        if n_ext:
+            fallos.append(f"quedan {n_ext} residuo(s) extremo(s)")
+        if fallos:
+            partes.append("**El modelo no se sostiene:** " + "; ".join(fallos)
+                          + ". La iteración continúa.")
+    except Exception as e:                                   # pragma: no cover
+        _warn("lectura de la diagnosis para la reformulación", e)
+    if guion_next.strip():
+        partes.append(f"**Siguiente versión declarada:** {guion_next.strip()}")
+    return "\n\n".join(partes)
+
+
+def envuelve_iteracion(*, nombre: str,
+                       modo: str = "",
+                       especificacion: str = "",
+                       ecuacion: str = "",
+                       diagnosis: str = "",
+                       reformulacion: str = "",
+                       figuras_b64: "list[str] | None" = None,
+                       rutas_figuras: "list[str] | None" = None,
+                       extra: str = "") -> str:
+    """Una iteración, con la MISMA forma siempre (BUG-0094).
+
+    Por qué existe
+    --------------
+    El proceso es iterativo y cada iteración tiene una salida. Si esa salida no
+    está mínimamente estandarizada, pasan dos cosas: es caótica, y —lo que
+    importa— **desobliga al analista**. Si la forma varía, no se le puede exigir
+    que haya leído un bloque, porque quizá no estaba; ni preguntarle por qué
+    decidió sin mirar la diagnosis. Con forma fija, la ausencia de una sección
+    es una omisión atribuible.
+
+    Es la misma lógica del guion, que obliga porque siempre lleva `decision` y
+    `rationale`.
+
+    Y la variabilidad era GRATUITA: **en el fondo ya está estandarizado**. De la
+    tesis (§1.1.1.2, §2.3), sobre la forma extendida de Box-Jenkins:
+
+        «un proceso iterativo consciente … (1) especificación inicial, basada
+        fundamentalmente en los datos, (2) estimación eficiente de los modelos
+        por el criterio de Máxima Verosimilitud Exacta No Condicionada (MVENC),
+        (3) diagnosis estadística de los modelos estimados (métodos formales e
+        informales) y, en su caso, (4) reformulación.»
+
+    Ésas son las cuatro secciones. No se uniforma el CONTENIDO —cada nodo llena
+    lo suyo— se uniforma **a qué etapa pertenece cada bloque**.
+
+    La cuarta va SIEMPRE, también cuando el modelo se sostiene. El «y en su
+    caso» de la cita es sobre si hay que reformular, no sobre si hay que
+    pronunciarse: una iteración que no dice qué haría después no ha terminado.
+
+    Guiado y autónomo
+    -----------------
+    El sobre es el MISMO en los dos carriles: el guion también lo es, y por la
+    misma razón. La única diferencia es que en autónomo **la figura no viaja** —
+    se escribe igual, porque el guion la necesita, pero se cita por su ruta.
+
+    No es un detalle de comodidad. Medido sobre las tres realizaciones del run 3
+    (483 llamadas): **el 97.4% de los bytes que salen del servidor son
+    imágenes**, y en un bucle agéntico cada byte se reenvía en todos los turnos
+    siguientes. Estimado en tokens, no mandarlas ahorra entre el **41% y el
+    45%** del presupuesto. En autónomo nadie las mira.
+
+    Cuando de verdad hagan falta, `guion_evidencia` las recupera del registro.
+
+    Parameters
+    ----------
+    nombre          : el modelo de esta iteración
+    especificacion  : de dónde sale este modelo — qué se decidió y por qué
+    ecuacion        : el bloque verbatim de la ecuación estimada
+    diagnosis       : Q, JB, anómalos; los métodos formales e informales
+    reformulacion   : qué falla y qué se propone. Vacío ⇒ «no procede», dicho
+    figuras_b64     : carril GUIADO. Viajan como ImageContent
+    rutas_figuras   : carril AUTÓNOMO. Sólo se citan
+    extra           : lo que no es una etapa (guion, estado, mapa)
+    """
+    # El CARRIL va en la cabecera, no enterrado: es una propiedad de la
+    # iteración —quién decidió— y quien lee la salida tiene que saberlo antes de
+    # nada. Lo pilló una prueba dorada que exigía el modo en la primera línea.
+    L = [f"# Iteración — {nombre}" + (f"  ·  {modo}" if modo else ""), ""]
+
+    L += [f"## 1 · {ETAPAS_ITERACION[0]}", ""]
+    L += [especificacion.strip() if especificacion.strip()
+          else "*Sin cambios de especificación en esta iteración.*", ""]
+
+    L += [f"## 2 · {ETAPAS_ITERACION[1]}", ""]
+    L += [ecuacion.strip() if ecuacion.strip()
+          else "*No se ha estimado ningún modelo en esta iteración.*", ""]
+
+    L += [f"## 3 · {ETAPAS_ITERACION[2]}", ""]
+    L += [diagnosis.strip() if diagnosis.strip()
+          else "*Sin diagnosis: no hay modelo estimado que diagnosticar.*"]
+    if rutas_figuras:
+        L += ["", "*Figuras (no viajan en este carril; el registro las tiene):*"]
+        L += [f"  · `{r}`" for r in rutas_figuras if r]
+    L.append("")
+
+    L += [f"## 4 · {ETAPAS_ITERACION[3]}", ""]
+    # SIEMPRE explícita. Una iteración que no se pronuncia no ha terminado.
+    L += [reformulacion.strip() if reformulacion.strip()
+          else "**No procede reformular:** el modelo se sostiene y nada en la "
+               "diagnosis pide cambiarlo. Si se continúa, es por una razón que "
+               "no está en estos datos.", ""]
+
+    if extra.strip():
+        L += ["---", "", extra.strip()]
+    return "\n".join(L)
 
 
 def _persist_pre_out(m, output_path: str) -> str:
@@ -888,6 +1219,9 @@ def create_inp(
             interventions=[],
             ifadf=[0] * (max(freq // 2, 1) + 1),
             mu=0.0, estimate_mu=False,
+            # la convención de la suite, explícita desde el primer fichero:
+            # sin ella el esqueleto nacía en escala 1 (BUG-0085).
+            refactor=_RESCALE_FACTOR,
         )
         _write_inp(ts, m, output_path)
 
@@ -982,6 +1316,11 @@ def incident_configurations(inp_path: str,
                             evento_fuente: str = "",
                             aportada_por: str = "") -> list:
     """
+    
+    **Instrumento suelto del nodo de intervención.** La secuencia completa
+    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
+    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
+    Ésta sirve para mirar qué configuraciones del incidente admite el dato sin avanzar el flujo.
     Enumera las CONFIGURACIONES del incidente compatibles con el dato, y dice
     si el dato las identifica o no.
 
@@ -1041,8 +1380,10 @@ def incident_configurations(inp_path: str,
                                        describe_configuraciones,
                                        InfoExtramuestral)
         from art.policy import decide_domain
-        ts, m = _load_ts_model(inp_path)
-        m.fit()
+        ts, m = _load_fitted(inp_path)
+        # `_load_fitted` y no `_load_ts_model` + `fit()` a mano: esa vía no sella
+        # el origen del fichero, y con ella el aviso de BUG-0090 es
+        # inalcanzable — el contrato tenía tres puertas y una cuarta abierta.
         if m.residuals is None:
             return _err("el modelo no tiene residuos: ¿se estimó?")
         r = np.asarray(m.residuals.data, dtype=float)
@@ -1086,7 +1427,8 @@ def incident_configurations(inp_path: str,
             m, cands, d=d_reg, dominio=dom, info=info,
             freq=int(ts.freq or 4),
             start_year=int(getattr(ts, "start", (2000, 1))[0]),
-            start_per=int(getattr(ts, "start", (2000, 1))[1]))
+            start_per=int(getattr(ts, "start", (2000, 1))[1]),
+            umbral_activo=umbral_activo)
         desc = describe_configuraciones(conj)
         if otros:
             aviso = ("\n\n---\n\n*Hay **" + str(len(otros)) + "** episodio(s) "
@@ -1117,8 +1459,13 @@ def intervention_ladder(inp_path: str,
                         at: int = 0,
                         ventana: int = 0,
                         threshold: float = 3.0,
-                        umbral_vecino: float = 3.0) -> list:
+                        umbral_vecino: float = 0.0) -> list:
     """
+    
+    **Instrumento suelto del nodo de intervención.** La secuencia completa
+    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
+    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
+    Ésta sirve para mirar los peldaños de Ockham de un suceso sin avanzar el flujo.
     ESCALERA DE OCKHAM — estima las especificaciones rivales de un suceso EN
     ORDEN de sofisticación, y dice qué justifica subir de peldaño.
 
@@ -1157,15 +1504,20 @@ def intervention_ladder(inp_path: str,
                     0 = tomar el episodio de mayor |z| que detecte el escaneo
     ventana       : ventana de agrupación en episodios; 0 usa la de la política
     threshold     : |z| para marcar un residuo como extremo
-    umbral_vecino : |z| a partir del cual un vecino cuenta como anómalo
+    umbral_vecino : |z| a partir del cual un vecino cuenta como anómalo.
+                    0 = el de la política (2.0). Estaba clavado a 3.0 —el de los
+                    anómalos sueltos— y daba por exitosa una intervención que
+                    deja un vecino a 2.4σ (BUG-0087).
     """
     try:
         import numpy as np
         from art.episodes import describe_episodios
         from art.escalera import escalera_de_ockham, describe_escalera
         from art.policy import decide_episodios, decide_domain, THRESHOLDS
-        ts, m = _load_ts_model(inp_path)
-        m.fit()
+        ts, m = _load_fitted(inp_path)
+        # `_load_fitted` y no `_load_ts_model` + `fit()` a mano: esa vía no sella
+        # el origen del fichero, y con ella el aviso de BUG-0090 es
+        # inalcanzable — el contrato tenía tres puertas y una cuarta abierta.
         if m.residuals is None:
             return _err("el modelo no tiene residuos: ¿se estimó?")
         r = np.asarray(m.residuals.data, dtype=float)
@@ -1191,7 +1543,7 @@ def intervention_ladder(inp_path: str,
         except Exception:
             dom = "generic"
         esc = escalera_de_ockham(m, ep, dominio=dom,
-                                 umbral_vecino=umbral_vecino)
+                                 umbral_vecino=umbral_vecino or 0.0)
         desc = describe_escalera(esc)
         _show_fig(desc.figure_b64, "escalera")
         return _result(desc)
@@ -1202,6 +1554,34 @@ def intervention_ladder(inp_path: str,
 # ---------------------------------------------------------------------------
 # Tool: gráfico de intervención
 # ---------------------------------------------------------------------------
+
+def _con_convenio(desc, omega, delta=None, b: int = 0):
+    """Añade a la descripción el operador leído EN EL NIVEL.
+
+    El convenio de signo de fue —Box-Jenkins, los retardos restan— es
+    consistente y no se toca. Lo que cuesta es que obliga a una resta mental
+    cada vez que se escribe o se lee un ω, y esa resta se falla: en la sesión de
+    la réplica se falló dos veces seguidas construyendo una hipótesis a mano.
+
+    La regla ya estaba escrita en tres docstrings. Escribirla una cuarta vez no
+    arregla nada; **calcularla**, sí. Así que donde el analista mete ω, la
+    respuesta le devuelve el camino del nivel que ha pedido de verdad — y un
+    signo cambiado se ve en el acto, antes de estimar nada.
+    """
+    if not omega or len(omega) < 2:
+        return desc                      # con un solo ω no hay resta que fallar
+    try:
+        from art.ltf import operador_en_palabras
+        from art.describe import Description
+        bloque = operador_en_palabras(list(omega), list(delta or ()), b=b)
+        return Description(summary=desc.summary + "\n\n---\n\n" + bloque,
+                           figure_b64=desc.figure_b64,
+                           recommendation=desc.recommendation,
+                           data=desc.data)
+    except Exception as e:
+        _warn("lectura del operador en el nivel", e)
+        return desc
+
 
 @mcp.tool()
 def intervention_plot(omega: list[float],
@@ -1215,6 +1595,11 @@ def intervention_plot(omega: list[float],
                       sobre: str = "residuos",
                       label: str = "") -> list:
     """
+    
+    **Instrumento suelto del nodo de intervención.** La secuencia completa
+    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
+    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
+    Ésta sirve para mirar una respuesta impulso concreta sobre los datos sin avanzar el flujo.
     GRÁFICO DE INTERVENCIÓN — la forma de una intervención, sola o superpuesta
     a lo observado.
 
@@ -1242,9 +1627,21 @@ def intervention_plot(omega: list[float],
       · N escalones en el nivel con ganancia NULA ≡ N−1 impulsos en el nivel,
         es decir un EPISODIO de duración N−1
 
-    LA CONVENCIÓN DE SIGNO, que es donde se cae: fue guarda el numerador como
-    ω(B) = ω₀ − ω₁B − ⋯, así que la ganancia es (ω₀−ω₁−⋯−ω_s)/(1−δ₁−⋯−δ_r) y
-    NO la suma de los ω. Pásalos tal como salen del `.out`.
+    LA CONVENCIÓN DE SIGNO, que es donde se cae. fue guarda el numerador con el
+    convenio de Box-Jenkins, el mismo para TODO operador —AR, MA, δ y ω—: los
+    coeficientes de retardo entran **restando**.
+
+        ω(B) = ω₀ − ω₁B − ω₂B² − ⋯ − ω_sB^s
+
+    Así que la ganancia es (ω₀−ω₁−⋯−ω_s)/(1−δ₁−⋯−δ_r) y **NO la suma de los ω**.
+    Pásalos tal como salen del `.out`, sin cambiarles el signo.
+
+    **No hace falta que hagas la resta.** La respuesta trae el CAMINO DEL NIVEL
+    que producen los ω que has pasado, que es lo que quieres decir cuando
+    escribes una hipótesis. Si el camino no es el que tenías en la cabeza, el
+    signo estaba mal — y lo ves antes de estimar nada. Ejemplo real de la
+    réplica: ω = (0.5700, +0.7236) tiene coeficientes que uno «sumaría» a
+    +1.29, y su ganancia es **−0.15**.
 
     LOS TRES NÚMEROS del modo superpuesto separan tres preguntas, y se leen sin
     mirar la figura — así sirven también al carril autónomo:
@@ -1289,6 +1686,7 @@ def intervention_plot(omega: list[float],
         from art.ltf import describe_ltf, describe_superposicion
         if not inp_path:
             desc = describe_ltf(omega, delta or (), b=b, K=K, etiqueta=label)
+            desc = _con_convenio(desc, omega, delta, b)
             _show_fig(desc.figure_b64, "intervention_plot")
             return _result(desc)
 
@@ -1297,8 +1695,10 @@ def intervention_plot(omega: list[float],
             return _err("con `inp_path` hay que dar `at`: dónde arranca el "
                         "suceso, 1-based, en el índice de aquello sobre lo que "
                         "se mira (ver `sobre`).")
-        ts, m = _load_ts_model(inp_path)
-        m.fit()
+        ts, m = _mirar(inp_path)
+        # `_mirar` y no `_load_ts_model` + `fit()` a mano: esa vía no sella
+        # el origen del fichero, y con ella el aviso de BUG-0090 es
+        # inalcanzable — el contrato tenía tres puertas y una cuarta abierta.
         if sobre == "residuos":
             if m.residuals is None:
                 return _err("el modelo no tiene residuos: ¿se estimó?")
@@ -1313,6 +1713,7 @@ def intervention_plot(omega: list[float],
             y, int(at), omega, delta or (), b=b, d=d_eff,
             ventana=int(ventana), entrada=entrada,
             etiqueta=label or f"{os.path.basename(inp_path)} — entorno de obs {at}")
+        desc = _con_convenio(desc, omega, delta, b)
         _show_fig(desc.figure_b64, "intervention_plot")
         return _result(desc)
     except Exception as e:
@@ -1328,6 +1729,11 @@ def residual_episodes(inp_path: str,
                       ventana: int = 0,
                       threshold: float = 3.0) -> list:
     """
+    
+    **Instrumento suelto del nodo de intervención.** La secuencia completa
+    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
+    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
+    Ésta sirve para mirar cómo se agrupan los extremos en sucesos sin avanzar el flujo.
     Agrupa los residuos extremos de un modelo estimado en EPISODIOS.
 
     LA PREGUNTA DE ESTE NODO no es «cuántos atípicos hay» sino **«esto es un
@@ -1361,8 +1767,10 @@ def residual_episodes(inp_path: str,
         import numpy as np
         from art.episodes import describe_episodios
         from art.policy import decide_episodios, THRESHOLDS
-        ts, m = _load_ts_model(inp_path)
-        m.fit()
+        ts, m = _mirar(inp_path)
+        # `_mirar` y no `_load_ts_model` + `fit()` a mano: esa vía no sella
+        # el origen del fichero, y con ella el aviso de BUG-0090 es
+        # inalcanzable — el contrato tenía tres puertas y una cuarta abierta.
         if m.residuals is None:
             return _err("el modelo no tiene residuos: ¿se estimó?")
         r = np.asarray(m.residuals.data, dtype=float)
@@ -1486,6 +1894,11 @@ def preliminary_outlier_scan(inp_path: str, d: int, D: int,
                               lam: float = 0.0,
                               threshold: float = _Z_USER) -> list:
     """
+    
+    **Instrumento suelto del nodo de intervención.** La secuencia completa
+    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
+    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
+    Ésta sirve para mirar los anómalos de una serie aún sin modelo sin avanzar el flujo.
     Scan the differenced series for extreme observations BEFORE choosing ARMA orders.
 
     "Lo más obvio primero": a large outlier in the differenced series distorts
@@ -1569,6 +1982,11 @@ def preliminary_outlier_scan(inp_path: str, d: int, D: int,
 @mcp.tool()
 def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
     """
+    
+    **Instrumento suelto del nodo de intervención.** La secuencia completa
+    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
+    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
+    Ésta sirve para mirar los anómalos de un modelo ya estimado sin avanzar el flujo.
     Scan the RESIDUALS of an estimated model for outliers, with each one's
     contribution to every ACF lag.
 
@@ -1592,8 +2010,10 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
         import fue as _fue
         from mcp.types import TextContent, ImageContent
         from art.describe import describe_prelim_scan, _resid_start
-        ts, m = _load_ts_model(inp_path)
-        m.fit()
+        ts, m = _mirar(inp_path)
+        # `_mirar` y no `_load_ts_model` + `fit()` a mano: esa vía no sella
+        # el origen del fichero, y con ella el aviso de BUG-0090 es
+        # inalcanzable — el contrato tenía tres puertas y una cuarta abierta.
         if m.residuals is None:
             return _err("el modelo no tiene residuos: ¿se estimó?")
         res_ts = _fue.TimeSeries(
@@ -1653,11 +2073,16 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
         #
         # La vieja se retira: está enteramente contenida en la nueva, que además
         # da la PACF y el veredicto por retardo.
-        _show_fig(cal_b64 or desc.figure_b64, "calibracion")
+        # La figura del ESCANEO es la que vuelve a mandar: lleva la serie —donde
+        # el analista ve DÓNDE está el suceso— más la ACF y ahora también la
+        # PACF, con la parte que ponen los anómalos en rojo. Ayer la retiré
+        # entera para poner una de dos paneles sin los datos, y perder el panel
+        # de la serie fue un retroceso: lo que faltaba era añadir la PACF.
+        _show_fig(desc.figure_b64, "escaneo")
         items = [TextContent(type="text", text=cab + desc.summary
                              + "\n\n---\n" + desc.recommendation + cal_txt)]
-        if cal_b64:
-            items.append(ImageContent(type="image", data=cal_b64,
+        if desc.figure_b64:
+            items.append(ImageContent(type="image", data=desc.figure_b64,
                                       mimeType="image/png"))
         return items
     except Exception:
@@ -1684,8 +2109,10 @@ def model_equation_display(inp_path: str) -> list:
     """
     try:
         from mcp.types import TextContent
-        ts, m = _load_ts_model(inp_path)
-        m.fit()
+        ts, m = _load_fitted(inp_path)
+        # `_load_fitted` y no `_load_ts_model` + `fit()` a mano: esa vía no sella
+        # el origen del fichero, y con ella el aviso de BUG-0090 es
+        # inalcanzable — el contrato tenía tres puertas y una cuarta abierta.
         eq_text = _equation_for_prompt(ts, m)
         return [TextContent(type="text", text=eq_text)]
     except Exception:
@@ -1697,7 +2124,13 @@ def model_equation_display(inp_path: str) -> list:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def estimate_and_diagnose(inp_path: str, output_path: str = "") -> list:
+def estimate_and_diagnose(inp_path: str, output_path: str = "",
+                          guion_path: str = "",
+                          guion_name: str = "",
+                          guion_decision: str = "",
+                          guion_rationale: str = "",
+                          guion_problems: str = "",
+                          guion_next: str = "") -> list:
     """
     Fit the model specified in an .inp file and run diagnosis.
 
@@ -1714,21 +2147,79 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "") -> list:
                   the same trio confirm_and_estimate writes, so a model estimated
                   through this clean path is not left without artefacts.  Empty
                   (default) keeps the old screen-only behaviour.
+    guion_*     : lo mismo que en `confirm_and_estimate`. Con `output_path` la
+                  entrada de guion **se escribe igual que allí**, y `guion_path`
+                  se deriva si no se da: el guion es obligatorio, no opcional.
+
+                  BUG-0088. Esta herramienta persistía el trío `.pre`/`.out`
+                  —el docstring lo prometía con esas palabras— y NO el guion.
+                  Un modelo estimado por esta vía quedaba con artefactos y sin
+                  su entrada, y el guion se desincronizaba **en silencio**. En
+                  la sesión FOOD_UEM la escalera de Ucrania entera se construyó
+                  así y hubo que reescribir el guion a mano.
+
+                  De las tres salidas que el reporte proponía, ésta es la que
+                  mantiene la promesa del docstring: lo inconsistente era
+                  persistir los artefactos y no el registro, y quitar los
+                  artefactos habría quitado también la razón de ser de la
+                  herramienta.
     """
     try:
         from mcp.types import TextContent, ImageContent
         from art.describe import describe_diagnosis
-        ts, m = _load_ts_model(inp_path)
-        m.fit()
+        ts, m = _load_fitted(inp_path)
+        # `_load_fitted` y no `_load_ts_model` + `fit()` a mano: esa vía no sella
+        # el origen del fichero, y con ella el aviso de BUG-0090 es
+        # inalcanzable — el contrato tenía tres puertas y una cuarta abierta.
         try:
             eq_text = _equation_for_prompt(ts, m)
         except Exception as _eq_exc:
             eq_text = f"⚠ *[model_equation error: {_eq_exc}]*"
         desc = describe_diagnosis(m)
         _show_fig(desc.figure_b64, "diagnosis")
-        text = eq_text + "\n\n---\n\n" + desc.summary + "\n\n---\n" + desc.recommendation
+        text = envuelve_iteracion(
+            nombre=os.path.splitext(os.path.basename(output_path or inp_path))[0],
+            especificacion=(f"Estimación de `{os.path.basename(inp_path)}` tal "
+                            f"como está: esta vía no construye especificación, "
+                            f"la relee."),
+            ecuacion=eq_text,
+            diagnosis=desc.summary + "\n\n---\n" + desc.recommendation,
+            reformulacion=_reformulacion_desde(desc, guion_next),
+        )
         if output_path:
+            # LA TERNA, COMPLETA (BUG-0092). `_persist_pre_out` escribe el `.pre`
+            # y el `.out` en el basename de `output_path`, y el `.inp` no estaba:
+            # la entrada del guion apuntaba a un fichero inexistente, que es justo
+            # el camino por el que el analista vuelve a un nodo.
+            #
+            # Se COPIA el `.inp` fuente byte a byte, no se reserializa el modelo
+            # ajustado. Escribir un modelo ajustado bajo nombre de `.inp` es la
+            # trampa de BUG-0027 —los valores estimados pasarían por semillas y
+            # la siguiente estimación arrancaría en el óptimo—, y la copia
+            # literal no puede caer en ella.
+            text += _asegura_inp_de_la_terna(inp_path, output_path)
             text += _persist_pre_out(m, output_path)
+            # El registro va con los artefactos, no aparte. `lam` sale del
+            # propio modelo: aquí no se pasa la especificación, se relee.
+            try:
+                nota = _record_to_guion(
+                    model=m, inp_path=output_path,
+                    lam=float(getattr(m, "boxlam", 0.0)),
+                    guion_path=guion_path or _derive_guion_path(output_path, m),
+                    name=guion_name, decision=guion_decision,
+                    rationale=guion_rationale, problems_found=guion_problems,
+                    next_version=guion_next, figure_b64=desc.figure_b64,
+                    hist_b64=(desc.data or {}).get("hist_b64"))
+                if nota:
+                    text += f"\n\n{nota}"
+            except Exception as _ge:
+                # Documentar no puede tumbar una estimación válida — pero
+                # tampoco puede fallar en silencio, que es el defecto que este
+                # arreglo viene a cerrar.
+                _warn("registro del guion en estimate_and_diagnose", _ge)
+                text += (f"\n\n⚠ *guion NO registrado "
+                         f"({type(_ge).__name__}: {_ge}). El modelo está en "
+                         f"disco y el guion no lo refleja.*")
         items = [TextContent(type="text", text=text)]
         if desc.figure_b64:
             items.append(ImageContent(type="image",
@@ -2311,10 +2802,16 @@ def meg_reformulate(inp_path: str, freq: int, output_path: str,
                   f"Activado el AR_f de raíz unitaria `ifadf[{f}]=1` {kind}"
                   f"{witness_line} Eliminados los armónicos deterministas en f={f}. "
                   f"Re-estimado desde `{os.path.basename(src)}`.\n\n{eq}\n\n")
-        diag.summary = (header + diag.summary
-                        + f"\n\n*Modelo guardado en: {output_path}  |  "
-                          f"semilla del siguiente paso: {pre_path}  |  "
-                          f"resultados: {base}.out*")
+        # El sobre de las cuatro etapas también aquí. `meg_reformulate` ES una
+        # reformulación —la etapa 4 con nombre propio— y era una de las dos
+        # herramientas que CIERRAN una iteración y emitían sin él. La otra es
+        # `record_version`. Las 40 restantes no son iteraciones: son
+        # instrumentos, y ponerle una «reformulación» a un ACF sería inventarla.
+        _esp_meg = header
+        _diag_meg = diag.summary + "\n\n---\n" + diag.recommendation
+        _extra_meg = (f"*Modelo guardado en: {output_path}  |  "
+                      f"semilla del siguiente paso: {pre_path}  |  "
+                      f"resultados: {base}.out*")
 
         # BUG-0053. El modelo reformulado se escribía a disco y el guion no se
         # enteraba: quedaba huérfano, y lo que se encadenara encima se registraba
@@ -2338,10 +2835,19 @@ def meg_reformulate(inp_path: str, freq: int, output_path: str,
                     rationale=guion_rationale,
                     base_pre_path=src,
                 )
-                diag.summary += f"\n\n{nota}"
+                _extra_meg += f"\n\n{nota}"
             except Exception as e:
                 _warn("no se pudo registrar la reformulación MEG en el guion", e)
 
+        diag.summary = envuelve_iteracion(
+            nombre=os.path.splitext(os.path.basename(output_path))[0],
+            especificacion=_esp_meg,
+            ecuacion=eq,
+            diagnosis=_diag_meg,
+            reformulacion=_reformulacion_desde(diag, ""),
+            extra=_extra_meg,
+        )
+        diag.recommendation = ""   # ya va dentro del sobre, en DIAGNOSIS
         return _result(diag)
     except Exception:
         return _err(traceback.format_exc())
@@ -2566,6 +3072,11 @@ def test_seasonal_simplification(inp_path: str,
 @mcp.tool()
 def intervention_analysis(inp_path: str, threshold: float = _Z_USER) -> list:
     """
+    
+    **Instrumento suelto del nodo de intervención.** La secuencia completa
+    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
+    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
+    Ésta sirve para mirar los anómalos antes de decidir nada sin avanzar el flujo.
     Detect extreme residuals and assess their impact on ACF/PACF and tests.
 
     Identifies residuals with |z| > threshold and reports:
@@ -2581,7 +3092,7 @@ def intervention_analysis(inp_path: str, threshold: float = _Z_USER) -> list:
     """
     try:
         from art.describe import describe_interventions
-        _, m = _load_fitted(inp_path)
+        _, m = _mirar(inp_path)
         return _result(describe_interventions(m, threshold=threshold))
     except Exception as e:
         return _err(traceback.format_exc())
@@ -2596,6 +3107,11 @@ def intervention_analysis(inp_path: str, threshold: float = _Z_USER) -> list:
 @mcp.tool()
 def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
     """
+    
+    **Instrumento suelto del nodo de intervención.** La secuencia completa
+    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
+    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
+    Ésta sirve para mirar si las intervenciones ya puestas se sostienen sin avanzar el flujo.
     Test H₀: ω=0 for every non-structural intervention in a fitted model.
 
     Runs a t-test on each free omega parameter of pulse, step, ramp, and
@@ -2624,9 +3140,27 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
         from art.interventions import simplify_interventions, simplify_summary
 
         ts, m = _load_fitted(inp_path)
-        results = simplify_interventions(m, alpha=alpha)
+        fallos: list = []
+        results = simplify_interventions(m, alpha=alpha, fallos=fallos)
 
         if not results:
+            # BUG-0090: «no hay» y «no se pudo» son cosas distintas, y decir la
+            # primera cuando pasa la segunda borra la razón. Sobre un modelo
+            # estimado desde un `.pre` esto respondía «No hay intervenciones»
+            # teniendo una delante.
+            if fallos:
+                det = "\n".join(
+                    f"- `{t}` [{i}]: {motivo}" for i, t, motivo in fallos)
+                try:
+                    from art.pipeline import aviso_se_no_fiable
+                    extra = aviso_se_no_fiable(m)
+                except Exception:
+                    extra = ""
+                return [TextContent(type="text", text=(
+                    f"⚠ **Hay {len(fallos)} intervención(es) y NINGUNA se pudo "
+                    f"contrastar.**\n\n{det}\n\nNo es que no haya "
+                    f"intervenciones: es que el contraste no se puede hacer "
+                    f"sobre este modelo." + extra))]
             return [TextContent(type="text",
                                 text="*No hay intervenciones no-estructurales en el modelo.*")]
 
@@ -2666,12 +3200,54 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
         except Exception as _tw:
             treadway = f"\n\n*[regla de Treadway no disponible: {_tw}]*\n"
 
+        # EL CONVENIO DE SIGNO, CALCULADO EN VEZ DE RECORDADO.
+        #
+        # fue guarda ω(B) = ω₀ − ω₁B − ⋯, el convenio de Box-Jenkins, el mismo
+        # para todo operador. Es consistente y no se toca. Lo que cuesta es que
+        # obliga a una resta mental cada vez que se lee un ω, y esa resta se
+        # falla: en la sesión de la réplica se falló dos veces seguidas al
+        # construir una hipótesis a mano, y el `.inp` necesitó que un −0.7236
+        # entrara como +0.7236. Un ω(B) = 0.5700 + 0.7236·B tiene coeficientes
+        # que uno «sumaría» a −0.15 y una ganancia de +1.29.
+        #
+        # El remedio no es repetir la regla —está en tres docstrings y aun así
+        # se falla— sino CALCULARLA: al lado de los coeficientes va el camino
+        # del nivel, que es lo que el analista quiere decir. Sólo para las que
+        # tienen más de un ω: con uno solo no hay resta que fallar.
+        convenio = ""
+        try:
+            from art.ltf import operador_en_palabras
+            _bloques = []
+            for _r in results:
+                if len(_r.omega) < 2:
+                    continue
+                _et = f"{_r.itv_type}[obs {_r.itv_at + 1}]"
+                _bloques.append(f"**`{_et}`**\n\n"
+                                + operador_en_palabras(list(_r.omega)))
+            if _bloques:
+                convenio = ("\n\n---\n\n### Los ω, leídos en el nivel\n\n"
+                            + "\n\n".join(_bloques) + "\n")
+        except Exception as _cv:
+            convenio = f"\n\n*[lectura del operador no disponible: {_cv}]*\n"
+
+        # La salida de esta herramienta es ENTERA razones t y un Wald, así que
+        # si el modelo vino de un `.pre` no hay nada aquí que se salve.
+        try:
+            from art.pipeline import aviso_se_no_fiable
+            origen_txt = aviso_se_no_fiable(m)
+        except Exception:
+            origen_txt = ""
         text = (
             f"### Contraste de intervenciones — {m.series.name or 'modelo'}\n\n"
             + f"**{n_sig} significativas**, **{n_nosig} prescindibles**"
-            + f" (α={alpha:.2f},  df={results[0].df})\n\n"
+            + f" (α={alpha:.2f},  df={results[0].df})"
+            + origen_txt
+            + ("".join(f"\n\n⚠ **`{t}` [{i}] no se pudo contrastar:** {motivo}"
+                       for i, t, motivo in fallos) if fallos else "")
+            + "\n\n"
             + eq_text
             + "\n\n---\n\n" + summary
+            + convenio
             + treadway
         )
         return [TextContent(type="text", text=text)]
@@ -2910,7 +3486,8 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
 def guided_identification(inp_path: str, lam: float = -1.0,
                            d: int = -1, D: int = -1,
                            pre_path: str = "",
-                           objetivo: str = "univariante") -> list:
+                           objetivo: str = "univariante",
+                           domain: str = "") -> list:
     """
     Sequential identification — ONE decision node per call.
 
@@ -2957,6 +3534,16 @@ def guided_identification(inp_path: str, lam: float = -1.0,
     lam      : Box-Cox lambda  (-1 = not yet decided → Call 1)
     d        : differencing order (-1 = not yet decided → Call 2)
     D        : seasonal differencing (-1 = not yet decided → Call 3)
+    domain   : what KIND of series this is — "price_index" | "multiplicative" |
+               "ratio" | "generic". Empty = inferred by `policy.decide_domain`.
+               **Lo declarado gana**, que es lo que la política dice de sí misma
+               y no podía cumplirse: el parámetro sólo existía en `build_model`,
+               así que un analista recorriendo los nodos uno a uno no tenía
+               forma de declararlo (BUG-0080). Muerde en el nodo Box-Cox
+               (Call 1), que es donde el dominio decide: un índice va en log
+               SIEMPRE —su base es una convención y un modelo en niveles no
+               tiene escala interpretable—, y una magnitud multiplicativa o un
+               cociente van en log salvo que el dato lo desmienta.
     objetivo : what the model is FOR — "univariante" | "multivariante" |
                "estructural". Only bites at the seasonal node (Call 3), where it
                says what the purpose implies for the B1/B2 route. It was
@@ -2976,25 +3563,75 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             bc      = describe_boxcox(ts)
             rec_lam = bc.data["recommended_lambda"]
 
-            # Index series rule: series without a natural zero base → always log.
-            # La regla vive en `policy.decide_domain`, no aquí: tenerla sólo en
-            # esta capa es lo que produjo BUG-0015 —el camino autónomo partía una
-            # familia de ocho IPC entre logs y niveles—. Una copia, dos caminos.
-            is_index = policy.decide_domain(ts) == "price_index"
-            if is_index and rec_lam != 0.0:
-                rec_lam   = 0.0
+            # La regla vive en `policy`, no aquí: tenerla sólo en esta capa es lo
+            # que produjo BUG-0015 —el camino autónomo partía una familia de ocho
+            # IPC entre logs y niveles—. Una copia, dos caminos.
+            #
+            # BUG-0080, dos cosas. (a) **Lo declarado gana**, que es lo que la
+            # política afirma de sí misma y no podía cumplirse: `domain=` sólo
+            # existía en `build_model`. (b) La copia que había aquí implementaba
+            # sólo la rama del índice, así que las otras dos categorías de
+            # BUG-0040 —`multiplicative` y `ratio`, que van en log salvo que el
+            # dato lo desmienta— no llegaban al carril guiado ni declarándolas.
+            # Se enruta por `decide_lambda`, que las tiene todas.
+            dom_decl = (domain or "").strip()
+            if dom_decl and dom_decl not in policy.DOMINIOS:
+                return _err(f"domain={dom_decl!r} no es un dominio reconocido. "
+                            "Usa uno de: " + ", ".join(policy.DOMINIOS))
+            dom = dom_decl or policy.decide_domain(ts)
+            lam_pol = policy.decide_lambda(bc.data, domain=dom)
+            index_note = ""
+            if lam_pol != rec_lam:
+                _origen = ("declarado por el analista" if dom_decl
+                           else "inferido por `decide_domain`")
+                _por_que = {
+                    "price_index":
+                        "un índice no tiene base natural —2016=100 es una "
+                        "convención— así que sólo los cambios relativos "
+                        "significan algo, y un modelo en niveles no tiene "
+                        "escala interpretable. λ=0 **siempre**, diga lo que "
+                        "diga el estadístico",
+                    "multiplicative":
+                        "una magnitud positiva que se mueve en proporción va "
+                        "en log por defecto, y el `gap` cae dentro de la banda "
+                        "en la que el estadístico no discrimina",
+                    "ratio":
+                        "un cociente acotado va en log por defecto, y el `gap` "
+                        "cae dentro de la banda en la que el estadístico no "
+                        "discrimina",
+                }.get(dom, "lo decide el dominio")
                 index_note = (
-                    f"\n\n> ⚠ **REGLA ÍNDICE APLICADA:** «{ts.name or 'serie'}» es una "
-                    "serie índice sin base natural — se impone **λ=0 (log)** "
-                    "independientemente de las estadísticas Box-Cox."
+                    f"\n\n> ⚠ **REGLA DE DOMINIO APLICADA** — dominio "
+                    f"`{dom}` ({_origen}).\n>\n"
+                    f"> Se impone **λ={lam_pol:g}** sobre el "
+                    f"λ={rec_lam:g} del estadístico: {_por_que}."
                 )
-            else:
-                index_note = ""
+                rec_lam = lam_pol
+            elif dom_decl:
+                index_note = (
+                    f"\n\n> Dominio `{dom}` declarado por el analista. "
+                    f"Coincide con el estadístico: **λ={rec_lam:g}**."
+                )
+            elif dom != "generic":
+                index_note = (
+                    f"\n\n> Dominio `{dom}` inferido por `decide_domain` — "
+                    "coincide con el estadístico. Si no es el que corresponde, "
+                    "declara `domain=` y vuelve a llamar: **lo declarado "
+                    "gana**."
+                )
 
+            # La EVIDENCIA del estadístico va verbatim; su RECOMENDACIÓN, no,
+            # cuando el dominio la anula: dejar «Confirma λ=1.0» encima de una
+            # nota que impone λ=0 son dos instrucciones contrarias en la misma
+            # pantalla, y la de arriba es la que se lee primero.
+            _rec_bc = bc.recommendation
+            if index_note.startswith("\n\n> ⚠"):
+                _rec_bc = (f"*(La recomendación del estadístico —«{_rec_bc.strip()}»— "
+                           "queda anulada por la regla de dominio: ver abajo.)*")
             _show_fig(bc.figure_b64, "boxcox")
             text = (
                 "## Paso 1 — Transformación Box-Cox\n\n"
-                + bc.summary + "\n\n---\n" + bc.recommendation
+                + bc.summary + "\n\n---\n" + _rec_bc
                 + index_note
                 + f"\n\n**Próximo paso:** confirma λ y llama con `lam={rec_lam}` "
                 "(o el valor que decidas) para ver la serie transformada."
@@ -3414,9 +4051,12 @@ def _state_footer(model, inp_path: str, guion_note: str = "",
     if ifadf:
         piezas.append("ifadf f=" + ",".join(str(i) for i in ifadf))
     itvs = list(getattr(model, "interventions", None) or [])
-    n_arm = sum(1 for i in itvs if i.type in ("cos", "sin", "alter"))
-    if n_arm:
-        piezas.append(f"{n_arm} armónicos")
+    # TÉRMINOS, no pares: cuenta cada cos, cada sin y el alter por separado.
+    # Es la cuenta de `seasonal_detection` (freq-1), no la de `n_harmonics`
+    # (pares, freq//2-1). Mensual completo: 11 aquí, 5 allí (hallazgo #7).
+    n_terminos_arm = sum(1 for i in itvs if i.type in ("cos", "sin", "alter"))
+    if n_terminos_arm:
+        piezas.append(f"{n_terminos_arm} términos armónicos")
     def _orden(coefs, libres):
         """Cuenta coeficientes LIBRES, no presentes: fue guarda factores con
         ceros fijos que no son parámetros del modelo."""
@@ -3438,7 +4078,7 @@ def _state_footer(model, inp_path: str, guion_note: str = "",
         piezas.append(f"estacional({P_ord},{Q_ord})")
     if getattr(model, "estimate_mu", False):
         piezas.append("μ")
-    n_itv = len(itvs) - n_arm
+    n_itv = len(itvs) - n_terminos_arm
     if n_itv > 0:
         piezas.append(f"{n_itv} intervención{'es' if n_itv > 1 else ''}")
 
@@ -3774,9 +4414,27 @@ def _texto_escalera(esc, rec: str) -> str:
         w1 = f"ω(1)={p.omega_1:+.4f}" if p.omega_1 is not None else ""
         L.append(f"- `{p.nivel}` {p.nombre} · AIC {p.aic:.2f} · {w1} · "
                  f"{est} {marca}")
-    if esc.razones_para_subir:
+    # `esc.subio` y no `rec == "2"`: el predicado tiene UNA definición, en
+    # `Escalera`. Re-derivarlo aquí era tenerlo en dos sitios que pueden
+    # divergir —`rec` llega como parámetro y el llamante lo calcula como
+    # `esc.recomendado or esc.nivel_simple or "1a"`— y es la misma familia que
+    # los cuatro `umbral_vecino` de BUG-0087.
+    if esc.razones_para_subir and esc.subio:
         L += ["", "Se subió de peldaño por:"]
         L += [f"  - {r}" for r in esc.razones_para_subir]
+    elif esc.ningun_peldano_se_sostiene:
+        # BUG-0084 §4. Decía «Se subió de peldaño por: …» marcando como elegido
+        # `1a`, que es el más bajo. O el mensaje describía una evaluación que no
+        # se aplicó, o la elección no era la que decía, y el analista no podía
+        # saber cuál de las dos. Lo que pasa de verdad es esto:
+        L += ["", f"**Había razones para subir y aun así se recomienda "
+              f"`{rec}`, el peldaño bajo:**"]
+        L += [f"  - {r}" for r in esc.razones_para_subir]
+        L += ["", "El peldaño 2 tampoco se sostiene, así que **ninguna forma de "
+              "esta escalera resuelve el suceso**. Lo recomendado es el menos "
+              "malo. Antes de fijarlo, mira si el episodio está bien delimitado "
+              "(`incident_configurations`) o si lo que queda no es un suceso "
+              "sino estructura sin modelizar."]
     else:
         L += ["", "**No hubo razón para subir**: la lectura simple absorbe su "
               "fecha, no deja vecino y el modelo es adecuado. El AIC no arbitra "
@@ -3805,6 +4463,61 @@ def _alternativas_escalera(esc, rec: str) -> str:
                 else "se sostiene, pero no había razón para subir a él")
         partes.append(f"{p.nivel} ({p.nombre}): AIC {p.aic:.2f}, {pega}")
     return " · ".join(partes)
+
+
+def _exige_la_misma_serie(ts_a, ts_b, ruta_a: str, ruta_b: str) -> None:
+    """El `.pre` que se encadena tiene que ser de ESTA serie.
+
+    El guardián comparaba `nobs` y `freq`, que es comparar la FORMA y no el
+    CONTENIDO. Dos series mensuales de la misma longitud pasaban — y en el
+    propio TFM hay tres. Medido con dos series sintéticas de 120 datos
+    mensuales: el guardián las daba por buenas con `max|A−B| = 152,3`.
+
+    Lo que ocurre después no avisa. `_build_arma_on_model` se queda con los
+    deterministas del `.pre` —los armónicos, la media, las intervenciones, con
+    sus fechas— y `_write_inp` escribe los datos del `.inp`: un modelo cuya
+    parte determinista es de otra serie, estimado sobre ésta, y registrado en el
+    guion como si fuera el paso siguiente del recorrido de ésta.
+
+    El margen para distinguirlas es amplio y no hay que afinarlo: el encadenado
+    legítimo reproduce la serie a 5·10⁻⁷ —la precisión con la que el `.inp` la
+    escribe, no ruido— y el ilegítimo estaba a 152. Se compara en RELATIVO
+    porque la tolerancia tiene que valer igual para una serie en unidades y para
+    otra en millones.
+
+    También se compara `start`: dos series de igual longitud y frecuencia que
+    empiezan en fechas distintas están desalineadas, y las fechas de las
+    intervenciones del `.pre` —que son índices— apuntarían a otro mes.
+    """
+    import numpy as _np
+    if ts_a.nobs != ts_b.nobs or ts_a.freq != ts_b.freq:
+        raise ValueError(
+            f"Series mismatch between inp_path and base_pre_path: "
+            f"nobs {ts_a.nobs} vs {ts_b.nobs}, freq {ts_a.freq} vs {ts_b.freq}"
+        )
+    if tuple(ts_a.start or ()) != tuple(ts_b.start or ()):
+        raise ValueError(
+            f"El `.pre` empieza en {ts_b.start} y la serie en {ts_a.start}: "
+            f"están desalineadas, y las fechas de las intervenciones del `.pre` "
+            f"apuntarían a otro periodo.\n  serie : {ruta_a}\n  .pre  : {ruta_b}"
+        )
+    a = _np.asarray(getattr(ts_a, "data", []), float)
+    b = _np.asarray(getattr(ts_b, "data", []), float)
+    if a.size == 0 or b.size == 0 or a.size != b.size:
+        return                      # sin datos que comparar, no se inventa nada
+    escala = max(float(_np.max(_np.abs(a))), 1e-12)
+    dif = _np.abs(a - b) / escala
+    if float(_np.max(dif)) > 1e-5:
+        i = int(_np.argmax(dif))
+        raise ValueError(
+            f"El `.pre` NO es de esta serie: difieren desde el dato {i} "
+            f"({a[i]:.6g} frente a {b[i]:.6g}; discrepancia relativa máxima "
+            f"{float(_np.max(dif)):.3g}, y el encadenado legítimo queda por "
+            f"debajo de 1e-5).\n  serie : {ruta_a}\n  .pre  : {ruta_b}\n"
+            f"Encadenar el `.pre` de otra serie da un modelo con los "
+            f"deterministas de aquélla —armónicos, media, intervenciones y sus "
+            f"fechas— estimado sobre ésta."
+        )
 
 
 def _version_instr() -> str:
@@ -3866,7 +4579,9 @@ def _record_to_guion(
     problems_found: str = "",
     next_version: str = "",
     figure_b64: str | None = None,
+    hist_b64: str | None = None,
     base_pre_path: str = "",
+    dominio: str = "",
 ) -> str:
     """
     Add a fitted model entry to guion.json (creates file if absent).
@@ -3900,6 +4615,11 @@ def _record_to_guion(
 
     diag_result = diagnose(model)
     spec  = _extract_spec(model, lam)
+    # El dominio es un dato del ANALISTA, no del modelo: no se puede recuperar
+    # releyendo el `.inp`. Si no queda aquí, la razón por la que λ vale lo que
+    # vale se pierde (BUG-0080).
+    if dominio:
+        spec["dominio"] = dominio
     stats = _extract_stats(model, diag_result)
     eq    = _build_equation(spec, model.series.freq)
 
@@ -3917,28 +4637,75 @@ def _record_to_guion(
         next_version=next_version,
         figure_b64=figure_b64,
         parent=parent,
+        # De dónde salió: el `.pre` que se usó como semilla. Es el dato con el
+        # que se dedujo `parent`, y hasta ahora se consumía y se tiraba.
+        base_pre_path=base_pre_path or "",
         instrumento=_version_instr(),
     )
     # BUG-0043: la figura va a un fichero hermano, no dentro del guion.
+    # Y son DOS: la diagnosis de esta escuela son residuos + ACF/PACF +
+    # histograma, y el Jarque-Bera se lee sobre el tercero. `describe_diagnosis`
+    # los genera los dos y sólo se guardaba el primero.
+    def _guarda_fig(b64, sufijo=""):
+        import base64 as _b64
+        figs = os.path.join(os.path.dirname(guion_path) or ".", "figs")
+        os.makedirs(figs, exist_ok=True)
+        nombre = f"{guion.series or 'serie'}_v{entry.version}{sufijo}.png"
+        with open(os.path.join(figs, nombre), "wb") as fh:
+            fh.write(_b64.b64decode(b64))
+        return os.path.join("figs", nombre)
+
     if entry.figure_b64:
         try:
-            import base64 as _b64
-            figs = os.path.join(os.path.dirname(guion_path) or ".", "figs")
-            os.makedirs(figs, exist_ok=True)
-            nombre = f"{guion.series or 'serie'}_v{entry.version}.png"
-            with open(os.path.join(figs, nombre), "wb") as fh:
-                fh.write(_b64.b64decode(entry.figure_b64))
-            entry.figure_path = os.path.join("figs", nombre)
+            entry.figure_path = _guarda_fig(entry.figure_b64)
             entry.figure_b64 = None
         except Exception as e:
             _warn("no se pudo escribir la figura del guion; se deja empotrada", e)
+    if hist_b64:
+        try:
+            entry.hist_path = _guarda_fig(hist_b64, "_hist")
+        except Exception as e:
+            _warn("no se pudo escribir el histograma del guion", e)
+
+    # BUG-0092. El guion es el mapa por el que se vuelve atrás, y una entrada
+    # que apunta a un fichero ausente rompe justo esa operación. Medido sobre el
+    # corpus real: 4 de 15 entradas apuntaban al vacío, y el guion no lo decía.
+    #
+    # No bloquea —registrar mal es mejor que no registrar— pero lo dice, y dice
+    # qué falta de la terna: un `.pre` o un `.out` que faltan se rehacen
+    # estimando; un `.inp` que falta deja el nodo irrecuperable.
+    aviso_terna = ""
+    try:
+        _b = os.path.splitext(entry.inp_path or "")[0]
+        if _b:
+            _falta = [ext for ext in (".inp", ".pre", ".out")
+                      if not os.path.exists(_b + ext)]
+            # Una RONDA intermedia del carril autónomo registra su `.pre` a
+            # propósito: no es una versión con especificación propia, es un
+            # paso del ciclo. Exigirle un `.inp` sería pedirle lo que no tiene.
+            if (entry.inp_path or "").lower().endswith(".pre"):
+                _falta = [x for x in _falta if x != ".inp"]
+            # El `.out` se REGISTRA, no se deriva: derivarlo es suponer que está.
+            # Y es la única constancia fiel de las SE, así que su ausencia
+            # cambia lo que se puede hacer desde este nodo (BUG-0090/0091).
+            if ".out" not in _falta:
+                entry.out_path = _b + ".out"
+            if ".inp" in _falta:
+                aviso_terna = (f"  ⚠ **el `.inp` registrado no existe** "
+                               f"(`{os.path.basename(entry.inp_path)}`): desde "
+                               f"este nodo no se puede reestimar")
+            elif _falta:
+                aviso_terna = (f"  *(sin {', '.join(_falta)}; se rehacen "
+                               f"estimando el `.inp`)*")
+    except Exception as _te:
+        _warn("comprobación de la terna al registrar en el guion", _te)
 
     guion.entries.append(entry)
     save_guion(guion, guion_path)
     # Una línea, y corta: el registro es interno y la salida no debe crecer por
     # documentar. Quien quiera ver lo documentado llama a `export_guion`.
     padre = f" ← v{parent}" if parent is not None else ""
-    return f"*guion: {name} v{version}{padre}*"
+    return f"*guion: {name} v{version}{padre}*" + aviso_terna
 
 
 # ---------------------------------------------------------------------------
@@ -3954,7 +4721,9 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                           base_pre_path: str = "",
                           estimate_mu: bool = False,
                           seasonal: bool | None = None,
+                          easter: bool = False,
                           include_histogram: bool = False,
+                          domain: str = "",
                           guion_path: str = "",
                           guion_name: str = "",
                           guion_decision: str = "",
@@ -3988,6 +4757,16 @@ def confirm_and_estimate(inp_path: str, output_path: str,
     q               : regular MA order
     n_harmonics     : harmonic pairs cos/sin (D=0 fresh only; ignored when
                       base_pre_path is given — harmonics come from the .pre)
+    easter          : add the EASTER (Semana Santa) calendar regressor. MONTHLY
+                      series only — the engine builds it itself: 1.0 in the month
+                      of Easter Sunday, split 0.5 March + 0.5 April when Good
+                      Friday falls in March. It is a deterministic term like the
+                      harmonics, NOT an intervention: it has no date and no form,
+                      so it does not go through the intervention node. Add it when
+                      the residuals show recurring April/March anomalies that move
+                      with the calendar. Like n_harmonics, it is ignored when
+                      base_pre_path is given — the deterministics come from the
+                      .pre, and if the .pre already carries it, it is inherited.
     seasonal        : on/off switch for the whole deterministic seasonal package
                       (cos/sin pairs + Nyquist alter). None (default) => derive from
                       n_harmonics>0, correct for freq>=4. Pass False for a
@@ -4026,6 +4805,14 @@ def confirm_and_estimate(inp_path: str, output_path: str,
     include_histogram : return histogram PNG as third item (default False).
                       Keep False during the outlier cycle to save tokens; set True
                       for the final model only.
+    domain          : what KIND of series this is — "price_index" |
+                      "multiplicative" | "ratio" | "generic". Se REGISTRA en el
+                      guion (no se puede recuperar releyendo el `.inp`: es un
+                      dato del analista) y se CONTRASTA con la λ que se pasa.
+                      Declarar `price_index` con λ=1 es una contradicción y la
+                      herramienta la dice — es exactamente el fallo que motivó
+                      BUG-0080: art recomendó «identidad (λ=1)» sobre un índice
+                      de precios y el carril guiado no ofrecía la corrección.
     guion_path      : (optional) path to guion.json — records this version
     guion_name      : version name (e.g. "PC3"); auto-assigned if empty
     guion_decision  : brief description of what this model tests or concludes
@@ -4060,21 +4847,34 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             base_pre_path = os.path.expanduser(base_pre_path)
             _, m_base = _load_ts_model(base_pre_path)
             ts_b = m_base.series
-            if ts.nobs != ts_b.nobs or ts.freq != ts_b.freq:
-                raise ValueError(
-                    f"Series mismatch between inp_path and base_pre_path: "
-                    f"nobs {ts.nobs} vs {ts_b.nobs}, freq {ts.freq} vs {ts_b.freq}"
-                )
+            _exige_la_misma_serie(ts, ts_b, inp_path, base_pre_path)
             m = _build_arma_on_model(m_base, p=p, q=q, P=P, Q=Q,
                                      estimate_mu=estimate_mu)
             _write_inp(ts, m, output_path)
         else:
             m_fresh = _make_model(ts, lam=lam, d=d, D=D, p=p, q=q,
                                   n_harmonics=n_harmonics, P=P, Q=Q,
-                                  estimate_mu=estimate_mu, seasonal=seasonal)
+                                  estimate_mu=estimate_mu, seasonal=seasonal,
+                                  easter=easter)
             _write_inp(ts, m_fresh, output_path)
 
         _, m = _load_fitted(output_path)
+
+        # LA λ QUE VALE ES LA DEL MODELO, no la del argumento (revisión externa,
+        # hallazgo #1). Con `base_pre_path` —el camino que las propias
+        # instrucciones mandan usar por defecto— `lam` se IGNORA para construir
+        # el modelo, porque la transformación viene del `.pre`. Y se seguía
+        # mostrando y registrando desde el argumento, cuyo defecto es 0.0.
+        #
+        # Resultado medido: un modelo en NIVELES encadenado desde su `.pre`
+        # quedaba en el guion como λ=0 y su ecuación se imprimía como ∇[ln y].
+        # Un registro falso, en el camino recomendado.
+        #
+        # Los otros cinco llamantes de `_record_to_guion` ya leían del modelo;
+        # éste era el único discrepante — y es la puerta principal del carril
+        # guiado.
+        lam = float(getattr(m, "boxlam", lam) if getattr(m, "boxlam", None)
+                    is not None else lam)
 
         # Parameter table
         if base_pre_path:
@@ -4087,7 +4887,39 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             spec_str = f"ARIMA({p},{d},{q}) D=1"
         else:
             spec_str = f"ARIMA({p},{d},{q}) armónicos={n_harmonics}"
+        # BUG-0080. El dominio y la λ tienen que contarse la misma historia. Un
+        # índice va en log SIEMPRE —su base es una convención—, así que
+        # `domain="price_index"` con λ=1 no es una preferencia: es una
+        # contradicción, y es literalmente el caso que abrió el bug (art
+        # recomendó «identidad» sobre el HICP de alimentos de la UEM y el carril
+        # guiado no ofrecía dónde corregirlo). No se bloquea —el analista manda—
+        # pero se dice.
+        aviso_dom = ""
+        _dd = (domain or "").strip()
+        if _dd:
+            if _dd not in policy.DOMINIOS:
+                return _err(f"domain={_dd!r} no es un dominio reconocido. "
+                            "Usa uno de: " + ", ".join(policy.DOMINIOS))
+            if _dd == "price_index" and lam != 0.0:
+                aviso_dom = (
+                    f"\n\n> ⚠ **Dominio `{_dd}` con λ={lam:g}.** Un índice no "
+                    "tiene base natural —2016=100 es una convención— así que "
+                    "sólo los cambios relativos significan algo: un modelo en "
+                    "NIVELES de un índice no tiene escala interpretable, y "
+                    "contra una entrada en log da una semielasticidad donde los "
+                    "demás dan una elasticidad. La regla índice dice **λ=0 "
+                    "siempre**. Se estima lo que has pedido, pero mira esto "
+                    "antes de seguir (BUG-0015, BUG-0080).")
+            elif _dd in ("multiplicative", "ratio") and lam != 0.0:
+                aviso_dom = (
+                    f"\n\n> Dominio `{_dd}` con λ={lam:g}. El log es el punto "
+                    "de partida para una magnitud que se mueve en proporción, "
+                    "pero **aquí el dato sí puede desmentirlo**: si el `gap` "
+                    "salió fuera de la banda ambigua, λ=1 está justificado. "
+                    "Queda anotado en el guion.")
         spec_line = f"**{spec_str}  λ={lam}**  —  {ts.name or 'series'}"
+        if _dd:
+            spec_line += f"  ·  dominio `{_dd}`"
 
         # Model equation replaces the parameter table
         try:
@@ -4139,7 +4971,9 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                 rationale=guion_rationale, problems_found=guion_problems,
                 next_version=guion_next,
                 figure_b64=diag.figure_b64,
+                hist_b64=(diag.data or {}).get("hist_b64"),
                 base_pre_path=base_pre_path,
+                dominio=(domain or "").strip(),
             )
         except Exception as e:
             # Documentar no puede tumbar una estimación válida.
@@ -4151,15 +4985,30 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         )
 
         text = (
-            spec_line + "\n\n"
-            + eq_text
-            + "\n\n---\n\n"
-            + diag.summary + "\n\n---\n" + diag.recommendation
-            + scan_section
-            + pre_note
-            + (f"\n\n{guion_note}" if guion_note else "")
-            + _state_footer(m, inp_path=output_path, guion_note=guion_note,
-                            guion_path_hint=guion_path or _derive_guion_path(output_path, m))
+            envuelve_iteracion(
+                nombre=os.path.splitext(os.path.basename(output_path))[0],
+                especificacion=(
+                    spec_line + aviso_dom
+                    + (f"\n\n*Encadenado desde "
+                       f"`{os.path.basename(base_pre_path)}`: se conservan sus "
+                       f"intervenciones y armónicos, y se sustituye el ARMA.*"
+                       if base_pre_path else "")),
+                ecuacion=eq_text,
+                # La diagnosis de esta escuela son los métodos formales Y los
+                # informales: el veredicto de Q y JB, y el escaneo de anómalos
+                # que se mira en el gráfico.
+                diagnosis=(diag.summary + "\n\n---\n" + diag.recommendation
+                           + scan_section),
+                # La 4ª etapa sale de lo que la propia diagnosis pide. Si no
+                # pide nada, `envuelve_iteracion` lo dice explícitamente.
+                reformulacion=_reformulacion_desde(diag, guion_next),
+                extra=pre_note
+                      + (f"\n\n{guion_note}" if guion_note else "")
+                      + _state_footer(
+                          m, inp_path=output_path, guion_note=guion_note,
+                          guion_path_hint=guion_path
+                          or _derive_guion_path(output_path, m)),
+            )
         )
 
         _show_fig(diag.figure_b64, "diagnosis")
@@ -4216,7 +5065,7 @@ def record_version(inp_path: str,
         from art.diagnosis import diagnose, plot_diagnosis
         import matplotlib.pyplot as plt
 
-        _, m = _load_fitted(inp_path)
+        _, m = _mirar(inp_path)
 
         # Diagnosis figure
         diag_result = diagnose(m)
@@ -4238,16 +5087,39 @@ def record_version(inp_path: str,
             figure_b64=b64,
         )
 
-        lines = [
-            f"### Versión registrada en guion",
-            note,
-            "",
+        # `record_version` CIERRA una iteración —escribe la entrada del guion—
+        # y emitía en su propia forma. Con el sobre, lo que el analista ve al
+        # registrar tiene la misma forma que lo que vio al estimar.
+        cifras = [
             f"**loglik** = {m._result.loglik:.3f}",
             f"**AIC** = {m._result.aic:.2f}" if m._result.aic else "",
             f"**Q-pass** = {diag_result.white_noise} | **JB-pass** = {diag_result.normal}",
             f"**Anomalías** = {len(diag_result.extreme)}",
         ]
-        items = [TextContent(type="text", text="\n".join(l for l in lines if l))]
+        # La ecuación ESTRUCTURAL, la del guion, no la del prompt. `record_version`
+        # MIRA —abre con `_mirar`, que acepta un `.pre`— y la ecuación del prompt
+        # imprime cada coeficiente con su error típico debajo. Desde un `.pre`
+        # esos errores no son fiables (BUG-0090/0091: la covarianza es un
+        # subproducto del camino del optimizador, no del óptimo), así que
+        # imprimirlos aquí sería contradecir el contrato que esta herramienta
+        # respeta. La estructural dice la FORMA sin inventar precisión.
+        try:
+            from art.guion import _build_equation, _extract_spec
+            eq_rv = _build_equation(_extract_spec(m, lam), m.series.freq)
+        except Exception as _e:
+            eq_rv = f"⚠ *[equation error: {_e}]*"
+        texto = envuelve_iteracion(
+            nombre=name or os.path.splitext(os.path.basename(inp_path))[0],
+            especificacion=(f"Registro de `{os.path.basename(inp_path)}` tal como "
+                            f"está: esta vía no construye especificación, la "
+                            f"deja constancia."),
+            ecuacion=eq_rv,
+            diagnosis="\n".join(l for l in cifras if l),
+            reformulacion=(next_version or
+                           "No consta: `next_version` vacío al registrar."),
+            extra=f"### Versión registrada en guion\n\n{note}",
+        )
+        items = [TextContent(type="text", text=texto)]
         if b64:
             items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
         return items
@@ -4291,7 +5163,8 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
     """
     try:
         from mcp.types import TextContent
-        from art.guion import load_guion, path_to_root, safe_ancestor, descendants
+        from art.guion import (load_guion, path_to_root, safe_ancestor,
+                               descendants, iteraciones, modelos_sin_registrar)
         g = load_guion(os.path.expanduser(guion_path))
         if not g.entries:
             return [TextContent(type="text", text="Guion vacío.")]
@@ -4361,6 +5234,44 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
 
         lines += ["", "◆ nodo de decisión · ✓ adoptada · ✗ callejón sin salida · · en exploración"]
 
+        # LA CUENTA DE ITERACIONES. Un modelo estimado cierra una iteración; los
+        # nodos que lo preceden son su etapa 1. Sin esto, «¿cuántas iteraciones
+        # tuvo este análisis?» tenía tres respuestas defendibles sobre el mismo
+        # corpus y el código no elegía ninguna.
+        its = iteraciones(g)
+        cerradas = [i for i in its if i.cerrada]
+        por_nodo: dict[str, int] = {}
+        for i in cerradas:
+            por_nodo[i.nodo or "—"] = por_nodo.get(i.nodo or "—", 0) + 1
+        detalle_nodos = " · ".join(f"{k}: {v}" for k, v in por_nodo.items())
+        lines += ["", f"**{len(cerradas)} iteraciones**"
+                      + (f" — {detalle_nodos}" if detalle_nodos else "")]
+        abiertas = [i for i in its if not i.cerrada]
+        if abiertas:
+            lines.append(f"   {len(abiertas)} especificada(s) sin estimar.")
+
+        # ¿ESTÁ COMPLETO EL REGISTRO? El guion no tenía forma de saberse
+        # incompleto, y se sabe incompleto: en UEM_FOOD_SERV_DS —un caso que
+        # salió bien— hay 13 modelos con terna completa en disco y 9 en el
+        # guion, y el que falta al final es el modelo FINAL (AIC −44,77 frente
+        # al −41,13 del último registrado). Esto no lo impide; lo hace visible.
+        try:
+            sueltos = modelos_sin_registrar(g, os.path.expanduser(guion_path))
+            if sueltos:
+                lines += ["", f"⚠ **{len(sueltos)} modelo(s) estimado(s) en la "
+                              f"carpeta y NO en el registro.** Tienen `.inp` y "
+                              f"`.out`, así que se estimaron; el guion no los "
+                              f"tiene, así que el recorrido que cuenta está "
+                              f"incompleto:"]
+                for r in sueltos[:12]:
+                    lines.append(f"   · {os.path.basename(r)}")
+                if len(sueltos) > 12:
+                    lines.append(f"   · … y {len(sueltos) - 12} más")
+                lines.append("   Regístralos con `record_version` si forman "
+                             "parte del recorrido.")
+        except Exception as e:
+            _warn("no se pudo reconciliar el guion con su carpeta", e)
+
         # El guion guarda VEREDICTOS, y un veredicto sólo significa algo junto al
         # instrumento que lo produjo. Si alguna entrada se calculó con otra
         # versión, el mapa lo dice — porque si no, presenta como estado actual
@@ -4391,6 +5302,72 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
             # ausencia se lee como «no hay nada que avisar».
             lines += ["", f"*[aviso de instrumento no disponible: "
                       f"{type(_vi).__name__}: {_vi}]*"]
+
+        # Y la otra cosa que hace incomparable una columna de ℓ/AIC: la ESCALA.
+        # La suite estima sobre 100·log(y) y `fue.Model` trae refactor=1.0 por
+        # defecto, así que un modelo construido a mano entra en el guion con una
+        # ℓ que difiere en n·ln(100) de la de sus hermanos. Mismo modelo, otras
+        # unidades — y el mapa los apilaba en la misma columna (BUG-0085).
+        try:
+            escalas = sorted({round(float(e.stats.refactor), 6)
+                              for e in g.entries
+                              if e.stats is not None
+                              and getattr(e.stats, "refactor", None)})
+            sin_esc = [e.version for e in g.entries
+                       if e.stats is not None
+                       and not getattr(e.stats, "refactor", None)]
+            if len(escalas) > 1:
+                lines += ["", "⚠ **No todo está en la misma ESCALA.** Factores "
+                          "de reescala presentes: "
+                          + ", ".join(f"`{x:g}`" for x in escalas) + ".",
+                          "   ℓ, AIC y BIC difieren en n·ln(factor) entre "
+                          "escalas: son el mismo ajuste en otras unidades. "
+                          "**No restes entradas de escalas distintas** — ni "
+                          "por AIC ni por LR. La convención de la suite es "
+                          f"`{_RESCALE_FACTOR:g}`, que es la que hace que σ̂ₐ "
+                          "se lea en tanto por ciento."]
+            elif sin_esc:
+                lines += ["", "*Escala no registrada en v"
+                          + ", v".join(str(v) for v in sin_esc)
+                          + " — anteriores a que el guion la guardara "
+                          "(BUG-0085). Se presumen de la convención, pero no "
+                          "está comprobado.*"]
+        except Exception as _es:
+            lines += ["", f"*[aviso de escala no disponible: "
+                      f"{type(_es).__name__}: {_es}]*"]
+
+        # Y la tercera cosa que hace irreleíble un nodo: que no quede el `.out`.
+        # La covarianza no es una propiedad del óptimo sino del CAMINO del
+        # optimizador, así que el `.pre` no puede llevarla: sin `.out`, los
+        # errores típicos de ese nodo no se recuperan sin reestimar desde el
+        # `.inp` (BUG-0090, BUG-0091). No es lo mismo «puedo releerlo» que
+        # «tengo que rehacerlo», y el mapa es donde se decide a dónde volver.
+        try:
+            sin_out, sin_inp = [], []
+            for e in g.entries:
+                if e.is_node or not (e.inp_path or ""):
+                    continue
+                _b = os.path.splitext(e.inp_path)[0]
+                if not os.path.exists(_b + ".inp"):
+                    sin_inp.append(e.version)
+                elif not (getattr(e, "out_path", None)
+                          and os.path.exists(e.out_path)) \
+                        and not os.path.exists(_b + ".out"):
+                    sin_out.append(e.version)
+            if sin_inp:
+                lines += ["", "⚠ **Nodos sin su `.inp`:** v"
+                          + ", v".join(str(v) for v in sin_inp)
+                          + ". Desde ellos **no se puede reestimar** — el "
+                          "fichero que los produjo no está donde el guion dice."]
+            if sin_out:
+                lines += ["", "*Nodos sin su `.out`: v"
+                          + ", v".join(str(v) for v in sin_out)
+                          + ". Se pueden reestimar desde su `.inp`, pero sus "
+                          "errores típicos no se pueden LEER: el `.out` es la "
+                          "única constancia fiel de la covarianza.*"]
+        except Exception as _ao:
+            lines += ["", f"*[aviso de artefactos no disponible: "
+                      f"{type(_ao).__name__}: {_ao}]*"]
         if _cortes[0]:
             lines.append(
                 f"⋯ {_cortes[0]} textos recortados para que el mapa quepa. "
@@ -4872,9 +5849,46 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
                 "formales (`formal_tests`), no del AIC.",
             ]
 
+        # El operador no es lo único que rompe la comparabilidad: el FACTOR DE
+        # REESCALA también. La suite estima sobre 100·log(y) y `fue.Model` trae
+        # 1.0 por defecto, así que un modelo construido a mano tiene una ℓ que
+        # difiere en n·ln(100) — mismo ajuste, otras unidades (BUG-0085). Aquí
+        # el remedio es distinto del de BUG-0051: no son modelos distintos, es
+        # el MISMO modelo mal anotado, y se arregla reestimando en la
+        # convención.
+        _ra = float(getattr(ma, "refactor", None) or 1.0)
+        _rb = float(getattr(mb, "refactor", None) or 1.0)
+        if abs(_ra - _rb) > 1e-9:
+            comparables = False
+            import math as _math
+            _n = min(len(ma._result.residuals), len(mb._result.residuals))
+            aviso_escala += [
+                "",
+                "> ⚠ **Los dos modelos están en ESCALAS distintas** "
+                f"(factor de reescala `{_ra:g}` frente a `{_rb:g}`). ℓ, AIC y "
+                f"BIC difieren en n·ln(factor) ≈ **{abs(_n * _math.log(_rb / _ra)):.0f}** "
+                "puntos de ℓ que son puro cambio de unidades, no de ajuste. Su "
+                "Δ se ha suprimido.",
+                ">",
+                "> Esto no son dos modelos distintos: es el mismo mal anotado. "
+                f"La convención de la suite es `{_RESCALE_FACTOR:g}` (hace que "
+                "σ̂ₐ se lea en tanto por ciento). Reestima el que se salga y "
+                "vuelve a compararlos.",
+            ]
+
         # ── Nested LR test ─────────────────────────────────────────────────
         nested = _nested_relation(spec_a, spec_b, npar_a, npar_b)
         lr_lines = []
+        if nested and not comparables:
+            # El LR es una DIFERENCIA de verosimilitudes: si no son comparables,
+            # tampoco lo es su diferencia. Y aquí duele más que en el ΔAIC,
+            # porque el χ² saldría enorme y con p≈0 — un contraste que dice
+            # «significativo» sobre un cambio de unidades (BUG-0051, BUG-0085).
+            lr_lines = ["", "**Contraste LR:** suprimido — los dos modelos "
+                        "están anidados pero sus verosimilitudes no son "
+                        "comparables (ver el aviso de arriba). Un LR sobre "
+                        "escalas distintas mide unidades, no ajuste."]
+            nested = None
         if nested == "A_in_B":
             lr = 2.0 * (lb - la)
             df = npar_b - npar_a
@@ -5023,6 +6037,396 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
 
 
 # ---------------------------------------------------------------------------
+# Tool: guided_intervention — la PUERTA del nodo de intervención
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def guided_intervention(inp_path: str,
+                        date: str = "",
+                        form: str = "",
+                        n_omega: int = 0,
+                        output_path: str = "",
+                        threshold: float = 3.0,
+                        umbral_activo: float = 1.0,
+                        umbral_vecino: float = 0.0,
+                        dominio: str = "",
+                        evento_desde: str = "",
+                        evento_naturaleza: str = "",
+                        evento_fuente: str = "",
+                        aportada_por: str = "",
+                        guion_path: str = "",
+                        guion_name: str = "",
+                        guion_decision: str = "",
+                        guion_rationale: str = "",
+                        guion_problems: str = "",
+                        guion_next: str = "") -> list:
+    """
+    Sequential INTERVENTION — ONE decision node per call.
+
+    La entrada del nodo de intervención, paralela a `guided_identification`. El
+    nodo tiene nueve instrumentos y era el único de la suite sin puerta: el
+    analista tenía que elegir a ciegas entre ellos y ninguno remitía a otro.
+    Esta herramienta los SECUENCIA y presenta un veredicto por llamada. **No
+    decide**: el analista decide en cada paso, igual que en identificación.
+
+    DECISION TREE — call in this sequence, one at a time:
+
+    Call 1   date=""   (default)
+      → ¿HAY QUE INTERVENIR? Calibra el correlograma OMITIENDO los anómalos y
+        dice si la identificación cambia: qué órdenes AR (PACF) y MA (ACF)
+        entran o salen. **Si no cambia nada, lo dice y avisa de que intervenir
+        aquí es sobre-intervenir** — cada intervención encoge σ̂ y promueve al
+        siguiente anómalo, así que la escalada no para sola.
+        Devuelve además las fechas candidatas con su |z|.
+      WAIT for user: qué fecha, o parar.
+
+    Call 2   date="Q3/2008"   form=""
+      → ¿QUÉ FORMA ADMITE EL DATO? En UNA respuesta:
+          · el EPISODIO — cuántos períodos del nivel altera el suceso;
+          · las CONFIGURACIONES que el dato admite, acotadas por el mecanismo,
+            con su ganancia ω(1) y su lectura permanente/transitorio;
+          · la ESCALERA de Ockham con lo que justifica subir de peldaño.
+        Y un veredicto único, con el árbitro explícito: para la FORMA gobierna
+        `incident_configurations` sobre `residual_episodes`, porque extiende el
+        arranque por el mecanismo y el otro sólo agrupa extremos.
+        Si el dato NO identifica la configuración, lo dice y pide lo
+        extramuestral en vez de elegir por AIC.
+      WAIT for user: qué forma y de CUÁNTOS ESCALONES.
+
+    Call 3   date="Q3/2008"   form="step"   n_omega=5   output_path=...
+             (n_omega = cuántos escalones; 5 escalones ⇔ ω(B) de orden 4)
+      → CONSTRUYE la forma elegida, estima, y verifica:
+          · Treadway — ¿queda un anómalo de vecino? ¿el residuo en la fecha
+            está en la media?
+          · ganancia — Wald sobre ω(1)=0: ¿permanente o transitorio?
+        Deja el nodo en el guion. Éste es el paso que faltaba (BUG-0079).
+
+    Parameters
+    ----------
+    inp_path      : .inp del modelo estimado **SIN** la intervención
+    date          : "" → Call 1. "MM/YYYY", "QN/YYYY" o "YYYY" → Call 2 ó 3
+    form          : "" → Call 2. "step"|"pulse"|"impulse"|"ramp" → Call 3
+    n_omega       : **cuántos ω**, que es lo mismo que cuántos ESCALONES en el
+                    nivel — la lengua en la que habla todo este nodo:
+                    `incident_configurations` dice «N escalones», la escalera
+                    dice «N escalones», y la Call 2 te devuelve el `n_omega` ya
+                    calculado. 0 = lo decide la escalera.
+
+                    La equivalencia, por si vienes del operador: **N escalones
+                    ⇔ ω(B) de orden N−1**. Así que `n_omega=2` son DOS escalones
+                    y un ω(B) = ω₀ − ω₁B.
+
+                    ⚠ Esta línea documentaba el parámetro como si fuera el
+                    grado del polinomio, y no lo es: cuenta coeficientes. Un
+                    analista al que Treadway le ordenaba subir de peldaño pasaba
+                    `n_omega=1` creyendo pedir la escalera de dos, recibía un
+                    escalón simple, y la cabecera se lo confirmaba en las
+                    unidades equivocadas. No se le ignoraba: se le había
+                    documentado otra cosa (BUG-0093).
+    output_path   : obligatorio en la Call 3 — dónde se escribe el modelo nuevo
+    threshold     : |z| para marcar un residuo como extremo
+    umbral_activo : |z| a partir del cual un vecino cuenta como parte del suceso
+                    aunque no sea extremo (Call 2)
+    umbral_vecino : |z| a partir del cual un vecino cuenta como anómalo
+                    (Treadway, Call 2). 0 = el de la política (2.0)
+    dominio       : clase de serie ("price_index", "generic"…). Vacío = la
+                    infiere `policy.decide_domain`. Lo declarado gana.
+    evento_*      : lo extramuestral, que sólo sabe el analista. `evento_fuente`
+                    es obligatoria si se declara `evento_naturaleza`: no se
+                    afirma que un suceso fue permanente sin decir por qué se
+                    sabe.
+    guion_*       : registro del nodo, como en el resto de la suite
+    """
+    try:
+        import numpy as np
+        from art.policy import THRESHOLDS, decide_domain, decide_episodios
+
+        ts, m = _load_fitted(inp_path)
+        # `_load_fitted` y no `_load_ts_model` + `fit()` a mano: esa vía no sella
+        # el origen del fichero, y con ella el aviso de BUG-0090 es
+        # inalcanzable — el contrato tenía tres puertas y una cuarta abierta.
+        if m.residuals is None:
+            return _err("el modelo no tiene residuos: ¿se estimó?")
+
+        freq = int(ts.freq or 1)
+        d_reg = int(getattr(m, "d", 0))
+        desfase = d_reg + int(getattr(m, "D", 0)) * freq
+        dom = dominio.strip() or (decide_domain(ts) if True else "generic")
+
+        r = np.asarray(m.residuals.data, dtype=float)
+        sd = r.std(ddof=0)
+        z = r / sd if sd > 0 else r
+
+        def fecha_de_resid(obs_1based: int) -> str:
+            """obs 1-based en RESIDUOS → fecha de calendario.
+
+            Los dos espacios de índices otra vez (BUG-0067): los residuos de un
+            modelo diferenciado empiezan `d + D·s` observaciones después.
+            """
+            t0 = (obs_1based - 1) + desfase
+            s0 = list(ts.start)
+            total = (s0[1] - 1 if freq > 1 else 0) + t0
+            if freq == 12:
+                return f"{total % 12 + 1:02d}/{s0[0] + total // 12}"
+            if freq == 4:
+                return f"Q{total % 4 + 1}/{s0[0] + total // 4}"
+            return str(s0[0] + total)
+
+        def resid_de_fecha(d_str: str) -> int:
+            """fecha → obs 1-based en RESIDUOS. Lanza si cae fuera."""
+            import re
+            t = d_str.strip()
+            mo = re.match(r"^(\d{1,2})/(\d{4})$", t)
+            q = re.match(r"^[Qq](\d)/(\d{4})$", t)
+            yr = re.match(r"^(\d{4})$", t)
+            if mo:
+                per, year = int(mo.group(1)), int(mo.group(2))
+            elif q:
+                per, year = int(q.group(1)), int(q.group(2))
+            elif yr:
+                per, year = 1, int(yr.group(1))
+            else:
+                raise ValueError(f"fecha no reconocida: {d_str!r}. "
+                                 "Usa MM/AAAA, QN/AAAA o AAAA.")
+            s0 = list(ts.start)
+            at_0 = (year - s0[0]) * freq + (per - (s0[1] if freq > 1 else 1))
+            obs = at_0 - desfase + 1
+            if obs < 1 or obs > len(z):
+                raise ValueError(
+                    f"{d_str} cae en la observación {at_0 + 1} de la serie, que "
+                    f"está fuera del rango de residuos [1, {len(z)}] "
+                    f"({fecha_de_resid(1)}–{fecha_de_resid(len(z))}). El modelo "
+                    f"consume {desfase} observación(es) al diferenciar.")
+            return obs
+
+        # ═════════════════ LLAMADA 3 — construir y verificar ═════════════════
+        if date.strip() and form.strip():
+            if not output_path.strip():
+                return _err(
+                    "la llamada 3 CONSTRUYE el modelo, así que necesita "
+                    "`output_path`: dónde escribir el `.inp` con la "
+                    "intervención. (Si lo que querías era ver las formas que el "
+                    "dato admite, llama sin `form`.)")
+            _sif = getattr(suggest_intervention_form, "fn",
+                           suggest_intervention_form)
+            partes = _sif(inp_path, output_path, date=date, form=form,
+                          n_omega=n_omega,
+                          guion_path=guion_path, guion_name=guion_name,
+                          guion_decision=guion_decision,
+                          guion_rationale=guion_rationale,
+                          guion_problems=guion_problems,
+                          guion_next=guion_next)
+            texto = "\n".join(getattr(c, "text", "") for c in partes)
+            if texto.startswith("❌"):
+                return partes
+            _ti = getattr(test_interventions, "fn", test_interventions)
+            ver = _ti(output_path)
+            from mcp.types import TextContent
+            cab = TextContent(type="text", text=(
+                "## Llamada 3 — la forma construida, estimada y verificada\n\n"
+                f"Se construye **{form}** de **{max(1, int(n_omega))} "
+                f"escalón(es) en el nivel** "
+                f"(ω de orden {max(1, int(n_omega)) - 1}) en **{date}** "
+                f"sobre `{os.path.basename(inp_path)}` → "
+                f"`{os.path.basename(output_path)}`.\n"))
+            sep = TextContent(type="text", text=(
+                "\n---\n\n**¿Funcionó? — Treadway y la ganancia.** "
+                "Dos preguntas distintas, y las dos son diagnosis, no bloqueo:\n"
+                "el **residuo en la fecha** debe estar en la media (cero) si la "
+                "forma absorbió el suceso; y el **vecino** no debe quedar "
+                "anómalo, porque lo que la forma no modeliza cae entero ahí.\n"))
+            return [cab] + partes + [sep] + ver
+
+        # ═════════════════ LLAMADA 2 — qué forma admite el dato ═════════════
+        if date.strip():
+            try:
+                obs = resid_de_fecha(date)
+            except ValueError as ve:
+                return _err(str(ve))
+
+            ext = [(i + 1, float(z[i])) for i in range(len(z))
+                   if abs(z[i]) > threshold]
+            if not ext:
+                return _err(
+                    f"no hay residuos con |z| > {threshold:g}: no hay suceso "
+                    "que analizar. Baja `threshold` o vuelve a la llamada 1.")
+            eps = decide_episodios(ext, ventana=THRESHOLDS["ventana_episodio"],
+                                   d=d_reg)
+            ep = next((e for e in eps if e.inicio <= obs <= e.fin), None)
+            if ep is None:
+                cerca = ", ".join(
+                    f"{fecha_de_resid(e.inicio)}"
+                    + ("" if e.aislado else f"–{fecha_de_resid(e.fin)}")
+                    for e in eps)
+                return _err(
+                    f"{date} (obs {obs} de los residuos) no cae en ningún "
+                    f"episodio detectado con |z| > {threshold:g}. Los que hay: "
+                    f"{cerca}. Si el suceso que buscas tiene el arranque por "
+                    "debajo del umbral, baja `threshold`.")
+
+            L = [f"## Llamada 2 — qué forma admite el dato en {date}", ""]
+
+            # ── el episodio ──
+            from art.episodes import describe_episodios
+            L += [f"### El suceso", "",
+                  f"Episodio **{fecha_de_resid(ep.inicio)}"
+                  + ("" if ep.aislado else f"–{fecha_de_resid(ep.fin)}") + "**"
+                  f" — {ep.n_extremos} extremo(s), "
+                  f"|z| máx {ep.z_max:.2f}, "
+                  f"**{ep.duracion_nivel} período(s) alterado(s) en el "
+                  f"nivel**.", ""]
+            if d_reg:
+                L += [f"*La duración se cuenta en el NIVEL, no en los residuos: "
+                      f"éstos están diferenciados {d_reg} vez(ces), así que L "
+                      f"impulsos del nivel se ven como L+{d_reg} extremos.*", ""]
+            if ep.parece_encadenado:
+                L += ["⚠ **El episodio parece encadenado** (largo o con "
+                      "huecos). Una cadena así es más probable que sea "
+                      "estructura no modelizada —estacionalidad, un cambio de "
+                      "régimen— que un suceso. Míralo antes de intervenir.", ""]
+
+            # ── las configuraciones: el ÁRBITRO de la forma ──
+            from art.configuracion import (InfoExtramuestral,
+                                           arranques_candidatos,
+                                           describe_configuraciones,
+                                           evalua_configuraciones)
+            try:
+                info = InfoExtramuestral(desde=evento_desde.strip(),
+                                         naturaleza=evento_naturaleza.strip(),
+                                         fuente=evento_fuente.strip(),
+                                         aportada_por=aportada_por.strip())
+            except ValueError as ve:
+                return _err(str(ve))
+            cands = arranques_candidatos(z, [o - 1 for o, _ in ep.extremos],
+                                         d=d_reg, umbral_activo=umbral_activo)
+            conj = evalua_configuraciones(
+                m, cands, d=d_reg, dominio=dom, info=info, freq=freq,
+                start_year=int(list(ts.start)[0]),
+                start_per=int(list(ts.start)[1] if freq > 1 else 1),
+                umbral_vecino=umbral_vecino, umbral_activo=umbral_activo)
+            d_cfg = describe_configuraciones(conj)
+            L += ["---", "", d_cfg.summary, ""]
+
+            # ── la escalera ──
+            from art.escalera import describe_escalera, escalera_de_ockham
+            esc = escalera_de_ockham(m, ep, dominio=dom,
+                                     umbral_vecino=umbral_vecino)
+            d_esc = describe_escalera(esc)
+            L += ["---", "", d_esc.summary, ""]
+
+            # ── EL VEREDICTO ÚNICO, con el árbitro dicho ──
+            L += ["---", "", "## Veredicto", ""]
+            mejor = conj.mejor
+            if conj.vivos and mejor is not None and not conj.identificado:
+                rg = conj.rango_ganancia
+                L += ["**El dato no identifica la configuración.** No elijas "
+                      "por AIC: aporta `evento_desde` y `evento_naturaleza` "
+                      "con su `evento_fuente`, o publica el rango de la "
+                      "ganancia en vez de un número"
+                      + (f" (**{rg[0]:+.4f}** a **{rg[1]:+.4f}**)" if rg else "")
+                      + ".", ""]
+            if mejor is not None and mejor.estimado:
+                L += [f"- **Forma** — la gobierna la configuración, que extiende "
+                      f"el arranque por el MECANISMO: `{mejor.etiqueta}`, es "
+                      f"decir {mejor.en_palabras}.", ""]
+                if esc.nivel_simple:
+                    L += [f"- **Lectura escalar** — `{esc.nivel_simple}` por la "
+                          f"firma del residuo: {esc.criterio_simple}. *El AIC no "
+                          "arbitra entre las dos lecturas del peldaño 1: no "
+                          "están anidadas y cuestan lo mismo.*", ""]
+                if esc.razones_para_subir:
+                    L += ["- **Razones para subir de peldaño**: "
+                          + str(len(esc.razones_para_subir)) + " (arriba).", ""]
+                else:
+                    L += ["- **Nada justifica subir de peldaño.** La navaja "
+                          "manda quedarse abajo aunque el peldaño 2 ajuste "
+                          "mejor.", ""]
+                _no = mejor.n_escalones
+                L += ["", "**Siguiente llamada** — construir y verificar:", "",
+                      "```",
+                      f'guided_intervention(inp_path="{inp_path}",',
+                      f'                    date="{mejor.fecha}", form="step",',
+                      f'                    n_omega={_no},',
+                      '                    output_path="<...>.inp")',
+                      "```"]
+            else:
+                L += ["Ninguna configuración llegó a estimarse. Mira los "
+                      "errores de la tabla."]
+
+            from art.describe import Description
+            _show_fig(d_esc.figure_b64, "guided_intervention_escalera")
+            return _result(Description(summary="\n".join(L),
+                                       figure_b64=d_esc.figure_b64,
+                                       recommendation=d_cfg.recommendation,
+                                       data=dict(llamada=2,
+                                                 identificado=conj.identificado,
+                                                 n_construidas=len(conj.vivos),
+                                                 nivel_simple=esc.nivel_simple)))
+
+        # ═════════════════ LLAMADA 1 — ¿hay que intervenir? ═════════════════
+        from art.calibracion import calibra_correlograma, describe_calibracion
+        cal = calibra_correlograma(m._result.residuals, umbral=threshold)
+        d_cal = describe_calibracion(cal, nombre=os.path.basename(inp_path))
+
+        L = ["## Llamada 1 — ¿hay que intervenir aquí?", "",
+             "La pregunta NO es «¿hay anómalos?» sino «¿cambian la "
+             "identificación?». Se calibra el correlograma **omitiendo** los "
+             "anómalos —no sustituyéndolos— y se mira qué órdenes entran o "
+             "salen: la **PACF** decide el orden AR y la **ACF** el MA, y "
+             "pueden cambiar de veredicto en sentidos opuestos en el mismo "
+             "retardo.", "", "---", "", d_cal.summary, ""]
+
+        cambia = bool(getattr(cal, "flips_ar", []) or getattr(cal, "flips_ma", []))
+        L += ["---", "", "## Veredicto", ""]
+        if cambia:
+            L += ["**Los anómalos SÍ cambian la identificación.** Intervenir "
+                  "está justificado: sin hacerlo se estaría eligiendo el orden "
+                  "de los operadores sobre un correlograma contaminado.", ""]
+        else:
+            L += ["**Los anómalos NO cambian la identificación.** Ningún "
+                  "retardo cambia de veredicto al omitirlos, ni en la ACF ni "
+                  "en la PACF.", "",
+                  "⚠ **Intervenir aquí es sobre-intervenir.** Y no se detiene "
+                  "solo: cada intervención encoge σ̂, con lo que el siguiente "
+                  "residuo sube de |z| y pide su turno. El criterio de parada "
+                  "es éste — cuando la calibración deja de decir que los "
+                  "anómalos cambian la identificación, se para.", ""]
+
+        ext = [(i + 1, float(z[i])) for i in range(len(z))
+               if abs(z[i]) > threshold]
+        if ext:
+            eps = decide_episodios(ext, ventana=THRESHOLDS["ventana_episodio"],
+                                   d=d_reg)
+            # El `|` de |z| parte la celda en Markdown: la barra vertical es
+            # el separador de columnas. Se escapa.
+            L += ["### Fechas candidatas", "",
+                  "| suceso | \\|z\\| máx | períodos en el nivel | fecha para "
+                  "la llamada 2 |", "|---|---|---|---|"]
+            for e in sorted(eps, key=lambda x: -x.z_max):
+                rng = fecha_de_resid(e.inicio) + (
+                    "" if e.aislado else f"–{fecha_de_resid(e.fin)}")
+                L.append(f"| {rng} | {e.z_max:.2f} | {e.duracion_nivel} | "
+                         f"`{fecha_de_resid(e.inicio)}` |")
+            L += ["", "**Siguiente llamada** — una fecha, un episodio:", "",
+                  "```",
+                  f'guided_intervention(inp_path="{inp_path}",',
+                  f'                    date="{fecha_de_resid(max(eps, key=lambda x: x.z_max).inicio)}")',
+                  "```"]
+        else:
+            L += [f"*No hay residuos con |z| > {threshold:g}.*"]
+
+        from art.describe import Description
+        _show_fig(d_cal.figure_b64, "guided_intervention_calibracion")
+        return _result(Description(summary="\n".join(L),
+                                   figure_b64=d_cal.figure_b64,
+                                   recommendation=d_cal.recommendation,
+                                   data=dict(llamada=1,
+                                             cambia_identificacion=cambia)))
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
 # Tool: suggest intervention form (B3)
 # ---------------------------------------------------------------------------
 
@@ -5030,6 +6434,7 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
 def suggest_intervention_form(inp_path: str, output_path: str,
                                date: str = "",
                                form: str = "auto",
+                               n_omega: int = 0,
                                context_hint: str = "",
                                include_histogram: bool = False,
                                guion_path: str = "",
@@ -5051,6 +6456,13 @@ def suggest_intervention_form(inp_path: str, output_path: str,
     output_path       : path to write the updated .inp
     date              : observation date "MM/YYYY" or "QN/YYYY" or "YYYY".
                         Leave empty ("") to auto-select the most extreme residual.
+    n_omega           : nº de coeficientes ω del numerador. **0 = automático**
+                        (1 con forma explícita; lo que decida la escalera con
+                        `form="auto"`). Con `form="step"` y `n_omega=N` se
+                        construye la FLT de N escalones consecutivos en el
+                        nivel que `incident_configurations` identifica como
+                        «fecha×N» — antes no había forma de construirla desde
+                        aquí, aunque el motor la soportaba (BUG-0079).
     form              : "pulse", "step", "ramp" — o **"auto"**, que corre la
                         ESCALERA DE OCKHAM: estima los peldaños en orden (1a
                         escalón permanente, 1b impulso transitorio, 2 episodio
@@ -5147,7 +6559,10 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                 raise ValueError(f"Date {date} gives obs={at_0+1}, outside series range [1, {ts.nobs}].")
             date_note = f"Fecha: **{date}**"
 
-        n_omega = 1
+        # BUG-0079. `n_omega` explícito manda sobre todo lo demás: es la puerta
+        # que faltaba para construir la FLT que el diagnóstico identifica.
+        n_omega = max(1, int(n_omega)) if n_omega else 1
+        _n_omega_pedido = int(n_omega) if n_omega else 0
         escalera_txt = ""
         escalera_alt = ""
         if form == "auto":
@@ -5180,11 +6595,68 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                 except Exception:
                     dom = "generic"
                 esc = escalera_de_ockham(m_src, ep, dominio=dom)
-                rec = esc.recomendado or "1b"
+                # El respaldo era `"1b"` —el impulso transitorio— y eso es la
+                # forma menos conservadora de las dos: afirma que el suceso
+                # revierte. Cuando la escalera no recomienda, lo que queda es la
+                # lectura que dio la firma del residuo (BUG-0086).
+                rec = esc.recomendado or esc.nivel_simple or "1a"
+
+                # EL ÁRBITRO (arquitectura §4.2). La longitud del peldaño 2 la
+                # da `incident_configurations` —que extiende el arranque por el
+                # MECANISMO mientras los vecinos sigan activos— y no
+                # `ep.n_escalones`, que cuenta sólo extremos y por tanto trunca
+                # los sucesos asimétricos (BUG-0083, P5). Sobre ITCER los dos
+                # criterios daban 3 escalones desde Q4/2008 y 5 desde Q2/2008,
+                # y el primero quedaba a 6,15 puntos de AIC del segundo. Eran
+                # dos respuestas a la misma pregunta sin árbitro.
+                n_esc, at_esc, nota_cfg = ep.n_escalones, at_0, ""
+                try:
+                    import numpy as _np
+                    from art.configuracion import (arranques_candidatos,
+                                                   evalua_configuraciones)
+                    _r = _np.asarray(m_src._result.residuals, dtype=float)
+                    _z = (_r - _r.mean()) / (_r.std(ddof=0) or 1.0)
+                    _cands = arranques_candidatos(
+                        _z, [o - 1 for o, _ in ep.extremos], d=int(m_src.d))
+                    _conj = evalua_configuraciones(
+                        m_src, _cands, d=int(m_src.d), dominio=dom,
+                        freq=int(ts.freq or 4),
+                        start_year=int(getattr(ts, "start", (2000, 1))[0]),
+                        start_per=int(getattr(ts, "start", (2000, 1))[1]))
+                    _mejor = _conj.mejor
+                    if _mejor is not None and _mejor.estimado:
+                        n_esc = _mejor.n_escalones
+                        at_esc = _mejor.arranque_resid - 1 + _desfase
+                        if not _conj.identificado:
+                            nota_cfg = (
+                                f"\n\n⚠ **El dato no identifica la "
+                                f"configuración**: {len(_conj.empatados)} caen "
+                                f"dentro de {_conj.banda_aic:g} puntos de AIC. "
+                                "Se toma la de mejor ajuste, pero mira "
+                                "`incident_configurations` antes de fijarla — "
+                                "las empatadas pueden discrepar en si el efecto "
+                                "es permanente o transitorio.")
+                        elif (n_esc, at_esc) != (ep.n_escalones, at_0):
+                            nota_cfg = (
+                                f"\n\n*La forma la fija el MECANISMO y no sólo "
+                                f"los extremos: {_mejor.en_palabras}. El "
+                                f"detector de episodios, que agrupa sólo "
+                                f"extremos, habría dado {ep.n_escalones} "
+                                "escalones desde su primer extremo.*")
+                except Exception as _ce:
+                    nota_cfg = f"\n\n*[configuraciones no disponibles: {_ce}]*"
+
                 form, n_omega = {"1a": ("step", 1), "1b": ("impulse", 1),
-                                 "2": ("step", ep.n_escalones)}[rec]
-                escalera_txt = _texto_escalera(esc, rec)
+                                 "2": ("step", n_esc)}[rec]
+                if rec == "2":
+                    at_0 = at_esc
+                escalera_txt = _texto_escalera(esc, rec) + nota_cfg
                 escalera_alt = _alternativas_escalera(esc, rec)
+
+        # Lo que el analista pide explícitamente manda sobre lo que la
+        # escalera decida: `n_omega` es una declaración, no una sugerencia.
+        if _n_omega_pedido:
+            n_omega = _n_omega_pedido
 
         # Create new Intervention with correct at= (0-based index)
         itv = fue.Intervention(
@@ -5263,6 +6735,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                 rationale=guion_rationale, problems_found=guion_problems,
                 next_version=guion_next,
                 figure_b64=diag.figure_b64,
+                hist_b64=(diag.data or {}).get("hist_b64"),
                 base_pre_path=inp_path,
             )
         except Exception as e:
@@ -5300,17 +6773,40 @@ def suggest_intervention_form(inp_path: str, output_path: str,
 
         _forma_txt = form.upper() + (f" ({n_omega} escalones en el nivel)"
                                      if n_omega > 1 else "")
-        text = (
-            f"**Intervención añadida:** {_forma_txt}  {date_note}{context_str}\n\n"
-            + eq_text
-            + escalera_txt
-            + "\n\n---\n\n"
-            + diag.summary + "\n\n---\n" + diag.recommendation
-            + scan_section
-            + f"\n\n*Modelo actualizado en: {output_path}{pre_note}*"
-            + (f"\n\n{guion_note}" if guion_note else "")
-            + _state_footer(m_fit, inp_path=output_path, guion_note=guion_note,
-                              guion_path_hint=guion_path or _derive_guion_path(output_path, m_fit))
+        # Los ω recién estimados, leídos EN EL NIVEL. Es la primera vez que una
+        # FLT de varios ω aparece en la sesión, así que es donde más falta hace
+        # que nadie tenga que hacer la resta del convenio a mano.
+        conv_txt = ""
+        try:
+            if n_omega > 1:
+                _itvs = [i for i in (m_fit.interventions or [])
+                         if i.type in ("step", "pulse", "impulse", "ramp")
+                         and len(i.omega or []) > 1]
+                if _itvs:
+                    from art.ltf import operador_en_palabras
+                    conv_txt = ("\n\n---\n\n"
+                                + operador_en_palabras(list(_itvs[-1].omega)))
+        except Exception as _cv:
+            _warn("lectura del operador en el nivel", _cv)
+
+        text = envuelve_iteracion(
+            nombre=os.path.splitext(os.path.basename(output_path))[0],
+            # La ESPECIFICACIÓN de esta iteración es la forma de la intervención
+            # y lo que la justifica: la escalera de Ockham y el operador leído
+            # en el nivel.
+            especificacion=(
+                f"**Intervención añadida:** {_forma_txt}  {date_note}"
+                f"{context_str}" + conv_txt + escalera_txt),
+            ecuacion=eq_text,
+            diagnosis=(diag.summary + "\n\n---\n" + diag.recommendation
+                       + scan_section),
+            reformulacion=_reformulacion_desde(diag, guion_next),
+            extra=(f"*Modelo actualizado en: {output_path}{pre_note}*"
+                   + (f"\n\n{guion_note}" if guion_note else "")
+                   + _state_footer(
+                       m_fit, inp_path=output_path, guion_note=guion_note,
+                       guion_path_hint=guion_path
+                       or _derive_guion_path(output_path, m_fit))),
         )
 
         _show_fig(diag.figure_b64, "diagnosis")
@@ -5360,6 +6856,7 @@ def _format_dcd_meg(dcd_results, meg_results) -> str:
 
 @mcp.tool()
 def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
+                con_figuras: bool = False,
                 run_meg: bool = False,
                 lam: float = -1.0, d: int = -1, D: int = -1,
                 p: int = -1, q: int = -1, n_harmonics: int = -1,
@@ -5648,27 +7145,61 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
                         decision=decision_txt,
                         rationale=guion_rationale if es_ultima else "",
                         problems_found=_round_problems_text(rd),
+                        # Carril AUTÓNOMO: sólo la última ronda guarda figura.
+                        # En guiado se guarda siempre — hay analista mirando.
                         figure_b64=(diag_desc.figure_b64 if es_ultima else None),
+                        hist_b64=((diag_desc.data or {}).get("hist_b64")
+                                  if es_ultima else None),
                     )
                 except Exception as e:
                     guion_note = f"*guion: no registrado ({type(e).__name__})*"
 
-        text = (
-            "\n".join(log)
-            + "\n\n" + eq_text
-            + "\n\n---\n\n" + diag_text
-            + "\n\n---\n\n### Contrastes formales\n\n" + formal_md
-            + f"\n\n*Modelo guardado en: {output_path}*"
-            + (f"\n\n{guion_note}" if guion_note else "")
-            + (_state_footer(m_fit, inp_path=output_path, guion_note=guion_note,
-                              guion_path_hint=guion_path or _derive_guion_path(output_path, m_fit))
-               if m_fit is not None else "")
+        # EL SOBRE, también aquí: el proceso es el mismo y el guion es el
+        # mismo, así que la salida es la misma. La única diferencia del carril
+        # autónomo es que la FIGURA NO VIAJA (BUG-0094).
+        _rutas = []
+        try:
+            from art.guion import load_guion
+            _gp = guion_path or _derive_guion_path(output_path, m_fit)
+            if os.path.exists(_gp):
+                _raiz = os.path.dirname(_gp) or "."
+                for _e in load_guion(_gp).entries:
+                    for _campo in ("figure_path", "hist_path"):
+                        _r = getattr(_e, _campo, None)
+                        if _r:
+                            _rutas.append(os.path.join(_raiz, _r))
+        except Exception as _re:
+            _warn("rutas de figuras para el sobre autónomo", _re)
+
+        text = envuelve_iteracion(
+            nombre=os.path.splitext(os.path.basename(output_path))[0],
+            modo=_mode,
+            especificacion="\n".join(log),
+            ecuacion=eq_text,
+            diagnosis=(diag_text + "\n\n---\n\n### Contrastes formales\n\n"
+                       + formal_md),
+            reformulacion=_reformulacion_desde(
+                getattr(result, "final_diag", None) or type("_", (), {"data": {}})(),
+                guion_next=""),
+            rutas_figuras=_rutas if not con_figuras else None,
+            extra=(f"*Modelo guardado en: {output_path}*"
+                   + (f"\n\n{guion_note}" if guion_note else "")
+                   + (_state_footer(
+                       m_fit, inp_path=output_path, guion_note=guion_note,
+                       guion_path_hint=guion_path
+                       or _derive_guion_path(output_path, m_fit))
+                      if m_fit is not None else "")),
         )
 
-        # ── Return: text + one figure per round (Block D) ─────────────────
         items: list = [TextContent(type="text", text=text)]
-        for fig_b64 in round_figures:
-            items.append(ImageContent(type="image", data=fig_b64, mimeType="image/png"))
+        # Medido sobre las tres realizaciones del run 3 (483 llamadas): el 97.4%
+        # de los bytes que salen del servidor son imágenes, y en un bucle
+        # agéntico cada byte se reenvía en todos los turnos siguientes. En
+        # autónomo nadie las mira. `guion_evidencia` las recupera si hacen falta.
+        if con_figuras:
+            for fig_b64 in round_figures:
+                items.append(ImageContent(type="image", data=fig_b64,
+                                          mimeType="image/png"))
         return items
 
     except Exception:
@@ -5917,7 +7448,7 @@ def generate_forecast(inp_path: str,
         from fue.report_forecast import write_forecast_report
 
         # 1. Fit from .pre → write fuf
-        _, m = _load_fitted(inp_path)
+        _, m = _mirar(inp_path)
 
         output_fuf_path = _fuf_path(os.path.expanduser(output_fuf_path))
         os.makedirs(os.path.dirname(os.path.abspath(output_fuf_path)), exist_ok=True)
@@ -6438,16 +7969,234 @@ def get_out_report(inp_path: str) -> list:
     Useful for detailed review of the estimated model beyond what the diagnosis
     summary shows.
 
+    LEE EL FICHERO, no lo vuelve a fabricar (BUG-0091). Antes reestimaba y
+    generaba el informe otra vez, con dos consecuencias: si se le pasaba un
+    `.pre` devolvía un informe con las desviaciones típicas hasta un **247%**
+    desviadas del `.out` que estaba en el mismo directorio, y aun con un `.inp`
+    devolvía una reestimación en vez del registro.
+
+    Y el registro importa: **la covarianza no es una propiedad del óptimo, es un
+    subproducto del camino del optimizador**, así que un fichero que sólo guarda
+    el óptimo —el `.pre`— no puede llevarla. El `.out` es el único sitio donde
+    las desviaciones típicas quedan tal como se calcularon.
+
+    Si no hay `.out`, estima **y lo dice**.
+
     Parameters
     ----------
-    inp_path : path to the .inp or .pre file with the model specification
+    inp_path : ruta del `.inp`, `.pre` o `.out`. La terna comparte basename, así
+               que se busca el `.out` hermano.
     """
     try:
         from mcp.types import TextContent
-        ts, m = _load_ts_model(inp_path)
-        m.fit()
+        from art.outfile import hay_out, lee_out
+
+        if hay_out(inp_path):
+            r = lee_out(inp_path)
+            cab = (f"*Leído de `{os.path.basename(r.ruta)}` — es el registro de "
+                   f"la estimación, no una reestimación.*\n\n")
+            return [TextContent(type="text",
+                                text=cab + f"```\n{r.texto}\n```")]
+
+        ts, m = _load_fitted(inp_path)
         out_text = m.write_out()
-        return [TextContent(type="text", text=f"```\n{out_text}\n```")]
+        aviso = (f"⚠ *No hay `.out` para `{os.path.basename(inp_path)}`, así que "
+                 f"este informe se ha REESTIMADO ahora — no es el registro de la "
+                 f"estimación original.*")
+        try:
+            from art.pipeline import aviso_se_no_fiable
+            aviso += aviso_se_no_fiable(m)
+        except Exception:
+            pass
+        return [TextContent(type="text",
+                            text=aviso + f"\n\n```\n{out_text}\n```")]
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
+# Tool: guion_evidencia — la evidencia de un nodo, SIN reestimar
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def guion_evidencia(guion_path: str, version: int = 0,
+                    con_figura: bool = True) -> list:
+    """La EVIDENCIA de un nodo del guion: ecuación, diagnosis y figuras.
+
+    Para volver a un camino seguro hacen falta dos cosas: el MAPA —quién
+    desciende de quién, qué se abandonó y por qué, que lo da `guion_map`— y la
+    EVIDENCIA del nodo al que se vuelve. Esto es lo segundo.
+
+    **No reestima nada.** Y ésa es toda la gracia: reestimar dirigido por el LLM
+    cuesta llamadas, tokens y decisiones intermedias, y no hace falta porque el
+    convenio de ficheros ya guarda lo necesario:
+
+        el `.out`      la ecuación CON sus errores típicos, exactos. La
+                       covarianza es un subproducto del camino del optimizador,
+                       así que no se puede recuperar de ningún otro sitio
+                       (BUG-0090, BUG-0091).
+        el guion       la diagnosis registrada: Q con sus retardos y p-valores,
+                       Jarque-Bera, σ̂ₐ, anómalos, y con qué versión del
+                       instrumento se calculó.
+        `figs/`        residuos + ACF/PACF, y el histograma.
+
+    Si alguna pieza no está, lo DICE en vez de fabricarla en silencio; sólo la
+    figura se regenera —desde el `.inp`, y avisando— porque depende de los
+    valores y no de la covarianza.
+
+    Parameters
+    ----------
+    guion_path  : ruta del guion.json
+    version     : versión a mirar. 0 = la última con modelo.
+    con_figura  : False si sólo interesa el texto (más barato).
+    """
+    try:
+        from mcp.types import TextContent, ImageContent
+        from art.guion import load_guion
+
+        g = load_guion(os.path.expanduser(guion_path))
+        modelos = [e for e in g.entries if not e.is_node]
+        if not modelos:
+            return _err("el guion no tiene ningún modelo todavía.")
+        if version:
+            e = next((x for x in g.entries if x.version == int(version)), None)
+            if e is None:
+                return _err(f"v{version} no está en el guion. Hay: "
+                            + ", ".join(f"v{x.version}" for x in g.entries))
+            if e.is_node:
+                return _err(f"v{version} es un nodo de DECISIÓN, no un modelo: "
+                            f"no tiene ecuación ni diagnosis. Su contenido está "
+                            f"en `guion_map`.")
+        else:
+            e = modelos[-1]
+
+        raiz = os.path.dirname(os.path.expanduser(guion_path)) or "."
+        L = [f"## Evidencia de `{e.name}` (v{e.version}) — {g.series}", ""]
+        if e.parent is not None:
+            L.append(f"*Desciende de v{e.parent}.*")
+        if e.timestamp:
+            L.append(f"*Registrado {e.timestamp}"
+                     + (f" con `{e.instrumento}`" if e.instrumento else "") + ".*")
+        L.append("")
+
+        # ── la ecuación, LEÍDA del .out ──
+        ruta_out = e.out_path or (os.path.splitext(e.inp_path or "")[0] + ".out"
+                                  if e.inp_path else "")
+        if ruta_out and os.path.exists(ruta_out):
+            from art.outfile import lee_out
+            r = lee_out(ruta_out)
+            L += ["### Parámetros, del registro de la estimación", "",
+                  f"*Leídos de `{os.path.basename(ruta_out)}` — no se ha "
+                  f"reestimado nada, así que estos errores típicos son "
+                  f"exactamente los que se calcularon.*", "", "```"]
+            for p_ in r.parametros:
+                L.append(f"  [{p_.indice:2d}] {p_.valor:+12.6f}  "
+                         f"({p_.se:.6f})   t={p_.t:+7.3f}   {p_.bloque}")
+            if r.loglik is not None:
+                L.append(f"\n  ℓ = {r.loglik:.4f}"
+                         + (f"   σ̂ₐ = {r.sigma:.4f}" if r.sigma else "")
+                         + (f"   n = {r.nobs}" if r.nobs else "")
+                         + (f"   iter = {r.iteraciones}" if r.iteraciones else ""))
+            L += ["```", ""]
+        else:
+            L += ["### Parámetros", "",
+                  f"⚠ **No hay `.out` para este nodo**, así que los errores "
+                  f"típicos no se pueden leer. La covarianza es un subproducto "
+                  f"del camino del optimizador y no se recupera del `.pre`: "
+                  f"habría que reestimar desde `"
+                  + (os.path.basename(e.inp_path) if e.inp_path else "?")
+                  + "` con `estimate_and_diagnose`.", ""]
+
+        # ── la ecuación esquemática que el guion sí guarda ──
+        if e.equation:
+            L += ["**Forma:** `" + e.equation + "`", ""]
+
+        # ── la diagnosis REGISTRADA ──
+        st = e.stats
+        if st is not None:
+            L += ["### Diagnosis registrada", ""]
+            fila = [f"σ̂ₐ = {st.sigma_a:.4f}", f"ℓ = {st.loglik:.4f}"]
+            if st.aic is not None:
+                fila.append(f"AIC = {st.aic:.2f}")
+            if getattr(st, "refactor", None):
+                fila.append(f"escala ×{st.refactor:g}")
+            L.append("  ·  ".join(fila))
+            if st.q_lags and st.q_pvalues:
+                qs = "  ".join(f"Q({l})={p:.4f}"
+                               for l, p in zip(st.q_lags, st.q_pvalues))
+                L.append(f"\n- **Ruido blanco:** {qs}"
+                         + (f"   (g.l. = retardos − {st.npar} ARMA libres)"
+                            if st.npar is not None else ""))
+            if st.jb_pvalue is not None:
+                L.append(f"- **Normalidad:** JB p={st.jb_pvalue:.4f}")
+            if st.n_extreme:
+                ext = ", ".join(f"{x.get('date', x.get('obs'))} (z={x['z']:+.2f})"
+                                for x in (st.extreme or [])[:6])
+                L.append(f"- **{st.n_extreme} anómalo(s):** {ext}")
+            L.append("")
+
+        # ── lo que se decidió aquí ──
+        for etiqueta, valor in (("Decisión", e.decision),
+                                ("Razón", e.rationale),
+                                ("Problemas", e.problems_found),
+                                ("Siguiente", e.next_version)):
+            if valor:
+                L.append(f"- **{etiqueta}:** {valor}")
+        # `exploring` es el estado normal y no dice nada; los otros dos sí.
+        if e.status in ("adopted", "dead-end"):
+            L.append(f"- **Estado:** "
+                     + ("✓ adoptada" if e.status == "adopted"
+                        else "✗ callejón sin salida")
+                     + (f" — {e.why_abandoned}" if e.why_abandoned else ""))
+        L.append("")
+
+        # ── las figuras ──
+        imgs = []
+        if con_figura:
+            import base64 as _b64
+            faltan = []
+            for campo, etq in (("figure_path", "residuos + ACF/PACF"),
+                               ("hist_path", "histograma")):
+                rel = getattr(e, campo, None)
+                ruta = os.path.join(raiz, rel) if rel else ""
+                if ruta and os.path.exists(ruta):
+                    with open(ruta, "rb") as fh:
+                        imgs.append(_b64.b64encode(fh.read()).decode())
+                    L.append(f"*Figura ({etq}): `{ruta}`*")
+                else:
+                    faltan.append(etq)
+            if faltan and e.inp_path and os.path.exists(e.inp_path):
+                # Regenerar SÍ vale para esto: la figura depende de los VALORES,
+                # y no promete errores típicos. Por eso se usa `mirar`.
+                try:
+                    from art.describe import describe_diagnosis
+                    from art.pipeline import mirar
+                    _, m = mirar(e.inp_path)
+                    d = describe_diagnosis(m)
+                    if "residuos" in " ".join(faltan) and d.figure_b64:
+                        imgs.append(d.figure_b64)
+                    if "histograma" in faltan and (d.data or {}).get("hist_b64"):
+                        imgs.append(d.data["hist_b64"])
+                    L.append(f"*({', '.join(faltan)}: no estaba guardado, se ha "
+                             f"REGENERADO desde `{os.path.basename(e.inp_path)}`. "
+                             f"Es la misma figura —depende de los valores— pero "
+                             f"no es la que se guardó.)*")
+                except Exception as _fe:
+                    L.append(f"*({', '.join(faltan)}: no guardado y no "
+                             f"regenerable: {type(_fe).__name__}: {_fe})*")
+            elif faltan:
+                L.append(f"*({', '.join(faltan)}: no guardado, y sin `.inp` para "
+                         f"regenerarlo.)*")
+
+        L += ["", "---", "",
+              f"**El mapa:** `guion_map(\"{guion_path}\", version={e.version})` "
+              f"— de dónde viene, qué se abandonó y cuál es el ancestro seguro."]
+
+        items = [TextContent(type="text", text="\n".join(L))]
+        for b in imgs:
+            items.append(ImageContent(type="image", data=b,
+                                      mimeType="image/png"))
+        return items
     except Exception:
         return _err(traceback.format_exc())
 

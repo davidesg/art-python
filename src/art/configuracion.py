@@ -33,13 +33,23 @@ mitad, y justo en el número que se va a interpretar.
 
 Qué hace este módulo
 --------------------
-**Acota el conjunto por el MECANISMO, no por rejilla.** Andando hacia atrás
-desde el primer extremo mientras los residuos contiguos sigan ACTIVOS (|z| ≥
-`umbral_activo`), cada arranque candidato determina **una sola** longitud:
+**Acota el conjunto por el MECANISMO, no por rejilla.** La marcha es
+**simétrica**: hacia atrás desde el primer extremo y hacia delante desde el
+último, en ambos casos mientras los residuos contiguos sigan ACTIVOS (|z| ≥
+`umbral_activo`) y parando en el primero que no lo esté. Fijados arranque y
+final, la longitud queda determinada:
 
-    n_escalones = (último extremo − arranque + 1) − d + 1
+    n_escalones = (final − arranque + 1) − d + 1
 
-Un candidato por arranque. No hay barrido, que es lo que sobre-elaboraría.
+Tiene que ser simétrica porque el mecanismo que la justifica —con d≥1 un suceso
+del nivel reparte su firma entre residuos contiguos, y el extremo puede caer en
+cualquiera de ellos— no distingue el signo del desplazamiento. Acotar sólo por
+la izquierda dejaba fuera para siempre los sucesos con la cola por debajo del
+umbral de extremo (BUG-0083).
+
+Sigue sin haber barrido: las dos marchas paran en el primer vecino inactivo, y
+sin vecinos activos el conjunto degenera en un solo candidato — en cuyo caso el
+informe dice que no hubo nada que comparar, no que el dato identifique.
 
 Y **no elige** cuando el dato no identifica: publica el conjunto, el rango de la
 ganancia, y devuelve la pregunta extramuestral. Es el resultado honesto.
@@ -146,8 +156,9 @@ class Candidato:
         escalón de orden cinco.
         """
         n = self.n_escalones
-        base = (f"**{n} escalones consecutivos en el nivel** a partir de "
-                f"**{self.fecha}**")
+        base = ("**un escalón en el nivel** a partir de " if n == 1 else
+                f"**{n} escalones consecutivos en el nivel** a partir de ") \
+            + f"**{self.fecha}**"
         if n > 1:
             base += f" — un `step` con ω de orden s={n-1}"
         if self.transitorio is None:
@@ -203,6 +214,18 @@ class ConjuntoCandidatos:
     def identificado(self) -> bool:
         """El dato identifica la configuración si sólo una queda en la banda."""
         return len(self.empatados) <= 1
+
+    @property
+    def unica_construida(self) -> bool:
+        """Sólo se llegó a estimar una configuración: no hubo comparación.
+
+        `identificado` sale True igual, y por eso hay que distinguirlo: una cosa
+        es que las alternativas se construyeran y perdieran, y otra que no
+        existiera ninguna que comparar. Publicar lo segundo como lo primero es
+        la precisión fabricada que esta herramienta dice no querer fabricar
+        (BUG-0083).
+        """
+        return len(self.vivos) <= 1
 
     @property
     def rango_ganancia(self) -> tuple[float, float] | None:
@@ -266,7 +289,8 @@ class ConjuntoCandidatos:
 def arranques_candidatos(z: Sequence[float], extremos_idx: Sequence[int],
                          d: int = 0,
                          umbral_activo: float = UMBRAL_ACTIVO,
-                         tope_atras: int = 6) -> list[tuple[int, int]]:
+                         tope_atras: int = 6,
+                         tope_delante: int = 6) -> list[tuple[int, int]]:
     """Los arranques admisibles y su longitud, acotados por el MECANISMO.
 
     Parameters
@@ -276,13 +300,26 @@ def arranques_candidatos(z: Sequence[float], extremos_idx: Sequence[int],
     d             : diferenciación regular del modelo.
     umbral_activo : |z| a partir del cual un residuo contiguo cuenta como parte
                     del suceso aunque no sea extremo.
-    tope_atras    : cuántos períodos como máximo se extiende hacia atrás.
+    tope_atras    : cuántos períodos como máximo se extiende hacia ATRÁS el
+                    arranque.
+    tope_delante  : cuántos períodos como máximo se extiende hacia DELANTE el
+                    final. (BUG-0083.)
 
     Returns
     -------
-    Lista de `(arranque_0based, n_escalones)`, del más temprano al más tardío.
-    **Un candidato por arranque**: fijado el arranque, la longitud queda
-    determinada por el último extremo. No hay rejilla.
+    Lista de `(arranque_0based, n_escalones)`, ordenada por arranque y longitud.
+
+    La marcha es **simétrica**, y tiene que serlo: el mecanismo que justifica
+    extender hacia atrás —con d≥1 un suceso del nivel reparte su firma entre
+    residuos contiguos, y el extremo puede caer en cualquiera de ellos— no
+    distingue el signo del desplazamiento. Acotar sólo por la izquierda hacía
+    que un suceso con la cola por DEBAJO del umbral de extremo, pero por encima
+    del de activo, no generase nunca la configuración larga: exactamente el caso
+    que esta herramienta existe para tratar (BUG-0083).
+
+    Ambas marchas paran en el primer vecino inactivo, así que el conjunto es
+    pequeño: sin vecinos activos degenera en un único candidato, que es el
+    comportamiento anterior exacto.
     """
     zz = np.asarray(z, dtype=float)
     ext = sorted(int(i) for i in extremos_idx)
@@ -290,19 +327,30 @@ def arranques_candidatos(z: Sequence[float], extremos_idx: Sequence[int],
         return []
     primero, ultimo = ext[0], ext[-1]
 
-    # hacia atrás mientras siga ACTIVO
+    # hacia atrás desde el PRIMER extremo, mientras siga ACTIVO
     arranques = [primero]
     s = primero - 1
     while s >= 0 and (primero - s) <= tope_atras and abs(zz[s]) >= umbral_activo:
         arranques.append(s)
         s -= 1
 
+    # hacia delante desde el ÚLTIMO extremo, con el mismo criterio
+    finales = [ultimo]
+    e = ultimo + 1
+    while e < zz.size and (e - ultimo) <= tope_delante \
+            and abs(zz[e]) >= umbral_activo:
+        finales.append(e)
+        e += 1
+
     out = []
     for a in sorted(arranques):
-        n = (ultimo - a + 1) - int(d) + 1
-        if n >= 1:
-            out.append((a, n))
-    return out
+        for f in sorted(finales):
+            n = (f - a + 1) - int(d) + 1
+            if n >= 1:
+                out.append((a, n))
+    # un arranque puede repetir longitud si el tope la satura; se deduplica
+    # conservando el orden.
+    return list(dict.fromkeys(out))
 
 
 def evalua_configuraciones(model_base, candidatos: Sequence[tuple[int, int]],
@@ -310,7 +358,8 @@ def evalua_configuraciones(model_base, candidatos: Sequence[tuple[int, int]],
                            info: "InfoExtramuestral | None" = None,
                            freq: int = 4, start_year: int = 2004,
                            start_per: int = 1,
-                           umbral_vecino: float = 2.5) -> ConjuntoCandidatos:
+                           umbral_vecino: float = 0.0,
+                           umbral_activo: float = UMBRAL_ACTIVO) -> ConjuntoCandidatos:
     """Estima cada configuración candidata y monta el conjunto.
 
     `model_base` es el modelo AJUSTADO **sin** la intervención. `candidatos`
@@ -339,9 +388,14 @@ def evalua_configuraciones(model_base, candidatos: Sequence[tuple[int, int]],
                                    omega=[0.0] * n_om,
                                    omega_free=[True] * n_om)
             kw = {}
+            # `refactor` va en la lista y no es un extra: `fue.Model` lo tiene
+            # a 1.0 por defecto y la suite estima sobre 100·log(y), así que un
+            # clon que no lo copie sale en OTRA escala. Los candidatos serían
+            # comparables entre sí y su AIC incomparable con el del modelo base
+            # —sobre FOOD_UEM, −2002 frente a −8,20— (BUG-0085).
             for a in ("ar", "ma", "ar_s", "ma_s", "ar_free", "ma_free",
                       "ar_s_free", "ma_s_free", "ar_f", "ma_f", "d", "D",
-                      "ifadf", "mu", "estimate_mu", "boxlam"):
+                      "ifadf", "mu", "estimate_mu", "boxlam", "refactor"):
                 v = getattr(model_base, a, None)
                 if v is not None:
                     kw[a] = v
@@ -350,7 +404,13 @@ def evalua_configuraciones(model_base, candidatos: Sequence[tuple[int, int]],
             m.fit()
             idx = len(base_itvs)
             tr = test_intervention(m, idx)
-            ck = [x for x in check_intervention_fit(m, umbral_vecino=umbral_vecino)
+            # 0 = el de la política. Aquí el valor clavado era 2.5, un TERCER
+            # número para el mismo concepto —3.0 en la escalera, 2.5 aquí— y ni
+            # uno era el de la regla (BUG-0087). El umbral del vecino es una
+            # decisión del método y vive en `policy`, no repartida en tres
+            # defaults literales.
+            ck = [x for x in check_intervention_fit(
+                m, umbral_vecino=umbral_vecino or None)
                   if x.itv_index == idx]
             c.model, c.aic = m, float(m.aic)
             c.omega_1, c.se_omega_1, c.wald_p = tr.omega_1, tr.se_omega_1, tr.wald_p
@@ -360,7 +420,8 @@ def evalua_configuraciones(model_base, candidatos: Sequence[tuple[int, int]],
         out.append(c)
 
     return ConjuntoCandidatos(candidatos=out, dominio=dominio,
-                              info=info or InfoExtramuestral())
+                              info=info or InfoExtramuestral(),
+                              umbral_activo=umbral_activo)
 
 
 def describe_configuraciones(conj: "ConjuntoCandidatos"):
@@ -399,11 +460,22 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
                  f"| {w} | {se_s} | {ic_s} | {c.deja_vecino or '—'} | {lect} |")
     L.append("")
 
-    if conj.identificado:
+    if conj.identificado and conj.unica_construida:
         u = emp[0] if emp else conj.mejor
-        L += [f"#### El dato **sí** identifica la configuración", "",
+        L += ["#### Sólo se construyó **una** configuración", "",
               f"→ {u.en_palabras}", "",
-              "Sólo una cae dentro de la banda de AIC; las demás quedan fuera."]
+              "Esto **no** es que el dato la identifique: es que no hubo nada "
+              "que comparar. La marcha del mecanismo no encontró ningún vecino "
+              "activo —ni antes ni después— con el que formar una alternativa, "
+              f"así que el umbral de activo ({conj.umbral_activo:g}σ) o el "
+              "episodio de partida acotan el conjunto a un solo elemento. "
+              "Baja el umbral si crees que el suceso tiene cola."]
+    elif conj.identificado:
+        u = emp[0] if emp else conj.mejor
+        L += ["#### El dato **sí** identifica la configuración", "",
+              f"→ {u.en_palabras}", "",
+              f"Se construyeron {len(conj.vivos)}; sólo una cae dentro de la "
+              "banda de AIC y las demás quedan fuera."]
     else:
         rg = conj.rango_ganancia
         L += [f"#### El dato **NO** identifica la configuración", "",
@@ -469,7 +541,12 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
             L.append("\n✓ La explicación **concuerda** con el contraste de "
                      "ganancia.")
 
-    if conj.identificado:
+    if conj.identificado and conj.unica_construida:
+        u = emp[0] if emp else conj.mejor
+        rec = ("Sólo se construyó una configuración, así que no hay "
+               "identificación que afirmar: " + u.en_palabras +
+               ". Si el suceso puede tener cola, baja `umbral_activo`.")
+    elif conj.identificado:
         rec = f"El dato identifica la configuración: {emp[0].en_palabras}."
     elif conj.fijado_por_lo_extramuestral is not None \
             and conj.concuerda_con_lo_extramuestral is not False:
@@ -485,6 +562,8 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
         summary="\n".join(L), figure_b64=None, recommendation=rec,
         data=dict(
             identificado=conj.identificado,
+            unica_construida=conj.unica_construida,
+            n_construidas=len(conj.vivos),
             n_empatados=len(emp),
             rango_ganancia=list(conj.rango_ganancia) if conj.rango_ganancia else None,
             discrepan=conj.discrepan_en_la_lectura,

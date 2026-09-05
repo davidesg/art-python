@@ -182,7 +182,8 @@ def test_the_all_significant_case_also_defers_to_the_meg():
 
     from art import describe
 
-    src = inspect.getsource(describe.describe_seasonal_params)
+    from tests._fuente import fuente_de
+    src = fuente_de(describe.describe_seasonal_params)
     i = src.find("Todos los armónicos son significativos")
     assert i > 0
     assert "MEG" in src[i:i + 400], (

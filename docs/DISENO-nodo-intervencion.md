@@ -492,6 +492,110 @@ residuos**, no en cero. Por eso la escuela lo enuncia «están en la media» y n
 «son cero» — con μ estimado la media es ~0 y coinciden, con μ fijado no. El
 `InterventionFitCheck` publica los dos, el crudo y el tipificado.
 
+### El umbral también se deriva — y es el 5%
+
+*Añadido el 2026-09-05, a raíz de BUG-0087 y de una pregunta del analista: «la
+regla y el umbral serían conjeturas basadas en una distribución gaussiana».*
+
+La regla **no** es conjetura: es la condición de primer orden, y eso es álgebra.
+El umbral tampoco, y la razón es mejor de lo que parece.
+
+Preguntar «¿queda masa del suceso en el vecino?» es preguntar **si hace falta un
+ω más**. Ése es el contraste de puntuación:
+
+    LM = (Σ_t a_t·x_t^(k+1))² / (σ̂² Σ_t (x_t^(k+1))²)   ~   χ²(1)
+
+Y sin ARMA el regresor filtrado es una **ficticia** —π(B)=1— así que la suma
+colapsa en un término y el estadístico se reduce a
+
+    LM = a²/σ̂² = z²
+
+**El residuo tipificado del vecino ES el contraste.** De ahí sale el 2, sin
+folclore:
+
+| | χ²(1) | p |
+|---|---|---|
+| z = 2.0 | 4.00 | **0.0455** |
+| z = 3.0 | 9.00 | 0.0027 |
+
+Comprobado sobre 200 réplicas —ruido blanco, un suceso de dos períodos en el
+nivel, un solo ω ajustado, y el LR contra el modelo de dos ω—:
+
+| sin ARMA | tamaño | potencia |
+|---|---|---|
+| `z > 2` | **5.0%** | **75.0%** |
+| `z > 3` | 1.0% | 36.0% |
+| LR al 5% | 5.5% | 75.0% |
+
+razón z²/LR: mediana **1.001**, [p10 0.996, p90 1.012].
+
+Es decir: Treadway eligió 2 porque en el caso en que uno deriva la regla el 2
+**es** el 5%. Y el 3.0 que art traía por defecto no dejaba «un punto ciego»:
+partía la potencia por la mitad.
+
+#### Con ARMA la equivalencia se rompe
+
+Ahí `x_t^(k+1)` deja de ser una ficticia —es la forma del filtro π— y mirar UN
+residuo deja de ser el estadístico. Mismo experimento con AR(1) φ=0.6:
+
+| | tamaño | potencia |
+|---|---|---|
+| `z > 2` | 1.5% | **47.0%** |
+| `z > 3` | 0.0% | **5.5%** |
+| LR al 5% | 4.5% | **77.5%** |
+
+razón z²/LR: mediana **0.527**, [p10 0.078, p90 9.834].
+
+El vecino crudo queda **infradimensionado y con 30 puntos menos de potencia**, y
+a 3σ es prácticamente ciego.
+
+#### Y eso NO es un defecto que arreglar: es una razón para el ORDEN
+
+*Observación del analista, 2026-09-05, y es la que ordena el hallazgo:*
+
+> «Lo interesante es que es una razón para intervenir **antes** de especificar el
+> ARMA. Treadway utilizaba la regla de lo más obvio primero.»
+
+Puestas en ese orden, las dos tablas dejan de ser «un estadístico bueno y uno
+malo»:
+
+| cuándo se aplica el diagnóstico | el vecino crudo es | tamaño | potencia |
+|---|---|---|---|
+| **antes** del ARMA (p=q=0) | el contraste EXACTO | 5.0% | 75.0% |
+| **después** del ARMA (AR(1) φ=0.6) | una aproximación conservadora | 1.5% | 47.0% |
+
+Y la ruta B1 de `guided_identification` **ya hace lo primero**: `m00` con
+armónicos y `p=q=0`, luego el ciclo de anómalos, y el ARMA en la llamada 4
+**sobre residuos ya limpios de sucesos**. Es decir: el orden que la escuela
+enuncia como «lo más obvio primero» coloca al analista —sin que nadie lo buscara
+por esta razón— justo donde su propio diagnóstico de intervención es exacto.
+**Es un argumento a favor del orden que no estaba escrito, y ahora está medido.**
+
+Es una **razón, no una obligación**. Las rutas B2 (D=1, estacionalidad
+estocástica) y «sin estacionalidad» van directas a la llamada 4, así que ahí el
+diagnóstico se aplica después del ARMA y es el conservador. No invalida nada: lo
+que cambia es qué significa que NO marque.
+
+Por eso la salida lo **dice** en vez de callarlo, y lo dice como información para
+decidir:
+
+    ¿hace falta un ω más?  p=0.0152  (χ²(1) sobre el peor vecino; umbral |z|>2 ⇔ p<0.0455)
+    nota: este modelo lleva ARMA, así que el p de arriba es CONSERVADOR — sobre
+    residuos sin ARMA el vecino es el contraste exacto y tiene más potencia
+    (medido: 75% frente a 47%). No invalida el veredicto; dice que si no marca,
+    puede ser el orden y no la forma.
+
+#### Lo que NO se hace, y por qué
+
+Subir la potencia —usar el LR que la escalera ya tiene, o calcular el LM exacto
+filtrando ξ por π(B)— es técnicamente posible y **está descartado a propósito**.
+El vecino anómalo no es un contraste cuyo único objetivo sea detectar: es una
+**puerta que autoriza añadir parámetros**, y la sobre-intervención es el modo de
+fallo que no se detiene solo. Abrir esa puerta un tercio más, en todas las
+intervenciones a la vez, no es obviamente una mejora. Queda documentado en
+BUG-0089 como **falencia** —no como bug— con lo que haría falta medir para
+reabrirlo.
+
 ### Las dos lecturas de un vecino anómalo
 
 Las dos son errores de representación:

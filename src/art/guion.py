@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 from datetime import datetime
 from typing import Any
 
@@ -13,15 +13,42 @@ from typing import Any
 # Data structures
 # ---------------------------------------------------------------------------
 
+def _campos_conocidos(cls, d: dict[str, Any] | None) -> dict[str, Any]:
+    """Los campos del dict que la clase entiende hoy, y sólo ésos.
+
+    Un guion es un registro histórico y se lee con el instrumento de HOY, que no
+    es el que lo escribió. Puede llevar campos que ya no existen (los descarta) y
+    faltarle campos que aún no existían (los pone la clase por defecto). Sin esto
+    la lectura revienta con un TypeError y el registro entero queda ilegible
+    — 10 entradas del corpus, no por borrado sino por leerlas mal (BUG-0098).
+
+    Lo que se descarta se pierde al reescribir, así que **no reescribas un guion
+    leído con una versión más antigua que la que lo escribió**. La lectura es
+    segura; la reescritura es la que trunca.
+    """
+    if not d:
+        return {}
+    campos = {f.name for f in fields(cls)}
+    return {k: v for k, v in d.items() if k in campos}
+
+
 @dataclass
 class GuionStats:
-    loglik: float
-    aic: float | None
-    bic: float | None
-    sigma_a: float
-    q_pass: bool | None
-    jb_pass: bool | None
-    n_extreme: int
+    # Todos con valor por defecto, y es una decisión sobre el REGISTRO, no una
+    # comodidad: un guion escrito por una versión anterior de art tiene que
+    # seguir abriéndose. `loglik`, `bic` y `sigma_a` se añadieron después, y sin
+    # defecto convertían en ilegible todo guion anterior a ellos — 10 entradas
+    # del corpus real, perdidas no por borrado sino por un TypeError al leer
+    # (BUG-0098). El registro científico no puede caducar con el instrumento.
+    #
+    # `None` aquí significa NO CONSTA, que es lo cierto, y no cero.
+    loglik: float | None = None
+    aic: float | None = None
+    bic: float | None = None
+    sigma_a: float | None = None
+    q_pass: bool | None = None
+    jb_pass: bool | None = None
+    n_extreme: int = 0
     extreme: list[dict[str, Any]] = field(default_factory=list)
     # ── Los DATOS, no sólo el veredicto ─────────────────────────────────
     # El guion guardaba `q_pass`/`jb_pass` como booleanos calculados en el
@@ -39,6 +66,13 @@ class GuionStats:
     q_pvalues: list[float] = field(default_factory=list)
     jb_pvalue: float | None = None
     npar: int | None = None          # la corrección de g.l. que se usó
+    # ── En qué UNIDADES están ℓ, AIC y BIC ───────────────────────────────
+    # La suite estima sobre `refactor`·log(y) (100 por convención, que es lo que
+    # hace que σ̂ₐ se lea en tanto por ciento). Un modelo en otra escala tiene
+    # una ℓ que difiere en n·ln(refactor) — misma verosimilitud, otras unidades.
+    # Sin este campo, la columna del mapa no se puede releer: se apilan cifras
+    # que parecen comparables y no lo son (BUG-0085).
+    refactor: float | None = None
 
 
 @dataclass
@@ -63,6 +97,29 @@ class GuionEntry:
     # que empotrarla es meter caché en el registro. `figure_b64` se conserva para
     # que los guiones ya escritos sigan abriéndose.
     figure_path: str | None = None
+    # ── El `.out`, que es un artefacto de PRIMERA CLASE y no un derivado ──
+    # La terna comparte basename, así que el `.out` se podría derivar del
+    # `inp_path`. Pero derivarlo es SUPONER que está, y esa suposición ya falló:
+    # sobre el corpus real 4 de 15 entradas apuntaban a ficheros ausentes
+    # (BUG-0092).
+    #
+    # Y no es un artefacto cualquiera. La covarianza no es una propiedad del
+    # óptimo sino un subproducto del camino del optimizador, así que un fichero
+    # que sólo guarda el óptimo —el `.pre`— no puede llevarla: **el `.out` es la
+    # única constancia fiel de las desviaciones típicas** (BUG-0090, BUG-0091).
+    # Una entrada sin `.out` es una entrada cuyos errores típicos no se pueden
+    # recuperar sin reestimar, y eso cambia lo que se puede hacer desde ese nodo.
+    # Merece un campo, como `figure_path`.
+    #
+    # El `.pre` NO lo lleva, y es deliberado: es la semilla del paso siguiente,
+    # no algo que se relea, y derivarlo por nombre basta.
+    out_path: str | None = None
+    #: El histograma de residuos, hermano de `figure_path`. La diagnosis de esta
+    #: escuela son TRES cosas —residuos, ACF/PACF e histograma— y el
+    #: Jarque-Bera se lee sobre la tercera. `describe_diagnosis` las genera todas
+    #: y sólo se guardaba la combinada, así que al volver a un nodo faltaba
+    #: justo la que sostiene el veredicto de normalidad.
+    hist_path: str | None = None
 
     # ── El nodo de decisión, que no es un modelo ──────────────────────────
     # Un guion que sólo registra MODELOS empieza a contar la historia tarde.
@@ -105,6 +162,46 @@ class GuionEntry:
     status: str = "exploring"          # exploring | adopted | dead-end
     why_abandoned: str = ""
 
+    # ── LA ITERACIÓN ──────────────────────────────────────────────────────
+    # El método es iterativo y sus etapas están dadas: especificación inicial,
+    # estimación por MVENC, diagnosis, reformulación. Una iteración es UNA
+    # vuelta por las cuatro: lleva una semilla y se mueve en una dirección, y
+    # termina en un informe y una decisión.
+    #
+    # El guion registraba las cuatro etapas y no registraba la vuelta. Sin este
+    # campo, «¿cuántas iteraciones tuvo este análisis?» tiene tres respuestas
+    # defendibles sobre el mismo corpus —una por entrada, una por modelo, una
+    # por nodo— y el código no elige ninguna. Con él tiene una.
+    #
+    # La regla: un MODELO estimado cierra una iteración y se lleva el número.
+    # Los NODOS de decisión que lo preceden llevan ESE MISMO número, porque son
+    # su etapa 1 — no son iteraciones aparte. Por eso un nodo puede contener
+    # varias iteraciones (medido: hasta 9) y una iteración no puede contener
+    # varios nodos.
+    iteracion: int | None = None
+    #: A qué nodo del protocolo sirve esta iteración (`lambda`, `d`,
+    #: `estacionalidad`, `ordenes`, `intervenciones`…). En las entradas de tipo
+    #: `node` es el nodo que se decide; en las de tipo `model`, el nodo abierto
+    #: cuando se estimó.
+    nodo: str = ""
+
+    # ── La semilla: de dónde SALIÓ esta versión ───────────────────────────
+    # `infer_parent` ya recibía el `.pre` desde el que se encadenó, lo usaba
+    # para decidir el padre... y lo tiraba. El resultado es que el campo que
+    # DETERMINA el parentesco no queda en el registro: sobre el corpus real, 0
+    # de 1.306 entradas lo llevan. Se puede leer de quién desciende un nodo,
+    # pero no comprobarlo, porque el dato con el que se dedujo ya no está.
+    #
+    # Y no es sólo auditoría del padre. Un `.pre` de partida es la mitad de la
+    # ESPECIFICACIÓN de una iteración: dice qué se daba por estimado al empezar
+    # —los armónicos, la media— frente a qué se estimó de nuevo. Dos entradas
+    # con la misma spec y distinta semilla son dos iteraciones distintas, y sin
+    # este campo se leen como la misma.
+    #
+    # Con `spec` ya completa, éste es el campo que faltaba para que una entrada
+    # diga de dónde vino Y a dónde llegó.
+    base_pre_path: str = ""
+
     # Con QUÉ instrumento se calculó lo de arriba. Un guion sin esto no se puede
     # releer: no hay forma de saber si un veredicto viene de una versión con un
     # defecto ya corregido. Y es lo que hace comparables —o no— dos guiones de
@@ -117,10 +214,10 @@ class GuionEntry:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "GuionEntry":
-        d = dict(d)
+        d = _campos_conocidos(cls, d)
         stats_d = d.pop("stats", None)
         # Un nodo de decisión no tiene diagnosis: no hay modelo que diagnosticar.
-        stats = GuionStats(**stats_d) if stats_d else None
+        stats = GuionStats(**_campos_conocidos(GuionStats, stats_d)) if stats_d else None
         return cls(stats=stats, **d)
 
     @property
@@ -402,23 +499,230 @@ def diff_nodes(a: "Guion", b: "Guion",
 
 
 # ---------------------------------------------------------------------------
+# La iteración: la unidad del método
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Iteracion:
+    """Una vuelta por las cuatro etapas, con todo lo que la identifica.
+
+    No es un envoltorio de presentación: es la unidad que se cuenta, se compara
+    entre dos recorridos y se cita. `envuelve_iteracion` PRESENTA una; esto la
+    IDENTIFICA.
+    """
+    numero: int
+    nodo: str = ""
+    #: Etapa 1. Las decisiones de especificación que la preceden.
+    especificacion: list[GuionEntry] = field(default_factory=list)
+    #: Etapas 2-3. El modelo estimado y diagnosticado. `None` = iteración
+    #: especificada y no estimada todavía.
+    modelo: GuionEntry | None = None
+
+    @property
+    def semilla(self) -> str:
+        """El `.pre` de partida. Con la dirección, es lo que la define."""
+        return (self.modelo.base_pre_path if self.modelo else "") or ""
+
+    @property
+    def decision(self) -> str:
+        """Etapa 4. Toda iteración termina en una."""
+        if self.modelo and self.modelo.decision:
+            return self.modelo.decision
+        return "; ".join(e.decision for e in self.especificacion if e.decision)
+
+    @property
+    def cerrada(self) -> bool:
+        return self.modelo is not None
+
+    @property
+    def estado(self) -> str:
+        return self.modelo.status if self.modelo else "sin estimar"
+
+
+def numera_iteraciones(guion: "Guion") -> None:
+    """Pone `iteracion` y `nodo` a cada entrada, en su sitio.
+
+    Es una DERIVACIÓN, no una invención: el orden de las entradas ya lleva la
+    información y esto sólo la hace explícita. Por eso se puede aplicar a los
+    guiones ya escritos sin tocar un byte de lo que dicen.
+
+    Sólo rellena lo que falta. Un número ya escrito manda sobre el derivado: si
+    alguna vez la numeración de escritura y la derivada discrepan, la que vale
+    es la que se registró cuando ocurrió.
+    """
+    n = 0
+    nodo_actual = ""
+    for e in guion.entries:
+        if e.is_node:
+            nodo_actual = (e.node or {}).get("nodo") or e.name or nodo_actual
+            if e.iteracion is None:
+                e.iteracion = n + 1     # es la etapa 1 de la que viene
+            if not e.nodo:
+                e.nodo = nodo_actual
+        else:
+            n += 1
+            if e.iteracion is None:
+                e.iteracion = n
+            if not e.nodo:
+                e.nodo = nodo_actual
+
+
+def iteraciones(guion: "Guion") -> list[Iteracion]:
+    """Las iteraciones del recorrido, en orden."""
+    numera_iteraciones(guion)
+    por_num: dict[int, Iteracion] = {}
+    for e in guion.entries:
+        k = int(e.iteracion or 0)
+        it = por_num.setdefault(k, Iteracion(numero=k, nodo=e.nodo))
+        if e.is_node:
+            it.especificacion.append(e)
+            if not it.nodo:
+                it.nodo = e.nodo
+        else:
+            it.modelo = e
+            it.nodo = e.nodo or it.nodo
+    return [por_num[k] for k in sorted(por_num)]
+
+
+def modelos_sin_registrar(guion: "Guion", guion_path: str) -> list[str]:
+    """Ternas que hay en la carpeta del guion y NO están en el guion.
+
+    El registro no tenía forma de saberse incompleto, y se sabe incompleto de
+    verdad. Caso UEM_FOOD_SERV_DS, que salió bien y fue difícil: 13 modelos con
+    terna completa en disco, 9 en el guion. El guion deja de escribirse a las
+    19:04 y el análisis sigue hasta las 21:06 — y el modelo FINAL, `m11_fact`,
+    es uno de los que faltan. El registro se quedó con el subcampeón: AIC −41,13
+    frente a −44,77, BIC 29,75 frente a 19,36.
+
+    Esto no lo impide —una herramienta que escribe un `.inp` sin registrar lo
+    seguirá haciendo— pero lo hace VISIBLE, que es lo que faltaba. Se mira sólo
+    lo que tiene `.out`: un `.inp` sin estimar no es una iteración.
+    """
+    carpeta = os.path.dirname(os.path.abspath(os.path.expanduser(guion_path)))
+    try:
+        ficheros = sorted(os.listdir(carpeta))
+    except OSError:
+        return []
+    registrados = set()
+    for e in guion.entries:
+        if e.inp_path:
+            registrados.add(os.path.splitext(os.path.basename(e.inp_path))[0])
+    sueltos = []
+    for f in ficheros:
+        raiz, ext = os.path.splitext(f)
+        if ext != ".inp" or raiz in registrados:
+            continue
+        if os.path.exists(os.path.join(carpeta, raiz + ".out")):
+            sueltos.append(os.path.join(carpeta, f))
+    return sueltos
+
+
+# ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
 
+#: Campos de `GuionEntry` que apuntan a un fichero de la terna y por tanto se
+#: guardan ABSOLUTOS. `figure_path` y `hist_path` NO están aquí a propósito: son
+#: hermanos del propio guion (viven en `figs/` a su lado) y viajan con él.
+CAMPOS_DE_RUTA = ("inp_path", "out_path")
+
+
+def _resuelve_ruta(ruta: str, base: str) -> str:
+    """Un camino relativo del guion, resuelto contra la carpeta del guion.
+
+    Los guiones guardaban el camino tal como se lo pasaron, y a la herramienta
+    se lo pasaban relativo al directorio de trabajo de aquel día. Medido sobre
+    el corpus: de 629 entradas con `inp_path`, 189 apuntaban a un fichero
+    inexistente — y **las 189 eran relativas, ninguna absoluta**. No se había
+    borrado nada; el guion había viajado y el cwd no.
+
+    De esas 189, **188 resuelven contra la carpeta del propio guion**. La
+    evidencia estaba donde siempre y el registro sabía dónde: lo que fallaba era
+    el origen desde el que se leía el camino.
+
+    Sólo se reescribe cuando el camino guardado NO existe y el resuelto SÍ, así
+    que no puede robarle el sitio a un fichero que esté donde dice.
+    """
+    if not ruta or os.path.isabs(ruta) or os.path.exists(ruta):
+        return ruta
+    for cand in (os.path.join(base, ruta),
+                 os.path.join(base, os.path.basename(ruta))):
+        if os.path.exists(cand):
+            return os.path.abspath(cand)
+    return ruta
+
+
 def load_guion(path: str) -> Guion:
     with open(path, encoding="utf-8") as f:
-        return Guion.from_dict(json.load(f))
+        g = Guion.from_dict(json.load(f))
+    base = os.path.dirname(os.path.abspath(os.path.expanduser(path)))
+    for e in g.entries:
+        for campo in CAMPOS_DE_RUTA:
+            v = getattr(e, campo, "") or ""
+            if v:
+                setattr(e, campo, _resuelve_ruta(v, base))
+    # Los guiones ya escritos no llevan número de iteración: se DERIVA del orden,
+    # que ya lo contiene. No se reescribe nada por leerlo.
+    numera_iteraciones(g)
+    return g
 
 
 def save_guion(guion: Guion, path: str) -> None:
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    """Se escribe con los caminos ABSOLUTOS, que es la otra mitad del arreglo.
+
+    Resolver al leer rescata los guiones ya escritos; guardar absoluto impide
+    que vuelva a ocurrir. Se absolutiza únicamente lo que EXISTE en el momento
+    de escribir: un camino que no se puede comprobar se deja tal cual, porque
+    convertirlo a absoluto contra este cwd sería inventar una ubicación —
+    exactamente el error que se está corrigiendo, con otro disfraz.
+    """
+    # Se numera aquí y no en cada llamante: así toda escritura queda con su
+    # iteración estampada, la de hoy y la que se añada mañana. Al leer se vuelve
+    # a derivar sólo lo que falte, de modo que un número escrito manda sobre el
+    # derivado — que es lo correcto: lo estampó quien estaba allí.
+    numera_iteraciones(guion)
+    dest = os.path.dirname(os.path.abspath(path))
+    os.makedirs(dest, exist_ok=True)
+    d = guion.to_dict()
+    for e in d.get("entries", []):
+        for campo in CAMPOS_DE_RUTA:
+            v = e.get(campo) or ""
+            if not v or os.path.isabs(v):
+                continue
+            for cand in (v, os.path.join(dest, v),
+                         os.path.join(dest, os.path.basename(v))):
+                if os.path.exists(cand):
+                    e[campo] = os.path.abspath(cand)
+                    break
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(guion.to_dict(), f, ensure_ascii=False, indent=2)
+        json.dump(d, f, ensure_ascii=False, indent=2)
 
 
 # ---------------------------------------------------------------------------
 # Spec / stats extraction
 # ---------------------------------------------------------------------------
+
+#: Tipos deterministas que NO son sucesos: son variables de calendario
+#: definidas sobre TODA la muestra. Su `at` es un relleno —vale 0— y no una
+#: fecha.
+SIN_FECHA = ("easter", "trend")
+
+
+def _det_a_spec(i, sy: int, sp: int, freq: int) -> dict:
+    """Una intervención, como la guarda el guion.
+
+    Un `easter` con `"date": "01/2005"` es un REGISTRO FALSO: dice que hubo un
+    suceso en enero de 2005 y no lo hubo. El efecto de Semana Santa es un
+    regresor de calendario sobre toda la serie, y ese 01/2005 era el `at=0` del
+    relleno convertido en fecha por el mero hecho de pasar por la misma función.
+    Misma clase que la λ tomada del argumento: un dato inventado en el registro
+    que se lee después como si constara.
+    """
+    d = {"type": i.type}
+    if i.type not in SIN_FECHA:
+        d["date"] = _at_to_date(i.at, sy, sp, freq)
+    return d
+
 
 def _at_to_date(at: int, start_year: int, start_per: int, freq: int) -> str:
     """Convert 0-based observation index to a date string (MM/YYYY or QN/YYYY or YYYY)."""
@@ -450,15 +754,59 @@ def _extract_spec(model, lam: float) -> dict[str, Any]:
     sy, sp = (model.series.start if model.series else (2000, 1))
 
     other_itvs = [
-        {"type": i.type, "date": _at_to_date(i.at, sy, sp, freq)}
+        _det_a_spec(i, sy, sp, freq)
         for i in itv
         if i.type not in ("cos", "sin", "alter")
     ]
+
+    # ── LO QUE FALTABA, Y HACÍA QUE LA SPEC NO DETERMINARA EL MODELO ──────
+    #
+    # Hallazgo #3 de una revisión con contexto limpio. Medido sobre 81 guiones:
+    # de 50 pares con spec idéntica **carácter a carácter**, 48 tenían ℓ
+    # distinta —mediana Δℓ = 4,87, máximo 57,88—. No eran revisitas: era una
+    # spec que no distinguía modelos separados por 57 puntos de verosimilitud.
+    #
+    # Abriendo los pares contra el motor, lo que los separaba era siempre uno
+    # de tres, y los tres se caían aquí:
+    #
+    #   ar_free / ma_free   las banderas libre/fijo — 21 pares
+    #   estimate_mu / mu    la media                — 19 pares
+    #   el `alter` de Nyquist                       —  5 pares
+    #
+    # La consecuencia no es cosmética. Sin esto **no hay identidad de estado
+    # definible**, y sin identidad de estado no hay lista cerrada posible: una
+    # construida con la clave vieja declararía a `m01` una revisita de `m00` y
+    # podaría el modelo bueno — 37,6 puntos de AIC en el caso medido.
+    #
+    # Y `guion_diff`, que compara dos recorridos nodo a nodo, comparaba specs
+    # que no determinan modelos.
+    def _banderas(factores, libres):
+        """Las banderas por factor, en la forma en que `fue` las guarda."""
+        if not factores:
+            return []
+        if libres is None:
+            return [[True] * len(f) for f in factores]
+        return [list(x) if isinstance(x, (list, tuple)) else [bool(x)]
+                for x in libres]
+
+    # El `alter` es el armónico de Nyquist —la frecuencia π, el (−1)ᵗ— y es un
+    # término de la parte determinista como cualquier otro. Se filtraba de
+    # `other_itvs` por no ser un suceso, y con eso desaparecía del registro.
+    tiene_alter = any(i.type == "alter" for i in itv)
 
     return {
         "lam": lam,
         "d": model.d,
         "D": model.D,
+        # La media: `mu` sin `estimate_mu` no dice nada — un μ=0 fijo y un μ=0
+        # estimado son modelos distintos con un parámetro de diferencia.
+        "mu": float(getattr(model, "mu", 0.0) or 0.0),
+        "estimate_mu": bool(getattr(model, "estimate_mu", False)),
+        "alter": tiene_alter,
+        "ar_free": _banderas(model.ar, getattr(model, "ar_free", None)),
+        "ma_free": _banderas(model.ma, getattr(model, "ma_free", None)),
+        "ar_s_free": _banderas(model.ar_s, getattr(model, "ar_s_free", None)),
+        "ma_s_free": _banderas(model.ma_s, getattr(model, "ma_s_free", None)),
         # BUG-0051. `ifadf` --la diferenciación POR FRECUENCIA-- se caía aquí, y
         # con ella de todo lo que use el spec: la ecuación, el diff de versiones
         # y la detección de anidamiento. Es tanto una transformación de los datos
@@ -513,6 +861,7 @@ def _extract_stats(model, diag_result) -> GuionStats:
         q_pvalues=[float(x) for x in (diag_result.q_pvalues or [])],
         jb_pvalue=float(diag_result.jb_pvalue),
         npar=int(diag_result.npar),
+        refactor=float(getattr(model, "refactor", None) or 1.0),
     )
 
 
@@ -641,6 +990,19 @@ def _build_equation(spec: dict[str, Any], freq: int) -> str:
 
     # Deterministic RHS components
     rhs_parts = []
+    # La MEDIA. Sin ella, un modelo con deriva y otro sin ella se escriben
+    # exactamente igual, y son modelos distintos con un parámetro de diferencia
+    # —sobre un caso real, 37,6 puntos de AIC—. La ecuación es la presentación
+    # autoritativa del modelo: si dos modelos distintos se escriben igual, la
+    # presentación miente (hallazgo #3 de la revisión externa).
+    if spec.get("estimate_mu"):
+        rhs_parts.append("μ")
+    elif spec.get("mu"):
+        rhs_parts.append(f"{float(spec['mu']):+g}")
+    # Y el `alter`: el armónico de Nyquist, el (−1)ᵗ. Es un término determinista
+    # como cualquier otro, y se filtraba del registro por no ser un suceso.
+    if spec.get("alter"):
+        rhs_parts.append("(−1)ᵗ")
     if n_h > 0:
         rhs_parts.append(f"D_t({n_h} arm.)")
     if itvs:

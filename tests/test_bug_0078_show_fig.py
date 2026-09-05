@@ -22,11 +22,15 @@ import art.mcp_server as srv
 os.environ.setdefault("ART_NO_VIEWER", "1")
 
 
-def _png() -> str:
+def _png(color=None) -> str:
+    """Una figura mínima. `color` la hace DISTINTA, que es lo que hace falta
+    para comprobar que dos figuras diferentes no comparten fichero."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     f = plt.figure(figsize=(1, 1))
+    if color is not None:
+        f.patch.set_facecolor(tuple(c / 255 for c in color))
     b = _io.BytesIO()
     f.savefig(b, format="png")
     plt.close(f)
@@ -45,12 +49,26 @@ def test_sin_figura_devuelve_cadena_vacia():
     assert srv._show_fig("", "x") == ""
 
 
-def test_dos_herramientas_con_la_misma_etiqueta_no_se_pisan_entre_procesos():
+def test_dos_figuras_distintas_con_la_misma_etiqueta_no_se_pisan():
     """La ruta llevaba SÓLO la etiqueta, y las etiquetas las elige cada
     herramienta a mano: dos que coincidieran se sobrescribían la figura, y el
-    analista se quedaba mirando la de otra llamada."""
-    p = srv._show_fig(_png(), "colision")
-    assert str(os.getpid()) in p, "la ruta discrimina por proceso"
+    analista se quedaba mirando la de otra llamada.
+
+    El arreglo de BUG-0078 discriminaba por `os.getpid()`, y **el servidor MCP
+    es un solo proceso durante toda la sesión**: dentro de una sesión no
+    discriminaba nada, que es justo donde ocurría la colisión (BUG-0081). Dos
+    series por los mismos nodos guiados escribían el mismo
+    `art_boxcox_<pid>.png`.
+
+    Ahora discrimina el CONTENIDO, que es más fuerte que (etiqueta, proceso) y
+    que (etiqueta, serie): no colisiona nunca.
+    """
+    a = srv._show_fig(_png(), "colision")
+    b = srv._show_fig(_png(color=(255, 0, 0)), "colision")
+    assert a != b, "dos figuras distintas comparten fichero"
+    assert os.path.exists(a) and os.path.exists(b)
+    with open(a, "rb") as fa, open(b, "rb") as fb:
+        assert fa.read() != fb.read()
 
 
 def test_la_misma_etiqueta_en_el_mismo_proceso_SI_reemplaza():
@@ -141,7 +159,8 @@ def test_la_suite_no_abre_ventanas():
     por eso nadie lo había notado.
     """
     import inspect
-    src = inspect.getsource(srv._show_fig)
+    from tests._fuente import fuente_de
+    src = fuente_de(srv._show_fig)
     assert "ART_NO_VIEWER" in src
     assert "pytest" in src
 
@@ -202,6 +221,7 @@ def test_en_linux_usa_xdg_open(monkeypatch):
 def test_la_ruta_no_supone_que_exista_slash_tmp():
     """`/tmp` no existe en Windows."""
     import inspect, tempfile
-    src = inspect.getsource(srv._show_fig)
+    from tests._fuente import fuente_de
+    src = fuente_de(srv._show_fig)
     assert "tempfile.gettempdir()" in src
     assert '"/tmp/art_' not in src

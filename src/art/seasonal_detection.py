@@ -72,8 +72,14 @@ def _build_differenced_harmonic_matrix(n: int, d: int, s: int) -> np.ndarray:
       - f = s/2 (Nyquist, s even): one column  ∇^d cos(2πft/s)
     t = i + d + 1  (original 1-based time index, matching C code).
     """
-    num_harmonics = s - 1
-    total_params  = num_harmonics + 1
+    # OJO CON LA CUENTA: esto son TÉRMINOS deterministas (s-1: los pares
+    # cos/sin MÁS el de Nyquist), no los PARES que cuenta `n_harmonics` en
+    # `pipeline`. En mensual son 11 aquí y 5 allí, y describen el mismo modelo.
+    # Se llamaba `num_harmonics`, a un carácter de distancia del otro recuento
+    # (revisión externa, hallazgo #7). Aquí es lo correcto: son los grados de
+    # libertad del contraste F. Ver `pipeline.maximo_de_armonicos`.
+    n_terminos_estacionales = s - 1
+    total_params  = n_terminos_estacionales + 1
     X = np.zeros((n, total_params))
     X[:, 0] = 1.0
 
@@ -191,11 +197,17 @@ def detect_seasonality(
         w = np.diff(w)
     n = len(w)
 
-    num_harmonics = s - 1
-    total_params  = num_harmonics + 1
+    # OJO CON LA CUENTA: esto son TÉRMINOS deterministas (s-1: los pares
+    # cos/sin MÁS el de Nyquist), no los PARES que cuenta `n_harmonics` en
+    # `pipeline`. En mensual son 11 aquí y 5 allí, y describen el mismo modelo.
+    # Se llamaba `num_harmonics`, a un carácter de distancia del otro recuento
+    # (revisión externa, hallazgo #7). Aquí es lo correcto: son los grados de
+    # libertad del contraste F. Ver `pipeline.maximo_de_armonicos`.
+    n_terminos_estacionales = s - 1
+    total_params  = n_terminos_estacionales + 1
 
     # An ANNUAL series (s=1) has NO seasonal frequencies: s-1 = 0 harmonics, so
-    # there is nothing to contrast and `f_stat = … / num_harmonics` divided by
+    # there is nothing to contrast and `f_stat = … / n_terminos_estacionales` divided by
     # zero. It was not a degenerate test result — it was an exception thrown
     # before any test ran, and it took the whole autonomous pipeline with it
     # (`run_full` → `describe_seasonality`, BUG-0018).
@@ -217,7 +229,7 @@ def detect_seasonality(
         name=name, freq=s, d=d, lam=lam,
         seasonal_detected=False, f_stat=0.0, p_value=1.0,
         dummies=np.zeros(s), dummy_se=np.zeros(s),
-        harmonic_coeffs=np.zeros(num_harmonics),
+        harmonic_coeffs=np.zeros(n_terminos_estacionales),
         freq_results=[], n_obs=n, message="Insufficient observations",
     )
     if n <= 2 * s:
@@ -246,11 +258,11 @@ def detect_seasonality(
     # --- HAC F-test on harmonic coefficients (joint H0: γ = 0) ---
     V_gamma = cov_hac[1:, 1:]
     try:
-        f_stat = float(gamma @ np.linalg.inv(V_gamma) @ gamma) / num_harmonics
+        f_stat = float(gamma @ np.linalg.inv(V_gamma) @ gamma) / n_terminos_estacionales
     except np.linalg.LinAlgError:
         f_stat = 0.0
 
-    df1 = num_harmonics
+    df1 = n_terminos_estacionales
     df2 = max(n - total_params, 1)
     p_value  = float(1.0 - sp_stats.f.cdf(f_stat, df1, df2))
     f_crit   = float(sp_stats.f.ppf(1.0 - significance, df1, df2))

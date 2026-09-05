@@ -211,7 +211,7 @@ def test_la_linea_latente_ya_no_afirma_lo_que_no_comprueba():
     mientras el escaneo completo decía «puede merecer la pena intervenir»."""
     import inspect
     import art.mcp_server as srv
-    cuerpo = inspect.getsource(srv._auto_scan_section)
+    cuerpo = __import__("_fuente").fuente_de(srv._auto_scan_section)
     # la frase sólo puede quedar en el comentario que explica el arreglo
     codigo = "\n".join(l for l in cuerpo.splitlines()
                        if not l.lstrip().startswith("#"))
