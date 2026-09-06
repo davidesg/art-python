@@ -13,6 +13,25 @@ from typing import Any
 # Data structures
 # ---------------------------------------------------------------------------
 
+def cifra(v, fmt: str = ".2f", ausente: str = "—") -> str:
+    """Un número del registro, o la marca de que NO CONSTA.
+
+    Desde que un guion escrito por una versión anterior se puede LEER
+    (BUG-0098), sus cifras pueden faltar: `loglik`, `bic` y `sigma_a` se
+    añadieron después y valen `None` en los registros previos. `None` es lo
+    cierto —no consta— pero cualquier `f"{v:.2f}"` revienta con él.
+
+    Es el precio de haber hecho legible lo viejo, y se paga en un solo sitio:
+    todo lo que presente una cifra del registro pasa por aquí.
+    """
+    if v is None:
+        return ausente
+    try:
+        return format(float(v), fmt)
+    except (TypeError, ValueError):
+        return ausente
+
+
 def _campos_conocidos(cls, d: dict[str, Any] | None) -> dict[str, Any]:
     """Los campos del dict que la clase entiende hoy, y sólo ésos.
 
@@ -617,6 +636,78 @@ def modelos_sin_registrar(guion: "Guion", guion_path: str) -> list[str]:
     return sueltos
 
 
+#: Tipos deterministas que son ESTRUCTURA estacional, no sucesos. `_extract_spec`
+#: no los guarda como intervenciones —van en `n_harmonics` y en `alter`— así que
+#: tampoco se cuentan al reconciliar.
+_ESTRUCTURALES = ("cos", "sin", "alter")
+
+
+def _deterministas_del_inp(ruta: str) -> list[str]:
+    """Los deterministas NO estructurales que declara un `.inp`, leyendo el
+    fichero — sin motor, sin estimar y sin cargar el modelo.
+
+    Se lee el texto a propósito: esto se llama una vez por entrada al dibujar el
+    mapa, e instanciar el modelo de cada una costaría el doble de lo que cuesta
+    el mapa entero.
+    """
+    try:
+        with open(ruta, encoding="utf-8", errors="replace") as fh:
+            lineas = fh.read().splitlines()
+    except OSError:
+        return []
+    for i, ln in enumerate(lineas):
+        if "Number of deterministic" not in ln:
+            continue
+        try:
+            n = int(lineas[i + 1].strip())
+        except (ValueError, IndexError):
+            return []
+        nombres = []
+        j = i + 2
+        while j < len(lineas) and len(nombres) < n:
+            t = lineas[j].strip()
+            if t and not t.startswith("*"):
+                nombres.append(t.split()[0])
+            j += 1
+        return [x for x in nombres if x not in _ESTRUCTURALES]
+    return []
+
+
+def entradas_que_no_cuadran(guion: "Guion") -> list[tuple]:
+    """Entradas cuyo registro CONTRADICE el fichero al que apuntan.
+
+    El guion es el registro científico y su `.inp` es la evidencia. Que discrepen
+    no es un descuadre de formato: es que lo que se lee en el mapa no es lo que
+    se estimó, y nadie se entera.
+
+    Medido sobre el corpus —616 entradas-modelo con su fichero en disco— hay
+    **una**: `b02_covid_auto` declara UNA intervención y su `.inp` lleva CUATRO;
+    las tres que se pierden son las que venía arrastrando de su padre. La entrada
+    está marcada como callejón sin salida, así que la pérdida no contaminó nada
+    aguas abajo — esta vez.
+
+    No se ha podido reproducir con el código de hoy: `_extract_spec` sobre ese
+    mismo fichero devuelve las cuatro, y la ruta `form="auto"` de extremo a
+    extremo las registra todas. Puede que ya esté arreglado y puede que no. Por
+    eso esto no es un arreglo sino un DETECTOR: la comprobación cuesta una
+    lectura de texto por entrada y convierte un fallo que no sé reproducir en uno
+    que no puede pasar desapercibido (BUG-0102).
+
+    Devuelve `(version, nombre, n_en_el_fichero, n_en_el_registro)`.
+    """
+    fuera = []
+    for e in guion.entries:
+        if e.is_node or not e.inp_path or not os.path.exists(e.inp_path):
+            continue
+        registradas = (e.spec or {}).get("interventions")
+        if registradas is None:          # spec vieja: no afirmaba nada
+            continue
+        en_fichero = _deterministas_del_inp(e.inp_path)
+        if len(en_fichero) != len(registradas):
+            fuera.append((e.version, e.name, len(en_fichero), len(registradas)))
+    return fuera
+
+
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
@@ -1105,8 +1196,8 @@ def export_guion_html(guion: Guion) -> str:
                 f"<tr>"
                 f"<td>{e.version}</td><td><a href='#v{e.version}'>{e.name}</a></td>"
                 f"<td><code>{e.equation}</code></td>"
-                f"<td>{s.loglik:.2f}</td><td>{aic_str}</td><td>{bic_str}</td>"
-                f"<td>{s.sigma_a:.5f}</td>"
+                f"<td>{cifra(s.loglik)}</td><td>{aic_str}</td><td>{bic_str}</td>"
+                f"<td>{cifra(s.sigma_a, '.5f')}</td>"
                 + _pass_cell(s.q_pass) + _pass_cell(s.jb_pass) +
                 f"<td>{s.n_extreme}</td>"
                 f"<td>{dec_short}</td>"
@@ -1153,8 +1244,8 @@ def export_guion_html(guion: Guion) -> str:
             lines += [
                 "<table style='width:auto;margin:8px 0'>",
                 "<tr><th>loglik</th><th>AIC</th><th>BIC</th><th>σ_a</th><th>Q</th><th>JB</th><th>Anomalías</th></tr>",
-                f"<tr><td>{s.loglik:.3f}</td><td>{aic_s}</td><td>{bic_s}</td>"
-                f"<td>{s.sigma_a:.6f}</td>"
+                f"<tr><td>{cifra(s.loglik, '.3f')}</td><td>{aic_s}</td><td>{bic_s}</td>"
+                f"<td>{cifra(s.sigma_a, '.6f')}</td>"
                 + _pass_cell(s.q_pass) + _pass_cell(s.jb_pass) +
                 f"<td>{s.n_extreme}</td></tr>",
                 "</table>",

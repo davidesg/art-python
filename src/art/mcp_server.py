@@ -5429,7 +5429,8 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
     try:
         from mcp.types import TextContent
         from art.guion import (load_guion, path_to_root, safe_ancestor,
-                               descendants, iteraciones, modelos_sin_registrar)
+                               descendants, iteraciones, modelos_sin_registrar,
+                               entradas_que_no_cuadran, cifra as _cifra)
         g = load_guion(os.path.expanduser(guion_path))
         if not g.entries:
             return [TextContent(type="text", text="Guion vacío.")]
@@ -5484,7 +5485,7 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                 q = "Q✓" if e.stats.q_pass else ("Q✗" if e.stats.q_pass is not None else "Q?")
                 jb = "JB✓" if e.stats.jb_pass else ("JB✗" if e.stats.jb_pass is not None else "JB?")
                 lines.append(f"{sangria}{rama}{st} v{e.version} {e.name}  "
-                             f"logL={e.stats.loglik:.2f}  {q} {jb}"
+                             f"logL={_cifra(e.stats.loglik)}  {q} {jb}"
                              + (f"  ← {e.decision}" if e.decision else ""))
             if e.status == "dead-end" and e.why_abandoned:
                 lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
@@ -5536,6 +5537,23 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                              "parte del recorrido.")
         except Exception as e:
             _warn("no se pudo reconciliar el guion con su carpeta", e)
+
+        # ¿DICE EL REGISTRO LO QUE DICE SU FICHERO? El guion es el registro y el
+        # `.inp` es la evidencia; que discrepen no es un descuadre de formato,
+        # es que lo que se lee en el mapa no es lo que se estimó.
+        try:
+            descuadres = entradas_que_no_cuadran(g)
+            if descuadres:
+                lines += ["", "⚠ **El registro CONTRADICE a su fichero** en "
+                              f"{len(descuadres)} entrada(s). Lo que ves aquí "
+                              "no es lo que se estimó:"]
+                for v, nom, en_f, en_r in descuadres:
+                    lines.append(f"   · v{v} {nom}: el `.inp` lleva {en_f} "
+                                 f"intervención(es) y el guion registra {en_r}")
+                lines.append("   Reléelo con `get_out_report` y vuelve a "
+                             "registrarlo con `record_version` (BUG-0102).")
+        except Exception as e:
+            _warn("no se pudo comprobar el registro contra sus ficheros", e)
 
         # El guion guarda VEREDICTOS, y un veredicto sólo significa algo junto al
         # instrumento que lo produjo. Si alguna entrada se calculó con otra
