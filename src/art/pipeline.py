@@ -358,6 +358,30 @@ def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> No
     def _orders(factors):
         return [len(f) for f in factors]
 
+    # ── EL RODEO DEL SEGFAULT ────────────────────────────────────────────
+    # Un `.inp` que declara CERO factores ARMA de todos los tipos mata al
+    # binario `fue` con SIGSEGV: es fue/BUG-0013, arreglado en el puente de
+    # Python —por eso `estimar()` funciona— y todavía vivo en el ejecutable y en
+    # las wheels sin ese desvío.
+    #
+    # Y no es hipotético: 178 de 4.505 `.inp` del ecosistema no declaran ningún
+    # factor, entre ellos ITCER, PGAS y RATIO —las tres series del TFM en curso—.
+    # Comprobado contra /usr/local/bin/fue: SIGSEGV.
+    #
+    # El rodeo es el que los ficheros antiguos ya usaban sin saber por qué:
+    # declarar un AR(1) FIJADO EN CERO. Es el mismo modelo —parámetro fijo, no
+    # entra en la verosimilitud ni en npar— y no mueve un dígito.
+    #
+    # Lo que sí cambia, y conviene saberlo: al releer ese fichero el modelo trae
+    # `ar=[[0.0]]`, `ar_free=[[False]]`, así que aparece en la spec del guion.
+    # Es visible, no silencioso, y alinea a `art` con la convención que el resto
+    # del ecosistema ya seguía. El arreglo de fondo —la escritura fuera de rango
+    # con p=q=0 en el C— sigue pendiente (fue/BUG-0013, sección TODO).
+    if not any((ar, ar_s, ma, ma_s,
+                getattr(model, "ar_f", None), getattr(model, "ma_f", None))):
+        ar   = [[0.0]]
+        ar_f = [[False]]
+
     lines += _arma_block(ar,   ar_f,  _orders(ar),  "Number and orders of regular AR operators:")
     lines += _arma_block(ar_s, ar_sf, _orders(ar_s), "Number and orders of annual AR operators:")
     lines += _arma_block(ma,   ma_f,  _orders(ma),  "Number and orders of regular MA operators:")
@@ -741,6 +765,39 @@ def tope_de_armonicos(n_harmonics: int, freq: int, avisa: bool = False) -> int:
             RuntimeWarning, stacklevel=3,
         )
     return n
+
+
+def es_relleno(factor, libres=None) -> bool:
+    """Un factor ARMA que no aporta nada: todo fijo y todo cero.
+
+    Es el AR(1) del rodeo del segfault —`1 1 / 0.0 0`— y también el que llevan
+    los 178 `.inp` del ecosistema que esquivaban el fallo sin saberlo. No es un
+    término del modelo: no entra en la verosimilitud, no cuenta en `npar` y no
+    tiene interpretación.
+
+    Hace falta nombrarlo porque, en cuanto `art` empezó a escribirlo, todo lo
+    que preguntaba «¿este fichero lleva un modelo?» mirando si hay factores
+    empezó a decir que sí sobre una serie pelada.
+    """
+    vals = list(factor or [])
+    if not vals:
+        return True
+    fl = list(libres) if libres is not None else [True] * len(vals)
+    return all((not f) and abs(float(v)) < 1e-12
+               for v, f in zip(vals, fl + [True] * len(vals)))
+
+
+def tiene_estructura_arma(model) -> bool:
+    """Si el modelo lleva ALGÚN factor ARMA que sea de verdad."""
+    pares = (("ar", "ar_free"), ("ma", "ma_free"),
+             ("ar_s", "ar_s_free"), ("ma_s", "ma_s_free"))
+    for attr, attr_free in pares:
+        factores = getattr(model, attr, None) or []
+        libres = getattr(model, attr_free, None) or []
+        for i, fac in enumerate(factores):
+            if not es_relleno(fac, libres[i] if i < len(libres) else None):
+                return True
+    return bool(getattr(model, "ar_f", None) or getattr(model, "ma_f", None))
 
 
 def _make_model(ts, lam: float, d: int, D: int,

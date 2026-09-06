@@ -1929,12 +1929,28 @@ def preliminary_outlier_scan(inp_path: str, d: int, D: int,
         # negativo tranquilizador. No se puede impedir; sí se puede avisar.
         aviso_modelo = ""
         try:
+            # QUÉ CUENTA COMO «llevar un modelo». La comprobación miraba si
+            # había algún factor ARMA, y eso dejó de discriminar en cuanto
+            # `_write_inp` empezó a escribir el AR(1) fijado en cero que esquiva
+            # el segfault del binario (fue/BUG-0013): con él, una serie pelada y
+            # un modelo estimado se parecen. Un factor fijo en cero no es
+            # estructura —no entra en la verosimilitud ni en `npar`— y por eso
+            # `tiene_estructura_arma` lo descarta.
+            #
+            # Pero la estructura tampoco basta: un modelo de sólo `d=1` no tiene
+            # NINGÚN término y sigue siendo un modelo estimado, con sus residuos,
+            # que es exactamente el caso en que este aviso hace falta. Lo que lo
+            # distingue no es su contenido sino que se ESTIMÓ, y de eso queda
+            # constancia al lado: el `.out` y el `.pre` de su terna.
+            from art.pipeline import tiene_estructura_arma
+            _base = os.path.splitext(os.path.expanduser(inp_path))[0]
+            _estimado = any(os.path.exists(_base + ext)
+                            for ext in (".out", ".pre"))
             _tiene_modelo = bool(
-                (getattr(_m_cargado, "ar", None) or [])
-                or (getattr(_m_cargado, "ma", None) or [])
-                or (getattr(_m_cargado, "ar_s", None) or [])
-                or (getattr(_m_cargado, "ma_s", None) or [])
+                _estimado
+                or tiene_estructura_arma(_m_cargado)
                 or (getattr(_m_cargado, "interventions", None) or [])
+                or getattr(_m_cargado, "estimate_mu", False)
             )
             if _tiene_modelo:
                 aviso_modelo = (

@@ -1,11 +1,11 @@
 ---
 id: BUG-0094
 title: La salida del carril guiado no está estandarizada — la presentación depende del LLM y cambia en cada sesión
-status: open
+status: fixed
 severity: high
 component: mcp-tools
 found_in: 0.1.12
-fixed_in:
+fixed_in: 0.2.0
 reported: 2026-09-05
 reporter: David / sesión SERV_UEM — análisis completo 2026-09-05
 tags:
@@ -101,3 +101,53 @@ con las rutas de figura pobladas; repetir con un segundo agente y verificar
 que el documento es idéntico módulo los números (que no cambian). Añadir un
 test de contrato en la suite: toda herramienta del carril guiado devuelve el
 esquema estándar.
+
+
+---
+
+## Cierre (2026-09-06) — hecho, con OTRAS cuatro secciones
+
+El sobre existe: `envuelve_iteracion`. Pero **las secciones no son las que este
+informe proponía**, y la desviación es deliberada.
+
+### Lo que proponía y por qué no se hizo así
+
+    MODELO ESTIMADO · GRÁFICO · CONCLUSIONES · SUGERENCIA SIGUIENTE
+
+Son cuatro secciones razonables y son **un apaño de sesión**: describen lo que
+una salida concreta tenía a mano, no lo que una iteración ES. Nada en ellas dice
+de dónde vino el modelo ni qué se decidió cambiar.
+
+### Lo que se construyó
+
+Las **cuatro etapas del método**, que están dadas y no hay que inventarlas:
+
+    ESPECIFICACIÓN · ESTIMACIÓN · DIAGNOSIS · REFORMULACIÓN
+
+La cuarta es la que faltaba en la propuesta y la que cierra el ciclo: una
+iteración que no termina en una reformulación no ha terminado. Va **siempre
+explícita**, también en autónomo — su ausencia es una omisión atribuible, no un
+hueco de formato. Y `_reformulacion_desde` la deduce de la diagnosis, para que
+no dependa de que al LLM se le ocurra escribirla.
+
+### El denominador, corregido
+
+La revisión de arquitectura contó «4 de 46 herramientas» (8,7%). El denominador
+está mal: 40 de las 46 son **instrumentos** —gráficos, barridos, contrastes— y
+ponerle una «reformulación» a un ACF sería inventarla. Cierran una iteración las
+que escriben en el guion, y son **seis**. Faltaban dos: `meg_reformulate` —que ES
+una reformulación, la etapa 4 con nombre propio— y `record_version`.
+
+**Hoy: 6 de 6.** `tests/test_iteracion_como_entidad.py` fija el recuento, así que
+una séptima herramienta que registre sin sobre hace saltar la suite.
+
+### Lo que este informe pedía y NO se hizo
+
+> *«el mismo documento con cualquier LLM»*
+
+El sobre fija la FORMA —las cuatro etapas, en ese orden, siempre— no el texto.
+Dos agentes producirán el mismo esqueleto con la misma ecuación verbatim y la
+misma diagnosis, pero la prosa dentro de cada etapa sigue siendo suya. Un
+documento idéntico carácter a carácter exigiría que las herramientas emitieran
+el informe entero y el agente sólo lo reenviara, y eso es otra decisión —más
+grande— que no se ha tomado.
