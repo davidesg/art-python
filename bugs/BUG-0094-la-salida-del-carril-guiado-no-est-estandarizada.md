@@ -151,3 +151,64 @@ misma diagnosis, pero la prosa dentro de cada etapa sigue siendo suya. Un
 documento idéntico carácter a carácter exigiría que las herramientas emitieran
 el informe entero y el agente sólo lo reenviara, y eso es otra decisión —más
 grande— que no se ha tomado.
+
+
+---
+
+## Reapertura y cierre de verdad (2026-09-06)
+
+**El cierre anterior era un error mío, y del tipo que importa: cerré el informe
+haciendo otra cosa distinta de la que pedía, y argumenté por qué era mejor.**
+
+Lo que dije: que las cuatro secciones propuestas eran «un apaño de sesión» y que
+las cuatro etapas del método —ESPECIFICACIÓN/ESTIMACIÓN/DIAGNOSIS/REFORMULACIÓN—
+eran la forma correcta.
+
+Lo que se me escapó: **las etapas son la forma del REGISTRO, no de la salida.**
+Al analista le sirven mal por dos razones concretas:
+
+  - empiezan por la ESPECIFICACIÓN, que él acaba de decidir hace un momento;
+  - terminan **anunciando** la REFORMULACIÓN, que era la decisión que le tocaba
+    a él. Una salida que anuncia lo que va a hacer ya ha decidido.
+
+Con esa forma el carril guiado se comporta como un autónomo que además narra. Y
+así lo describió el analista: *«ahora es caótico y no pregunta nada»*.
+
+### La causa concreta
+
+`confirm_and_estimate` —**la** herramienta del carril guiado, la que se llama
+justo cuando el analista ha confirmado la especificación— **no pasaba `modo`**.
+`es_guiado("")` es falso, así que el sobre le daba siempre la forma del registro.
+El carril guiado nunca declaró que lo era.
+
+### Lo que se emite ahora en guiado
+
+    1 · MODELO ESTIMADO      2 · DIAGNOSIS
+    3 · CONCLUSIONES         4 · DECISIÓN — alternativas
+    ⏸ Tu decisión. No sigo hasta que me digas.
+
+Las cuatro que pedía el informe original. Y tres piezas que no estaban:
+
+  - **CONCLUSIONES** las escribe la herramienta (`_conclusiones_desde`), no el
+    LLM: un veredicto redactado por el modelo cambia con el modelo.
+  - **ALTERNATIVAS** salen de la diagnosis (`_alternativas_desde`) en el orden
+    de Treadway —lo más obvio primero: un anómalo antes que un orden ARMA— y
+    **cada una trae la llamada exacta que la ejecuta**. Eso es lo que quita los
+    turnos de ida y vuelta averiguando qué opciones hay y con qué argumentos.
+  - **La marca de fin de turno**, que hace COMPROBABLE que la salida para en la
+    pregunta.
+
+Y la regla dura en `_INSTRUCTIONS`: mostrar el bloque entero y tal cual, no
+escribir nada detrás de la marca, **no llamar a ninguna herramienta más hasta
+que el analista conteste**. Elegir por él la alternativa A porque «era la obvia»
+es exactamente el fallo.
+
+El carril **autónomo no cambia**: allí no hay a quién preguntar, y sigue con las
+cuatro etapas del método, que son las del registro.
+
+### Lo que sigue sin hacerse
+
+Salida idéntica carácter a carácter con cualquier LLM. El sobre fija la forma y
+ahora también las conclusiones y las alternativas —que eran lo que más variaba—
+pero la prosa que el agente ponga alrededor sigue siendo suya. La regla se lo
+prohíbe; nada lo impide mecánicamente.

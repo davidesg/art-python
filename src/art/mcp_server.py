@@ -261,6 +261,42 @@ y gráfico. En guiado el analista SOLO ve lo que muestras; sin la ecuación no
 decide. Esquema (tesis): estimar → ECUACIÓN (verbatim) → gráfico → decisión.
 
 ══════════════════════════════════════════════════════
+EN GUIADO, EL QUE DECIDE ES EL ANALISTA — REGLA DURA
+══════════════════════════════════════════════════════
+
+GUIADO NO ES «AUTÓNOMO CONTANDO LO QUE HACE». Es el analista tomando cada
+decisión. Si tú decides y luego lo narras, el carril guiado no existe.
+
+Las herramientas del carril guiado devuelven un bloque con CUATRO secciones:
+
+    1 · MODELO ESTIMADO      2 · DIAGNOSIS
+    3 · CONCLUSIONES         4 · DECISIÓN — alternativas
+
+y terminan en «⏸ Tu decisión. No sigo hasta que me digas.»
+
+QUÉ HACES CON ESE BLOQUE:
+
+  1. LO MUESTRAS ENTERO Y TAL CUAL. No lo resumas, no lo reordenes, no lo
+     reescribas «más claro». Está estandarizado precisamente para que el
+     analista sepa dónde mirar sin releerlo entero cada vez.
+  2. TU TURNO TERMINA EN ESA MARCA. No escribas nada detrás. Ni un resumen, ni
+     «como puedes ver», ni tu recomendación no pedida.
+  3. NO LLAMES A NINGUNA HERRAMIENTA MÁS hasta que el analista conteste. Elegir
+     por él la alternativa A porque «era la obvia» es exactamente el fallo.
+  4. El analista contesta con una letra —«A», «la B»— o con lo suyo propio.
+     ENTONCES ejecutas esa alternativa, y sólo ésa.
+
+QUÉ SÍ PUEDES AÑADIR, y sólo si te lo piden: una respuesta a la pregunta que
+haga el analista. Si te pide tu opinión, dala en una o dos frases y vuelve a
+parar.
+
+POR QUÉ ES REGLA Y NO SUGERENCIA: cuando la salida no está estandarizada y no
+termina en una pregunta, el analista tiene que interrumpir el chat para poder
+decidir, y se van varios turnos aclarando qué opciones había y con qué
+argumentos se ejecutan. Las alternativas vienen ya con su llamada exacta para
+que eso no haga falta.
+
+══════════════════════════════════════════════════════
 PROTOCOLO GUIADO — 4 ETAPAS
 ══════════════════════════════════════════════════════
 
@@ -973,7 +1009,30 @@ def _asegura_inp_de_la_terna(inp_path: str, output_path: str) -> str:
 #: Las cuatro etapas del proceso iterativo consciente, con los nombres de la
 #: escuela. No las inventa esta capa: son las de la metodología —Box y Jenkins
 #: en su forma extendida— y las que el guion ya registra entrada a entrada.
+#: Las cuatro etapas del MÉTODO. Es lo que el REGISTRO guarda —una iteración es
+#: una vuelta por ellas— y lo que el carril autónomo emite, porque allí no hay
+#: nadie a quien preguntar.
 ETAPAS_ITERACION = ("ESPECIFICACIÓN", "ESTIMACIÓN", "DIAGNOSIS", "REFORMULACIÓN")
+
+#: Las cuatro secciones de la SALIDA GUIADA, que no son las mismas y no deben
+#: serlo. Las de arriba miran hacia el registro: de dónde vino el modelo. Éstas
+#: miran hacia el analista, que ya sabe de dónde vino porque lo decidió él, y lo
+#: que necesita es lo que tiene delante y qué se le pregunta.
+#:
+#: La cuarta es la que convierte el carril en guiado: **no dictamina, ofrece
+#: alternativas y para**. Una salida que anuncia la reformulación ya ha decidido,
+#: y entonces el guiado es un autónomo que además cuenta lo que hace.
+SECCIONES_GUIADO = ("MODELO ESTIMADO", "DIAGNOSIS", "CONCLUSIONES",
+                    "DECISIÓN — alternativas")
+
+#: La marca que cierra una salida guiada. Está para que sea COMPROBABLE que el
+#: turno termina en la pregunta: la suite la busca, y el LLM tiene instrucción
+#: de no escribir nada después de ella.
+FIN_DE_TURNO_GUIADO = "⏸ **Tu decisión.** No sigo hasta que me digas."
+
+
+def es_guiado(modo: str) -> bool:
+    return "guiad" in (modo or "").lower()
 
 
 def _reformulacion_desde(diag, guion_next: str = "") -> str:
@@ -1005,12 +1064,137 @@ def _reformulacion_desde(diag, guion_next: str = "") -> str:
     return "\n\n".join(partes)
 
 
+def _conclusiones_desde(diag) -> str:
+    """La 3ª sección: qué DICE la diagnosis, no qué números dio.
+
+    Existe porque el bloque de diagnosis es una lista de contrastes y el
+    analista tiene que poder leer el veredicto sin recomponerlo. Y porque un
+    veredicto escrito por la herramienta es el mismo en todas las sesiones,
+    mientras que uno redactado por el LLM cambia con el LLM.
+    """
+    d = getattr(diag, "data", None) or {}
+    fallos, bien = [], []
+    (fallos if d.get("white_noise") is False else bien).append(
+        "la Q " + ("RECHAZA el ruido blanco" if d.get("white_noise") is False
+                   else "no rechaza el ruido blanco"))
+    (fallos if d.get("normal") is False else bien).append(
+        "el Jarque-Bera " + ("RECHAZA la normalidad" if d.get("normal") is False
+                             else "no rechaza la normalidad"))
+    n_ext = int(d.get("n_extreme") or 0)
+    if n_ext:
+        fallos.append(f"quedan {n_ext} residuo(s) extremo(s)")
+
+    L = []
+    if fallos:
+        L.append("**El modelo NO se sostiene:** " + "; ".join(fallos) + ".")
+        qf = d.get("q_fails") or []
+        if qf:
+            L.append("Retardos donde la Q falla: " + "; ".join(str(x) for x in qf)
+                     + ". *Dónde falla dice QUÉ falta: un retardo estacional "
+                       "pide estructura estacional, uno bajo pide orden regular.*")
+    else:
+        L.append("**El modelo se sostiene:** " + "; ".join(bien)
+                 + ", y no quedan residuos extremos.")
+    return "\n\n".join(L)
+
+
+def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
+                        guion_path: str = "") -> list:
+    """La 4ª sección: las opciones REALES, cada una con su llamada.
+
+    El orden es el de Treadway —lo más obvio primero—: un residuo extremo se
+    atiende antes que un orden ARMA, porque un anómalo sin tratar contamina la
+    estimación de todo lo demás.
+
+    Cada alternativa lleva la llamada exacta que la ejecuta. No es comodidad: es
+    lo que evita los turnos de ida y vuelta averiguando qué se puede hacer y con
+    qué argumentos, que es donde se va el presupuesto en el carril guiado.
+    """
+    d = getattr(diag, "data", None) or {}
+    alts = []
+    ruta = f'"{inp_path}"' if inp_path else "<inp>"
+
+    def _fecha(obs):
+        try:
+            from art.guion import _at_to_date
+            return _at_to_date(int(obs), int(ts.start[0]), int(ts.start[1]),
+                               int(ts.freq))
+        except Exception:
+            return f"obs {obs}"
+
+    # 1 · lo más obvio: un residuo extremo
+    pistas = d.get("intervention_hints") or []
+    if pistas:
+        pista = max(pistas, key=lambda h: abs(float(h.get("z") or 0)))
+        f = _fecha(pista.get("obs"))
+        alts.append(
+            f"**Intervenir {f}** (|z| = {abs(float(pista.get('z') or 0)):.2f}"
+            + (f", forma sugerida: {pista['form']}" if pista.get("form") else "")
+            + f"). Un anómalo sin tratar contamina la estimación de todo lo "
+              f"demás, y por eso va primero.\n"
+              f"   `suggest_intervention_form(inp_path={ruta}, date=\"{f}\")` "
+              f"→ y luego `guided_intervention(...)`")
+
+    # 2 · dónde falla la Q dice qué falta
+    if d.get("white_noise") is False:
+        qf = " ".join(str(x) for x in (d.get("q_fails") or []))
+        estacional = ts is not None and any(
+            f" {k}" in qf for k in (str(int(ts.freq)), str(int(ts.freq) * 2)))
+        p_act = len((model.ar or [[]])[0]) if getattr(model, "ar", None) else 0
+        q_act = len((model.ma or [[]])[0]) if getattr(model, "ma", None) else 0
+        if estacional:
+            alts.append(
+                "**Añadir estructura ESTACIONAL** — la Q falla en un retardo "
+                "estacional, que es donde se ve lo que los armónicos no "
+                "absorben.\n"
+                f"   `confirm_and_estimate(inp_path={ruta}, P=1, ...)`, o "
+                f"`meg_frequency(...)` si sospechas raíz unitaria estacional")
+        else:
+            alts.append(
+                f"**Subir el orden regular** — hoy AR({p_act}) MA({q_act}). "
+                f"El correlograma de los residuos dice cuál de los dos.\n"
+                f"   `confirm_and_estimate(inp_path={ruta}, p={p_act + 1}, "
+                f"q={q_act}, ...)`  ó  `q={q_act + 1}`\n"
+                f"   `identification_analysis(inp_path={ruta})` para mirarlo "
+                f"antes de elegir")
+
+    # 3 · normalidad sin ruido: casi siempre son anómalos, no la distribución
+    if d.get("normal") is False and d.get("white_noise") is not False:
+        alts.append(
+            "**Mirar los anómalos antes que la distribución** — la Q pasa y el "
+            "Jarque-Bera no: eso suele ser un puñado de sucesos, no una "
+            "distribución distinta.\n"
+            f"   `residual_outlier_scan(inp_path={ruta})`")
+
+    # 4 · si nada falla, ADOPTAR es una decisión y hay que poder tomarla
+    if not alts:
+        alts.append(
+            "**Adoptar este modelo** y cerrar el nodo. Nada en la diagnosis "
+            "pide cambiarlo.\n"
+            f"   `record_version(inp_path={ruta}, decision=\"adoptado\", "
+            f"rationale=\"...\")`")
+        alts.append(
+            "**Sobreparametrizar para comprobarlo** — añadir un parámetro y ver "
+            "si sale no significativo es la forma de saber que no falta nada.\n"
+            f"   `overparameterization_analysis(inp_path={ruta})`")
+
+    # 5 · siempre: volver atrás. El camino es un grafo, no un árbol.
+    alts.append(
+        "**Volver a un nodo anterior** — el recorrido es un laberinto y "
+        "retroceder es el método funcionando, no un fallo.\n"
+        + (f"   `guion_map(guion_path=\"{guion_path}\")`" if guion_path
+           else "   `guion_map(guion_path=<guion>)`"))
+    return alts
+
+
 def envuelve_iteracion(*, nombre: str,
                        modo: str = "",
                        especificacion: str = "",
                        ecuacion: str = "",
                        diagnosis: str = "",
                        reformulacion: str = "",
+                       conclusiones: str = "",
+                       alternativas: "list[str] | None" = None,
                        figuras_b64: "list[str] | None" = None,
                        rutas_figuras: "list[str] | None" = None,
                        extra: str = "") -> str:
@@ -1073,6 +1257,53 @@ def envuelve_iteracion(*, nombre: str,
     # iteración —quién decidió— y quien lee la salida tiene que saberlo antes de
     # nada. Lo pilló una prueba dorada que exigía el modo en la primera línea.
     L = [f"# Iteración — {nombre}" + (f"  ·  {modo}" if modo else ""), ""]
+
+    # ── CARRIL GUIADO: otra salida, y por una razón de fondo ──────────────
+    # Las cuatro etapas del método son la forma del REGISTRO. Al analista le
+    # sirven mal: empiezan por la especificación —que decidió él, hace un
+    # momento— y terminan anunciando la reformulación, que es la decisión que le
+    # tocaba a él. Con esa forma el guiado se comporta como un autónomo que
+    # además narra lo que ya ha resuelto.
+    #
+    # Aquí la salida termina en la PREGUNTA, con alternativas y con la llamada
+    # exacta que ejecuta cada una. Eso quita dos costes que se pagaban en cada
+    # nodo: el analista interrumpiendo el chat para poder decidir, y los turnos
+    # de ida y vuelta aclarando qué opciones había.
+    if es_guiado(modo):
+        L += [f"## 1 · {SECCIONES_GUIADO[0]}", ""]
+        L += [ecuacion.strip() if ecuacion.strip()
+              else "*No se ha estimado ningún modelo en esta iteración.*", ""]
+
+        L += [f"## 2 · {SECCIONES_GUIADO[1]}", ""]
+        L += [diagnosis.strip() if diagnosis.strip()
+              else "*Sin diagnosis: no hay modelo estimado que diagnosticar.*"]
+        if rutas_figuras:
+            L += ["", "*Figuras:*"] + [f"  · `{r}`" for r in rutas_figuras if r]
+        L.append("")
+
+        L += [f"## 3 · {SECCIONES_GUIADO[2]}", ""]
+        L += [conclusiones.strip() if conclusiones.strip()
+              else "*Sin conclusión: la diagnosis no dictamina nada.*", ""]
+
+        L += [f"## 4 · {SECCIONES_GUIADO[3]}", ""]
+        if especificacion.strip():
+            L += [f"*Punto de partida: {especificacion.strip()}*", ""]
+        opciones = [a for a in (alternativas or []) if str(a).strip()]
+        if opciones:
+            for i, alt in enumerate(opciones):
+                L.append(f"**{chr(65 + i)})** {str(alt).strip()}")
+                L.append("")
+        else:
+            # Sin alternativas no hay decisión que tomar, y hay que DECIRLO:
+            # callarlo deja al analista sin saber si es que no hay opciones o
+            # es que nadie las buscó.
+            L += ["*No se han derivado alternativas de esta diagnosis. "
+                  "Dime tú por dónde seguir, o pide `guion_map` para ver el "
+                  "recorrido y volver a un nodo anterior.*", ""]
+        if extra.strip():
+            L += ["---", "", extra.strip(), ""]
+        L += [FIN_DE_TURNO_GUIADO]
+        return "\n".join(L)
 
     L += [f"## 1 · {ETAPAS_ITERACION[0]}", ""]
     L += [especificacion.strip() if especificacion.strip()
@@ -2195,11 +2426,17 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
         _show_fig(desc.figure_b64, "diagnosis")
         text = envuelve_iteracion(
             nombre=os.path.splitext(os.path.basename(output_path or inp_path))[0],
-            especificacion=(f"Estimación de `{os.path.basename(inp_path)}` tal "
-                            f"como está: esta vía no construye especificación, "
-                            f"la relee."),
+            modo="guiado",
+            especificacion=(f"`{os.path.basename(inp_path)}` estimado tal como "
+                            f"está: esta vía no construye especificación, la "
+                            f"relee."),
             ecuacion=eq_text,
             diagnosis=desc.summary + "\n\n---\n" + desc.recommendation,
+            conclusiones=_conclusiones_desde(desc),
+            alternativas=_alternativas_desde(
+                desc, model=m, ts=getattr(m, "series", None),
+                inp_path=output_path or inp_path,
+                guion_path=guion_path),
             reformulacion=_reformulacion_desde(desc, guion_next),
         )
         if output_path:
@@ -5003,6 +5240,18 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         text = (
             envuelve_iteracion(
                 nombre=os.path.splitext(os.path.basename(output_path))[0],
+                # ESTA ES LA HERRAMIENTA DEL CARRIL GUIADO —el nombre lo dice:
+                # se llama cuando el analista ha confirmado la especificación—
+                # y no declaraba su modo, así que el sobre le daba la forma del
+                # REGISTRO: empezaba por la especificación que el analista
+                # acababa de decidir y terminaba anunciando la reformulación,
+                # que era la decisión que le tocaba a él. Con eso el guiado se
+                # comportaba como un autónomo que además narra (BUG-0094).
+                modo="guiado",
+                conclusiones=_conclusiones_desde(diag),
+                alternativas=_alternativas_desde(
+                    diag, model=m, ts=ts, inp_path=output_path,
+                    guion_path=guion_path or _derive_guion_path(output_path, m)),
                 especificacion=(
                     spec_line + aviso_dom
                     + (f"\n\n*Encadenado desde "

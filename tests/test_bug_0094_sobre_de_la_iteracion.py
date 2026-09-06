@@ -142,21 +142,29 @@ def test_no_mandarlas_no_las_PIERDE(serie):
 
 # ───────────── el sobre en las herramientas ─────────────
 
-def test_confirm_and_estimate_usa_el_sobre(serie):
+def test_confirm_and_estimate_emite_LA_SALIDA_GUIADA(serie):
+    """Corregido: esta prueba exigía las cuatro ETAPAS del método, que es la
+    forma del REGISTRO. `confirm_and_estimate` es la herramienta del carril
+    guiado y su salida va dirigida al analista, que ya sabe de dónde viene el
+    modelo —lo decidió él— y lo que necesita es lo que tiene delante y qué se
+    le pregunta."""
+    from art.mcp_server import SECCIONES_GUIADO
     f, d = serie
     t = _txt(CE, f, os.path.join(d, "m00.inp"), lam=0.0, d=1, D=0, p=0, q=0,
              n_harmonics=0)
-    assert _secciones(t) == list(ETAPAS_ITERACION)
+    assert _secciones(t) == list(SECCIONES_GUIADO)
 
 
-def test_build_model_usa_el_MISMO_sobre(serie):
-    """El proceso es el mismo y el guion es el mismo, así que la salida es la
-    misma. La diferencia está sólo en si la figura viaja."""
+def test_build_model_sigue_con_las_ETAPAS_del_metodo(serie):
+    """Y aquí está la diferencia entre los dos carriles, que antes no existía:
+    en autónomo no hay a quién preguntar, así que la salida ES el registro."""
+    from art.mcp_server import FIN_DE_TURNO_GUIADO
     f, d = serie
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         t = _txt(BM, f, os.path.join(d, "mismo.inp"), max_rounds=2)
     assert _secciones(t) == list(ETAPAS_ITERACION)
+    assert FIN_DE_TURNO_GUIADO not in t, "el autónomo no pregunta"
 
 
 def test_la_reformulacion_sale_de_la_diagnosis_no_del_agente(serie):

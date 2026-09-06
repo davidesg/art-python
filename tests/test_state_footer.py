@@ -33,8 +33,18 @@ def _estima(d, nombre, y, **kw):
 
 
 def _pie(txt):
+    """El pie, y sólo el pie.
+
+    En el carril guiado la salida termina en la marca de decisión, que va
+    DESPUÉS del pie. Recortar «hasta el final» la metía dentro y hacía parecer
+    que el pie había crecido."""
+    from art.mcp_server import FIN_DE_TURNO_GUIADO
     i = txt.find("── Estado ──")
-    return txt[i:] if i >= 0 else ""
+    if i < 0:
+        return ""
+    trozo = txt[i:]
+    j = trozo.find(FIN_DE_TURNO_GUIADO)
+    return trozo[:j] if j >= 0 else trozo
 
 
 @pytest.fixture(scope="module")
