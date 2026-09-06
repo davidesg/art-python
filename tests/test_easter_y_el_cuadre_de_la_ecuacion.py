@@ -200,3 +200,63 @@ def test_el_pre_conserva_el_easter(tmp_path):
 
 def test_el_defecto_esta_documentado():
     assert os.path.exists("bugs/BUG-0097-repro/repro.py")
+
+
+# ── la previsión, vigilada desde aquí ─────────────────────────────────
+
+def test_la_prevision_lleva_el_efecto_de_semana_santa(tmp_path):
+    """fue/BUG-0014: la previsión de Python daba efecto NULO a `compimp`,
+    `easter` y `trend` —tres de los once tipos deterministas— porque
+    `forecast._build_xi` reimplementaba el generador y se había quedado atrás.
+
+    El defecto es de `fue`, pero se ve desde aquí y aquí no había test. Se
+    inyecta un efecto GRANDE y limpio para que la comprobación no dependa de
+    una significatividad marginal.
+    """
+    from fue.cast_us import easter_date
+    rng = np.random.default_rng(9)
+    n = 240
+    y = 100.0 + np.cumsum(rng.standard_normal(n) * 0.05)
+    for t in range(n):
+        yr, mo = 2000 + t // 12, t % 12 + 1
+        if mo == easter_date(yr)[1]:
+            y[t] *= 1.04                       # +4% en el mes de Pascua
+    ts = fue.TimeSeries(y.tolist(), freq=12, start=(2000, 1), name="P")
+    ea = fue.Intervention("easter", at=0, omega=[0.0], omega_free=[True])
+    m = fue.Model(ts, d=1, ar=[[0.0]], ar_free=[[True]], mu=0.0,
+                  estimate_mu=True, interventions=[ea],
+                  refactor=_RESCALE_FACTOR)
+    f = str(tmp_path / "P.inp")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _write_inp(ts, m, f)
+        _, m2 = estimar(f)
+        assert abs(m2.interventions[0].omega[0] - 400.0) < 20, "no lo estima"
+        import art.mcp_server as srv
+        gf = getattr(srv.generate_forecast, "fn", srv.generate_forecast)
+        r = gf(f, 18, str(tmp_path / "P.fuf"), str(tmp_path / "P.html"))
+    txt = "\n".join(c.text for c in r if getattr(c, "text", None))
+
+    def _nivel(fecha):
+        fila = next(l for l in txt.splitlines() if f"| {fecha} |" in l)
+        return float(fila.split("|")[3].strip())
+
+    # La serie acaba en 12/2019; Pascua de 2020 cae en abril.
+    abril = _nivel("04/2020")
+    vecinos = (_nivel("03/2020") + _nivel("05/2020")) / 2
+    assert abril / vecinos - 1 > 0.03, (
+        f"la previsión no lleva la Semana Santa: 04={abril}, vecinos={vecinos}")
+
+
+def test_ningun_determinista_da_regresor_nulo_al_prever():
+    """La clase entera, no sólo el easter: eran TRES de once."""
+    from fue.forecast import _build_xi
+    ts = fue.TimeSeries([100.0] * 160, freq=12, start=(2005, 1), name="X")
+    for tipo in ("step", "impulse", "compimp", "easter", "trend", "alter"):
+        at = 0 if tipo in ("easter", "trend", "alter") else 100
+        m = fue.Model(ts, d=1, ar=[[0.0]], ar_free=[[False]], mu=0.0,
+                      estimate_mu=False, refactor=_RESCALE_FACTOR,
+                      interventions=[fue.Intervention(tipo, at=at, omega=[1.0],
+                                                      omega_free=[False])])
+        xi = _build_xi(m, 160, 12, 12, [[1.0]], [[]])
+        assert float(np.abs(xi).sum()) > 0.0, f"{tipo}: regresor nulo"
