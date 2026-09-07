@@ -198,6 +198,17 @@ class GuionEntry:
     # varias iteraciones (medido: hasta 9) y una iteración no puede contener
     # varios nodos.
     iteracion: int | None = None
+    #: CÓMO se supo el padre. Es la diferencia entre un mapa y una conjetura:
+    #:
+    #:   "declarado" — el llamante dijo de qué `.pre` encadenaba;
+    #:   "inferido"  — se tomó la última entrada del guion porque nadie lo dijo.
+    #:
+    #: Un padre inferido puede ser falso, y `guion_abandon` arrastra a los
+    #: descendientes POR DISEÑO: sobre un linaje inventado, marcar un callejón
+    #: correcto barre la rama viva (BUG-0108). Distinguirlos permite avisar antes
+    #: de hacer daño, en vez de exigir que el analista lo recuerde.
+    parent_origen: str = ""
+
     #: A qué nodo del protocolo sirve esta iteración (`lambda`, `d`,
     #: `estacionalidad`, `ordenes`, `intervenciones`…). En las entradas de tipo
     #: `node` es el nodo que se decide; en las de tipo `model`, el nodo abierto
@@ -1188,6 +1199,25 @@ def export_guion_html(guion: Guion) -> str:
             "<th>σ_a</th><th>Q</th><th>JB</th><th>Anomalías</th><th>Decisión (resumen)</th></tr>",
         ]
         for e in guion.entries:
+            # UN NODO DE DECISIÓN NO TIENE DIAGNOSIS, y el export recorría TODAS
+            # las entradas desreferenciando `e.stats.aic`. Bastaba un nodo —los
+            # que escribe `guion_node`— para que el informe navegable muriera con
+            # `AttributeError: 'NoneType' object has no attribute 'aic'` y no
+            # produjera fichero alguno (BUG-0107).
+            #
+            # Un nodo se dibuja como lo que es: una decisión, con su fila y sin
+            # columnas de ajuste. Omitirlo sería peor —el recorrido cuenta la
+            # historia y los nodos son la mitad que explica POR QUÉ— y es
+            # justamente lo que BUG-0101 arregló en el mapa.
+            if e.is_node:
+                nd = e.node or {}
+                dec = f"{nd.get('nodo', e.name)} = {nd.get('decidido', '')}"
+                lines.append(
+                    f"<tr><td>{e.version}</td>"
+                    f"<td><a href='#v{e.version}'>◆ {e.name}</a></td>"
+                    f"<td colspan='8'><em>nodo de decisión</em></td>"
+                    f"<td>{dec[:60]}</td></tr>")
+                continue
             s = e.stats
             aic_str = f"{s.aic:.1f}" if s.aic is not None else "—"
             bic_str = f"{s.bic:.1f}" if s.bic is not None else "—"
@@ -1210,9 +1240,10 @@ def export_guion_html(guion: Guion) -> str:
         for e in guion.entries:
             s = e.stats
             open_attr = " open" if e == guion.entries[-1] else ""
-            aic_hdr = f"{s.aic:.1f}" if s.aic is not None else "—"
-            q_hdr   = "✓" if s.q_pass else ("✗" if s.q_pass is False else "—")
-            jb_hdr  = "✓" if s.jb_pass else ("✗" if s.jb_pass is False else "—")
+            # Igual aquí: un nodo no tiene ajuste que resumir en la cabecera.
+            aic_hdr = f"{s.aic:.1f}" if (s and s.aic is not None) else "—"
+            q_hdr   = "✓" if (s and s.q_pass) else ("✗" if (s and s.q_pass is False) else "—")
+            jb_hdr  = "✓" if (s and s.jb_pass) else ("✗" if (s and s.jb_pass is False) else "—")
             lines += [
                 f"<details id='v{e.version}'{open_attr}>",
                 f"<summary>v{e.version} — {e.name}"
@@ -1238,7 +1269,22 @@ def export_guion_html(guion: Guion) -> str:
                 f"</tr></table>",
             ]
 
-            # Stats
+            # Stats — sólo si las hay. Un nodo de decisión llega hasta aquí con
+            # su razón y sus alternativas, que es lo que tiene que enseñar; una
+            # tabla de ajuste vacía no diría nada y desreferenciarla mata el
+            # export entero (BUG-0107).
+            if s is None:
+                nd = e.node or {}
+                if nd.get("evidencia"):
+                    lines.append(f"<p><b>Evidencia:</b> {nd['evidencia']}</p>")
+                if nd.get("alternativas"):
+                    lines.append(f"<p><b>Descartado:</b> {nd['alternativas']}</p>")
+                if e.decided_by:
+                    lines.append(f"<p class='meta'>Decidido por: {e.decided_by}</p>")
+                if e.rationale:
+                    lines.append(f"<p><b>Razón:</b> {e.rationale}</p>")
+                lines.append("</details>")
+                continue
             aic_s = f"{s.aic:.2f}" if s.aic is not None else "—"
             bic_s = f"{s.bic:.2f}" if s.bic is not None else "—"
             lines += [

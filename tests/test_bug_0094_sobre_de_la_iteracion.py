@@ -169,15 +169,27 @@ def test_build_model_sigue_con_las_ETAPAS_del_metodo(serie):
 
 def test_la_reformulacion_sale_de_la_diagnosis_no_del_agente(serie):
     """La 4ª etapa no se le pide al LLM: se deduce de lo que la diagnosis ya
-    dictaminó."""
+    dictaminó.
+
+    CORREGIDA: esta prueba usaba las claves `q_pass`/`jb_pass`, que son las que
+    leía el código y NO las que la diagnosis publica (`white_noise`/`normal`).
+    Estaba escrita contra la implementación en vez de contra los datos reales,
+    así que pasaba en verde mientras el bloque era ciego a los dos contrastes —
+    y por eso el defecto sobrevivió a la suite hasta que lo encontró una sesión
+    de análisis (BUG-0106).
+
+    La lección va en el nombre de las claves: un doble usado en una prueba tiene
+    que llevar las claves que el productor escribe, o la prueba sólo comprueba
+    que dos errores coinciden."""
     from art.mcp_server import _reformulacion_desde
 
     class _D:
-        data = {"q_pass": False, "jb_pass": True, "n_extreme": 2}
+        data = {"white_noise": False, "normal": True, "n_extreme": 2,
+                "nobs": 200}
 
     r = _reformulacion_desde(_D())
-    assert "no se sostiene" in r
-    assert "Q rechaza" in r and "2 residuo" in r
+    assert "NO se sostiene" in r
+    assert "Q RECHAZA" in r
 
 
 def test_lo_declarado_por_el_analista_entra_en_la_cuarta():

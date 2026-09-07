@@ -1244,17 +1244,43 @@ def model_equation(ts, model) -> str:
                 lbl_b  = "B" if tc_lbl == "1" else f"{tc_lbl}·B"
                 b_term = f" + {lbl_b}"              # f=4,5: (1 + B + ...)
 
-            # Free coefficient: always show numeric value (never hide near-unit-root)
+            # EL COEFICIENTE DE B NO ES 2·cos: ES 2·cos·√(−φ₂) (BUG-0104).
+            #
+            # Un factor de frecuencia fija es (1 − φ₁B − φ₂B²) con **φ₂ estimado
+            # y φ₁ DERIVADO**: φ₁ = 2·cos(2πf/s)·√(−φ₂). El render ponía sólo el
+            # 2·cos —que en s=12 vale 1 para f=2 y f=4— y se comía el √(−φ₂), de
+            # modo que imprimía el término en B como si su coeficiente fuese 1.
+            #
+            # Medido en UEM_HCPI m04:
+            #     se publicaba   (1 + B + 0.5267·B²)_f=4
+            #     el .out dice   φ₁ = −0.725732
+            #     o sea          (1 + 0.7257·B + 0.5267·B²)
+            #
+            # La ecuación es la presentación autoritativa: publicar un
+            # coeficiente que no es el estimado es la misma falta que BUG-0097.
+            # φ₁ va SIN error típico porque no se estima: se deriva.
+            def _b_derivado(c_abs):
+                """El término en B con su coeficiente real."""
+                if abs(tc_val) < 1e-9:
+                    return ""                      # f=3 en s=12: no hay término
+                phi1 = abs(tc_val) * (c_abs ** 0.5)
+                signo = "−" if tc_val > 0 else "+"
+                if abs(phi1 - 1.0) < 5e-5:
+                    return f" {signo} B"
+                return f" {signo} {_fv(phi1)}·B"
+
             if ff.free:
                 v, se = pi.pop()
+                b_real = _b_derivado(abs(v))
                 c_str = f"{_fv(abs(v))}·B²"
-                f_v   = f"(1{b_term} + {c_str})_f={f_idx}"
-                se_offset = len(f"(1{b_term} + ")
+                f_v   = f"(1{b_real} + {c_str})_f={f_idx}"
+                se_offset = len(f"(1{b_real} + ")
                 f_s   = " " * se_offset + _fse(se)
             else:
                 v_c   = float(getattr(ff, "coef", 1.0))
+                b_real = _b_derivado(abs(v_c))
                 c_str = "B²" if abs(abs(v_c) - 1.0) < 0.001 else f"{_fv(abs(v_c))}·B²"
-                f_v   = f"(1{b_term} + {c_str})_f={f_idx}"
+                f_v   = f"(1{b_real} + {c_str})_f={f_idx}"
                 f_s   = ""
             target.append((f_v, f_s))
 
@@ -1970,6 +1996,11 @@ def describe_diagnosis(model) -> Description:
             "jb_pvalue": result.jb_pvalue,
             "q_fails": q_fails,
             "n_extreme": len(result.extreme),
+            # CUÁNTOS residuos hay. Sin esto, «1 residuo |z|>3» no se puede
+            # juzgar: con n=100 es raro y con n=500 es lo normal, y el consumidor
+            # no tenía forma de saber cuál de los dos casos está mirando
+            # (BUG-0105).
+            "nobs": int(getattr(getattr(model, "series", None), "nobs", 0) or 0),
             "intervention_hints": [
                 {"obs": o, "z": z, "form": h} for o, z, h in intervention_hints
             ],

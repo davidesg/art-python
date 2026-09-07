@@ -1,11 +1,11 @@
 ---
-id: BUG-0102
+id: BUG-0109
 title: suggest_intervention_form registra el guion antes de persistir .pre/.out — el guion niega artefactos que sí se escriben
-status: open
+status: fixed
 severity: medium
 component: guion
 found_in: 0.2.0.dev0
-fixed_in:
+fixed_in: 0.2.0.dev0
 reported: 2026-09-06
 reporter: DeepSeek — sesión UEM_FOOD_SERV_DS, análisis univariante HICP Services
 tags: [guion, suggest_intervention_form, terna, orden-de-persistencia, silencioso]
@@ -44,7 +44,7 @@ no es solo cosmético: dirige el encadenado hacia una base más antigua.
 
 ## Reproduction
 
-`bugs/BUG-0102-repro/repro.py` — determinista, sin datos ni motor. Lee
+`bugs/BUG-0109-repro/repro.py` — determinista, sin datos ni motor. Lee
 `src/art/mcp_server.py` y compara los números de línea de las llamadas reales:
 
 ```
@@ -100,7 +100,42 @@ se registra.
 
 ## Validation
 
-Con el arreglo, `bugs/BUG-0102-repro/repro.py` debe salir 0: en
+Con el arreglo, `bugs/BUG-0109-repro/repro.py` debe salir 0: en
 `suggest_intervention_form`, `write_pre`/`write_out` aparecen antes que
 `_record_to_guion`, y la entrada del guion queda con `out_path` resuelto y sin el
 aviso *«sin .pre, .out»*.
+
+
+---
+
+## Nota sobre la numeración (2026-09-07)
+
+**Este informe se registró como BUG-0102 y ya había un BUG-0102** —«el registro
+puede contradecir a su fichero»— escrito el mismo día. Los dos se comitearon
+juntos en `95b4bec` sin que nadie notara el choque.
+
+La colisión no fue sólo del identificador: **los dos repros se llamaban
+`bugs/BUG-0102-repro/repro.py`, y el de este informe se perdió** al ocupar el
+otro ese nombre. Se ha reconstruido a partir de la sección «Reproduction» de
+este mismo documento, que describía su salida con detalle suficiente — y
+reproduce.
+
+Se renumeró éste y no el otro porque aquél ya estaba cableado en comentarios del
+código, en `tests/test_registro_contra_su_fichero.py` y en su carpeta de repro:
+mover el que estaba suelto cuesta menos y no deja referencias colgando.
+
+**Lo que esto enseña**: el índice no comprobaba identificadores duplicados. Dos
+informes con el mismo número conviven sin que nada avise, y sus carpetas de
+repro se pisan en silencio. Queda como prueba en la suite.
+
+---
+
+## Cierre (2026-09-07)
+
+Invertido el orden: `write_pre`/`write_out` primero, `_record_to_guion` después,
+que es lo que `confirm_and_estimate` ya hacía. El repro reconstruido sale 0.
+
+El daño que documentabas —encadenar desde un `.pre` más antiguo porque el guion
+daba el bueno por inexistente, y perder con ello la intervención de 11/2015— es
+la razón por la que esto no era cosmético: **un registro que niega sus propios
+artefactos dirige el recorrido hacia atrás**.

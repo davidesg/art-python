@@ -1045,23 +1045,58 @@ def _reformulacion_desde(diag, guion_next: str = "") -> str:
     """
     partes = []
     try:
+        # UNA SOLA LECTURA DE LA DIAGNOSIS, y aquí estaba el defecto: esta
+        # función leía `q_pass`/`jb_pass` y la diagnosis publica `white_noise`/
+        # `normal` (describe.py). `d.get("q_pass")` devolvía None, `None is
+        # False` es False, y **la rama de fallo no se ejecutaba nunca**: el
+        # bloque era ciego a los dos contrastes que deciden la adecuación y
+        # sólo veía `n_extreme`, que es justo el que no debería mirar
+        # (BUG-0105). Sobre un modelo con Q y JB rechazando, la etapa 4 del
+        # carril AUTÓNOMO decía «no procede reformular: el modelo se sostiene»
+        # (BUG-0106).
+        #
+        # Se delega en `_conclusiones_desde`, que ya lee las claves correctas,
+        # en vez de repetir la lectura: dos funciones consultando el mismo dict
+        # con nombres distintos es exactamente cómo se llegó aquí.
         d = getattr(diag, "data", None) or {}
-        fallos = []
-        if d.get("q_pass") is False:
-            fallos.append("la Q rechaza el ruido blanco")
-        if d.get("jb_pass") is False:
-            fallos.append("el Jarque-Bera rechaza la normalidad")
-        n_ext = int(d.get("n_extreme") or 0)
-        if n_ext:
-            fallos.append(f"quedan {n_ext} residuo(s) extremo(s)")
-        if fallos:
-            partes.append("**El modelo no se sostiene:** " + "; ".join(fallos)
-                          + ". La iteración continúa.")
+        if d.get("white_noise") is False or d.get("normal") is False:
+            partes.append(_conclusiones_desde(diag).split("\n\n")[0]
+                          + " La iteración continúa.")
     except Exception as e:                                   # pragma: no cover
         _warn("lectura de la diagnosis para la reformulación", e)
     if guion_next.strip():
         partes.append(f"**Siguiente versión declarada:** {guion_next.strip()}")
     return "\n\n".join(partes)
+
+
+def umbral_extremo(n: int, prob: float = 0.90) -> float:
+    """El |z| a partir del cual un residuo extremo es NOTICIA, dado n.
+
+    Bajo especificación correcta el máximo de n normales crece con n, así que un
+    umbral fijo deja de significar lo mismo:
+
+        n=100  c=3.28   con el 3 fijo, P(al menos uno) = 0.24
+        n=215  c=3.49                                    0.44
+        n=500  c=3.71                                    0.74
+
+    Con n=500 y umbral 3, **tres de cada cuatro** modelos correctamente
+    especificados tendrían un «residuo extremo». No es que el 3 esté mal
+    calibrado: es que a partir de cierto n el criterio se invierte y marca lo
+    normal (BUG-0105).
+
+    `c` es el cuantil `prob` del máximo: P(máx|z| < c) = (2Φ(c)−1)ⁿ = prob.
+    """
+    from math import erf, sqrt
+    n = max(int(n or 0), 1)
+    objetivo = (1.0 + prob ** (1.0 / n)) / 2.0
+    lo, hi = 1.0, 10.0
+    for _ in range(200):                      # bisección: sin dependencias
+        c = (lo + hi) / 2.0
+        if 0.5 * (1.0 + erf(c / sqrt(2.0))) < objetivo:
+            lo = c
+        else:
+            hi = c
+    return round((lo + hi) / 2.0, 2)
 
 
 def _conclusiones_desde(diag) -> str:
@@ -1080,9 +1115,16 @@ def _conclusiones_desde(diag) -> str:
     (fallos if d.get("normal") is False else bien).append(
         "el Jarque-Bera " + ("RECHAZA la normalidad" if d.get("normal") is False
                              else "no rechaza la normalidad"))
+    # LOS ANÓMALOS NO DICTAN LA ADECUACIÓN, y estaban en la lista de fallos.
+    # La adecuación la deciden la Q y el Jarque-Bera —es lo que dice
+    # `result.clean`— y meter aquí `n_extreme` producía informes que se
+    # contradecían a sí mismos: «Veredicto APROBADO ✓ · Q ✓ · JB ✓» y diez
+    # líneas más abajo «El modelo NO se sostiene: queda 1 residuo extremo»
+    # (BUG-0105).
+    #
+    # El dato no se tira: se pone donde SÍ informa.
     n_ext = int(d.get("n_extreme") or 0)
-    if n_ext:
-        fallos.append(f"quedan {n_ext} residuo(s) extremo(s)")
+    nobs = int(d.get("nobs") or 0)
 
     L = []
     if fallos:
@@ -1093,8 +1135,25 @@ def _conclusiones_desde(diag) -> str:
                      + ". *Dónde falla dice QUÉ falta: un retardo estacional "
                        "pide estructura estacional, uno bajo pide orden regular.*")
     else:
-        L.append("**El modelo se sostiene:** " + "; ".join(bien)
-                 + ", y no quedan residuos extremos.")
+        L.append("**El modelo se sostiene:** " + "; ".join(bien) + ".")
+
+    if n_ext:
+        if d.get("normal") is False:
+            # Con el JB rechazando, los extremos dicen DÓNDE está la
+            # no-normalidad: ahí el dato dirige la reformulación.
+            L.append(f"Los {n_ext} residuo(s) extremo(s) son el sitio por donde "
+                     f"mirar la no-normalidad. *Un JB que falla SIN anómalos "
+                     f"apunta a λ, no a intervenciones (BUG-0043).*")
+        else:
+            # Con el JB aprobado, la mención va calibrada por n o no va: un
+            # umbral fijo convierte lo esperable en alarma.
+            c = umbral_extremo(nobs) if nobs else None
+            nota = (f"{n_ext} residuo(s) con |z|>3, que con n={nobs} es lo "
+                    f"esperable —el umbral calibrado sería {c:.2f}—"
+                    if c else f"{n_ext} residuo(s) con |z|>3")
+            L.append(f"*El Jarque-Bera no rechaza: {nota}. No es un fallo de "
+                     f"adecuación; interviene sólo si el suceso se sostiene por "
+                     f"sí mismo.*")
     return "\n\n".join(L)
 
 
@@ -1122,8 +1181,19 @@ def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
         except Exception:
             return f"obs {obs}"
 
-    # 1 · lo más obvio: un residuo extremo
+    # 1 · lo más obvio: un residuo extremo — PERO calibrado por n.
+    # Ofrecer «intervenir» como opción A sobre un modelo cuya Q y JB pasan es
+    # invitar a sobre-intervenir: con n=215 un |z|>3 es lo esperable, no una
+    # señal. Sólo se ofrece si supera el umbral calibrado o si algo más falla
+    # (BUG-0105).
     pistas = d.get("intervention_hints") or []
+    _nobs = int(d.get("nobs") or 0)
+    if pistas and _nobs:
+        _c = umbral_extremo(_nobs)
+        _limpio = (d.get("white_noise") is not False
+                   and d.get("normal") is not False)
+        if _limpio:
+            pistas = [h for h in pistas if abs(float(h.get("z") or 0)) > _c]
     if pistas:
         pista = max(pistas, key=lambda h: abs(float(h.get("z") or 0)))
         f = _fecha(pista.get("obs"))
@@ -2372,6 +2442,7 @@ def model_equation_display(inp_path: str) -> list:
 
 @mcp.tool()
 def estimate_and_diagnose(inp_path: str, output_path: str = "",
+                          base_pre_path: str = "",
                           guion_path: str = "",
                           guion_name: str = "",
                           guion_decision: str = "",
@@ -2384,6 +2455,14 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
     Estimates the model by maximum likelihood (fue MVENC) and runs the
     full diagnosis: standardised residuals, ACF/PACF, Ljung-Box Q-test,
     Jarque-Bera normality test, and residual seasonality check.
+
+    **base_pre_path — DECLARA DE QUÉ MODELO SALE ÉSTE.** This tool re-reads an
+    `.inp` as it stands, so it has no other way of knowing the lineage: without
+    it the guion records the LAST entry as the parent, which need not be the
+    real one. That matters because `guion_abandon` propagates to descendants BY
+    DESIGN — a false parent turns a correct abandonment into a destructive one.
+    Pass it whenever the `.inp` was built from another model, which is the usual
+    case for hand-built factorised or fixed-frequency AR models.
 
     Parameters
     ----------
@@ -2462,7 +2541,18 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
                     name=guion_name, decision=guion_decision,
                     rationale=guion_rationale, problems_found=guion_problems,
                     next_version=guion_next, figure_b64=desc.figure_b64,
-                    hist_b64=(desc.data or {}).get("hist_b64"))
+                    hist_b64=(desc.data or {}).get("hist_b64"),
+                    # DE QUÉ MODELO SALE ÉSTE. Sin esto `infer_parent` caía en
+                    # «la última entrada del guion», que no tiene por qué ser el
+                    # padre: un `.inp` construido a mano —los AR factorizados y
+                    # los AR(2) de frecuencia fija, que la superficie MCP no
+                    # expone (BUG-0103)— entra por aquí con un padre INVENTADO.
+                    #
+                    # Y el linaje falso hace destructiva la única operación que
+                    # da valor al guion: `guion_abandon` arrastra descendientes
+                    # POR DISEÑO, así que marcar un callejón correcto podía
+                    # barrer la rama viva (BUG-0108).
+                    base_pre_path=base_pre_path)
                 if nota:
                     text += f"\n\n{nota}"
             except Exception as _ge:
@@ -4865,6 +4955,9 @@ def _record_to_guion(
     # De qué versión desciende ésta. Encadenar desde un `.pre` antiguo ES volver
     # atrás, y hay que registrarlo como tal (guion.infer_parent).
     parent = infer_parent(guion, base_pre_path)
+    # Y CÓMO se supo. Sin `base_pre_path` el padre es «la última entrada», que
+    # es una conjetura razonable y a veces falsa (BUG-0108).
+    parent_origen = "declarado" if base_pre_path else "inferido"
 
     diag_result = diagnose(model)
     spec  = _extract_spec(model, lam)
@@ -4893,6 +4986,7 @@ def _record_to_guion(
         # De dónde salió: el `.pre` que se usó como semilla. Es el dato con el
         # que se dedujo `parent`, y hasta ahora se consumía y se tiraba.
         base_pre_path=base_pre_path or "",
+        parent_origen=parent_origen,
         instrumento=_version_instr(),
     )
     # BUG-0043: la figura va a un fichero hermano, no dentro del guion.
@@ -5905,6 +5999,26 @@ def guion_abandon(guion_path: str, version: int, why: str,
         por_v = {e.version: e for e in g.entries}
         if version not in por_v:
             return _err(f"la versión {version} no está en {gp}")
+        # ¿SE PUEDE FIAR UNO DE ESTA CASCADA? Arrastra a los descendientes por
+        # diseño, y eso sólo es correcto si el parentesco es cierto. Una entrada
+        # cuyo padre se INFIRIÓ —porque nadie pasó `base_pre_path`— puede colgar
+        # de quien no le toca, y entonces la cascada barre una rama viva
+        # (BUG-0108). Se avisa ANTES de tocar nada.
+        aviso_linaje = ""
+        if cascade:
+            from art.guion import descendants as _desc
+            dudosas = [v for v in _desc(g, version)
+                       if getattr(por_v.get(v), "parent_origen", "") == "inferido"]
+            if dudosas:
+                aviso_linaje = (
+                    "\n\n⚠ **La cascada se apoya en un parentesco INFERIDO** en "
+                    + ", ".join(f"v{v} ({por_v[v].name})" for v in dudosas)
+                    + ". Esas entradas no declararon de qué modelo salían, así "
+                      "que su padre es «la última entrada del guion» y puede no "
+                      "ser el real. Compruébalo antes de darlas por muertas: si "
+                      "alguna no desciende de v"
+                    + str(version)
+                    + ", repite con `cascade=False` (BUG-0108).")
         tocadas, recolocadas = abandon(g, version, why, cascade=cascade)
         save_guion(g, gp)
         seguro = safe_ancestor(g, version)
@@ -5931,7 +6045,7 @@ def guion_abandon(guion_path: str, version: int, why: str,
                        f"vuelta atrás quede registrada como rama.")
         else:
             txt.append("No queda ningún ancestro sano: hay que rehacer desde el principio.")
-        return [TextContent(type="text", text="\n".join(txt))]
+        return [TextContent(type="text", text="\n".join(txt) + aviso_linaje)]
     except ValueError as e:
         return _err(str(e))
     except Exception:
@@ -7009,20 +7123,20 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                     decidido_por="analista+LLM")
             except Exception:
                 pass
-        try:
-            lam_fit = float(getattr(m_fit, "boxlam", 0.0) or 0.0)
-            guion_note = _record_to_guion(
-                model=m_fit, inp_path=output_path, lam=lam_fit,
-                guion_path=guion_path or _derive_guion_path(output_path, m_fit),
-                name=guion_name, decision=guion_decision,
-                rationale=guion_rationale, problems_found=guion_problems,
-                next_version=guion_next,
-                figure_b64=diag.figure_b64,
-                hist_b64=(diag.data or {}).get("hist_b64"),
-                base_pre_path=inp_path,
-            )
-        except Exception as e:
-            guion_note = f"*guion: no registrado ({type(e).__name__})*"
+        # PERSISTIR ANTES DE REGISTRAR, y el orden no es cosmético: la
+        # comprobación de la terna dentro de `_record_to_guion` (BUG-0092) mira
+        # si el `.pre` y el `.out` EXISTEN en ese momento. Registrando primero,
+        # la entrada quedaba con `out_path: null` y el aviso «(sin .pre, .out)»
+        # aunque los dos ficheros acabaran en disco un instante después.
+        #
+        # El daño medido no es cosmético: en UEM_FOOD_SERV_DS la entrada
+        # `m04_step1115` quedó marcada sin terna, el analista encadenó desde un
+        # `.pre` MÁS ANTIGUO —el que el guion sí daba por bueno— y la
+        # intervención de 11/2015 se perdió de la rama AR. Un registro que niega
+        # sus artefactos dirige el encadenado hacia atrás (BUG-0109).
+        #
+        # `confirm_and_estimate` ya lo hacía en este orden; esta se quedó con el
+        # inverso.
 
         # Persist the fitted model as .pre so the NEXT step starts from this
         # optimum (sequential construction: each estimate begins at the previous
@@ -7041,6 +7155,23 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                 pre_note = f"  |  pre-estimaciones: {new_pre_path}"
         except Exception:
             pre_note = ""
+
+        # Y AHORA el guion, con la terna ya en disco.
+        try:
+            lam_fit = float(getattr(m_fit, "boxlam", 0.0) or 0.0)
+            guion_note = _record_to_guion(
+                model=m_fit, inp_path=output_path, lam=lam_fit,
+                guion_path=guion_path or _derive_guion_path(output_path, m_fit),
+                name=guion_name, decision=guion_decision,
+                rationale=guion_rationale, problems_found=guion_problems,
+                next_version=guion_next,
+                figure_b64=diag.figure_b64,
+                hist_b64=(diag.data or {}).get("hist_b64"),
+                base_pre_path=inp_path,
+            )
+        except Exception as e:
+            guion_note = f"*guion: no registrado ({type(e).__name__})*"
+
         lam_fit = float(getattr(m_fit, "boxlam", 0.0) or 0.0)
         d_fit   = int(getattr(m_fit, "d", 0) or 0)
         D_fit   = int(getattr(m_fit, "D", 0) or 0)
