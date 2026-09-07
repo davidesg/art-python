@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "art-tseries"
-version         = "0.2.0.dev0"
+version         = "0.2.0"
 description     = "ART — A Real-Time Time-Series Analysis toolkit (Box-Jenkins-Treadway methodology) + MCP server (uses fue and pyfug)"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -32,7 +32,15 @@ dependencies = [
     # (formal_tests._fit_py). Con fue 0.1.9 el aviso nuevo no existe; con
     # 0.1.10 y el art anterior, los contrastes que reestiman con restricción
     # lanzaban RuntimeError.
-    "fue>=0.1.10",
+    # >=0.1.14: dos defectos de fue que art vigila desde sus propias pruebas y
+    # que con una versión anterior las hacen fallar —correctamente, porque el
+    # defecto está ahí—:
+    #   · 0.1.13 (fue/BUG-0014) la previsión daba efecto NULO a `compimp`,
+    #     `easter` y `trend`: tres de los once tipos deterministas. `compimp` lo
+    #     produce el nodo de intervenciones de art, así que el alcance es amplio.
+    #   · 0.1.14 (fue/BUG-0005) un óptimo con una media absurda dejaba de
+    #     reportarse como `converged=True` sin aviso.
+    "fue>=0.1.14",
     "pyfug>=2.0",
     "numpy>=1.24",
     "matplotlib>=3.7",

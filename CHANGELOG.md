@@ -4,20 +4,48 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
-## art-tseries 0.2.0.dev0 — SIN PUBLICAR
+## art-tseries 0.2.0 — 2026-09-07
 
-> **`dev0` es deliberado y no es un descuido.** El árbol lleva demasiados
-> cambios para publicarlos sin haber conducido los dos carriles —guiado y
-> autónomo— a mano. La etiqueta lo dice a simple vista: esto NO es la 0.1.12 de
-> PyPI y tampoco es todavía la 0.2.0.
->
-> Lo que sí hace este commit es quitar el `+sucio` del sello del guion. Con el
-> árbol sin cometer, `version_instrumento()` marcaba cada entrada como no
-> reproducible a partir del SHA — y eso incluía las corridas de prueba que
-> vienen ahora. El sello pasa a ser `art 0.2.0.dev0 @<sha>`, que identifica
-> exactamente el código que produjo cada número.
+El árbol pasó por `0.2.0.dev0` mientras el analista conducía los dos carriles a
+mano. Probados, se quita el sufijo: **esto es la 0.2.0**.
 
-## art-tseries 0.2.0 — 2026-09-05
+Requiere **fue >= 0.1.14**, y no por gusto: dos defectos de `fue` que `art`
+vigila desde sus propias pruebas —la previsión daba efecto nulo a `compimp`,
+`easter` y `trend`, y un óptimo con media absurda pasaba por convergido— hacen
+fallar la suite con una versión anterior. Correctamente, porque el defecto está
+ahí.
+
+### Lo que trae, además de lo de abajo
+
+**El carril guiado pregunta.** Su salida son cuatro secciones —MODELO ESTIMADO,
+DIAGNOSIS, CONCLUSIONES, DECISIÓN— y termina en «⏸ Tu decisión. No sigo hasta que
+me digas.» Las conclusiones las escribe la herramienta y no el LLM, y las
+alternativas salen de la diagnosis en el orden de Treadway, **cada una con la
+llamada exacta que la ejecuta**. El carril autónomo no cambia: allí no hay a
+quién preguntar y la salida es el registro.
+
+**La iteración existe como entidad.** Un modelo estimado cierra una iteración y
+los nodos que lo preceden son su etapa 1. Sobre el corpus, la pregunta «¿cuántas
+iteraciones tuvo este análisis?» pasa de tener tres respuestas defendibles a
+tener una: 656.
+
+**El registro se sabe incompleto.** `guion_map` reconcilia el guion con su
+carpeta y dice qué modelos se estimaron sin registrar, y qué entradas contradicen
+a su propio `.inp`.
+
+**Nunca se capa un AR sin factorizar y contrastar antes.** `ar_factorization`
+avisa cuando los módulos casi iguales podrían tomarse por un operador en B^N —la
+igualdad es la hipótesis, no el hallazgo— y `confirm_and_estimate` acepta ahora
+`p` como lista de órdenes por factor y `ar_f_freqs`, de modo que el procedimiento
+completo es transitable en vez de tener que imponer la restricción.
+
+### Al actualizar desde 0.1.12
+
+Sigue valiendo el aviso de abajo: los veredictos cambian. Y se añade que **los
+errores típicos de un modelo reestimado desde su `.pre` ya no se publican sin
+decir que no son fiables** — hasta 4,23× optimistas, sin cota conocida.
+
+## art-tseries 0.2.0 (borrador) — 2026-09-05
 
 **El nodo de intervención por episodios, que es lo que 0.1.12 declaró pendiente.**
 Con él se cierra el ciclo que aquella versión abrió, y por eso ésta es el cambio
