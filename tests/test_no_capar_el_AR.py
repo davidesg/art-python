@@ -161,3 +161,144 @@ def test_la_doctrina_da_el_procedimiento_completo():
 def test_la_doctrina_dice_que_el_BIC_no_autoriza():
     """Fue el argumento con el que se propuso: BIC mejor y t no significativas."""
     assert "Ni el BIC ni las t autorizan" in srv._INSTRUCTIONS
+
+
+# ══════ La ruta correcta EXISTE: los cinco pasos, desde la superficie ══════
+
+def _factoriza(coefs):
+    """Los factores reales y complejos conjugados de un AR estimado."""
+    raices = np.roots([1.0] + [-float(c) for c in coefs])
+    facs, usados = [], set()
+    for i, r in enumerate(raices):
+        if i in usados:
+            continue
+        if abs(r.imag) < 1e-9:
+            facs.append([float(r.real)])
+            usados.add(i)
+        else:
+            j = next(k for k in range(i + 1, len(raices)) if k not in usados
+                     and abs(raices[k] - np.conj(r)) < 1e-8)
+            usados |= {i, j}
+            facs.append([float(2 * r.real), float(-(abs(r) ** 2))])
+    return facs
+
+
+@pytest.fixture(scope="module")
+def ciclo(tmp_path_factory):
+    """Serie con un ciclo real, para que la factorización tenga qué encontrar."""
+    d = tmp_path_factory.mktemp("fact")
+    rng = np.random.default_rng(5)
+    n = 300
+    a = rng.standard_normal(n) * 0.3
+    w = np.zeros(n)
+    for i in range(6, n):
+        w[i] = 1.4 * w[i - 1] - 0.75 * w[i - 2] + 0.2 * w[i - 3] + a[i]
+    y = 100.0 + np.cumsum(w * 0.3)
+    ts = fue.TimeSeries(y.tolist(), freq=12, start=(2000, 1), name="C")
+    f = str(d / "C.inp")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _write_inp(ts, fue.Model(ts, d=1, mu=0.0, estimate_mu=False,
+                                 refactor=_RESCALE_FACTOR), f)
+    return d, f
+
+
+def _ll(f):
+    from art.outfile import lee_out
+    o = lee_out(os.path.splitext(f)[0] + ".out")
+    return o.loglik, o.npar
+
+
+def test_el_modelo_factorizado_se_puede_estimar_desde_la_superficie(ciclo):
+    """Era lo que faltaba: `p` sólo aceptaba un entero, así que el paso 3 del
+    procedimiento no existía y había que construir el `.inp` a mano."""
+    d, f = ciclo
+    ce = getattr(srv.confirm_and_estimate, "fn", srv.confirm_and_estimate)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ce(f, str(d / "fac.inp"), lam=0.0, d=1, D=0, p=[2, 1, 1], q=0,
+           n_harmonics=0, seasonal=False, estimate_mu=True,
+           guion_decision="factorizado")
+    from art.pipeline import mirar
+    _, m = mirar(str(d / "fac.inp"))
+    assert [len(x) for x in m.ar] == [2, 1, 1]
+
+
+def test_la_reparametrizacion_reproduce_la_VEROSIMILITUD(ciclo):
+    """«Exactamente identificada» significa esto y hay que comprobarlo: mismos
+    parámetros reagrupados, misma ℓ, mismos grados de libertad. Si no
+    coincidiera, el paso 3 no sería una reparametrización sino otro modelo."""
+    d, f = ciclo
+    ce = getattr(srv.confirm_and_estimate, "fn", srv.confirm_and_estimate)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ce(f, str(d / "p1.inp"), lam=0.0, d=1, D=0, p=4, q=0, n_harmonics=0,
+           seasonal=False, estimate_mu=True, guion_decision="base")
+        from art.pipeline import mirar
+        _, m1 = mirar(str(d / "p1.inp"))
+        facs = _factoriza(m1.ar[0])
+        ce(f, str(d / "p2.inp"), lam=0.0, d=1, D=0,
+           p=[len(x) for x in facs], q=0, ar_seeds=facs, n_harmonics=0,
+           seasonal=False, estimate_mu=True, guion_decision="fact")
+    l1, k1 = _ll(str(d / "p1.inp"))
+    l2, k2 = _ll(str(d / "p2.inp"))
+    assert k1 == k2, "mismos grados de libertad"
+    assert abs(l1 - l2) < 1e-4, f"ℓ difiere en {l1 - l2}: no es reparametrización"
+
+
+def test_SIN_semillas_la_reparametrizacion_NO_reproduce_la_verosimilitud(ciclo):
+    """Y por eso `ar_seeds` no es comodidad. La identidad es ALGEBRAICA; el
+    optimizador es una búsqueda local, y arrancando de semillas neutras cae en
+    otro sitio. Medido: 8 puntos de ℓ peor.
+
+    Quien haga el paso 3 sin pasar las semillas de `ar_factorization` creerá que
+    la reparametrización «empeora el ajuste», que es falso y le hará descartar
+    el camino correcto."""
+    d, f = ciclo
+    ce = getattr(srv.confirm_and_estimate, "fn", srv.confirm_and_estimate)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ce(f, str(d / "sinsem.inp"), lam=0.0, d=1, D=0, p=[2, 2], q=0,
+           n_harmonics=0, seasonal=False, estimate_mu=True,
+           guion_decision="sin semillas")
+    l_sin, _ = _ll(str(d / "sinsem.inp"))
+    l_con, _ = _ll(str(d / "p1.inp"))
+    assert l_sin < l_con - 1.0, "sin semillas debería caer en otro óptimo"
+
+
+def test_el_AR2_de_frecuencia_fija_es_estimable(ciclo):
+    """El paso 4: la versión CONTRASTABLE de «este factor es estacional».
+    Anidada en el factor libre, así que su LR con 1 g.l. la decide — en vez de
+    imponerla, que es lo único que se podía hacer antes."""
+    d, f = ciclo
+    ce = getattr(srv.confirm_and_estimate, "fn", srv.confirm_and_estimate)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        ce(f, str(d / "ffix.inp"), lam=0.0, d=1, D=0, p=[2], q=0,
+           ar_f_freqs=[2], n_harmonics=0, seasonal=False, estimate_mu=True,
+           guion_decision="ffix")
+    from art.pipeline import mirar
+    _, m = mirar(str(d / "ffix.inp"))
+    assert [int(x.freq) for x in (m.ar_f or [])] == [2]
+    l_lib, k_lib = _ll(str(d / "p2.inp"))
+    l_fij, k_fij = _ll(str(d / "ffix.inp"))
+    assert k_fij < k_lib, "restringir tiene que gastar menos parámetros"
+
+
+def test_p_entero_sigue_significando_lo_mismo(ciclo):
+    """El entero se conserva porque es el caso particular de un factor, no
+    porque haya dos formas de decirlo: por dentro sólo hay una."""
+    from art.pipeline import ordenes_ar
+    assert ordenes_ar(6) == [6]
+    assert ordenes_ar([1, 1, 2, 2]) == [1, 1, 2, 2]
+    assert ordenes_ar(0) == [] and ordenes_ar(None) == [] and ordenes_ar([]) == []
+
+
+def test_la_herramienta_documenta_las_tres_cosas():
+    from tests._fuente import fuente_de
+    ce = getattr(srv.confirm_and_estimate, "fn", srv.confirm_and_estimate)
+    src = fuente_de(ce)
+    assert "LIST OF ORDERS PER FACTOR" in src
+    assert "EXACTLY IDENTIFIED" in src
+    assert "Shin-Fuller" in src
+    assert "ar_f_freqs" in src and "NAILED" in src

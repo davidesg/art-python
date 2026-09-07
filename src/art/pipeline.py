@@ -800,13 +800,45 @@ def tiene_estructura_arma(model) -> bool:
     return bool(getattr(model, "ar_f", None) or getattr(model, "ma_f", None))
 
 
+def ordenes_ar(p) -> list:
+    """`p` como lista de órdenes por FACTOR — la forma general.
+
+    `fue` estima el AR regular como un PRODUCTO de factores, y ésa es la forma
+    en que esta escuela lee un operador: (1−φB)(1−φ'B)(1−φ₁B−φ₂B²)… Cada factor
+    tiene su amortiguamiento y su periodo, y sólo así se pueden contrastar por
+    separado.
+
+    `art` exponía únicamente `p: int`, que construye UN operador de orden p sin
+    factorizar. La consecuencia no era la falta de comodidad sino que **el paso
+    siguiente del procedimiento no existía**: para saber si un factor admite la
+    frecuencia estacional hace falta su `d ± SE` y su `periodo ± SE`, y un
+    operador sin factorizar no los da. Lo único alcanzable era imponer la
+    restricción sin contrastarla (BUG-0103).
+
+        6           un operador de orden 6      ar=[[·,·,·,·,·,·]]
+        [1,1,2,2]   cuatro factores             ar=[[·],[·],[·,·],[·,·]]
+        0 / [] / None  sin AR regular
+
+    El entero se conserva porque es el caso particular de un solo factor, no
+    porque haya dos formas de decir lo mismo: **por dentro sólo hay una**.
+    """
+    if p is None:
+        return []
+    if isinstance(p, int):
+        return [int(p)] if p > 0 else []
+    ords = [int(x) for x in p if int(x) > 0]
+    return ords
+
+
 def _make_model(ts, lam: float, d: int, D: int,
-                p: int, q: int, n_harmonics: int,
+                p, q: int, n_harmonics: int,
                 extra_itvs: list | None = None,
                 P: int = 0, Q: int = 0,
                 estimate_mu: bool = False,
                 seasonal: bool | None = None,
-                easter: bool = False):
+                easter: bool = False,
+                ar_seeds: list | None = None,
+                ar_f_freqs: list | None = None):
     """
     Build a fue.Model from SARIMA(p,d,q)(P,D,Q)_s spec.
 
@@ -881,13 +913,27 @@ def _make_model(ts, lam: float, d: int, D: int,
         resid_ref = w
     except Exception:
         resid_ref = None
-    ar_i, ma_i, ars_i, mas_i = _arma_starts(resid_ref, p, q, P, Q, freq)
+    _ords = ordenes_ar(p)
+    _p_total = sum(_ords)
+    ar_i, ma_i, ars_i, mas_i = _arma_starts(resid_ref, _p_total, q, P, Q, freq)
 
     # Workaround for fue C crash when nar=0 AND nma=0: add AR(1) phi=0 fixed.
-    if p > 0:
-        ar   = [ar_i]
-        ar_f = [[True] * p]
-    elif q == 0:
+    if _ords:
+        if len(_ords) == 1:
+            ar   = [ar_i]
+            ar_f = [[True] * _ords[0]]
+        else:
+            # VARIOS FACTORES. Las semillas de Yule-Walker son las del operador
+            # COMPLETO y no valen para los factores por separado: reparte
+            # semillas neutras y deja que el llamante pase las suyas —
+            # `ar_factorization` las calcula, que es de donde salen en la
+            # práctica.
+            if ar_seeds and len(ar_seeds) == len(_ords):
+                ar = [[float(c) for c in fac] for fac in ar_seeds]
+            else:
+                ar = [[0.0] * o for o in _ords]
+            ar_f = [[True] * o for o in _ords]
+    elif q == 0 and not ar_f_freqs:
         ar   = [[0.0]]
         ar_f = [[False]]
     else:
@@ -960,6 +1006,16 @@ def _make_model(ts, lam: float, d: int, D: int,
         itvs.append(fue.Intervention("easter", at=0, omega=[0.0],
                                      omega_free=[True]))
 
+    # LOS AR(2) DE FRECUENCIA FIJA. Un factor (1 − φ₁B − φ₂B²) con la frecuencia
+    # CLAVADA en 2πk/s: sólo φ₂ se estima y φ₁ = 2·cos(2πk/s)·√(−φ₂) se deriva.
+    #
+    # Es la versión CONTRASTABLE de «este factor es estacional»: está anidada en
+    # el factor libre, así que la razón de verosimilitudes con 1 g.l. la decide.
+    # Sin esto, la única forma de afirmar que un factor es estacional era
+    # imponerlo (BUG-0103).
+    ar_ff = [fue.FixedFreqFactor(freq=int(k), coef=-0.5, free=True)
+             for k in (ar_f_freqs or [])]
+
     return fue.Model(
         ts,
         d=d, D=D, boxlam=lam,
@@ -967,6 +1023,7 @@ def _make_model(ts, lam: float, d: int, D: int,
         ma=ma, ma_free=ma_f,
         ar_s=ar_s_val, ar_s_free=ar_sf_val if ar_sf_val else None,
         ma_s=ma_s_val, ma_s_free=ma_sf_val if ma_sf_val else None,
+        ar_f=ar_ff or None,
         interventions=itvs,
         ifadf=[0] * (freq // 2 + 1),
         mu=_mu_seed(ts, lam, d, D, estimate_mu, _RESCALE_FACTOR), estimate_mu=estimate_mu,

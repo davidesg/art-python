@@ -5174,7 +5174,9 @@ def _record_to_guion(
 @mcp.tool()
 def confirm_and_estimate(inp_path: str, output_path: str,
                           lam: float = 0.0, d: int = 1, D: int = 0,
-                          p: int = 0, q: int = 1,
+                          p=0, q: int = 1,
+                          ar_seeds: list | None = None,
+                          ar_f_freqs: list | None = None,
                           n_harmonics: int = 5,
                           P: int = 0, Q: int = 0,
                           base_pre_path: str = "",
@@ -5212,7 +5214,37 @@ def confirm_and_estimate(inp_path: str, output_path: str,
     lam             : Box-Cox lambda (0.0=log, 1.0=identity)
     d               : regular differencing order
     D               : seasonal differencing order (0=B1 harmonics, 1=B2 multiplicative)
-    p               : regular AR order
+    p               : regular AR order — an INT or a LIST OF ORDERS PER FACTOR.
+                      `fue` estimates the regular AR as a PRODUCT of factors, and
+                      that is how this school reads an operator: each factor has
+                      its own damping and period.
+
+                          6          one operator of order 6
+                          [1,1,2,2]  four factors — the FACTORISED model
+
+                      The factorised form is an EXACTLY IDENTIFIED
+                      reparametrisation of the same model: same likelihood, same
+                      degrees of freedom. Its point is not a better fit — it is
+                      that each factor gets its `d ± SE` and `period ± SE`,
+                      without which you cannot test whether a factor admits the
+                      seasonal frequency.
+
+                      **Never replace an AR(p) by a capped or sparse operator on
+                      the strength of similar moduli.** That IMPOSES p−1
+                      untested restrictions and forecloses Shin-Fuller. Estimate
+                      the full operator, factorise it, then test.
+    ar_seeds        : starting values per factor, e.g. [[0.78],[-0.77],[.9,-.6]].
+                      `ar_factorization` computes them; pass them when splitting
+                      an estimated operator into factors so the fit starts at the
+                      optimum it already found. Ignored unless `p` is a list of
+                      matching length.
+    ar_f_freqs      : frequencies k of FIXED-FREQUENCY AR(2) factors, e.g. [4,2]
+                      for s=12. Each is (1 − φ₁B − φ₂B²) with the frequency
+                      NAILED to 2πk/s: only φ₂ is estimated and φ₁ is derived.
+                      This is the CONTRASTABLE version of «this factor is
+                      seasonal» — nested in the free factor, so a likelihood
+                      ratio with 1 d.f. decides it. Without it the only way to
+                      claim a factor is seasonal was to impose it.
     q               : regular MA order
     n_harmonics     : harmonic pairs cos/sin (D=0 fresh only; ignored when
                       base_pre_path is given — harmonics come from the .pre)
@@ -5314,7 +5346,8 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             m_fresh = _make_model(ts, lam=lam, d=d, D=D, p=p, q=q,
                                   n_harmonics=n_harmonics, P=P, Q=Q,
                                   estimate_mu=estimate_mu, seasonal=seasonal,
-                                  easter=easter)
+                                  easter=easter, ar_seeds=ar_seeds,
+                                  ar_f_freqs=ar_f_freqs)
             _write_inp(ts, m_fresh, output_path)
 
         _, m = _load_fitted(output_path)

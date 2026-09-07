@@ -1,11 +1,11 @@
 ---
 id: BUG-0103
 title: El modelo FACTORIZADO que ar_factorization prescribe no se puede estimar desde la superficie MCP — y la salida que invita a factorizar no advierte que leer los módulos iguales como un operador en B^s impone 5 restricciones sin contrastar
-status: open
+status: fixed
 severity: high
 component: mcp-tools
 found_in: 0.2.0.dev0
-fixed_in: 
+fixed_in: 0.2.0.dev0
 reported: 2026-09-06
 reporter: David / sesión UEM_HCPI_0219 — nodo de órdenes sobre m02
 tags:
@@ -229,3 +229,57 @@ a mano entra por `estimate_and_diagnose` y su linaje hay que declararlo.
 
 El informe sigue `open` por eso: el aviso evita el error, pero no hace cómodo el
 acierto.
+
+
+---
+
+## Cierre (2026-09-07): la ruta existe
+
+Aplicados los puntos **1 y 2**. El procedimiento de cinco pasos ya es transitable
+de extremo a extremo desde la superficie MCP.
+
+**`p` acepta un entero o una LISTA DE ÓRDENES POR FACTOR** — `6` sigue siendo un
+operador de orden 6 y `[1,1,2,2]` son cuatro factores. El entero se conserva
+porque es el caso particular de un solo factor, **no porque haya dos formas de
+decir lo mismo**: `ordenes_ar()` normaliza y por dentro sólo hay una.
+
+**`ar_f_freqs`** expone los AR(2) de frecuencia fija: `(1 − φ₁B − φ₂B²)` con la
+frecuencia clavada en 2πk/s, φ₂ estimado y φ₁ derivado. Es la versión
+**contrastable** de «este factor es estacional» — anidada en el factor libre, de
+modo que la razón de verosimilitudes con 1 g.l. la decide en vez de imponerla.
+
+### Verificado: la reparametrización reproduce la verosimilitud
+
+    PASO 1  AR(4) completo         ℓ=290.3229  npar=5
+    PASO 2  ar_factorization  →  [[0.0461,−0.3253], [0.6455], [0.7049]]
+    PASO 3  factorizado [2,1,1]    ℓ=290.3229  npar=5    Δℓ = −0.00000
+
+Al último dígito, que es lo que «exactamente identificada» significa. Si no
+coincidiera, el paso 3 no sería una reparametrización sino otro modelo.
+
+### Y una cosa que la medición enseñó: `ar_seeds` NO es comodidad
+
+Sin pasar las semillas de `ar_factorization`, el mismo modelo factorizado sale
+**8 puntos de ℓ peor**:
+
+    factorizado SIN semillas       ℓ=282.2871   ← otro óptimo
+    factorizado CON semillas       ℓ=290.3229   ← el mismo de siempre
+
+La identidad es **algebraica**; el optimizador es una búsqueda **local**. Quien
+haga el paso 3 arrancando de semillas neutras verá que «la reparametrización
+empeora el ajuste» —lo cual es falso— y descartará el camino correcto por la
+razón equivocada. Está fijado en una prueba, con esa explicación.
+
+### Lo que este arreglo cambia de fondo
+
+Antes: el asistente veía módulos parecidos, **no podía** estimar el factorizado, y
+lo único que sí podía hacer era imponer la restricción. Los dos defectos se
+componían.
+
+Ahora las dos ramas existen, y el aviso de `ar_factorization` deja de ser un
+regaño para ser una ruta: *no impongas — estima el factorizado, que cuesta una
+llamada y es exactamente identificado*.
+
+Queda pendiente lo que esto ya no obliga: con el modelo factorizado alcanzable
+desde la superficie, los `.inp` construidos a mano dejan de ser el camino normal
+—y con ellos los padres inventados de BUG-0108.
