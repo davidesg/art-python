@@ -167,3 +167,65 @@ regresión del enunciado del aviso.
 
 Caso de referencia: `cases/UEM_HCPI_0219` — m02 y el nodo n4 del guion, que
 registra la propuesta rechazada con su demostración.
+
+
+---
+
+## Primer paso aplicado (2026-09-07): el aviso y la doctrina
+
+De los tres puntos del arreglo se aplica el **3**, que el informe listaba último
+y resulta ser el primero: mientras la ruta correcta no exista (puntos 1 y 2), lo
+único que se puede hacer es **impedir que la incorrecta parezca correcta**.
+
+### El aviso, con su umbral medido
+
+`ar_factorization` avisa cuando la dispersión relativa de los módulos cae por
+debajo de `UMBRAL_MODULOS_PARECIDOS = 0.20`, diciendo tres cosas: que ése es el
+aspecto de un operador en B^N, que **la igualdad es la hipótesis y no el
+hallazgo**, y cuántas restricciones se impondrían sin contrastar.
+
+El umbral está medido sobre 12 réplicas de cada hipótesis (n=300, AR(6)):
+
+    el proceso ES (1−Θ·B⁶)      mediana  7.8%   rango  2.8%–26.0%
+    amortiguamientos LIBRES     mediana 57.3%   rango 22.8%–83.7%
+
+Se solapan entre el 23% y el 26%, así que **ningún umbral separa limpiamente** —
+y no hace falta que lo haga, porque esto avisa, no dictamina. La asimetría decide
+dónde ponerlo: un falso positivo cuesta un párrafo que el analista salta; un
+falso negativo cuesta imponer N−1 restricciones sin contrastar.
+
+Comprobado: **7 de 8** réplicas de un proceso B⁶ disparan el aviso, **0 de 8**
+con amortiguamientos libres. El caso real que lo motivó —módulos 1.2684 a
+1.2934— está en el 1.9%, muy dentro.
+
+La prueba fija **la tasa medida y no una absoluta**: exigir 8 de 8 sería elegir
+las semillas que funcionan y llamarlo garantía.
+
+### La doctrina, donde el asistente la lee
+
+El asistente propuso capar **creyendo que hacía lo correcto**, y no estaba
+escrito en ninguna parte que no se hace. `_INSTRUCTIONS` lleva ahora la regla con
+su porqué, y sobre todo con **el procedimiento completo**: prohibir sin dar la
+ruta no sirve de nada, porque entonces impone igual —es lo único que puede
+hacer—.
+
+Incluye la razón que el informe no daba y que el analista sí:
+
+> **Capar de entrada elimina la posibilidad de contrastar Shin-Fuller.** La ruta
+> MEG/DCD_f necesita factores con su `d ± SE` y su `periodo ± SE`, y un operador
+> ya restringido no los tiene. Un AR(6) puede ser perfectamente un AR(1)×AR(5)
+> con amortiguamientos distintos, y capando eso deja de ser alcanzable.
+
+Y que ni el BIC ni las t autorizan a saltárselo, que fue el argumento con el que
+se propuso.
+
+### Lo que sigue abierto
+
+Los puntos **1 y 2**: `ar_orders` y `ar_f` en la superficie MCP. Hasta que
+existan, los pasos 3 y 4 del procedimiento se construyen a mano —como consta en
+el propio guion de UEM_HCPI_0219 v5, «construido a mano porque la superficie MCP
+no expone operadores AR factorizados»— y eso compone con BUG-0108: lo construido
+a mano entra por `estimate_and_diagnose` y su linaje hay que declararlo.
+
+El informe sigue `open` por eso: el aviso evita el error, pero no hace cómodo el
+acierto.

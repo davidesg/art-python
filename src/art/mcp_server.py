@@ -261,6 +261,47 @@ y gráfico. En guiado el analista SOLO ve lo que muestras; sin la ecuación no
 decide. Esquema (tesis): estimar → ECUACIÓN (verbatim) → gráfico → decisión.
 
 ══════════════════════════════════════════════════════
+NUNCA SE CAPA UN AR SIN FACTORIZAR Y CONTRASTAR ANTES
+══════════════════════════════════════════════════════
+
+Si la PACF enseña un pico en el retardo 6, la respuesta NO es estimar
+(1 − φ₆B⁶) ni un AR disperso (1 − φ₁B − φ₆B⁶). Es estimar el **AR(6) COMPLETO**
+y mirar después qué se sostiene.
+
+POR QUÉ, y no es cuestión de gusto:
+
+  · Un operador en B^N impone que las N raíces tengan **el mismo módulo** y las
+    frecuencias **clavadas** en 2πk/N. Eso son N−1 restricciones; el disperso
+    (1 − φ₁B − φ_NB^N) son N−2. **Ninguna contrastada.**
+  · Un AR(6) puede ser perfectamente un AR(1)×AR(5) con amortiguamientos
+    DISTINTOS. Capando de entrada eso deja de ser alcanzable.
+  · Y lo peor: **capar de entrada elimina la posibilidad de contrastar
+    Shin-Fuller**. La ruta MEG/DCD_f necesita factores con su `d ± SE` y su
+    `periodo ± SE`, y un operador ya restringido no los tiene.
+
+QUE UNOS MÓDULOS SALGAN CASI IGUALES ES LA HIPÓTESIS, NO EL HALLAZGO. Es
+exactamente el aspecto que tendría un operador en B^N — por eso engaña.
+`ar_factorization` avisa cuando ocurre.
+
+Ni el BIC ni las t autorizan a saltárselo: comprar parsimonia imponiendo
+restricciones sin contrastar da un modelo estimable, plausible y más simple, que
+es la clase de error que sobrevive.
+
+EL PROCEDIMIENTO, en orden:
+
+  1. estimar el AR(p) COMPLETO, sin restringir → base-line;
+  2. `ar_factorization` sobre él → factores con d y periodo;
+  3. estimar el modelo FACTORIZADO (reparametrización exactamente identificada:
+     misma verosimilitud, mismos grados de libertad) → cada factor con su ±SE;
+  4. restringir a frecuencia fija el factor cuyo periodo lo admita, y
+     contrastarlo por **razón de verosimilitudes**, 1 g.l. por factor;
+  5. MEG/DCD_f sobre los que pasen.
+
+Los pasos 3 y 4 se construyen HOY a mano, porque la superficie no expone los
+operadores factorizados (art/bugs/BUG-0103). Que sea incómodo no autoriza a
+saltárselos: es la diferencia entre contrastar una restricción e imponerla.
+
+══════════════════════════════════════════════════════
 EN GUIADO, EL QUE DECIDE ES EL ANALISTA — REGLA DURA
 ══════════════════════════════════════════════════════
 
@@ -1067,6 +1108,26 @@ def _reformulacion_desde(diag, guion_next: str = "") -> str:
     if guion_next.strip():
         partes.append(f"**Siguiente versión declarada:** {guion_next.strip()}")
     return "\n\n".join(partes)
+
+
+#: Dispersión relativa de los módulos por debajo de la cual la factorización
+#: TIENE EL ASPECTO de un operador en B^N y conviene avisarlo.
+#:
+#: Medido sobre 12 réplicas de cada hipótesis, n=300, AR(6):
+#:
+#:     el proceso ES (1−Θ·B⁶)      mediana  7.8%   rango  2.8%–26.0%
+#:     amortiguamientos LIBRES     mediana 57.3%   rango 22.8%–83.7%
+#:
+#: Las dos se solapan entre el 23% y el 26%, así que ningún umbral separa
+#: limpiamente — y no hace falta que lo haga, porque **esto no dictamina, avisa**.
+#: La asimetría decide dónde ponerlo: un falso positivo cuesta un párrafo que el
+#: analista salta; un falso negativo cuesta imponer N−1 restricciones sin
+#: contrastar, que es el error que el aviso existe para evitar. Por eso va
+#: generoso.
+#:
+#: El caso real que lo motivó —UEM_HCPI_0219, módulos 1.2684 a 1.2934— está en
+#: el 1.9%: muy dentro.
+UMBRAL_MODULOS_PARECIDOS = 0.20
 
 
 def umbral_extremo(n: int, prob: float = 0.90) -> float:
@@ -3029,6 +3090,57 @@ def ar_factorization(inp_path: str, sper: int = 0) -> list:
                 fcov = cov_full[np.ix_(coef_idx, coef_idx)]
             fac = factor_ar(coefs, sper=s, cov=fcov)
             blocks.append(f"AR factor #{k} (order {len(coefs)}):\n" + describe(fac))
+        # ¿PARECE ESTO UN OPERADOR EN B^s? Y si lo parece, decirlo con la
+        # advertencia de que PARECERLO NO ES SERLO.
+        #
+        # Un operador (1 − Θ·B^N) tiene sus N raíces con el MISMO módulo y en
+        # ángulos CLAVADOS a 2πk/N. Por tanto unos módulos casi iguales en la
+        # factorización libre son exactamente su firma — y ahí está la trampa:
+        # es la firma de la HIPÓTESIS, no la prueba de que se cumpla. Leerlos
+        # así IMPONE la restricción en vez de contrastarla.
+        #
+        # Pasó en UEM_HCPI_0219 y quedó registrado en el nodo v4 del guion: el
+        # asistente propuso sustituir un AR(6) por (1 − φ₁B − φ₆B⁶) porque los
+        # seis módulos salían entre 1.2684 y 1.2934, y hubo que corregirlo a
+        # mano. El propio caso da la medida de lo que se estaba imponiendo: la
+        # factorización LIBRE daba periodos 3.03 y 6.67 frente a los 3.00 y 6.00
+        # que el operador en B⁶ fija por decreto — un 11.1% de desvío en el
+        # segundo (BUG-0103).
+        try:
+            mods = []
+            for k, factor in enumerate(factors):
+                r = np.roots([1.0] + [-float(c) for c in factor])
+                mods.extend(float(abs(x)) for x in r if abs(x) > 1e-12)
+            if len(mods) >= 4:
+                disp = (max(mods) - min(mods)) / max(np.mean(mods), 1e-12)
+                if disp < UMBRAL_MODULOS_PARECIDOS:
+                    N = len(mods)
+                    blocks.insert(0,
+                        f"⚠ **Los {N} módulos son casi iguales** "
+                        f"({min(mods):.4f}–{max(mods):.4f}, dispersión relativa "
+                        f"{disp:.1%}), que es **exactamente el aspecto que "
+                        f"tendría un operador en B^{N}**.\n\n"
+                        f"**Eso es la hipótesis, no el hallazgo.** Un "
+                        f"(1 − Θ·B^{N}) impone un amortiguamiento ÚNICO común a "
+                        f"todas las frecuencias y las clava en 2πk/{N}; aquí las "
+                        f"frecuencias están LIBRES y pueden desviarse. Sustituir "
+                        f"el operador completo por uno en B^{N} son "
+                        f"{N - 1} restricciones, y por uno disperso "
+                        f"(1 − φ₁B − φ_{N}B^{N}) son {N - 2} — **ninguna "
+                        f"contrastada**.\n\n"
+                        f"**No lo impongas: contrástalo.** Estima primero el "
+                        f"modelo FACTORIZADO —misma verosimilitud, mismos grados "
+                        f"de libertad, reparametrización exactamente "
+                        f"identificada— para que cada factor reciba su `d ± SE` y "
+                        f"su `periodo ± SE`; con eso se ve si los "
+                        f"amortiguamientos son de verdad iguales y si los "
+                        f"periodos admiten la frecuencia estacional. La "
+                        f"restricción se contrasta después, por razón de "
+                        f"verosimilitudes y con sus grados de libertad "
+                        f"(art/bugs/BUG-0103).")
+        except Exception as _e:                              # pragma: no cover
+            _warn("dispersión de módulos en ar_factorization", _e)
+
         if _cov_degenerada:
             blocks.insert(0, "⚠ **Sin errores típicos** (BUG-0027): "
                              + AVISO_COV_DEGENERADA
