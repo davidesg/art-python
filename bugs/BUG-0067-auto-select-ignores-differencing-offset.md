@@ -5,7 +5,7 @@ status: fixed
 severity: medium
 component: mcp-tools
 found_in: 0.1.12 (unreleased)
-fixed_in:
+fixed_in: 0.1.12
 reported: 2026-09-01
 reporter: David / benchmark guiado ES_CORE — D=1 (∇∇₁₂), auto-select erróneo
 tags:

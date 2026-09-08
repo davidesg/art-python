@@ -1,7 +1,7 @@
 ---
 id: BUG-0011
 title: dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so
-status: partially fixed — pair reported; the two calibration items remain
+status: in-progress
 severity: medium
 component: formal-tests
 found_in: 0.1.4
@@ -406,3 +406,26 @@ None proposed — diagnosis required first.
 Once the cause is known: assert `d confirmed` on `IPC_ES_m00.pre` and `IPC_ES_m10.pre`,
 whose integration order is established independently (Shin-Fuller Φ̂₁ᵤ=37.5, ADF/KPSS
 consensus at d=1).
+
+
+---
+
+## Nota sobre el estado (2026-09-08)
+
+El encabezado decía `status: partially fixed — pair reported; the two
+calibration items remain`. **El matiz era correcto y el campo no lo admitía**:
+`status` tiene vocabulario cerrado, y quien lo escribió tenía algo que decir sin
+sitio donde ponerlo, así que lo escribió al lado y rompió el campo — el índice
+llevaba tiempo en rojo por esto y por otros cinco (BUG-0117).
+
+Pasa a `in-progress`, que es lo que significa, y el matiz va aquí entero:
+
+**Hecho:** el par confirmatorio se reporta.
+
+**Falta:** los dos elementos de calibración. Mientras no estén, el DCD de
+sobrediferenciación en f=0 sigue apoyándose en la ley nula desnuda y en la
+verosimilitud de frontera de FUE, que es lo que este informe dice que están mal
+ahí — y el propio artículo lo dice.
+
+Lo que NO se ha hecho es recortar el estado a `fixed`: sería declarar cerrado lo
+que no lo está, que es peor que un índice en rojo.

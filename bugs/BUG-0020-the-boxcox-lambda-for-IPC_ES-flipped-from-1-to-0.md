@@ -1,8 +1,8 @@
 ---
 id: BUG-0020
 title: art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved
-status: closed — not a defect
-severity: none (el defecto estaba en el pin)
+status: wontfix
+severity: low
 component: identification
 found_in: working copy (posterior a art-tseries 0.1.11)
 reported: 2026-08-15
@@ -128,3 +128,23 @@ autonomous path is not left with nothing, not because the name is good evidence�
 y deja abierta la puerta del `domain=` explícito. Con `IPC_ES` acierta; una serie
 llamada `serie3` no recibiría la regla, y el mismo IPC saldría en niveles o en
 logs según de qué lado del estadístico cayera.
+
+
+---
+
+## Nota sobre el estado (2026-09-08)
+
+El encabezado decía `status: closed — not a defect` y `severity: none (el
+defecto estaba en el pin)`. Los dos campos tienen vocabulario cerrado y los dos
+llevaban prosa, así que el índice los daba por inválidos (BUG-0117).
+
+Pasa a **`wontfix`**, que es el estado que el vocabulario reserva justamente para
+esto: se investigó, se entendió, y no hay nada que arreglar en `art`.
+
+Y `severity: low` en vez de `none`, que no existe en el vocabulario. La
+severidad de un informe que resultó no ser un defecto es convencional; lo que
+importa es el estado, y ése ahora dice la verdad.
+
+**Lo que se investigó y por qué se cierra:** el cambio de λ no era una regresión
+de `art` sino consecuencia del pin de la batería de `drtran`. La conclusión no
+cambia; sólo el campo que la declara.

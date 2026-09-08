@@ -1,11 +1,11 @@
 ---
 id: BUG-0117
 title: El índice de defectos lleva tiempo en rojo — 7 errores en 6 informes, y ninguna prueba lo miraba
-status: open
+status: fixed
 severity: medium
 component: bugs
 found_in: 0.1.12
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-08
 reporter: David / sesión de Windows — observación (f) del informe de defectos
 tags:
@@ -82,3 +82,55 @@ sin motor y sin datos. Exit 1 mientras haya informes inválidos.
    matiz movido al cuerpo, donde cabe entero y donde se lee.
 3. **Una prueba en la suite**, como la de `fue`. Sin ella esto vuelve: el
    validador existe desde hace tiempo y no impidió que se acumularan seis.
+
+
+---
+
+## Cierre (2026-09-08)
+
+**119 informes, todos válidos.**
+
+### Los cuatro de `fixed_in` vacío — la versión sale del historial
+
+No se conjeturó: cada informe se cerró en un commit, y ese commit tiene su
+`pyproject.toml`.
+
+    0024, 0066, 0067   commit 3535010 (2026-09-02)   → 0.1.12
+    0088               ya lo tenía escrito           → 0.1.12
+
+El 0088 no necesitaba dato nuevo: lo tenía **escrito y anulado** por un
+`fixed_in:` vacío en la línea de abajo. El YAML se queda con la última, así que
+bastó quitar la repetición.
+
+### Los dos de prosa — el matiz se movió, no se recortó
+
+`«partially fixed — pair reported; the two calibration items remain»` y
+`«closed — not a defect»` no eran descuidos: eran **matices reales que el
+vocabulario no admite**.
+
+Recortarlos a `fixed` habría perdido información y, peor, habría mentido: el
+0011 **no está** enteramente arreglado. Así que el campo se queda con el término
+del vocabulario —`in-progress` y `wontfix`— y el matiz va al cuerpo, donde cabe
+entero y donde se lee:
+
+  · **0011 → `in-progress`**, con lo hecho y lo que falta dicho por extenso.
+  · **0020 → `wontfix`**, que es exactamente el estado que el vocabulario
+    reserva para «se investigó, se entendió, y no hay nada que arreglar».
+    `severity: none` no existe; pasa a `low`, que es convencional — lo que
+    importa es el estado.
+
+### Y la prueba, que es lo que faltaba de verdad
+
+`tests/test_indice_de_defectos.py`. El validador existía desde hace tiempo y no
+impidió que se acumularan seis informes rotos, porque **nadie lo corría**. Ahora
+lo corre la suite, con cinco comprobaciones:
+
+  · todos los informes válidos;
+  · ningún identificador repetido (el choque de los dos BUG-0102);
+  · `fixed` implica `fixed_in`;
+  · **ninguna clave duplicada en el encabezado** — el caso del 0088, que
+    `problems()` NO ve, porque para cuando mira ya sólo queda una;
+  · ningún campo de vocabulario con prosa.
+
+La cuarta es la que más me interesa: era un fallo **invisible al propio
+validador**, y ahora no lo es.

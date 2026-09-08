@@ -5,7 +5,7 @@ status: fixed
 severity: medium
 component: formal-tests
 found_in: 0.1.11
-fixed_in: 
+fixed_in: 0.1.12
 reported: 2026-08-25
 reporter: David / réplica TFM Bolivia
 tags:

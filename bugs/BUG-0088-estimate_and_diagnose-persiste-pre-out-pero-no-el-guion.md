@@ -6,7 +6,6 @@ severity: medium
 component: guion
 found_in: 0.1.12
 fixed_in: 0.1.12
-fixed_in:
 reported: 2026-09-04
 reporter: David / sesión FOOD_UEM — escalera Ucrania
 tags: [guion, mcp_server, estimate_and_diagnose, confirm_and_estimate, documentacion]

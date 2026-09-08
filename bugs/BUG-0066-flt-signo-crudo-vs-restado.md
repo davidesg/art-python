@@ -5,7 +5,7 @@ status: fixed
 severity: medium
 component: describe
 found_in: 0.1.12 (unreleased)
-fixed_in:
+fixed_in: 0.1.12
 reported: 2026-09-01
 reporter: David / benchmark guiado ES_CORE — FLT (ω₀−ω₁B) Step 9/2012
 tags:
