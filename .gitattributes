@@ -1,0 +1,26 @@
+# FINALES DE LÍNEA — normalizados a LF en el repositorio.
+#
+# Sin esto, editar un fichero desde Windows a través del Dropbox compartido lo
+# devuelve en CRLF, y `git diff` deja de servir: `mcp_server.py` volvió una vez
+# con 17.621 líneas cambiadas sobre un fichero de 7.500, de las cuales 86 eran
+# el cambio real. Un diff así no se puede revisar, y lo que no se puede revisar
+# se comitea a ciegas.
+#
+# `text=auto` guarda LF en el repositorio y deja que cada copia de trabajo use
+# lo que le corresponda. Es la convención de git y no obliga a nadie a cambiar
+# de editor.
+* text=auto
+
+# Binarios: que git no toque un solo byte.
+*.png binary
+*.pdf binary
+*.eps binary
+*.so  binary
+*.xlsx binary
+
+# Los ficheros del contrato son TEXTO y se leen en las dos plataformas. Se
+# normalizan como todo lo demás: el motor los lee con newline universal, así
+# que el final de línea no cambia ni un número.
+*.inp text
+*.pre text
+*.out text

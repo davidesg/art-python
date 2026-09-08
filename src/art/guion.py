@@ -745,10 +745,22 @@ def _resuelve_ruta(ruta: str, base: str) -> str:
     Sólo se reescribe cuando el camino guardado NO existe y el resuelto SÍ, así
     que no puede robarle el sitio a un fichero que esté donde dice.
     """
-    if not ruta or os.path.isabs(ruta) or os.path.exists(ruta):
+    # LO QUE DECIDE ES SI EXISTE, no si PARECE absoluto.
+    #
+    # Aquí había un `os.path.isabs(ruta)` que cortocircuitaba, y estaba mal en
+    # el caso que más importa: **el mismo Dropbox abierto en otro sistema**.
+    # `ntpath.isabs("/home/david/…")` es True en Windows, así que un guion
+    # escrito en Linux —y desde BUG-0098 sus caminos son absolutos— llegaba
+    # aquí, se declaraba «absoluto», se devolvía tal cual y quedaba muerto: el
+    # rescate no llegaba a probarse.
+    #
+    # El basename contra la carpeta del guion resuelve ese caso, que es
+    # exactamente para lo que existe esta función: la evidencia viaja CON el
+    # guion, en su misma carpeta, se llame como se llame el punto de montaje.
+    if not ruta or os.path.exists(ruta):
         return ruta
     for cand in (os.path.join(base, ruta),
-                 os.path.join(base, os.path.basename(ruta))):
+                 os.path.join(base, os.path.basename(ruta.replace("\\", "/")))):
         if os.path.exists(cand):
             return os.path.abspath(cand)
     return ruta
@@ -1006,10 +1018,46 @@ def version_instrumento() -> str:
             v = "?"
 
     def _git(*args, tiempo=3):
+        """Consulta a git, best-effort y ACOTADA DE VERDAD.
+
+        BUG-0114. Esto era `subprocess.run(..., timeout=3)`, y el `timeout` NO
+        acota: cuando salta, `run` mata al hijo y vuelve a llamar a
+        `communicate()` **sin límite** para vaciar las tuberías. Si git dejó un
+        nieto vivo con el extremo de escritura abierto —un ayudante de
+        credenciales, un paginador—, ese segundo `communicate()` no vuelve
+        jamás. Bajo servidor MCP eso cuelga la herramienta ENTERA después de
+        haber hecho todo el trabajo: el `.inp`, el `.out` y el `.pre` quedan
+        escritos y la respuesta no sale nunca.
+
+        Además el hijo heredaba el `stdin` del proceso, que bajo un servidor
+        stdio es la tubería del protocolo y no se cierra nunca: cualquier git
+        que decida leer de ahí se queda esperando.
+
+        La versión de aquí: `stdin` a DEVNULL, git en modo no interactivo, y
+        tras el plazo se mata y se ABANDONA la tubería en vez de volver a
+        esperarla. Saber la versión del instrumento es un adorno del registro;
+        no puede costar la sesión.
+        """
+        pr = None
         try:
-            return subprocess.run(["git", "-C", raiz, *args], capture_output=True,
-                                  text=True, timeout=tiempo).stdout.strip()
+            pr = subprocess.Popen(
+                ["git", "-C", raiz, *args],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0",
+                     "GIT_OPTIONAL_LOCKS": "0", "GIT_PAGER": "cat"},
+            )
+            salida, _ = pr.communicate(timeout=tiempo)
+            return (salida or "").strip()
         except Exception:
+            if pr is not None:
+                try:
+                    pr.kill()
+                    if pr.stdout is not None:
+                        pr.stdout.close()
+                except Exception:
+                    pass
             return ""
 
     sha = _git("rev-parse", "--short", "HEAD")

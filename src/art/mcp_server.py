@@ -759,6 +759,15 @@ _FIGURAS: dict[str, str] = {}
 _FIGURAS_TOPE = 256
 
 
+#: True cuando el módulo corre COMO SERVIDOR MCP — lo pone `main()`, que es el
+#: único sitio por donde se entra en ese modo. Existe porque `_show_fig` tenía
+#: que distinguir tres contextos y sólo conocía dos: la suite y el apagado
+#: explícito. El tercero es éste, y ahí la ventana del escritorio no debe
+#: abrirse (BUG-0111). Importar el módulo como biblioteca lo deja en False, que
+#: es lo correcto: un guion o un cuaderno sí quieren ver la figura.
+_BAJO_SERVIDOR = False
+
+
 def _huella_figura(b64: str) -> str:
     import hashlib
     return hashlib.sha1(b64.encode("ascii", "ignore")).hexdigest()[:12]
@@ -788,7 +797,19 @@ def _result(desc) -> list:
     if desc.figure_b64:
         _ruta = _FIGURAS.get(_huella_figura(desc.figure_b64), "")
         if _ruta:
-            txt += _nota_figura(_ruta)
+            # LA RUTA VA ANTES DE LA MARCA DE FIN DE TURNO, no detrás.
+            #
+            # Dos arreglos correctos que chocaban: BUG-0113 exige que la ruta se
+            # DIGA —sin ella, con el visor apagado y un cliente que no renderice,
+            # el analista se queda sin nada—, y BUG-0094 exige que la salida
+            # guiada TERMINE en la pregunta, porque esa marca es lo que hace
+            # comprobable que la herramienta para y no decide por él.
+            #
+            # Añadirla al final rompía el segundo: la última línea pasaba a ser
+            # una nota de fichero, y el turno dejaba de cerrar donde debía. La
+            # ruta es parte de la evidencia, así que su sitio está DENTRO del
+            # sobre, delante de la decisión.
+            txt = _con_nota_figura(txt, _ruta)
     items = [TextContent(type="text", text=txt)]
     if desc.figure_b64:
         items.append(ImageContent(type="image", data=desc.figure_b64, mimeType="image/png"))
@@ -934,10 +955,19 @@ def _show_fig(b64: str | None, label: str = "art") -> str:
     # guarda, la suite abre una ventana por cada figura que genera: son cientos,
     # y las de prueba van en blanco. El fichero se escribe igual, que es lo que
     # una prueba necesita comprobar.
+    #
+    # BUG-0111: y TAMPOCO bajo servidor MCP, que era el tercer contexto que
+    # faltaba en esta guarda. Ahí la figura ya viaja como ImageContent —la
+    # ventana es un extra, según dice el docstring de `_abrir_visor`—, así que
+    # pedirle al shell que la abra no aporta nada, y en algunos anfitriones no
+    # es inocuo: el de Windows intercepta la petición y la convierte en un
+    # diálogo de «¿adjunto este fichero a la sesión?» que saca al analista del
+    # panel en el que trabaja, una vez por figura.
     global _ULTIMO_VISOR_ERROR
     _ULTIMO_VISOR_ERROR = ""
     import sys
-    if os.environ.get("ART_NO_VIEWER") or "pytest" in sys.modules:
+    if (_BAJO_SERVIDOR or os.environ.get("ART_NO_VIEWER")
+            or "pytest" in sys.modules):
         return path
 
     _ULTIMO_VISOR_ERROR = _abrir_visor(path)
@@ -991,6 +1021,31 @@ def _abrir_visor(path: str) -> str:
 
 
 _ULTIMO_VISOR_ERROR: str = ""
+
+
+def _con_nota_figura(texto: str, ruta: str) -> str:
+    """Añade la nota de la figura DONDE corresponde, que no es siempre al final.
+
+    Dos arreglos correctos chocaban aquí: BUG-0113 exige que la ruta se DIGA
+    —sin ella, con el visor apagado bajo servidor y un cliente que no renderice,
+    el analista se queda sin figura, sin ventana y sin ruta— y BUG-0094 exige
+    que la salida GUIADA termine en la marca de decisión, porque esa marca es lo
+    que hace comprobable que la herramienta para en vez de decidir por él.
+
+    Pegar la nota al final rompía el segundo: la última línea pasaba a ser un
+    nombre de fichero y el turno dejaba de cerrar donde debía. La ruta es
+    evidencia, así que su sitio está DENTRO del sobre, delante de la decisión.
+
+    Estaba escrito a mano en tres sitios y cada uno lo hacía a su manera, que es
+    como se llegó al choque. Aquí hay uno.
+    """
+    if not ruta:
+        return texto
+    nota = _nota_figura(ruta)
+    i = texto.rfind(FIN_DE_TURNO_GUIADO)
+    if i < 0:
+        return texto + nota
+    return texto[:i].rstrip() + "\n" + nota + "\n\n" + texto[i:]
 
 
 def _nota_figura(path: str) -> str:
@@ -4083,13 +4138,17 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             if index_note.startswith("\n\n> ⚠"):
                 _rec_bc = (f"*(La recomendación del estadístico —«{_rec_bc.strip()}»— "
                            "queda anulada por la regla de dominio: ver abajo.)*")
-            _show_fig(bc.figure_b64, "boxcox")
+            # BUG-0113: la ruta se RECOGE y se dice. `_show_fig` la devuelve
+            # justo para esto, y este carril no pasa por `_result()`, que es
+            # donde vive la red del BUG-0078.
+            _ruta_fig = _show_fig(bc.figure_b64, "boxcox")
             text = (
                 "## Paso 1 — Transformación Box-Cox\n\n"
                 + bc.summary + "\n\n---\n" + _rec_bc
                 + index_note
                 + f"\n\n**Próximo paso:** confirma λ y llama con `lam={rec_lam}` "
                 "(o el valor que decidas) para ver la serie transformada."
+                + _nota_figura(_ruta_fig)
             )
             items = [TextContent(type="text", text=text)]
             if bc.figure_b64:
@@ -4102,7 +4161,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             from art.describe import describe_unit_root
             b64     = _plot_series_at_d(ts, lam=lam, d=0)
             lam_str = "log" if lam == 0.0 else f"λ={lam}"
-            _show_fig(b64, "series_d0")
+            _ruta_fig = _show_fig(b64, "series_d0")          # BUG-0113
 
             # BUG-0023: este nodo evalúa DESDE d=0, y en la escuela de
             # Box-Jenkins no se saltan dos decisiones sin pasar por los
@@ -4131,6 +4190,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 "**Confirma d y llama al paso 3:**\n"
                 f"- ¿Hay tendencia? → `guided_identification(inp_path, lam={lam}, d=1)`\n"
                 f"- ¿Sin tendencia? → `guided_identification(inp_path, lam={lam}, d=0, D=0)`"
+                + _nota_figura(_ruta_fig)                     # BUG-0113
             )
             items = [TextContent(type="text", text=text)]
             if b64:
@@ -4142,15 +4202,16 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             b64     = _plot_series_at_d(ts, lam=lam, d=d)
             lam_str = "log" if lam == 0.0 else f"λ={lam}"
             sym     = {0: "", 1: "∇", 2: "∇²"}.get(d, f"∇^{d}")
-            _show_fig(b64, f"series_d{d}")
+            _ruta_fig = _show_fig(b64, f"series_d{d}")        # BUG-0113
 
             sea_text = ""
             sea_fig  = None
+            _ruta_sea = ""
             d_next_text = ""
             hay_estacionalidad = False
             if d > 0:
                 sea     = describe_seasonality(ts)
-                _show_fig(sea.figure_b64, "seasonality")
+                _ruta_sea = _show_fig(sea.figure_b64, "seasonality")   # BUG-0113
                 sea_fig  = sea.figure_b64
                 sea_text = (
                     "\n\n**Test HAC de estacionalidad (soporte):**\n"
@@ -4268,6 +4329,9 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 + ((_nota_objetivo(objetivo) + b1_note + b1_steps + b2_steps)
                    if hay_estacionalidad
                    else _sin_estacionalidad_next(inp_path, lam, d))
+                # BUG-0113: este nodo puede traer DOS figuras; se citan las dos,
+                # y en el mismo orden en que van los ImageContent de abajo.
+                + _nota_figura(_ruta_fig) + _nota_figura(_ruta_sea)
             )
             items = [TextContent(type="text", text=text)]
             if b64:
@@ -4294,7 +4358,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             ident      = describe_identification(ts, d=d, D=D, lam=lam)
             data_label = f"∇^{d}∇_s^{D} y(λ={lam})"
 
-        _show_fig(ident.figure_b64, "identification")
+        _ruta_fig = _show_fig(ident.figure_b64, "identification")   # BUG-0113
         top   = ident.data["suggestions"][0] if ident.data["suggestions"] else {}
         rec_p = top.get("p", 0)
         rec_q = top.get("q", 0)
@@ -4448,6 +4512,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
               "orden ≥2, `ar_factorization` dice si esconde un ciclo o una "
               "frecuencia estacional."
             + "\n\n**Próximo paso:** " + next_call
+            + _nota_figura(_ruta_fig)                              # BUG-0113
         )
         items = [TextContent(type="text", text=text)]
         if ident.figure_b64:
@@ -5171,10 +5236,36 @@ def _record_to_guion(
 # Tool: confirm and estimate (B2)
 # ---------------------------------------------------------------------------
 
+def _orden_ar(p):
+    """Normaliza el orden AR. Acepta 3, "3", [1,1,2] o "[1,1,2]".
+
+    BUG-0112. `p` estaba SIN anotar —porque admite un entero o una lista de
+    órdenes por factor, y no hay una anotación obvia para las dos—, y sin
+    anotación FastMCP publicaba `"type": "string"`. Un cliente conforme al
+    esquema mandaba entonces una cadena, y `pipeline._arma_starts` la comparaba
+    con un entero: `TypeError: '>' not supported between 'str' and 'int'`.
+
+    O sea que **no se podía fijar ningún orden AR desde el servidor** — ni
+    `p=1`, ni la forma factorizada `[1,1,2,2]` que expuso BUG-0103—, que es el
+    nodo central del carril guiado. La anotación por sí sola arregla el
+    esquema; esta función arregla además el caso del cliente laxo, y es lo que
+    el docstring de la herramienta ya prometía al documentar las dos formas.
+    """
+    import json as _json
+    if isinstance(p, str):
+        p = p.strip()
+        if not p:
+            return 0
+        p = _json.loads(p) if p.startswith("[") else int(p)
+    if isinstance(p, (list, tuple)):
+        return [int(x) for x in p]
+    return int(p)
+
+
 @mcp.tool()
 def confirm_and_estimate(inp_path: str, output_path: str,
                           lam: float = 0.0, d: int = 1, D: int = 0,
-                          p=0, q: int = 1,
+                          p: int | list[int] = 0, q: int = 1,
                           ar_seeds: list | None = None,
                           ar_f_freqs: list | None = None,
                           n_harmonics: int = 5,
@@ -5329,6 +5420,16 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         from mcp.types import TextContent, ImageContent
         from art.describe import describe_diagnosis
         import fue
+
+        # BUG-0112. La anotación arregla el esquema publicado; esto arregla lo
+        # que llegue de un cliente que no lo respete. Va lo primero: a partir
+        # de aquí `p` es un int o una list[int] y nadie aguas abajo tiene que
+        # preguntárselo.
+        try:
+            p = _orden_ar(p)
+        except (TypeError, ValueError):
+            return _err(f"orden AR no valido: {p!r}. Se espera un entero "
+                        f"(p=2) o una lista de ordenes por factor (p=[1,1,2]).")
 
         ts, _ = _load_ts_model(inp_path)
         output_path = os.path.expanduser(output_path)
@@ -5515,7 +5616,11 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             )
         )
 
-        _show_fig(diag.figure_b64, "diagnosis")
+        # BUG-0113: mismo caso que el carril guiado — este sobre se compone a
+        # mano (BUG-0094) y no pasa por `_result()`, asi que la ruta hay que
+        # recogerla y decirla aqui.
+        _ruta_fig = _show_fig(diag.figure_b64, "diagnosis")
+        text = _con_nota_figura(text, _ruta_fig)
         items = [TextContent(type="text", text=text)]
         if diag.figure_b64:
             items.append(ImageContent(type="image",
@@ -7368,7 +7473,11 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                        or _derive_guion_path(output_path, m_fit))),
         )
 
-        _show_fig(diag.figure_b64, "diagnosis")
+        # BUG-0113: mismo caso que el carril guiado — este sobre se compone a
+        # mano (BUG-0094) y no pasa por `_result()`, asi que la ruta hay que
+        # recogerla y decirla aqui.
+        _ruta_fig = _show_fig(diag.figure_b64, "diagnosis")
+        text = _con_nota_figura(text, _ruta_fig)
         items = [TextContent(type="text", text=text)]
         if diag.figure_b64:
             items.append(ImageContent(type="image",
@@ -8765,6 +8874,11 @@ def guion_evidencia(guion_path: str, version: int = 0,
 # ---------------------------------------------------------------------------
 
 def main():
+    # BUG-0111. Dejar constancia de que se corre COMO SERVIDOR es lo que
+    # permite a `_show_fig` no abrir el visor aquí y sí abrirlo cuando el
+    # módulo se usa como biblioteca. Va antes de `mcp.run()`, que no devuelve.
+    global _BAJO_SERVIDOR
+    _BAJO_SERVIDOR = True
     mcp.run()
 
 

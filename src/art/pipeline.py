@@ -558,6 +558,15 @@ def _arma_starts(resid, p, q, P, Q, s):
     Yule-Walker for AR/AR_s and Hannan-Rissanen for MA/MA_s. Falls back to the old
     constants (AR 0.0, MA -0.3) if resid is unusable."""
     import numpy as np
+    # BUG-0112: fallar DICIENDO qué pasa. Antes, un `p` que llegara como cadena
+    # —lo que hacía la superficie MCP, que lo publicaba como string— moría en
+    # la comparación `p > 0` con un TypeError que no menciona ni el parámetro
+    # ni la herramienta, y que costó una sesión rastrear.
+    for _nombre, _v in (("p", p), ("q", q), ("P", P), ("Q", Q)):
+        if not isinstance(_v, (int, np.integer)) or isinstance(_v, bool):
+            raise TypeError(
+                f"orden {_nombre} debe ser un entero, recibido "
+                f"{type(_v).__name__}: {_v!r}")
     ok = (resid is not None and np.size(resid) > 8
           and np.all(np.isfinite(np.asarray(resid, float))))
     if not ok:
@@ -824,6 +833,19 @@ def ordenes_ar(p) -> list:
     """
     if p is None:
         return []
+    # BUG-0112. Una CADENA es iterable, así que caía al `for` de abajo y se
+    # descomponía en dígitos: `"12"` daba [1, 2] —dos factores de órdenes 1 y
+    # 2— en vez de [12], que es un AR(12). Otro modelo, sin error y sin aviso.
+    # No es hipotético: la superficie MCP publicaba `p` como string, así que
+    # eso es exactamente lo que llegaba por el camino de modelo fresco.
+    if isinstance(p, str):
+        import json as _json
+        p = p.strip()
+        if not p:
+            return []
+        p = _json.loads(p) if p.startswith("[") else int(p)
+    if isinstance(p, bool):                     # True no es un orden
+        raise TypeError(f"orden AR no valido: {p!r}")
     if isinstance(p, int):
         return [int(p)] if p > 0 else []
     ords = [int(x) for x in p if int(x) > 0]

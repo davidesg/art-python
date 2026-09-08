@@ -393,15 +393,20 @@ def _build_param_labels(model) -> list[str]:
             if free:
                 labels.append(f"MA_s({(li+1)*freq})")
 
-    # 7. AR_f free coefs
-    for f_idx, ff in enumerate(model.ar_f or []):
+    # 7-8. AR_f / MA_f free coefs
+    #
+    # LA ETIQUETA ES LA FRECUENCIA DEL FACTOR, no su posición en la lista.
+    # Aquí se usaba el índice de `enumerate`, y con un solo factor —el caso
+    # normal tras `meg_reformulate`— ese índice vale 0: el testigo MA_f de f=3
+    # se etiquetaba `MA_f(f=0)`. La frecuencia es lo único que identifica al
+    # factor, y f=0 significa otra cosa (BUG-0115).
+    for ff in (model.ar_f or []):
         if ff.free:
-            labels.append(f"AR_f(f={f_idx})")
+            labels.append(f"AR_f(f={int(round(float(ff.freq)))})")
 
-    # 8. MA_f free coefs
-    for f_idx, ff in enumerate(model.ma_f or []):
+    for ff in (model.ma_f or []):
         if ff.free:
-            labels.append(f"MA_f(f={f_idx})")
+            labels.append(f"MA_f(f={int(round(float(ff.freq)))})")
 
     # 9. mu
     if getattr(model, "estimate_mu", False):

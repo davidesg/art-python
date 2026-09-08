@@ -160,3 +160,47 @@ def test_record_version_guarda_la_semilla_que_uso_para_el_padre():
 
 def test_los_defectos_estan_documentados():
     assert os.path.exists("bugs/BUG-0098-repro/repro.py")
+
+
+# ── el mismo Dropbox, otro sistema ────────────────────────────────────
+
+def test_un_camino_absoluto_de_OTRO_sistema_se_resuelve(tmp_path, monkeypatch):
+    """El caso que importa de verdad: el mismo Dropbox abierto en Windows y en
+    Linux. Los guiones guardan caminos ABSOLUTOS (BUG-0098) y el punto de
+    montaje cambia — `/home/david/Dropbox/…` frente a `C:\\Users\\…\\Dropbox\\…`.
+
+    Aquí había un cortocircuito `os.path.isabs(ruta)` que lo rompía, porque
+    `ntpath.isabs("/home/david/…")` es **True** en Windows: el camino se
+    declaraba absoluto, se devolvía tal cual y quedaba muerto sin llegar a
+    probar el rescate. Lo que decide es si EXISTE, no si lo parece."""
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work" / "S_m00.inp").write_text("x")
+    for ajena in ("/otra/maquina/work/S_m00.inp",
+                  r"C:\Users\david\Dropbox\work\S_m00.inp",
+                  "/home/david/Dropbox/borrado/S_m00.inp"):
+        gp = tmp_path / "work" / "S_guion.json"
+        gp.write_text(json.dumps({
+            "series": "S", "analyst": "", "created": "2025-01-01", "entries": [
+                {"version": 1, "name": "m00", "inp_path": ajena, "timestamp": "t",
+                 "spec": {}, "stats": None, "equation": "", "decision": "",
+                 "rationale": "", "problems_found": "", "next_version": ""}]}))
+        e = load_guion(str(gp)).entries[0]
+        assert os.path.exists(e.inp_path), f"no resuelve {ajena!r}"
+
+
+def test_pero_un_camino_que_SI_existe_sigue_intacto(tmp_path, monkeypatch):
+    """La resolución no puede robarle el sitio a un fichero que está donde dice,
+    ni siquiera ahora que ya no se salta los absolutos."""
+    (tmp_path / "aqui").mkdir()
+    (tmp_path / "aqui" / "S_m00.inp").write_text("EL BUENO")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "S_m00.inp").write_text("el otro")
+    gp = tmp_path / "sub" / "S_guion.json"
+    gp.write_text(json.dumps({
+        "series": "S", "analyst": "", "created": "2025-01-01", "entries": [
+            {"version": 1, "name": "m00",
+             "inp_path": str(tmp_path / "aqui" / "S_m00.inp"), "timestamp": "t",
+             "spec": {}, "stats": None, "equation": "", "decision": "",
+             "rationale": "", "problems_found": "", "next_version": ""}]}))
+    e = load_guion(str(gp)).entries[0]
+    assert open(e.inp_path).read() == "EL BUENO"

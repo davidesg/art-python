@@ -43,8 +43,15 @@ def _pie(txt):
     if i < 0:
         return ""
     trozo = txt[i:]
-    j = trozo.find(FIN_DE_TURNO_GUIADO)
-    return trozo[:j] if j >= 0 else trozo
+    # El pie termina donde empieza lo que viene DETRÁS de él, y detrás puede ir
+    # la marca de decisión (carril guiado) o la nota de la figura, que desde
+    # BUG-0113 va delante de esa marca. Ninguna de las dos es el pie, y lo que
+    # esta prueba mide es lo que el pie CUESTA en cada llamada.
+    for corte in (FIN_DE_TURNO_GUIADO, "\n*Figura:"):
+        j = trozo.find(corte)
+        if j >= 0:
+            trozo = trozo[:j]
+    return trozo
 
 
 @pytest.fixture(scope="module")
