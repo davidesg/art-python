@@ -3308,10 +3308,20 @@ def meg_reformulate(inp_path: str, freq: int, output_path: str,
         else:
             witness_line = (" SIN testigo MA_f → modelo AR-only SOBRE-DIFERENCIADO "
                             "(subproducto diagnóstico, NO es S; usa with_witness=True).")
+        # LA ECUACIÓN NO VA AQUÍ. Esta cabecera es la ESPECIFICACIÓN —qué se
+        # activó, en qué frecuencia, con o sin testigo, desde qué `.pre`— y su
+        # sitio es la etapa 1 del sobre. La ecuación va en `ecuacion=`, que es
+        # la etapa 2.
+        #
+        # Llevaba `{eq}` al final, de cuando esta función componía su salida a
+        # mano. Al envolverla en el sobre (BUG-0094) se añadió el campo correcto
+        # y NO se quitó el texto que ya lo llevaba: el bloque «MODELO ESTIMADO»
+        # salía DOS VECES, idéntico, en las secciones 2 y 3 del mismo informe.
+        # Un residuo del propio arreglo (BUG-0120).
         header = (f"## Reformulación MEG — estacionalidad ESTOCÁSTICA en f={f}\n\n"
                   f"Activado el AR_f de raíz unitaria `ifadf[{f}]=1` {kind}"
                   f"{witness_line} Eliminados los armónicos deterministas en f={f}. "
-                  f"Re-estimado desde `{os.path.basename(src)}`.\n\n{eq}\n\n")
+                  f"Re-estimado desde `{os.path.basename(src)}`.")
         # El sobre de las cuatro etapas también aquí. `meg_reformulate` ES una
         # reformulación —la etapa 4 con nombre propio— y era una de las dos
         # herramientas que CIERRAN una iteración y emitían sin él. La otra es

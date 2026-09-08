@@ -235,3 +235,88 @@ def test_un_solo_sitio_sabe_donde_va_la_nota():
                     pathlib.Path("src/art/mcp_server.py").read_text().splitlines())
     assert src.count("FIN_DE_TURNO_GUIADO)") <= 2, (
         "más de un sitio decide dónde va la nota respecto de la marca")
+
+
+# ══════ BUG-0120 — el bloque del modelo, una sola vez ══════
+
+@pytest.fixture(scope="module")
+def salidas(tmp_path_factory):
+    """Las seis herramientas que cierran una iteración, ejecutadas de verdad.
+
+    La comprobación estática no vale aquí: en `meg_reformulate` la ecuación
+    entraba por DOS niveles de indirección —`ecuacion=eq` y `{eq}` dentro de un
+    `header` que llegaba como `especificacion=`— y un `grep` de un solo nivel
+    decía que estaba limpia. Lo único que discrimina es contar en la salida."""
+    import warnings as _w
+    import numpy as _np
+    import fue as _fue
+    from art.pipeline import _RESCALE_FACTOR as _RF, _write_inp as _wi
+    d = tmp_path_factory.mktemp("sobre")
+    rng = _np.random.default_rng(6)
+    n = 180
+    t = _np.arange(n)
+    y = (100 + _np.cumsum(rng.standard_normal(n) * 0.3)
+         + 2.0 * _np.cos(2 * _np.pi * 4 * t / 12))
+    ts = _fue.TimeSeries(y.tolist(), freq=12, start=(2005, 1), name="M")
+    F = lambda x: getattr(x, "fn", x)          # noqa: E731
+    out = {}
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")
+        _wi(ts, _fue.Model(ts, d=1, mu=0.0, estimate_mu=False, refactor=_RF),
+            str(d / "M.inp"))
+        def _txt(r):
+            return "\n".join(c.text for c in r if getattr(c, "text", None))
+        out["confirm_and_estimate"] = _txt(F(srv.confirm_and_estimate)(
+            str(d / "M.inp"), str(d / "M0.inp"), lam=0.0, d=1, D=0, p=0, q=0,
+            n_harmonics=5, estimate_mu=True, guion_decision="base"))
+        out["estimate_and_diagnose"] = _txt(F(srv.estimate_and_diagnose)(
+            str(d / "M0.inp"), str(d / "M0b.inp")))
+        out["meg_reformulate"] = _txt(F(srv.meg_reformulate)(
+            str(d / "M0.inp"), freq=4, output_path=str(d / "M1.inp")))
+        out["suggest_intervention_form"] = _txt(F(srv.suggest_intervention_form)(
+            str(d / "M0.inp"), date="06/2010", form="step",
+            output_path=str(d / "M2.inp")))
+        out["build_model"] = _txt(F(srv.build_model)(
+            str(d / "M.inp"), str(d / "M3.inp"), max_rounds=1))
+    return out
+
+
+@pytest.mark.parametrize("herramienta", [
+    "confirm_and_estimate", "estimate_and_diagnose", "meg_reformulate",
+    "suggest_intervention_form", "build_model"])
+def test_el_bloque_del_modelo_sale_UNA_vez(salidas, herramienta):
+    """`meg_reformulate` lo imprimía dos veces, idéntico, en las secciones 2 y
+    3. Era un residuo del propio arreglo del BUG-0094: se añadió el campo
+    `ecuacion=` sin quitar el `{eq}` que la cabecera ya llevaba de cuando esta
+    función componía su salida a mano.
+
+    Se comprueban las cinco que muestran ecuación, no sólo la que falló: el
+    residuo podía estar en cualquiera de las que se envolvieron a la vez."""
+    n = salidas[herramienta].count("MODELO ESTIMADO:")
+    assert n == 1, f"{herramienta}: {n} veces"
+
+
+def test_record_version_NO_muestra_esa_ecuacion_y_es_correcto():
+    """La sexta envuelta sale con CERO, y no es un defecto: `record_version`
+    abre con `_mirar` —acepta un `.pre`— y la ecuación del prompt imprime cada
+    coeficiente con su error típico debajo. Desde un `.pre` esos errores no son
+    fiables (BUG-0090/0091), así que usa la ecuación ESTRUCTURAL del guion, que
+    dice la FORMA sin inventar precisión.
+
+    Se fija aquí para que un futuro «arreglo» de la asimetría no la rompa."""
+    from tests._fuente import fuente_de
+    rv = getattr(srv.record_version, "fn", srv.record_version)
+    src = fuente_de(rv)
+    assert "_build_equation" in src
+    assert "_equation_for_prompt" not in src
+
+
+def test_la_especificacion_del_MEG_sigue_diciendo_lo_suyo(salidas):
+    """Quitar la ecuación de la cabecera no puede vaciar la etapa 1: sigue
+    siendo la ESPECIFICACIÓN —qué se activó, dónde, con o sin testigo, desde
+    qué `.pre`—."""
+    t = salidas["meg_reformulate"]
+    i = t.index("## 1 · ESPECIFICACIÓN")
+    j = t.index("## 2 ·")
+    esp = t[i:j]
+    assert "ifadf" in esp and "Re-estimado desde" in esp

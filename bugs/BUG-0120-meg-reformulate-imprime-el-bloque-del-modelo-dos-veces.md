@@ -1,11 +1,11 @@
 ---
 id: BUG-0120
 title: meg_reformulate imprime el bloque del modelo estimado dos veces, idéntico, en dos secciones del mismo sobre
-status: open
+status: fixed
 severity: low
 component: mcp-tools
 found_in: 0.2.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-08
 reporter: David / sesión de Windows — observación (e) del informe de defectos
 tags:
@@ -54,3 +54,48 @@ testigo, desde qué `.pre`—, que es la ESPECIFICACIÓN y su sitio es la etapa 
 
 Conviene comprobar de paso si el mismo residuo quedó en las otras herramientas
 que se envolvieron a la vez.
+
+
+---
+
+## Cierre (2026-09-08)
+
+Quitado el `{eq}` de la cabecera. La ecuación se queda sólo en `ecuacion=`, que
+es la etapa 2; la cabecera sigue diciendo lo suyo —qué se activó, en qué
+frecuencia, con o sin testigo, desde qué `.pre`—, que es la ESPECIFICACIÓN y su
+sitio es la etapa 1. Comprobado que la etapa 1 no queda vacía.
+
+## Y la comprobación de las otras cinco envueltas
+
+El informe pedía mirar si el mismo residuo había quedado en las demás. **Primero
+lo comprobé mal**: un `grep` de la variable que va en `ecuacion=` buscándola en
+los otros campos. Dijo que las seis estaban limpias — **incluida
+`meg_reformulate`, que era la que fallaba**.
+
+El motivo es que allí la ecuación entra por **dos niveles de indirección**:
+
+    ecuacion=eq                     ← uno
+    especificacion=_esp_meg  →  _esp_meg = header  →  header = f"...{eq}..."
+
+y la comprobación sólo recorría uno. Lo único que discrimina es **contar en la
+salida real**, así que se ejecutan las seis:
+
+    confirm_and_estimate        MODELO ESTIMADO × 1
+    estimate_and_diagnose       × 1
+    meg_reformulate             × 2  ⚠  → 1 tras el arreglo
+    suggest_intervention_form   × 1
+    build_model                 × 1
+    record_version              × 0
+
+**`meg_reformulate` era la única.**
+
+### El cero de `record_version` NO es un defecto
+
+Sale con cero porque usa la **ecuación estructural** del guion y no la del
+prompt. Es deliberado: abre con `_mirar` —acepta un `.pre`— y la del prompt
+imprime cada coeficiente con su error típico debajo, que desde un `.pre` no son
+fiables (BUG-0090/0091). Usar allí la del prompt contradiría el contrato que esa
+herramienta respeta.
+
+Queda fijado en una prueba **para que un futuro «arreglo» de la asimetría no lo
+rompa**: la asimetría es correcta y tiene su razón escrita.
