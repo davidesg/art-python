@@ -1,11 +1,11 @@
 ---
 id: BUG-0118
 title: El repro del óptimo espurio muestra la semilla YA AJUSTADA y mezcla unidades — dos columnas que no dicen lo que dicen
-status: open
+status: fixed
 severity: medium
 component: bugs
 found_in: 0.1.2
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-08
 reporter: David / sesión de Windows — al verificar BUG-0006 en la otra plataforma
 tags:
@@ -75,3 +75,39 @@ El repro vive en `art/bugs/BUG-0006-repro/` y sirve a `fue/BUG-0005`. Los
 documentos de la prueba de Windows lo llamaron «BUG-0005» siguiendo al informe
 de `fue`; el `art/BUG-0005` es otra cosa (`nyquist-added-when-no-harmonics`).
 Conviene decirlo en la cabecera del repro para que no vuelva a confundir.
+
+
+---
+
+## Cierre (2026-09-08)
+
+**1 · La semilla.** `copy.deepcopy` antes de `fit()`. Ahora las dos filas
+enseñan semillas DISTINTAS, que es lo que el repro existe para comparar:
+
+    por defecto     Φ⁰ = [[-0.0400, -0.0805]]
+    identificada    Φ⁰ = [[-0.1100, -0.0900]]
+
+Y confirma de paso lo que la prueba de Windows dedujo: **la semilla por defecto
+es hoy NEGATIVA**, o sea que el arreglo del signo está en `art 0.2.0`.
+
+**2 · Las unidades — y aquí había más de lo que decía el informe.**
+
+Al presentarlo todo en proporción apareció que **las dos cifras de referencia
+están en escalas distintas**:
+
+    μ̂  ≈ +0.0021   PROPORCIÓN          (en la escala del modelo, 0.2149)
+    σ̂ₐ ≈  0.261    REESCALADA (×100)   (en proporción, 0.002608)
+
+Eso no era un defecto del repro sino de las cifras publicadas que usaba de
+referencia, y explica por qué hubo que rehacer la aritmética a mano en Windows
+para ver que el resultado coincidía: **una de las dos comparaciones siempre
+fallaba por un factor de 100, hiciera uno lo que hiciera.**
+
+El repro imprime ahora **las dos escalas para las dos cantidades**, etiquetadas,
+y avisa de que las publicadas no comparten unidad. Cuesta una línea y quita toda
+la ambigüedad.
+
+**3 · Y pasa a ser un guardián.** Ya no reproduce —ni en Linux ni en Windows—,
+así que se documenta como lo que es: sale 1 **si los dos arranques vuelven a
+llegar a óptimos distintos**. Un repro de un defecto cerrado que no vigila su
+regreso es un fichero muerto.

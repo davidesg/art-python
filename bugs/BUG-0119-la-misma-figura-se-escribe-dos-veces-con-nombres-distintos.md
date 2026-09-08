@@ -1,11 +1,11 @@
 ---
 id: BUG-0119
 title: La misma figura se escribe dos veces con nombres distintos y el mismo SHA — nada delata que son la misma imagen
-status: open
+status: fixed
 severity: low
 component: mcp-tools
 found_in: 0.2.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-08
 reporter: David / sesión de Windows — observación (b) del informe de defectos
 tags:
@@ -54,3 +54,24 @@ Ninguna de las dos se quita. Basta con que **se sepan la misma**:
   · citar las dos rutas juntas en la nota, diciendo que son copias.
 
 La segunda es más barata y más honesta: no esconde que hay dos ficheros.
+
+
+---
+
+## Cierre (2026-09-08)
+
+Ninguna copia se quita: las dos tienen su razón. Lo que se arregla es que **se
+sepan la misma**.
+
+`_show_fig` ya nombraba la suya `art_<etq>_<huella>.png` con la huella del
+CONTENIDO. Ahora la del registro lleva la misma:
+
+    antes   art_diagnosis_89c37232f8ad.png   /   figs/S_v1.png
+    ahora   art_diagnosis_89c37232f8ad.png   /   figs/S_v1__89c37232f8ad.png
+
+Los dos nombres comparten un token visible, así que se reconocen a simple vista
+sin tener que comparar los ficheros. Un tercero —el histograma— sigue con su
+huella distinta, que es lo correcto: es otra imagen.
+
+Los guiones ya escritos conservan sus rutas, que están guardadas en
+`figure_path`: el cambio afecta a lo que se escriba a partir de ahora.

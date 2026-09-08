@@ -260,3 +260,130 @@ def test_ningun_determinista_da_regresor_nulo_al_prever():
                                                       omega_free=[False])])
         xi = _build_xi(m, 160, 12, 12, [[1.0]], [[]])
         assert float(np.abs(xi).sum()) > 0.0, f"{tipo}: regresor nulo"
+
+
+# ══════ El carril lo OFRECE, que es lo que faltaba (BUG-0116) ══════
+
+def _serie_con_easter(seed=9, n=240, mag=1.04, con=True):
+    from fue.cast_us import easter_date
+    rng = np.random.default_rng(seed)
+    y = 100.0 + np.cumsum(rng.standard_normal(n) * 0.05)
+    if con:
+        for t in range(n):
+            yr, mo = 2000 + t // 12, t % 12 + 1
+            if mo == easter_date(yr)[1]:
+                y[t] *= mag
+    return fue.TimeSeries(y.tolist(), freq=12, start=(2000, 1), name="P")
+
+
+def _ajusta(tmp_path, nombre, ts, con_armonicos=True):
+    itvs = []
+    if con_armonicos:
+        for k in range(1, 6):
+            itvs += [fue.Intervention("cos", at=0, omega=[0.0],
+                                      omega_free=[True], harmonic=float(k)),
+                     fue.Intervention("sin", at=0, omega=[0.0],
+                                      omega_free=[True], harmonic=float(k))]
+        itvs.append(fue.Intervention("alter", at=0, omega=[0.0],
+                                     omega_free=[True]))
+    m = fue.Model(ts, d=1, mu=0.0, estimate_mu=True, interventions=itvs,
+                  refactor=_RESCALE_FACTOR)
+    f = str(tmp_path / f"{nombre}.inp")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _write_inp(ts, m, f)
+        _, mm = estimar(f)
+    return mm
+
+
+def test_el_easter_NO_aparece_como_anomalos(tmp_path):
+    """La razón de que hiciera falta un contraste propio: el efecto es
+    SISTEMÁTICO, así que no deja residuos |z|>3 y `intervention_hints` no lo ve.
+    Lo que deja es estructura, que es la misma firma que la estacionalidad
+    corriente."""
+    from art.describe import describe_diagnosis
+    m = _ajusta(tmp_path, "sist", _serie_con_easter(), con_armonicos=False)
+    d = describe_diagnosis(m).data or {}
+    assert d["n_extreme"] == 0, "si dejara anómalos, no haría falta el contraste"
+    assert d["white_noise"] is False, "pero sí deja estructura"
+
+
+def test_el_contraste_lo_detecta_incluso_con_los_armonicos_puestos(tmp_path):
+    """El caso que importa: con el paquete estacional ya puesto, la
+    estacionalidad FIJA está absorbida y lo que queda es lo que SE MUEVE."""
+    from art.mcp_server import _falta_el_easter
+    m = _ajusta(tmp_path, "con", _serie_con_easter(con=True))
+    assert _falta_el_easter(m, m.series) > 5.0
+
+
+def test_y_calla_cuando_no_lo_hay(tmp_path):
+    from art.mcp_server import _falta_el_easter
+    m = _ajusta(tmp_path, "sin", _serie_con_easter(con=False))
+    assert _falta_el_easter(m, m.series) < 3.0
+
+
+def test_el_umbral_esta_medido():
+    """10 réplicas de cada hipótesis, n=240, con un efecto pequeño (+2%):
+
+        SIN easter   |t| mediana 0,35   máximo 1,30
+        CON un +2%   |t| mediana 9,89   mínimo 9,82
+
+    Factor 7 entre el peor caso de cada lado."""
+    from art.mcp_server import UMBRAL_EASTER
+    assert 2.0 <= UMBRAL_EASTER <= 5.0
+
+
+def test_no_se_ofrece_si_el_modelo_YA_lo_lleva(tmp_path):
+    """Ofrecer lo que ya está puesto es ruido, y en el carril guiado el ruido
+    compite con las alternativas que sí importan."""
+    from art.mcp_server import _falta_el_easter
+    ts = _serie_con_easter(con=True)
+    m = fue.Model(ts, d=1, mu=0.0, estimate_mu=True, refactor=_RESCALE_FACTOR,
+                  interventions=[fue.Intervention("easter", at=0, omega=[0.0],
+                                                  omega_free=[True])])
+    f = str(tmp_path / "ya.inp")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _write_inp(ts, m, f)
+        _, mm = estimar(f)
+    assert _falta_el_easter(mm, mm.series) == 0.0
+
+
+def test_en_series_no_mensuales_ni_se_mira(tmp_path):
+    from art.mcp_server import _falta_el_easter
+    rng = np.random.default_rng(3)
+    y = 100.0 + np.cumsum(rng.standard_normal(120) * 0.3)
+    ts = fue.TimeSeries(y.tolist(), freq=4, start=(2000, 1), name="Q")
+    m = fue.Model(ts, d=1, mu=0.0, estimate_mu=True, refactor=_RESCALE_FACTOR)
+    f = str(tmp_path / "q.inp")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _write_inp(ts, m, f)
+        _, mm = estimar(f)
+    assert _falta_el_easter(mm, mm.series) == 0.0
+
+
+def test_la_alternativa_dice_POR_QUE_y_como(tmp_path):
+    """Un aviso que sólo nombra el parámetro deja al analista donde estaba: la
+    documentación de `easter` es justo la que el cliente NO entrega (BUG-0116),
+    así que la alternativa tiene que llevarla."""
+    from art.mcp_server import _alternativas_desde
+    m = _ajusta(tmp_path, "alt", _serie_con_easter(con=True))
+    from art.describe import describe_diagnosis
+    alts = _alternativas_desde(describe_diagnosis(m), model=m, ts=m.series,
+                               inp_path="x.inp")
+    ea = [a for a in alts if "SEMANA SANTA" in a]
+    assert ea, "no la ofrece"
+    t = ea[0]
+    assert "se mueve entre marzo y abril" in t
+    assert "easter=True" in t
+    assert "mensuales" in t and "no una intervención" in t
+
+
+def test_la_guarda_nunca_tumba_una_diagnosis():
+    """Una comprobación de conveniencia que revienta es peor que no tenerla."""
+    from art.mcp_server import _falta_el_easter
+    assert _falta_el_easter(None, None) == 0.0
+    class _Roto:
+        interventions = None
+    assert _falta_el_easter(_Roto(), object()) == 0.0

@@ -121,3 +121,132 @@ Culpar al cliente. Que recorte es un hecho del entorno —y otro cliente recorta
 por otro sitio—; una descripción que sólo funciona entregada entera es frágil
 por diseño. Lo que se puede controlar desde aquí es que lo importante vaya
 primero.
+
+
+---
+
+## Punto 4 aplicado (2026-09-08): el carril ya OFRECE el easter
+
+De los cuatro puntos del arreglo se aplica el **cuarto**, que era el último de la
+lista y resulta ser el que cierra la consecuencia grave: **que una capacidad
+exista y nadie la encuentre nunca**.
+
+### Y al medirlo, mi propia propuesta resultó estar mal
+
+Este informe decía «una opción cuando haya **anómalos recurrentes de
+marzo/abril**». Medido, es falso:
+
+    serie CON un efecto de Semana Santa del 4%
+      n_extreme      0        ← NO deja anómalos: es SISTEMÁTICO
+      white_noise    False    ← deja ESTRUCTURA
+      q_fails        lag 12, lag 24, lag 36
+
+`intervention_hints` no lo ve, y lo que sí ve —la Q rompiéndose en los retardos
+estacionales— es **la misma firma que la estacionalidad corriente**. Una
+alternativa basada en anómalos no habría saltado nunca.
+
+### Lo que sí lo distingue: que SE MUEVE
+
+La Semana Santa cae en marzo o en abril según el año, así que **ningún armónico
+de periodo fijo la absorbe**. De ahí sale el contraste: correlacionar los
+residuos con el regresor que el motor sabe construir, que es un contraste de
+puntuación de andar por casa.
+
+Medido sobre 10 réplicas de cada hipótesis, n=240, **con el paquete estacional
+determinista ya puesto** —que es el caso que importa, porque ahí lo fijo ya está
+absorbido— y con un efecto pequeño, del 2%:
+
+    SIN easter     |t| mediana 0,35   máximo 1,30
+    CON un +2%     |t| mediana 9,89   mínimo 9,82
+
+Factor 7 entre el peor caso de cada lado. `UMBRAL_EASTER = 3`, muy dentro del
+hueco.
+
+### Y la alternativa lleva encima lo que el cliente no entrega
+
+    **Añadir el efecto de SEMANA SANTA** — los residuos correlacionan con su
+    regresor a |t| = 15.5. No aparece como anómalos porque es sistemático, y
+    ningún armónico lo absorbe porque **se mueve entre marzo y abril**.
+       `confirm_and_estimate(inp_path=…, easter=True, …)` — es un determinista,
+       no una intervención: no lleva fecha, y sólo existe en series mensuales
+
+Eso es exactamente la documentación que este informe mide como perdida (está al
+36,7% del docstring, y el cliente entregó el 23%). **Llega cuando hace falta**,
+que es lo que ningún párrafo consigue.
+
+Ocho pruebas, incluidas las que fijan que no se ofrezca si el modelo ya lo lleva
+—ofrecer lo puesto es ruido, y en el carril guiado el ruido compite con las
+alternativas que importan— y que ni se mire en series no mensuales.
+
+### Lo que sigue abierto de este informe
+
+Los puntos **1, 2 y 3**: el presupuesto por descripción, mover la doctrina a
+`_INSTRUCTIONS` y la referencia a `docs/`. **12 de 46 descripciones siguen por
+encima del presupuesto**, y `ar_f_freqs` y Shin-Fuller se siguen perdiendo con un
+cliente que recorte — o sea que la doctrina de no capar el AR llega y la
+herramienta para obedecerla, no.
+
+
+---
+
+## Punto 3 aplicado (2026-09-08): los RECURSOS, que no existían
+
+El informe proponía «mover lo que es referencia a `docs/`, citados por nombre».
+Al ir a hacerlo apareció algo mejor y que el propio protocolo ya ofrecía:
+
+    herramientas   46      se EMPUJAN en cada llamada  → caras, y se recortan
+    recursos        0      se PIDEN cuando hacen falta → completas, y con URI
+
+**MCP tiene un primitivo exactamente para esto y `art` usaba cero.** No es un
+defecto de código: es una capacidad sin estrenar, y explica por qué el arreglo
+no era acortar. El texto hace falta; lo que estaba mal es el canal.
+
+    art://defectos              23.028 car.   índice, con lo que sigue abierto
+    art://defectos/{bug_id}     14.180        un informe entero
+    art://docs                     664        índice de diseño
+    art://doc/{nombre}          13.915        un documento entero
+    art://protocolo             34.121        releíble a mitad de análisis
+
+### Lo que esto desbloquea, y es más que el canal
+
+**El registro de defectos pasa a ser consultable en tiempo de ejecución.** Son
+121 informes con su causa MEDIDA y la razón del arreglo, o sea la memoria de por
+qué el método es como es — y hasta ahora el modelo que opera la herramienta no
+veía ninguno.
+
+Es el principio que `guion.py` ya aplica al análisis:
+
+> «lo que una iteración fallida produce de valor NO es el modelo que se
+> descarta, es la RAZÓN por la que se descarta.»
+
+`art` lo aplicaba al análisis y **no a sí mismo**. Y no es teórico: en la sesión
+del capado del AR(6), la razón por la que eso invierte la lógica del contraste
+estaba escrita en `BUG-0103` y no había forma de pedirla.
+
+### La mitad que hace que sirva
+
+Un recurso que nadie sabe que existe es igual que no tenerlo, así que van
+anunciados en `_INSTRUCTIONS` —el canal que SÍ llega entero— con las tres cosas
+que hacen que se usen:
+
+  · **cuándo**: «antes de proponer una simplificación que parezca obvia —capar
+    un operador, podar un armónico, fiarte de un error típico»;
+  · **el ejemplo concreto** del AR(6), que es lo que hace entender el
+    disparador;
+  · y **el aviso de que las descripciones pueden llegar recortadas**, que el
+    modelo no puede saber por sí mismo —no ve el original— con la salida:
+    pedirlo como recurso.
+
+### Lo que sigue abierto
+
+**Punto 1** — el presupuesto por descripción: 12 de 46 siguen por encima, y con
+un cliente que recorte se pierden todavía `ar_f_freqs` y Shin-Fuller. Ahora hay
+dónde ponerlo, que era lo que faltaba.
+
+**Punto 2** — la doctrina a `_INSTRUCTIONS`. Parcialmente hecho: la regla de no
+capar el AR ya está ahí, y ahora también el mapa de recursos.
+
+Y queda apuntado lo que este informe destapó y **excede a un defecto**: que
+`DefaultPolicy` tiene todas las reglas en código mientras `ClaudePolicy` recibe
+el 23% del texto, o sea que **los dos decisores no están igual de informados**.
+Eso amenaza la comparabilidad que `guion_diff` afirma dar, y es medible.

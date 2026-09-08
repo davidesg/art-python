@@ -261,6 +261,40 @@ y gráfico. En guiado el analista SOLO ve lo que muestras; sin la ecuación no
 decide. Esquema (tesis): estimar → ECUACIÓN (verbatim) → gráfico → decisión.
 
 ══════════════════════════════════════════════════════
+LO QUE PUEDES PEDIR — los RECURSOS del servidor
+══════════════════════════════════════════════════════
+
+Además de las herramientas, este servidor expone documentación que puedes LEER
+cuando la necesites. Llega ENTERA, y no ocupa nada mientras no la pidas:
+
+    art://protocolo            este mismo texto, para releerlo a mitad de un
+                               análisis largo
+    art://defectos             el registro de defectos: qué se ha roto, por qué,
+                               y qué sigue abierto
+    art://defectos/BUG-0103    un informe concreto, entero
+    art://docs                 índice de los documentos de diseño
+    art://doc/<NOMBRE>         uno de ellos, entero
+
+CUÁNDO CONSULTAR `art://defectos` — y esto importa más de lo que parece. Cada
+informe lleva su causa MEDIDA y la razón por la que se arregló así, o sea que el
+registro es **la memoria de por qué el método es como es**.
+
+Míralo antes de proponer una simplificación que parezca obvia: capar un
+operador, podar un armónico, fiarte de un error típico, intervenir un residuo
+grande. Muchas de esas ideas son razonables a primera vista y están documentadas
+como error, con la medición que lo demuestra.
+
+No es hipotético. En una sesión de este mes se propuso sustituir un AR(6) por un
+operador disperso porque los módulos de las raíces salían casi iguales — y la
+razón por la que eso invierte la lógica del contraste estaba escrita en
+`art://defectos/BUG-0103`, que entonces no se podía pedir.
+
+La descripción de una herramienta puede llegarte RECORTADA: el protocolo la
+empuja en cada llamada y algunos clientes la truncan. Un recurso no. Si algo de
+lo que lees en una descripción parece cortado, o si necesitas el detalle de un
+parámetro que sólo ves nombrado, **pídelo aquí**.
+
+══════════════════════════════════════════════════════
 NUNCA SE CAPA UN AR SIN FACTORIZAR Y CONTRASTAR ANTES
 ══════════════════════════════════════════════════════
 
@@ -640,6 +674,67 @@ REGLAS GENERALES
 """
 
 mcp = FastMCP("ART — A Real-Time Time-Series Analysis", instructions=_INSTRUCTIONS)
+
+
+# ---------------------------------------------------------------------------
+# RECURSOS — lo que el modelo PIDE, frente a lo que se le empuja
+# ---------------------------------------------------------------------------
+#
+# La documentación de art se entregaba por un solo canal: la descripción de cada
+# herramienta, que el protocolo empuja EN CADA LLAMADA. Son 75.548 caracteres en
+# 46 herramientas y un cliente real entregó al modelo el 23%, o sea que se
+# perdían ~58.000 caracteres por sesión — entre ellos la documentación de
+# `easter`, la de `ar_f_freqs` y la de Shin-Fuller (BUG-0116).
+#
+# Acortar no era el arreglo: el texto hace falta. Lo que estaba mal era el
+# canal. MCP tiene un primitivo para esto —los recursos, que se piden cuando
+# hacen falta y llegan enteros— y art usaba CERO.
+#
+# Lo que va aquí es lo que se consulta, no lo que se decide: la referencia, el
+# procedimiento y la memoria de POR QUÉ las cosas se hacen así.
+
+@mcp.resource("art://defectos")
+def _r_defectos() -> str:
+    """El registro de defectos de ART: qué se ha roto, por qué, y qué sigue
+    abierto. Cada informe lleva su causa MEDIDA y la razón del arreglo.
+
+    Consúltalo antes de proponer una simplificación que parezca obvia —capar un
+    operador, podar un armónico, fiarte de un error típico—: puede estar ya
+    documentada como error, con su medición."""
+    from art.recursos import indice_de_defectos
+    return indice_de_defectos()
+
+
+@mcp.resource("art://defectos/{bug_id}")
+def _r_defecto(bug_id: str) -> str:
+    """Un informe entero, por identificador (`BUG-0097` o `0097`)."""
+    from art.recursos import informe_de_defecto
+    return informe_de_defecto(bug_id)
+
+
+@mcp.resource("art://docs")
+def _r_docs() -> str:
+    """Índice de los documentos de diseño: el contrato de ficheros, el nodo de
+    intervención, la arquitectura, las lecciones de la réplica."""
+    from art.recursos import indice_de_documentos
+    return indice_de_documentos()
+
+
+@mcp.resource("art://doc/{nombre}")
+def _r_doc(nombre: str) -> str:
+    """Un documento de diseño entero, por nombre y sin extensión."""
+    from art.recursos import documento
+    return documento(nombre)
+
+
+@mcp.resource("art://protocolo")
+def _r_protocolo() -> str:
+    """El protocolo completo y la doctrina del método, entero.
+
+    Es el mismo texto que el servidor entrega como `instructions`, expuesto
+    también aquí para poder RELEERLO a mitad de un análisis sin depender de que
+    siga en la ventana."""
+    return _INSTRUCTIONS
 
 
 # ---------------------------------------------------------------------------
@@ -1273,6 +1368,60 @@ def _conclusiones_desde(diag) -> str:
     return "\n\n".join(L)
 
 
+#: |t| a partir del cual la correlación de los residuos con el regresor de
+#: Semana Santa deja de ser ruido. Medido sobre 10 réplicas de cada hipótesis
+#: (n=240, mensual, con el paquete estacional determinista ya puesto):
+#:
+#:     SIN easter        |t| mediana 0,35   máximo  1,30
+#:     CON un +2%        |t| mediana 9,89   mínimo  9,82
+#:
+#: Un factor de 7 entre el peor caso de cada lado, y con un efecto pequeño. El
+#: umbral va en 3, que es el convencional y queda muy dentro del hueco.
+UMBRAL_EASTER = 3.0
+
+
+def _falta_el_easter(model, ts) -> float:
+    """|t| de la correlación entre los residuos y el regresor de Semana Santa.
+
+    Es un contraste de puntuación de andar por casa, y sirve porque el efecto de
+    Semana Santa **no se manifiesta como anómalos**: es sistemático, así que no
+    deja residuos |z|>3 y `intervention_hints` no lo ve. Lo que deja es
+    estructura —la Q rechaza en 12, 24, 36 y la estacionalidad residual salta—,
+    que es la MISMA firma que la estacionalidad corriente.
+
+    Lo que lo distingue es que **se mueve**: cae en marzo o en abril según el
+    año, así que ningún armónico de periodo fijo lo absorbe. Correlacionar los
+    residuos con el regresor que el motor sabe construir separa las dos cosas —
+    medido, incluso con el paquete estacional ya puesto.
+
+    Devuelve 0.0 cuando no procede (no mensual, sin residuos, o ya lo lleva).
+    """
+    import numpy as _np
+    try:
+        if ts is None or int(getattr(ts, "freq", 0)) != 12:
+            return 0.0
+        if any(i.type == "easter" for i in (getattr(model, "interventions", None) or [])):
+            return 0.0
+        r = _np.asarray(getattr(getattr(model, "_result", None), "residuals", None),
+                        dtype=float)
+        if r.size < 36:
+            return 0.0
+        from fue.cast_us import _build_indicator
+        import fue as _fue
+        ind = _build_indicator(
+            _fue.Intervention("easter", at=0, omega=[1.0], omega_free=[False]),
+            int(ts.nobs), 12, int(ts.start[1]), int(ts.start[0]))[1:]
+        if ind.size < r.size or not _np.any(ind):
+            return 0.0
+        ind = ind[-r.size:]
+        c = float(_np.corrcoef(r, ind)[0, 1])
+        if not _np.isfinite(c) or abs(c) >= 1.0:
+            return 0.0
+        return abs(c) * _np.sqrt(r.size - 2) / _np.sqrt(1.0 - c * c)
+    except Exception:
+        return 0.0
+
+
 def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
                         guion_path: str = "") -> list:
     """La 4ª sección: las opciones REALES, cada una con su llamada.
@@ -1343,6 +1492,24 @@ def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
                 f"q={q_act}, ...)`  ó  `q={q_act + 1}`\n"
                 f"   `identification_analysis(inp_path={ruta})` para mirarlo "
                 f"antes de elegir")
+
+    # 2bis · LA SEMANA SANTA, que nadie ofrecía nunca.
+    #
+    # `easter` existe desde BUG-0097 y la ruta desde BUG-0103, pero el carril no
+    # lo mencionaba en ningún nodo y su documentación cae fuera de lo que el
+    # cliente entrega al modelo (BUG-0116). En la sesión que lo destapó salió
+    # porque el analista leyó el fuente. Una opción que aparece CUANDO HACE
+    # FALTA vale más que cualquier párrafo que hay que haber leído antes.
+    t_ea = _falta_el_easter(model, ts)
+    if t_ea > UMBRAL_EASTER:
+        alts.append(
+            f"**Añadir el efecto de SEMANA SANTA** — los residuos correlacionan "
+            f"con su regresor a |t| = {t_ea:.1f}. No aparece como anómalos "
+            f"porque es sistemático, y ningún armónico lo absorbe porque **se "
+            f"mueve entre marzo y abril**.\n"
+            f"   `confirm_and_estimate(inp_path={ruta}, easter=True, ...)` "
+            f"— es un determinista, no una intervención: no lleva fecha, y sólo "
+            f"existe en series mensuales")
 
     # 3 · normalidad sin ruido: casi siempre son anómalos, no la distribución
     if d.get("normal") is False and d.get("white_noise") is not False:
@@ -5181,10 +5348,24 @@ def _record_to_guion(
     # histograma, y el Jarque-Bera se lee sobre el tercero. `describe_diagnosis`
     # los genera los dos y sólo se guardaba el primero.
     def _guarda_fig(b64, sufijo=""):
+        # EL NOMBRE LLEVA LA HUELLA DE LA IMAGEN, y no es cosmético.
+        #
+        # La misma figura se escribe DOS veces: aquí, como hermana del guion —el
+        # registro, que viaja con él— y en `ART_FIG_DIR` vía `_show_fig`, que es
+        # la ruta que se cita cuando el visor no abre (BUG-0078). Las dos copias
+        # tienen razón de ser y ninguna sobra.
+        #
+        # Lo que faltaba es que se supieran la misma: mismo SHA-256 y nombres
+        # que no se parecían en nada, lo que indujo a enviar la figura dos veces
+        # a la conversación creyéndolas distintas (BUG-0119). `_show_fig` ya
+        # nombra la suya `art_<etq>_<huella>.png`; poniendo la misma huella aquí,
+        # los dos nombres comparten un token visible y se reconocen a simple
+        # vista sin tener que compararlas.
         import base64 as _b64
         figs = os.path.join(os.path.dirname(guion_path) or ".", "figs")
         os.makedirs(figs, exist_ok=True)
-        nombre = f"{guion.series or 'serie'}_v{entry.version}{sufijo}.png"
+        nombre = (f"{guion.series or 'serie'}_v{entry.version}{sufijo}"
+                  f"__{_huella_figura(b64)}.png")
         with open(os.path.join(figs, nombre), "wb") as fh:
             fh.write(_b64.b64decode(b64))
         return os.path.join("figs", nombre)
