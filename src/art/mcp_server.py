@@ -876,6 +876,32 @@ def _registra_figura(b64: str, path: str) -> None:
         _FIGURAS.pop(next(iter(_FIGURAS)))
 
 
+def _imagen(b64: str, etiqueta: str = "art"):
+    """Convierte una figura en `ImageContent` **y la escribe**.
+
+    Único sitio del módulo donde nace un `ImageContent`, y por eso escribir no
+    se puede olvidar: el olvido era el defecto.
+
+    BUG-0122. Veintitrés sitios construían el `ImageContent` a mano, y quince de
+    las veintiocho herramientas que devuelven figura no llamaban a `_show_fig`
+    en ninguna rama: su figura viajaba SÓLO como imagen en la respuesta. Sin
+    fichero, sin ventana y sin ruta que citar — y la herramienta reportando
+    éxito. `_result` tampoco la salvaba: BUSCA la huella en `_FIGURAS` por si
+    otro la escribió, y si nadie lo hizo se calla y no cita ninguna.
+
+    Se vio en vivo en el escaneo de anómalos del m00 de RATIO (réplica de
+    Bolivia, run5 guiado): el panel que descompone la ACF en «parte debida al
+    outlier» —la evidencia del punto de decisión— llegó sin ventana y sin ruta,
+    justo cuando el analista tenía que decidir si intervenir antes del ARMA.
+
+    `_show_fig` discrimina por CONTENIDO (BUG-0081), así que llamarla de más no
+    duplica nada: la misma figura da el mismo fichero.
+    """
+    from mcp.types import ImageContent
+    _show_fig(b64, etiqueta)
+    return ImageContent(type="image", data=b64, mimeType="image/png")
+
+
 def _result(desc) -> list:
     """Convert a Description to MCP content list (text + optional image).
 
@@ -890,7 +916,10 @@ def _result(desc) -> list:
     from mcp.types import TextContent, ImageContent
     txt = desc.summary + "\n\n---\n" + desc.recommendation
     if desc.figure_b64:
-        _ruta = _FIGURAS.get(_huella_figura(desc.figure_b64), "")
+        # BUG-0122: ESCRIBIRLA, no sólo buscarla. Buscar la huella supone que
+        # alguien la escribió antes, y quince herramientas no lo hacían nunca.
+        _ruta = _show_fig(desc.figure_b64) or _FIGURAS.get(
+            _huella_figura(desc.figure_b64), "")
         if _ruta:
             # LA RUTA VA ANTES DE LA MARCA DE FIN DE TURNO, no detrás.
             #
@@ -907,7 +936,7 @@ def _result(desc) -> list:
             txt = _con_nota_figura(txt, _ruta)
     items = [TextContent(type="text", text=txt)]
     if desc.figure_b64:
-        items.append(ImageContent(type="image", data=desc.figure_b64, mimeType="image/png"))
+        items.append(_imagen(desc.figure_b64, "result"))
     return items
 
 
@@ -1036,13 +1065,29 @@ def _show_fig(b64: str | None, label: str = "art") -> str:
     # costó una sesión averiguar que art no renderizaba en blanco.
     # `/tmp` no existe en Windows: el directorio temporal lo da el sistema.
     dest = os.environ.get("ART_FIG_DIR") or tempfile.gettempdir()
-    path = os.path.join(dest, f"art_{etq}_{_huella_figura(b64)}.png")
-    try:
-        os.makedirs(dest, exist_ok=True)
-        with open(path, "wb") as fh:
-            fh.write(data)
-    except Exception:
-        return ""
+    # MISMA FIGURA, MISMO FICHERO — y eso incluye dos ETIQUETAS distintas.
+    #
+    # BUG-0122. El nombre lleva la etiqueta delante de la huella, así que la
+    # misma figura pedida dos veces con etiquetas distintas se escribía dos
+    # veces: `art_nodo_1_<huella>.png` y `art_art_<huella>.png`. Es el BUG-0119
+    # otra vez —la misma figura con dos nombres—, y aquí además rompía la nota,
+    # porque quien la citaba se quedaba con el nombre que no era.
+    #
+    # La reutilización se limita al MISMO directorio: `ART_FIG_DIR` (BUG-0082)
+    # existe para sacar las figuras de un temporal compartido, y un fichero
+    # escrito en otro sitio no cumple lo que se pidió.
+    previa = _FIGURAS.get(_huella_figura(b64), "")
+    if (previa and os.path.exists(previa)
+            and os.path.normpath(os.path.dirname(previa)) == os.path.normpath(dest)):
+        path = previa
+    else:
+        path = os.path.join(dest, f"art_{etq}_{_huella_figura(b64)}.png")
+        try:
+            os.makedirs(dest, exist_ok=True)
+            with open(path, "wb") as fh:
+                fh.write(data)
+        except Exception:
+            return ""
     _ULTIMA_FIGURA = path
     _registra_figura(b64, path)
 
@@ -1061,12 +1106,45 @@ def _show_fig(b64: str | None, label: str = "art") -> str:
     global _ULTIMO_VISOR_ERROR
     _ULTIMO_VISOR_ERROR = ""
     import sys
-    if (_BAJO_SERVIDOR or os.environ.get("ART_NO_VIEWER")
-            or "pytest" in sys.modules):
+    if not _visor_procede(_BAJO_SERVIDOR, os.name, os.environ,
+                          "pytest" in sys.modules):
         return path
 
     _ULTIMO_VISOR_ERROR = _abrir_visor(path)
     return path
+
+
+def _visor_procede(bajo_servidor: bool, so: str, entorno,
+                   bajo_pytest: bool) -> bool:
+    """¿Se le pide al shell que abra la figura? Decide, no actúa.
+
+    Va aparte por la misma razón que `_abrir_visor`: `_show_fig` no llega hasta
+    aquí bajo pytest, y sin separar la DECISIÓN del EFECTO no había forma de
+    probarla más que leyendo el fuente.
+
+    BUG-0121. La guarda del BUG-0111 apagaba la ventana bajo servidor MCP **en
+    todas las plataformas**, y el defecto que la motivó era del anfitrión de
+    WINDOWS: allí `os.startfile` lo intercepta la aplicación de escritorio y lo
+    convierte en un diálogo «¿adjunto este fichero a la sesión?». En POSIX nadie
+    intercepta `xdg-open`.
+
+    El razonamiento que generalizó el arreglo —«bajo servidor la ventana es un
+    extra, la figura ya viaja como ImageContent»— es FALSO en los anfitriones
+    que no pintan el ImageContent. Ahí la ventana no es un extra: es el único
+    canal por el que el analista ve la figura, y el 0111 se lo cerró. La mitad
+    guiada de un análisis son figuras.
+
+    Las llaves, de más fuerte a más débil:
+      ART_NO_VIEWER / pytest  apagan siempre;
+      ART_VIEWER              enciende donde el 0111 apagaría, para el anfitrión
+                              de Windows que no intercepte, o el que sí y aun
+                              así prefiera la ventana.
+    """
+    if bajo_pytest or entorno.get("ART_NO_VIEWER"):
+        return False
+    if bajo_servidor and so == "nt" and not entorno.get("ART_VIEWER"):
+        return False
+    return True
 
 
 def _abrir_visor(path: str) -> str:
@@ -2568,8 +2646,7 @@ def preliminary_outlier_scan(inp_path: str, d: int, D: int,
         text = desc.summary + "\n\n---\n" + desc.recommendation + next_opts
         items = [TextContent(type="text", text=text)]
         if desc.figure_b64:
-            items.append(ImageContent(type="image",
-                                      data=desc.figure_b64, mimeType="image/png"))
+            items.append(_imagen(desc.figure_b64, "preliminary_outlier_scan"))
         return items
     except Exception:
         return _err(traceback.format_exc())
@@ -2682,8 +2759,7 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
         items = [TextContent(type="text", text=cab + desc.summary
                              + "\n\n---\n" + desc.recommendation + cal_txt)]
         if desc.figure_b64:
-            items.append(ImageContent(type="image", data=desc.figure_b64,
-                                      mimeType="image/png"))
+            items.append(_imagen(desc.figure_b64, "residual_outlier_scan"))
         return items
     except Exception:
         return _err(traceback.format_exc())
@@ -2848,12 +2924,10 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
                          f"disco y el guion no lo refleja.*")
         items = [TextContent(type="text", text=text)]
         if desc.figure_b64:
-            items.append(ImageContent(type="image",
-                                      data=desc.figure_b64, mimeType="image/png"))
+            items.append(_imagen(desc.figure_b64, "estimate_and_diagnose"))
         hist_b64 = desc.data.get("hist_b64")
         if hist_b64:
-            items.append(ImageContent(type="image",
-                                      data=hist_b64, mimeType="image/png"))
+            items.append(_imagen(hist_b64, "estimate_and_diagnose"))
         return items
     except Exception as e:
         return _err(traceback.format_exc())
@@ -2885,7 +2959,7 @@ def model_histogram(inp_path: str) -> list:
         b64 = desc.data.get("hist_b64") or desc.figure_b64
         if b64 is None:
             return _err("No se pudo generar el histograma de residuos.")
-        return [ImageContent(type="image", data=b64, mimeType="image/png")]
+        return [_imagen(b64, "model_histogram")]
     except Exception:
         return _err(traceback.format_exc())
 
@@ -3102,7 +3176,7 @@ def overparameterization_analysis(inp_path: str, threshold: float = 0.7) -> list
         text = "\n".join(lines) + aviso_cov      # BUG-0061
         items = [TextContent(type="text", text=text)]
         if b64:
-            items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
+            items.append(_imagen(b64, "overparameterization_analysis"))
         return items
 
     except Exception:
@@ -4329,8 +4403,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             )
             items = [TextContent(type="text", text=text)]
             if bc.figure_b64:
-                items.append(ImageContent(type="image",
-                                          data=bc.figure_b64, mimeType="image/png"))
+                items.append(_imagen(bc.figure_b64, "guided_identification"))
             return items
 
         # ── Call 2: Series at d=0 + ADF/KPSS unit root table ─────────────
@@ -4371,7 +4444,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             )
             items = [TextContent(type="text", text=text)]
             if b64:
-                items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
+                items.append(_imagen(b64, "guided_identification"))
             return items
 
         # ── Call 3: Series at level d, D not yet decided ──────────────────
@@ -4512,9 +4585,9 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             )
             items = [TextContent(type="text", text=text)]
             if b64:
-                items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
+                items.append(_imagen(b64, "guided_identification"))
             if sea_fig:
-                items.append(ImageContent(type="image", data=sea_fig, mimeType="image/png"))
+                items.append(_imagen(sea_fig, "guided_identification"))
             return items
 
         # ── Call 4: ARMA identification ───────────────────────────────────
@@ -4693,8 +4766,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
         )
         items = [TextContent(type="text", text=text)]
         if ident.figure_b64:
-            items.append(ImageContent(type="image",
-                                      data=ident.figure_b64, mimeType="image/png"))
+            items.append(_imagen(ident.figure_b64, "guided_identification"))
         return items
 
     except Exception:
@@ -5814,16 +5886,13 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         text = _con_nota_figura(text, _ruta_fig)
         items = [TextContent(type="text", text=text)]
         if diag.figure_b64:
-            items.append(ImageContent(type="image",
-                                      data=diag.figure_b64, mimeType="image/png"))
+            items.append(_imagen(diag.figure_b64, "confirm_and_estimate"))
         if scan_b64:
-            items.append(ImageContent(type="image",
-                                      data=scan_b64, mimeType="image/png"))
+            items.append(_imagen(scan_b64, "confirm_and_estimate"))
         if include_histogram:
             hist_b64 = diag.data.get("hist_b64")
             if hist_b64:
-                items.append(ImageContent(type="image",
-                                          data=hist_b64, mimeType="image/png"))
+                items.append(_imagen(hist_b64, "confirm_and_estimate"))
         return items
 
     except Exception:
@@ -5921,7 +5990,7 @@ def record_version(inp_path: str,
         )
         items = [TextContent(type="text", text=texto)]
         if b64:
-            items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
+            items.append(_imagen(b64, "record_version"))
         return items
 
     except Exception:
@@ -6867,7 +6936,7 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
 
         items = [TextContent(type="text", text="\n".join(lines))]
         if b64:
-            items.append(ImageContent(type="image", data=b64, mimeType="image/png"))
+            items.append(_imagen(b64, "compare_versions"))
         return items
 
     except Exception:
@@ -7671,16 +7740,13 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         text = _con_nota_figura(text, _ruta_fig)
         items = [TextContent(type="text", text=text)]
         if diag.figure_b64:
-            items.append(ImageContent(type="image",
-                                      data=diag.figure_b64, mimeType="image/png"))
+            items.append(_imagen(diag.figure_b64, "suggest_intervention_form"))
         if scan_b64:
-            items.append(ImageContent(type="image",
-                                      data=scan_b64, mimeType="image/png"))
+            items.append(_imagen(scan_b64, "suggest_intervention_form"))
         if include_histogram:
             hist_b64 = diag.data.get("hist_b64")
             if hist_b64:
-                items.append(ImageContent(type="image",
-                                          data=hist_b64, mimeType="image/png"))
+                items.append(_imagen(hist_b64, "suggest_intervention_form"))
         return items
 
     except Exception:
@@ -8057,8 +8123,7 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
         # autónomo nadie las mira. `guion_evidencia` las recupera si hacen falta.
         if con_figuras:
             for fig_b64 in round_figures:
-                items.append(ImageContent(type="image", data=fig_b64,
-                                          mimeType="image/png"))
+                items.append(_imagen(fig_b64, "build_model"))
         return items
 
     except Exception:
@@ -8151,9 +8216,7 @@ def batch_build(inp_paths: list[str], output_dir: str,
                 if m_fit is not None:
                     diag_desc = describe_diagnosis(m_fit)
                     if diag_desc.figure_b64:
-                        items.append(ImageContent(type="image",
-                                                  data=diag_desc.figure_b64,
-                                                  mimeType="image/png"))
+                        items.append(_imagen(diag_desc.figure_b64, "batch_build"))
 
                 # ── DCD non-invertibility check ───────────────────────────
                 dcd_flag = ""
@@ -9053,8 +9116,7 @@ def guion_evidencia(guion_path: str, version: int = 0,
 
         items = [TextContent(type="text", text="\n".join(L))]
         for b in imgs:
-            items.append(ImageContent(type="image", data=b,
-                                      mimeType="image/png"))
+            items.append(_imagen(b, "guion_evidencia"))
         return items
     except Exception:
         return _err(traceback.format_exc())

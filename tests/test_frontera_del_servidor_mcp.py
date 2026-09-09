@@ -131,6 +131,53 @@ def test_pero_como_BIBLIOTECA_el_visor_se_conserva():
     assert "_BAJO_SERVIDOR = True" in fuente_de(srv.main)
 
 
+# ══════ BUG-0121 — …pero SÓLO donde el anfitrión intercepta ══════
+#
+# Se leen con las dos de arriba, y por eso van aquí. El 0111 apagó la ventana
+# bajo servidor sin mirar la plataforma; el defecto medido era de Windows.
+
+def test_en_posix_bajo_servidor_la_ventana_se_conserva():
+    """La regresión. En Linux nadie intercepta `xdg-open`, y en un anfitrión
+    que no pinta el ImageContent la ventana es el ÚNICO canal por el que el
+    analista ve la figura. El 0111 se lo cerró: nodo de Box-Cox del RATIO de la
+    réplica de Bolivia, 8-sep, el analista se quedó mirando texto."""
+    assert srv._visor_procede(True, "posix", {}, bajo_pytest=False)
+
+
+def test_en_windows_bajo_servidor_sigue_callada():
+    """Y el 0111 se conserva: allí la petición al shell se convierte en un
+    diálogo modal de adjuntar, una vez por figura."""
+    assert not srv._visor_procede(True, "nt", {}, bajo_pytest=False)
+
+
+def test_como_biblioteca_la_ventana_se_abre_en_las_dos():
+    for so in ("posix", "nt"):
+        assert srv._visor_procede(False, so, {}, bajo_pytest=False), so
+
+
+def test_ART_VIEWER_enciende_donde_el_0111_apagaria():
+    """Para el anfitrión de Windows que no intercepte —o que sí y aun así
+    prefiera la ventana."""
+    assert srv._visor_procede(True, "nt", {"ART_VIEWER": "1"}, bajo_pytest=False)
+
+
+def test_ART_NO_VIEWER_y_pytest_ganan_a_todo():
+    assert not srv._visor_procede(
+        True, "nt", {"ART_VIEWER": "1", "ART_NO_VIEWER": "1"}, bajo_pytest=False)
+    assert not srv._visor_procede(False, "posix", {}, bajo_pytest=True)
+
+
+def test_show_fig_consulta_la_decision_y_no_la_reimplementa():
+    """La enfermedad recurrente de este proyecto es el concepto escrito dos
+    veces, y la copia que se queda atrás. La decisión vive en UN sitio."""
+    from tests._fuente import fuente_de
+    src = "\n".join(l.split("#", 1)[0]
+                     for l in fuente_de(srv._show_fig).splitlines())
+    assert "_visor_procede(" in src
+    # `os.name` sí aparece: se le PASA. Lo que no puede aparecer es la regla.
+    assert '"nt"' not in src, "la plataforma se JUZGA en _visor_procede"
+
+
 # ══════ BUG-0113 — la ruta de la figura, dicha ══════
 
 def test_el_carril_guiado_no_tira_la_ruta_que_devuelve_show_fig():
@@ -320,3 +367,70 @@ def test_la_especificacion_del_MEG_sigue_diciendo_lo_suyo(salidas):
     j = t.index("## 2 ·")
     esp = t[i:j]
     assert "ifadf" in esp and "Re-estimado desde" in esp
+
+
+# ══════ BUG-0122 — una figura que nadie escribe ══════
+#
+# Cierra la familia 0078 · 0081 · 0111 · 0113 · 0119 · 0121: todos son «la
+# figura llega, o no llega, al analista». Los anteriores arreglaron el CAMINO;
+# éste arregla que quince herramientas no entraran en él.
+
+def test_result_escribe_la_figura_no_solo_la_busca():
+    """`_result` buscaba la huella en `_FIGURAS` por si otro la había escrito.
+    Si nadie lo hizo, se callaba: ni fichero, ni ventana, ni ruta que citar."""
+    from tests._fuente import fuente_de
+    src = "\n".join(l.split("#", 1)[0]
+                     for l in fuente_de(srv._result).splitlines())
+    assert "_show_fig(" in src
+
+
+def test_el_ImageContent_nace_en_un_solo_sitio():
+    """La enfermedad de este proyecto es el concepto escrito dos veces. Aquí
+    estaba escrito VEINTITRÉS veces, y en quince herramientas la mitad que
+    escribe el fichero faltaba. Con un solo constructor, olvidarlo deja de ser
+    posible."""
+    import io as _io
+    import os as _os
+    fuente = _io.open(_os.path.join(_os.path.dirname(srv.__file__),
+                                    "mcp_server.py"), encoding="utf-8").read()
+    fuera = [l for l in fuente.splitlines()
+             if "ImageContent(" in l
+             and "from mcp.types" not in l
+             and "return ImageContent(type=" not in l]
+    assert not fuera, f"{len(fuera)} ImageContent fuera de _imagen: {fuera[:3]}"
+
+
+def test_imagen_escribe_siempre(tmp_path, monkeypatch):
+    """Y lo hace de verdad, no sólo en el fuente."""
+    import base64
+    monkeypatch.setenv("ART_FIG_DIR", str(tmp_path))
+    png = base64.b64encode(bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000a49444154789c6360000002000100ffff03000006000557bfabd4000000"
+        "0049454e44ae426082")).decode()
+    srv._FIGURAS.pop(srv._huella_figura(png), None)
+    item = srv._imagen(png, "prueba")
+    assert item.type == "image" and item.data == png
+    assert srv._huella_figura(png) in srv._FIGURAS
+    assert list(tmp_path.glob("*.png")), "no escribió ningún fichero"
+
+
+def test_ninguna_herramienta_de_figura_se_queda_sin_escribirla():
+    """El censo. Una herramienta que devuelve figura tiene que pasar por
+    `_imagen` o por `_result` — que ahora escribe. La medida que encontró el
+    defecto daba 15 de 28 sin escribir."""
+    import ast
+    import io as _io
+    import os as _os
+    ruta = _os.path.join(_os.path.dirname(srv.__file__), "mcp_server.py")
+    fuente = _io.open(ruta, encoding="utf-8").read()
+    huerfanas = []
+    for n in ast.walk(ast.parse(fuente)):
+        if not isinstance(n, ast.FunctionDef):
+            continue
+        if not any("tool" in ast.dump(d) for d in n.decorator_list):
+            continue
+        cuerpo = ast.get_source_segment(fuente, n) or ""
+        if "ImageContent(" in cuerpo and "_imagen(" not in cuerpo:
+            huerfanas.append(n.name)
+    assert not huerfanas, huerfanas

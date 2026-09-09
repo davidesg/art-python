@@ -83,16 +83,30 @@ def test_result_cita_su_propia_figura_no_la_ultima():
     assert pb not in txt
 
 
-def test_result_no_cita_ninguna_ruta_si_la_figura_no_se_escribio():
+def test_result_nunca_cita_la_ruta_de_otra_figura():
     """Mejor ninguna nota que una que apunta al fichero de otra serie. La nota
     existe para cuando la ventana no aparece: si miente, la red de seguridad
-    falla igual que aquello que venía a cubrir."""
-    srv._show_fig(_png(), "otra")
+    falla igual que aquello que venía a cubrir.
+
+    ESTA PRUEBA CAMBIÓ CON EL BUG-0122, y conviene decir en qué. Antes exigía
+    que `_result` NO citara ninguna ruta cuando la figura no se había escrito
+    —`assert "Figura" not in txt`—. La premisa de aquella exigencia era que una
+    figura sin escribir fuese un caso a tolerar, y el 0122 la desmonta: quince
+    de las veintiocho herramientas que devuelven figura no la escribían nunca,
+    así que el caso «no se escribió» no era una excepción rara sino la mitad
+    del programa, y el analista se quedaba sin fichero, sin ventana y sin ruta.
+    Ahora `_result` la ESCRIBE, y por eso esa rama ya no se puede alcanzar.
+
+    Lo que sobrevive intacto es el contenido de la regla —no citar la ruta de
+    otra figura—, y es lo que se comprueba aquí."""
+    otra = srv._show_fig(_png(), "otra")
     txt = "\n".join(getattr(c, "text", "") for c in
                     srv._result(Description(summary="s",
                                             figure_b64=_png("yellow"),
                                             recommendation="r")))
-    assert "Figura" not in txt
+    assert otra not in txt, "cita el fichero de otra figura"
+    assert srv._huella_figura(_png("yellow")) in srv._FIGURAS, (
+        "BUG-0122: _result tiene que escribir la figura que devuelve")
 
 
 def test_el_registro_no_crece_sin_limite():
