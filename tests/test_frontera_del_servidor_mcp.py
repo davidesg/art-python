@@ -190,8 +190,9 @@ def test_el_carril_guiado_no_tira_la_ruta_que_devuelve_show_fig():
     from tests._fuente import fuente_de
     gi = getattr(srv.guided_identification, "fn", srv.guided_identification)
     src = fuente_de(gi)
-    llamadas = src.count("_show_fig(")
-    usadas = src.count("= _show_fig(")
+    # BUG-0126: el carril guiado pide la RUTA, no la ventana.
+    llamadas = src.count("_escribe_fig(")
+    usadas = src.count("= _escribe_fig(")
     assert llamadas > 0
     assert usadas == llamadas, (
         f"{llamadas - usadas} de {llamadas} llamadas descartan el retorno")
@@ -381,7 +382,10 @@ def test_result_escribe_la_figura_no_solo_la_busca():
     from tests._fuente import fuente_de
     src = "\n".join(l.split("#", 1)[0]
                      for l in fuente_de(srv._result).splitlines())
-    assert "_show_fig(" in src
+    # BUG-0126: escribir dejó de ser `_show_fig` y pasó a ser `_escribe_fig`,
+    # que escribe y NO abre ventana. La propiedad que esta prueba cuida es que
+    # `_result` escriba; con cuál de las dos, es implementación.
+    assert "_escribe_fig(" in src or "_show_fig(" in src
 
 
 def test_el_ImageContent_nace_en_un_solo_sitio():
@@ -434,3 +438,75 @@ def test_ninguna_herramienta_de_figura_se_queda_sin_escribirla():
         if "ImageContent(" in cuerpo and "_imagen(" not in cuerpo:
             huerfanas.append(n.name)
     assert not huerfanas, huerfanas
+
+
+# ══════ BUG-0126 — una ventana por imagen, ni más ni menos ══════
+#
+# Escribir y ENSEÑAR eran la misma función. Escribir es idempotente y se pide
+# tantas veces como haga falta; abrir una ventana no. La misma figura abría
+# TRES: la herramienta pedía la ruta, `_result` la pedía otra vez para la nota,
+# y `_imagen` una tercera al construir la salida.
+#
+# Ninguna de las 1.617 pruebas lo vio: todas comprueban que el FICHERO se
+# escribe, y ninguna cuenta ventanas — bajo pytest el visor no se abre, con
+# razón, y nadie separó «no abrir en la suite» de «poder contar cuántas
+# abriría».
+
+def test_solo_imagen_abre_ventana():
+    """El censo. `_show_fig` es el único que abre, y dentro del servidor lo
+    llama sólo `_imagen`. Todo lo demás usa `_escribe_fig`, que escribe y
+    calla."""
+    import ast
+    import io as _io
+    import os as _os
+    import re as _re
+    ruta = _os.path.join(_os.path.dirname(srv.__file__), "mcp_server.py")
+    fuente = _io.open(ruta, encoding="utf-8").read()
+    culpables = []
+    for n in ast.walk(ast.parse(fuente)):
+        if not isinstance(n, ast.FunctionDef) or n.name in ("_imagen", "_show_fig"):
+            continue
+        cuerpo = ast.get_source_segment(fuente, n) or ""
+        if _re.search(r"(?<![_\w])_show_fig\(", cuerpo):
+            culpables.append(n.name)
+    assert not culpables, (
+        f"{len(culpables)} funciones abren ventana por su cuenta: {culpables}")
+
+
+def test_se_cuentan_las_ventanas_no_solo_los_ficheros(monkeypatch, tmp_path):
+    """La prueba que faltaba: contar aperturas. Se sustituye `_abrir_visor` y
+    se levanta la guarda de pytest para poder medir lo que el servidor haría."""
+    import base64
+    import sys as _sys
+    png = base64.b64encode(bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000a49444154789c6360000002000100ffff03000006000557bfabd4000000"
+        "0049454e44ae426082")).decode()
+    monkeypatch.setenv("ART_FIG_DIR", str(tmp_path))
+    monkeypatch.delenv("ART_NO_VIEWER", raising=False)
+    ventanas = []
+    monkeypatch.setattr(srv, "_abrir_visor", lambda p: ventanas.append(p) or "")
+    monkeypatch.setattr(srv, "_visor_procede",
+                        lambda *a, **k: True)      # como si no fuera la suite
+    srv._FIGURAS.pop(srv._huella_figura(png), None)
+
+    srv._escribe_fig(png, "a")
+    srv._escribe_fig(png, "b")
+    assert ventanas == [], "escribir no puede abrir ventana"
+
+    srv._imagen(png, "c")
+    assert len(ventanas) == 1, f"una imagen, {len(ventanas)} ventanas"
+
+
+def test_escribe_fig_sigue_escribiendo(monkeypatch, tmp_path):
+    """Separar no puede haber roto la mitad que ya funcionaba (BUG-0122)."""
+    import base64
+    monkeypatch.setenv("ART_FIG_DIR", str(tmp_path))
+    png = base64.b64encode(bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000a49444154789c6360000002000100ffff03000006000557bfabd4000000"
+        "0049454e44ae426082")).decode()
+    srv._FIGURAS.pop(srv._huella_figura(png), None)
+    ruta = srv._escribe_fig(png, "prueba")
+    assert ruta and os.path.exists(ruta)
+    assert srv._huella_figura(png) in srv._FIGURAS

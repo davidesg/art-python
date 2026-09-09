@@ -160,8 +160,14 @@ def test_la_suite_no_abre_ventanas():
     """
     import inspect
     from tests._fuente import fuente_de
-    src = fuente_de(srv._show_fig)
+    # BUG-0126: `_show_fig` se partió en escribir (`_escribe_fig`) y enseñar.
+    # La guarda del entorno vive donde se DECIDE, que es `_visor_procede`
+    # (BUG-0121); lo que esta prueba cuida —que ART_NO_VIEWER apague el visor—
+    # se comprueba mejor sobre la decisión que sobre el texto de la función.
+    src = fuente_de(srv._show_fig) + fuente_de(srv._visor_procede)
     assert "ART_NO_VIEWER" in src
+    assert not srv._visor_procede(False, "posix", {"ART_NO_VIEWER": "1"},
+                                  bajo_pytest=False)
     assert "pytest" in src
 
 
@@ -222,6 +228,7 @@ def test_la_ruta_no_supone_que_exista_slash_tmp():
     """`/tmp` no existe en Windows."""
     import inspect, tempfile
     from tests._fuente import fuente_de
-    src = fuente_de(srv._show_fig)
+    # BUG-0126: quien elige el directorio es ahora `_escribe_fig`.
+    src = fuente_de(srv._escribe_fig)
     assert "tempfile.gettempdir()" in src
     assert '"/tmp/art_' not in src

@@ -1,0 +1,116 @@
+************************************************
+* Input file for program FUE                   *
+* DOCTYPE ATSW-interface SYSTEM                *
+************************************************
+
+** Frequency of time series: either 1(A), 4(Q) or 12(M):
+ 4
+** Number of observations and starting date of time series:
+ 84  1 2004 RATIO
+** Number of deterministic variables (including seasonal components):
+ 0
+**Number and orders of regular AR operators:
+ 0
+** Number and orders of annual AR operators:
+ 0
+** Number and orders of regular MA operators:
+ 0
+** Number and orders of anual MA operators:
+ 0
+** Number and frequencies of regular AR(2) operators with fixed frequency:
+ 0
+** Number and frequencies of regular MA(2) operators with fixed frequency:
+ 0
+** Mean parameter (mu):
+0
+** Box-Cox lambda, regular differences and complete annual differences:
+1.00 0 0
+** Individual factors of the annual difference (from freq 0.0): 
+ 0 0 0
+** ACF/PACF bands (0 Automatic) and reescaling factor: 
+ 0 100.00
+** Time series (stochastic and non-standard deterministic variables): 
+0.1475241477 
+0.1571392305 
+0.1605708486 
+0.1845893592 
+0.1502919806 
+0.1585383049 
+0.1557490526 
+0.1732317515 
+0.1342995660 
+0.1418339447 
+0.1377057010 
+0.1595385077 
+0.1328367303 
+0.1398072089 
+0.1332458141 
+0.1554845973 
+0.1158998777 
+0.1265696598 
+0.1229222498 
+0.1682677505 
+0.1259740512 
+0.1482347826 
+0.1473311414 
+0.1650688691 
+0.1236508510 
+0.1369300190 
+0.1382812325 
+0.1515315034 
+0.1127835430 
+0.1420864195 
+0.1344062866 
+0.1586762075 
+0.1122452436 
+0.1388533222 
+0.1352546146 
+0.1480806759 
+0.1113668756 
+0.1410078123 
+0.1400762584 
+0.1584413411 
+0.1203222209 
+0.1474044140 
+0.1486958134 
+0.1694149881 
+0.1374412658 
+0.1735997878 
+0.1836726146 
+0.2035533457 
+0.1460488554 
+0.1799764241 
+0.1770567516 
+0.1924801023 
+0.1425605642 
+0.1773258532 
+0.1712307481 
+0.1871969450 
+0.1414202918 
+0.1778436310 
+0.1808073444 
+0.1988652831 
+0.1474874601 
+0.1856555560 
+0.1897358659 
+0.2012643659 
+0.1496784890 
+0.2324402646 
+0.2086296878 
+0.2080888298 
+0.1513964073 
+0.1959814758 
+0.2018979973 
+0.2205374158 
+0.1445417701 
+0.1982793247 
+0.2027926441 
+0.2173066659 
+0.1453007491 
+0.2058438127 
+0.2052768885 
+0.2149925938 
+0.1507632717 
+0.2039401904 
+0.1951331769 
+0.2163063979 

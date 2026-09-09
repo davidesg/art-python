@@ -918,7 +918,7 @@ def _result(desc) -> list:
     if desc.figure_b64:
         # BUG-0122: ESCRIBIRLA, no sólo buscarla. Buscar la huella supone que
         # alguien la escribió antes, y quince herramientas no lo hacían nunca.
-        _ruta = _show_fig(desc.figure_b64) or _FIGURAS.get(
+        _ruta = _escribe_fig(desc.figure_b64) or _FIGURAS.get(
             _huella_figura(desc.figure_b64), "")
         if _ruta:
             # LA RUTA VA ANTES DE LA MARCA DE FIN DE TURNO, no detrás.
@@ -1031,8 +1031,14 @@ def _equation_for_prompt(ts, model) -> str:
 _ULTIMA_FIGURA: str = ""
 
 
-def _show_fig(b64: str | None, label: str = "art") -> str:
-    """Escribe la figura y trata de abrirla. **Devuelve la ruta**, o "".
+def _escribe_fig(b64: str | None, label: str = "art") -> str:
+    """Escribe la figura y devuelve su ruta, o "". **NO abre ventana.**
+
+    BUG-0126: escribir y ENSEÑAR eran la misma función, y por eso la misma
+    figura abría tres ventanas — la herramienta pedía la ruta, `_result` la
+    pedía otra vez para la nota, y `_imagen` una tercera al construir la
+    salida. Escribir es idempotente y se puede pedir tantas veces como haga
+    falta; abrir una ventana no. Ahora la ventana la abre UN solo sitio.
 
     Devolver la ruta es la mitad del arreglo: quien llama puede decirla, y
     cuando el visor no aparece el analista tiene el fichero.
@@ -1103,13 +1109,29 @@ def _show_fig(b64: str | None, label: str = "art") -> str:
     # es inocuo: el de Windows intercepta la petición y la convierte en un
     # diálogo de «¿adjunto este fichero a la sesión?» que saca al analista del
     # panel en el que trabaja, una vez por figura.
+    return path
+
+
+def _show_fig(b64: str | None, label: str = "art") -> str:
+    """Escribe la figura **y la enseña**. Devuelve la ruta, o "".
+
+    BUG-0126. Es el ÚNICO sitio que abre una ventana, y dentro del servidor lo
+    llama sólo `_imagen` — o sea, una ventana por imagen devuelta, ni más ni
+    menos. Todo lo demás usa `_escribe_fig`, que escribe y calla.
+
+    Se conserva con este nombre y esta semántica porque fuera del servidor
+    —cuadernos, guiones, la biblioteca— «enseñar una figura» es exactamente lo
+    que se quiere pedir.
+    """
+    path = _escribe_fig(b64, label)
+    if not path:
+        return ""
     global _ULTIMO_VISOR_ERROR
     _ULTIMO_VISOR_ERROR = ""
     import sys
     if not _visor_procede(_BAJO_SERVIDOR, os.name, os.environ,
                           "pytest" in sys.modules):
         return path
-
     _ULTIMO_VISOR_ERROR = _abrir_visor(path)
     return path
 
@@ -1958,7 +1980,7 @@ def boxcox_analysis(inp_path: str) -> list:
         from art.describe import describe_boxcox
         ts, _ = _load_ts_model(inp_path)
         desc = describe_boxcox(ts)
-        _show_fig(desc.figure_b64, "boxcox")
+        _escribe_fig(desc.figure_b64, "boxcox")
         return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
@@ -2207,7 +2229,7 @@ def intervention_ladder(inp_path: str,
         esc = escalera_de_ockham(m, ep, dominio=dom,
                                  umbral_vecino=umbral_vecino or 0.0)
         desc = describe_escalera(esc)
-        _show_fig(desc.figure_b64, "escalera")
+        _escribe_fig(desc.figure_b64, "escalera")
         return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
@@ -2349,7 +2371,7 @@ def intervention_plot(omega: list[float],
         if not inp_path:
             desc = describe_ltf(omega, delta or (), b=b, K=K, etiqueta=label)
             desc = _con_convenio(desc, omega, delta, b)
-            _show_fig(desc.figure_b64, "intervention_plot")
+            _escribe_fig(desc.figure_b64, "intervention_plot")
             return _result(desc)
 
         import numpy as np
@@ -2376,7 +2398,7 @@ def intervention_plot(omega: list[float],
             ventana=int(ventana), entrada=entrada,
             etiqueta=label or f"{os.path.basename(inp_path)} — entorno de obs {at}")
         desc = _con_convenio(desc, omega, delta, b)
-        _show_fig(desc.figure_b64, "intervention_plot")
+        _escribe_fig(desc.figure_b64, "intervention_plot")
         return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
@@ -2445,7 +2467,7 @@ def residual_episodes(inp_path: str,
         eps = decide_episodios(ext, ventana=v, d=d_reg)
         off = int(getattr(m, "d", 0)) + int(getattr(m, "D", 0)) * int(ts.freq or 1)
         desc = describe_episodios(r, eps, ventana=v, umbral=threshold, offset=off)
-        _show_fig(desc.figure_b64, "episodios")
+        _escribe_fig(desc.figure_b64, "episodios")
         return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
@@ -2474,7 +2496,7 @@ def seasonal_analysis(inp_path: str) -> list:
         from art.describe import describe_seasonality
         ts, _ = _load_ts_model(inp_path)
         desc = describe_seasonality(ts)
-        _show_fig(desc.figure_b64, "seasonality")
+        _escribe_fig(desc.figure_b64, "seasonality")
         return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
@@ -2506,7 +2528,7 @@ def unit_root_analysis(inp_path: str, lam: float = 0.0,
         from art.describe import describe_unit_root
         ts, _ = _load_ts_model(inp_path)
         desc = describe_unit_root(ts, lam=lam, max_d=max_d)
-        _show_fig(desc.figure_b64, "unit_root")
+        _escribe_fig(desc.figure_b64, "unit_root")
         return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
@@ -2541,7 +2563,7 @@ def identification_analysis(inp_path: str, d: int = 2, D: int = 0,
         from art.describe import describe_identification
         ts, _ = _load_ts_model(inp_path)
         desc = describe_identification(ts, d=d, D=D, lam=lam)
-        _show_fig(desc.figure_b64, "identification")
+        _escribe_fig(desc.figure_b64, "identification")
         return _result(desc)
     except Exception as e:
         return _err(traceback.format_exc())
@@ -2755,7 +2777,7 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
         # PACF, con la parte que ponen los anómalos en rojo. Ayer la retiré
         # entera para poner una de dos paneles sin los datos, y perder el panel
         # de la serie fue un retroceso: lo que faltaba era añadir la PACF.
-        _show_fig(desc.figure_b64, "escaneo")
+        _escribe_fig(desc.figure_b64, "escaneo")
         items = [TextContent(type="text", text=cab + desc.summary
                              + "\n\n---\n" + desc.recommendation + cal_txt)]
         if desc.figure_b64:
@@ -2861,7 +2883,7 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
         except Exception as _eq_exc:
             eq_text = f"⚠ *[model_equation error: {_eq_exc}]*"
         desc = describe_diagnosis(m)
-        _show_fig(desc.figure_b64, "diagnosis")
+        _escribe_fig(desc.figure_b64, "diagnosis")
         text = envuelve_iteracion(
             nombre=os.path.splitext(os.path.basename(output_path or inp_path))[0],
             modo="guiado",
@@ -4392,7 +4414,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             # BUG-0113: la ruta se RECOGE y se dice. `_show_fig` la devuelve
             # justo para esto, y este carril no pasa por `_result()`, que es
             # donde vive la red del BUG-0078.
-            _ruta_fig = _show_fig(bc.figure_b64, "boxcox")
+            _ruta_fig = _escribe_fig(bc.figure_b64, "boxcox")
             text = (
                 "## Paso 1 — Transformación Box-Cox\n\n"
                 + bc.summary + "\n\n---\n" + _rec_bc
@@ -4411,7 +4433,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             from art.describe import describe_unit_root
             b64     = _plot_series_at_d(ts, lam=lam, d=0)
             lam_str = "log" if lam == 0.0 else f"λ={lam}"
-            _ruta_fig = _show_fig(b64, "series_d0")          # BUG-0113
+            _ruta_fig = _escribe_fig(b64, "series_d0")          # BUG-0113
 
             # BUG-0023: este nodo evalúa DESDE d=0, y en la escuela de
             # Box-Jenkins no se saltan dos decisiones sin pasar por los
@@ -4452,7 +4474,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             b64     = _plot_series_at_d(ts, lam=lam, d=d)
             lam_str = "log" if lam == 0.0 else f"λ={lam}"
             sym     = {0: "", 1: "∇", 2: "∇²"}.get(d, f"∇^{d}")
-            _ruta_fig = _show_fig(b64, f"series_d{d}")        # BUG-0113
+            _ruta_fig = _escribe_fig(b64, f"series_d{d}")        # BUG-0113
 
             sea_text = ""
             sea_fig  = None
@@ -4461,7 +4483,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             hay_estacionalidad = False
             if d > 0:
                 sea     = describe_seasonality(ts)
-                _ruta_sea = _show_fig(sea.figure_b64, "seasonality")   # BUG-0113
+                _ruta_sea = _escribe_fig(sea.figure_b64, "seasonality")   # BUG-0113
                 sea_fig  = sea.figure_b64
                 sea_text = (
                     "\n\n**Test HAC de estacionalidad (soporte):**\n"
@@ -4608,7 +4630,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             ident      = describe_identification(ts, d=d, D=D, lam=lam)
             data_label = f"∇^{d}∇_s^{D} y(λ={lam})"
 
-        _ruta_fig = _show_fig(ident.figure_b64, "identification")   # BUG-0113
+        _ruta_fig = _escribe_fig(ident.figure_b64, "identification")   # BUG-0113
         top   = ident.data["suggestions"][0] if ident.data["suggestions"] else {}
         rec_p = top.get("p", 0)
         rec_q = top.get("q", 0)
@@ -5882,7 +5904,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         # BUG-0113: mismo caso que el carril guiado — este sobre se compone a
         # mano (BUG-0094) y no pasa por `_result()`, asi que la ruta hay que
         # recogerla y decirla aqui.
-        _ruta_fig = _show_fig(diag.figure_b64, "diagnosis")
+        _ruta_fig = _escribe_fig(diag.figure_b64, "diagnosis")
         text = _con_nota_figura(text, _ruta_fig)
         items = [TextContent(type="text", text=text)]
         if diag.figure_b64:
@@ -7261,7 +7283,7 @@ def guided_intervention(inp_path: str,
                       "errores de la tabla."]
 
             from art.describe import Description
-            _show_fig(d_esc.figure_b64, "guided_intervention_escalera")
+            _escribe_fig(d_esc.figure_b64, "guided_intervention_escalera")
             return _result(Description(summary="\n".join(L),
                                        figure_b64=d_esc.figure_b64,
                                        recommendation=d_cfg.recommendation,
@@ -7323,7 +7345,7 @@ def guided_intervention(inp_path: str,
             L += [f"*No hay residuos con |z| > {threshold:g}.*"]
 
         from art.describe import Description
-        _show_fig(d_cal.figure_b64, "guided_intervention_calibracion")
+        _escribe_fig(d_cal.figure_b64, "guided_intervention_calibracion")
         return _result(Description(summary="\n".join(L),
                                    figure_b64=d_cal.figure_b64,
                                    recommendation=d_cal.recommendation,
@@ -7736,7 +7758,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         # BUG-0113: mismo caso que el carril guiado — este sobre se compone a
         # mano (BUG-0094) y no pasa por `_result()`, asi que la ruta hay que
         # recogerla y decirla aqui.
-        _ruta_fig = _show_fig(diag.figure_b64, "diagnosis")
+        _ruta_fig = _escribe_fig(diag.figure_b64, "diagnosis")
         text = _con_nota_figura(text, _ruta_fig)
         items = [TextContent(type="text", text=text)]
         if diag.figure_b64:

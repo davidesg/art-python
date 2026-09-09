@@ -180,11 +180,21 @@ class TestDescribeUnitRoot:
         assert "KPSS" in desc.summary
         assert "| d |" in desc.summary
 
-    def test_figure_generated(self):
+    def test_no_lleva_figura(self):
+        """BUG-0127. Esta prueba exigía lo contrario: que hubiera figura.
+
+        La figura era la MISMA tabla del markdown, dibujada — y además pintaba
+        en verde la fila d=2 que la recomendación de la propia salida dedica
+        tres párrafos a desaconsejar. El color decía lo contrario que la
+        doctrina, y el color es lo que se mira primero.
+
+        Lo que se comprueba ahora es que no hay imagen y que la información
+        —que es lo que importaba— sigue entera en el texto."""
         from art.describe import describe_unit_root
         desc = describe_unit_root(self.ts, lam=0.0)
-        assert desc.figure_b64 is not None
-        assert len(desc.figure_b64) > 100
+        assert desc.figure_b64 is None
+        assert desc.summary.count("|") > 20, "la tabla tiene que seguir en el texto"
+        assert "d = 1" in desc.recommendation or "d=1" in desc.recommendation
 
     def test_data_has_recommended_d(self):
         from art.describe import describe_unit_root

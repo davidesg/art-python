@@ -95,11 +95,20 @@ class TestDescribeSeasonalParamsAPI:
         result = describe_seasonal_params(m)
         assert isinstance(result, Description)
 
-    def test_has_figure(self):
+    def test_no_lleva_figura_pero_si_la_tabla(self):
+        """BUG-0128. Esta prueba exigía lo contrario: que hubiera figura.
+
+        Los dos paneles de barras eran la tabla dibujada, y dibujada PEOR:
+        escalas distintas y sin cero común, así que un sin de −9,22 se veía
+        como el doble de un cos de +5,11. Y la amplitud A_k —lo único con
+        lectura física— no estaba en ningún panel.
+
+        Lo que se elimina es la FIGURA, no la tabla: aquí se comprueban las
+        dos cosas."""
         m = _make_harmonic_model(n_harmonics=2)
         result = describe_seasonal_params(m)
-        assert result.figure_b64 is not None
-        assert len(result.figure_b64) > 100
+        assert result.figure_b64 is None
+        assert "cos_k" in result.summary and "A_k" in result.summary
 
     def test_summary_has_table(self):
         m = _make_harmonic_model(n_harmonics=2)

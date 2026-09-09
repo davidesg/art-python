@@ -408,7 +408,7 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
 
     Returns a Description with:
       summary      — markdown table of test statistics and verdicts
-      figure_b64   — matplotlib coloured table (one row per d level)
+      figure_b64   — None: esta descripción NO lleva figura (BUG-0127)
       recommendation — recommended d with reasoning
       data         — list of per-level dicts + recommended_d
     """
@@ -517,47 +517,27 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
         "KPSS H₀: estacionariedad — no rechazar (✓) indica estacionariedad.",
     ]
 
-    # --- figure: coloured matplotlib table --------------------------------
-    if results:
-        col_labels = ["d", "Serie", "n",
-                      "ADF t", "ADF p", "ADF",
-                      "KPSS η", "KPSS p", "KPSS",
-                      "Veredicto"]
-        rows, colors = [], []
-        for r in results:
-            adf_v  = "✓" if r.adf_rejects      else "✗"
-            kpss_v = "✓" if not r.kpss_rejects  else "✗"
-            rows.append([
-                str(r.d), r.label, str(r.n),
-                f"{r.adf_stat:+.3f}", f"{r.adf_pvalue:.4f}", adf_v,
-                f"{r.kpss_stat:.3f}", f"{r.kpss_pvalue:.4f}", kpss_v,
-                _VERDICT_ES[r.verdict],
-            ])
-            bg = _COLOR[r.verdict]
-            colors.append([bg] * len(col_labels))
-
-        fig_h = max(1.8, 0.55 * len(results) + 0.8)
-        fig, ax = plt.subplots(figsize=(10, fig_h))
-        ax.axis("off")
-        tbl = ax.table(
-            cellText=rows,
-            colLabels=col_labels,
-            cellColours=colors,
-            loc="center",
-            cellLoc="center",
-        )
-        tbl.auto_set_font_size(False)
-        tbl.set_fontsize(9)
-        tbl.auto_set_column_width(list(range(len(col_labels))))
-        # Style header row
-        for j in range(len(col_labels)):
-            tbl[0, j].set_facecolor("#455a64")
-            tbl[0, j].set_text_props(color="white", fontweight="bold")
-        fig.tight_layout()
-        b64 = _fig_b64(fig)
-        plt.close(fig)
-    else:
-        b64 = None
+    # SIN FIGURA — BUG-0127.
+    #
+    # Aquí había una tabla dibujada con matplotlib: las mismas nueve columnas
+    # que el markdown de arriba, coloreadas. Se retira por dos razones, y la
+    # segunda es la que la convierte en defecto y no en gasto:
+    #
+    # 1. NO ENSEÑABA NADA QUE NO ESTUVIERA EN EL TEXTO. Una figura se justifica
+    #    cuando muestra algo que no cabe en una tabla —una forma, una serie, un
+    #    correlograma—. Ésta era la tabla. 24 KB de imagen para que el modelo
+    #    leyera lo que ya tenía en texto plano, y al analista el markdown le
+    #    sirve mejor porque no depende de que el visor abra.
+    #
+    # 2. CONTRADECÍA AL TEXTO QUE LA ACOMPAÑA. Pintaba en VERDE la fila d=2
+    #    —«estacionaria ✓»— mientras la recomendación, tres párrafos más
+    #    arriba, dice literalmente «punto de partida recomendado: d = 1, no 2;
+    #    un paso cada vez» y explica que la estacionalidad sin contrastar sesga
+    #    el ADF hacia diferenciar de más. El color decía lo contrario que la
+    #    doctrina, y el color es lo que se mira primero.
+    #
+    # El veredicto por fila sigue estando, con sus ✓/✗, en el markdown.
+    b64 = None
 
     # --- recommendation ---------------------------------------------------
     verdicts = {r.d: r.verdict for r in results}
@@ -3210,40 +3190,23 @@ def describe_seasonal_params(model) -> Description:
     k_cos = [k for k in k_all if "cos" in harmonic_data[k]]
     k_sin = [k for k in k_all if "sin" in harmonic_data[k]]
 
-    has_cos = bool(k_cos)
-    has_sin = bool(k_sin)
-    n_panels = (1 if has_cos else 0) + (1 if has_sin else 0)
-    fig, axes = plt.subplots(1, n_panels, figsize=(5 * n_panels, 4.5), squeeze=False)
-    ax_iter = iter(axes[0])
-
-    def _bar_panel(ax, k_list, component, title):
-        vals  = [harmonic_data[k][component][0] for k in k_list]
-        svals = [harmonic_data[k][component][1] for k in k_list]
-        t_abs = [abs(v) / (s + 1e-12) for v, s in zip(vals, svals)]
-        cols  = ["steelblue" if t > 2 else "lightgrey" for t in t_abs]
-        xerrs = [2 * s for s in svals]
-        xs    = list(range(len(k_list)))
-        ax.bar(xs, vals, yerr=xerrs, capsize=5, color=cols,
-               edgecolor="dimgrey", linewidth=0.6, error_kw={"elinewidth": 1.2})
-        ax.axhline(0, color="crimson", linestyle="--", linewidth=0.8)
-        ax.set_title(title, fontsize=11)
-        ax.set_xticks(xs)
-        ax.set_xticklabels([_freq_label(k) for k in k_list], fontsize=8)
-        ax.set_xlabel("Frecuencia k", fontsize=9)
-        ax.set_ylabel("Coeficiente", fontsize=9)
-        ax.tick_params(axis="y", labelsize=8)
-
-    if has_cos:
-        _bar_panel(next(ax_iter), k_cos, "cos", "Coeficientes cos(ωₖt)")
-    if has_sin:
-        _bar_panel(next(ax_iter), k_sin, "sin", "Coeficientes sin(ωₖt)")
-
-    series_name = getattr(model.series, "name", "") or "modelo"
-    fig.suptitle(f"Parámetros estacionales — {series_name}  (freq={freq})",
-                 fontsize=12, y=1.01)
-    fig.tight_layout()
-    b64 = _fig_b64(fig)
-    plt.close(fig)
+    # SIN FIGURA — BUG-0128.
+    #
+    # Aquí había dos paneles de barras, cos y sin, con sus ±2 SE. Se retiran:
+    #
+    # 1. Era la tabla de abajo, dibujada. Los mismos cos_k, sin_k, SE y t.
+    # 2. Y la dibujaba PEOR. Los dos paneles salían con escalas distintas y sin
+    #    cero común —uno de 0 a 8, otro de −12 a 0—, así que un sin de −9,22 se
+    #    veía como una barra enorme y un cos de +5,11 como una pequeña. La
+    #    figura sugería una dominancia que los números no dicen.
+    # 3. Y lo único que justificaría dibujar algo aquí —la AMPLITUD A_k, que es
+    #    lo que tiene lectura física y lo que se compara entre armónicos— no
+    #    estaba en ningún panel. Está en la tabla.
+    #
+    # El valor de esta herramienta es la tabla y, sobre todo, la advertencia de
+    # su docstring: no podar armónicos por el t-ratio antes del MEG (BUG-0010).
+    # Eso no necesita dibujo.
+    b64 = None
 
     # ── text table ──────────────────────────────────────────────────────────
     def _fv(v: float) -> str:

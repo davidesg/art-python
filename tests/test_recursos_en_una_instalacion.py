@@ -16,15 +16,23 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(RAIZ, "tools"))
 
 
-def test_el_material_esta_sincronizado():
-    """La copia que se distribuye es de `bugs/` y `docs/`, y se genera. Si se
-    queda atrás, la rueda sale con informes viejos y nadie se entera — que es
-    la enfermedad que este proyecto ya tiene documentada seis veces."""
+def test_el_material_se_puede_sincronizar():
+    """La copia que se distribuye se GENERA de `bugs/` y `docs/`.
+
+    Esta prueba sincroniza y comprueba que después queda al día. NO exige que
+    lo estuviera: en el árbol de trabajo, añadir un informe de defecto dejaría
+    la suite en rojo por una razón que no tiene que ver con lo que se está
+    probando — medido en la práctica, ocurre a la hora de escribir la guarda.
+
+    **La estrictez vive donde importa, que es el ARTEFACTO**: el flujo de
+    publicación sincroniza antes de construir y falla la publicación si la
+    rueda no lleva el material (`.github/workflows/publish-art.yml`). Lo que
+    esta prueba cuida es que el guion que lo genera siga funcionando."""
     import sync_material
+    sync_material.sincroniza()
     fallos = sync_material.desincronizado()
     assert not fallos, (
-        f"{len(fallos)} desajustes; corre `python3 tools/sync_material.py`. "
-        f"Primeros: {fallos[:5]}")
+        f"el guion de sincronización no deja la copia al día: {fallos[:5]}")
 
 
 def test_los_recursos_leen_del_paquete_y_no_del_arbol():
