@@ -347,6 +347,10 @@ class Superposicion:
     # El soporte es el de la respuesta MÁS UN VECINO a cada lado, y el vecino no
     # es un margen de cortesía: es la regla de Treadway —lo que la forma no
     # modeliza cae entero ahí—, así que tiene que entrar en la medida.
+    #: cuántos períodos abarca la RESPUESTA — BUG-0135: es lo que hay que
+    #: sombrear, no sólo el arranque. Sale de `fin_sop`, la última posición no
+    #: nula de la respuesta, así que vale igual para dos ω que para cinco.
+    soporte: int = 1
     r2_soporte: float = float("nan")
     z_resto_soporte: float = float("nan")
     resto_max_en: int = 0          # offset respecto a `at` del mayor resto
@@ -535,7 +539,8 @@ def superpone(observado: Sequence[float],
                          at=at, escala=escala, r2=r2, z_resto=z_resto,
                          sd=sd, entrada=entrada, r2_soporte=r2_soporte,
                          z_resto_soporte=z_resto_soporte,
-                         resto_max_en=resto_max_en)
+                         resto_max_en=resto_max_en,
+                         soporte=int(fin_sop) + 1)
 
 
 def describe_superposicion(observado: Sequence[float],
@@ -560,23 +565,42 @@ def describe_superposicion(observado: Sequence[float],
     fig, (a1, a2) = plt.subplots(2, 1, figsize=(10, 5.4), sharex=True,
                                  gridspec_kw=dict(height_ratios=[2.2, 1]))
     a1.axhline(0, color="#111", lw=0.8)
-    a1.axvline(sp.at, color="#f59e0b", lw=8, alpha=0.30)
-    a1.plot(sp.k, sp.observado, color="#1d4ed8", lw=1.2, marker="o", ms=4,
-            label="observado", zorder=3)
-    a1.plot(sp.k, sp.simulado, color="#b91c1c", lw=1.6, ls="--", marker="s",
-            ms=4, label=f"hipótesis × {sp.escala:.3g}", zorder=2)
-    a1.legend(fontsize=8, loc="best")
-    a1.set_ylabel("nivel" if d == 0 else "∇")
-    a1.grid(alpha=0.25)
-    a1.set_title(etiqueta or f"Superposición en el entorno de obs {sp.at}",
-                 fontsize=10)
 
+    # EL SOMBREADO CUBRE EL INCIDENTE ENTERO — BUG-0135.
+    #
+    # Era una `axvline` en el arranque: con una hipótesis de dos ω sombreaba
+    # sólo el primer período y el analista veía marcado un suceso de uno donde
+    # la forma abarca dos. El soporte de la hipótesis es tan largo como el
+    # número de coeficientes, y es lo que hay que marcar.
+    _sop = max(1, int(getattr(sp, "soporte", 1) or 1))
+    a1.axvspan(sp.at - 0.5, sp.at + _sop - 0.5,
+               color="#f59e0b", alpha=0.28, lw=0, zorder=0)
+
+    a1.plot(sp.k, sp.observado, color="#1d4ed8", lw=1.2, marker="o", ms=4,
+            label="observed", zorder=3)
+    a1.plot(sp.k, sp.simulado, color="#b91c1c", lw=1.6, ls="--", marker="s",
+            ms=4, label=f"hypothesis × {sp.escala:.3g}", zorder=2)
+    a1.legend(fontsize=8, loc="best")
+    a1.set_ylabel("level" if d == 0 else "∇")
+    a1.grid(alpha=0.25)
+    a1.set_title(etiqueta or f"Overlay around obs {sp.at}", fontsize=10)
+
+    # EL RESTO, TIPIFICADO, CON SUS ±2σ — BUG-0135.
+    #
+    # Iba en unidades de la serie y con líneas a ±3σ dibujadas como `u*sd`, así
+    # que el eje decía «resto» y no se podía leer contra nada. Todas las demás
+    # figuras del nodo enseñan residuos TIPIFICADOS con banda de 2σ; ésta era la
+    # excepción, y es la que el analista mira para juzgar si la forma encaja.
+    _z = (np.asarray(sp.resto, dtype=float) / sp.sd) if sp.sd else \
+        np.asarray(sp.resto, dtype=float)
     a2.axhline(0, color="#111", lw=0.8)
-    for u in (-3, 3):
-        a2.axhline(u * sp.sd, color="#b91c1c", ls=":", lw=0.9)
-    a2.bar(sp.k, sp.resto, color="#6b7280", width=0.65)
-    a2.set_ylabel("resto")
-    a2.set_xlabel("observación")
+    for u in (-2, 2):
+        a2.axhline(u, color="#888888", ls="--", lw=0.8)
+    a2.bar(sp.k, _z, color="#6b7280", width=0.65)
+    a2.set_ylim(-max(2.4, float(np.max(np.abs(_z))) * 1.15),
+                +max(2.4, float(np.max(np.abs(_z))) * 1.15))
+    a2.set_ylabel("residual (z)")
+    a2.set_xlabel("observation")
     a2.grid(alpha=0.25)
     fig.tight_layout()
     b64 = _fig_b64(fig)

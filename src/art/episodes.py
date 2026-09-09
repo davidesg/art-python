@@ -242,25 +242,24 @@ def describe_episodios(residuals: Sequence[float],
     z = z / sd if sd > 0 else z
     k = np.arange(1, len(z) + 1)
 
-    fig, ax = plt.subplots(figsize=(11, 3.4))
-    ax.axhline(0, color="#111", lw=0.8)
-    for u in (-umbral, umbral):
-        ax.axhline(u, color="#b91c1c", ls="--", lw=0.9)
-    ax.plot(k, z, color="#1d4ed8", lw=0.9, marker="o", ms=2.4)
-    for i, ep in enumerate(episodios):
-        ax.axvspan(ep.inicio - 0.5, ep.fin + 0.5,
-                   color="#f59e0b", alpha=0.28, lw=0)
-        ax.annotate(f"E{i+1}", (ep.inicio + (ep.duracion - 1) / 2,
-                                ax.get_ylim()[1]),
-                    ha="center", va="top", fontsize=8, color="#92400e")
-    ax.set_xlabel("observación (espacio de RESIDUOS)")
-    ax.set_ylabel("z")
-    ax.set_title(f"Episodios — ventana {ventana}, umbral |z| > {umbral:g}",
-                 fontsize=10)
-    ax.grid(alpha=0.25)
-    fig.tight_layout()
-    b64 = _fig_b64(fig)
-    plt.close(fig)
+    # SIN FIGURA — BUG-0134.
+    #
+    # Aquí había un panel con los residuos tipificados y los episodios
+    # sombreados. Se retira porque **no añade nada al gráfico de calibración de
+    # distorsiones más que una franja**: aquél dibuja los mismos residuos, marca
+    # el tramo igual (BUG-0133), y además lleva las fechas, la ACF, la PACF con
+    # la contribución del anómalo y la Q al pie.
+    #
+    # Y tenía un defecto propio: su eje iba en «espacio de residuos», sin
+    # fechas, así que decía «observación 19» donde el resto del nodo dice
+    # «Q4/2008». Era la única figura que obligaba a traducir contando.
+    #
+    # LO QUE SE CONSERVA, que es el valor de esta herramienta: la TABLA con la
+    # duración EN EL NIVEL, la cohesión y —sobre todo— la forma general que le
+    # corresponde a cada episodio (un episodio de duración L son L+1 escalones
+    # en el nivel). Eso es doctrina que no está en ninguna otra salida y no
+    # necesita dibujo.
+    b64 = None
 
     if not episodios:
         return Description(

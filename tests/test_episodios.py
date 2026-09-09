@@ -132,7 +132,11 @@ def test_describe_enseña_la_agrupacion_y_la_forma():
     d = describe_episodios(r, agrupa_episodios(ext, ventana=2), ventana=2)
     assert "3 escalones" in d.summary      # el episodio de dos períodos
     assert "2 escalones" in d.summary      # el aislado
-    assert d.figure_b64 and len(d.figure_b64) > 1000
+    # BUG-0134: esta prueba exigía figura. El panel no añadía nada al gráfico
+    # de calibración de distorsiones más que una franja —los mismos residuos,
+    # el mismo tramo sombreado— y encima iba sin fechas. Lo que importa es la
+    # TABLA: la duración en el NIVEL y la forma general que le corresponde.
+    assert d.figure_b64 is None
     assert len(d.data["episodios"]) == 2
     assert d.data["episodios"][0]["duracion"] == 2
 
