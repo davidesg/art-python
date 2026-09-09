@@ -510,3 +510,26 @@ def test_escribe_fig_sigue_escribiendo(monkeypatch, tmp_path):
     ruta = srv._escribe_fig(png, "prueba")
     assert ruta and os.path.exists(ruta)
     assert srv._huella_figura(png) in srv._FIGURAS
+
+
+# ══════ BUG-0129 — el histograma se pide, no se impone ══════
+
+def test_estimate_and_diagnose_no_manda_el_histograma_por_defecto():
+    """Tres sitios contestaban la misma pregunta de tres maneras:
+    `confirm_and_estimate` lo tiene opcional («saves tokens»),
+    `model_histogram` existe para pedirlo aparte y dice «request it
+    explicitly», y `estimate_and_diagnose` lo mandaba siempre."""
+    import inspect
+    fn = getattr(srv.estimate_and_diagnose, "fn", srv.estimate_and_diagnose)
+    p = inspect.signature(fn).parameters
+    assert "include_histogram" in p
+    assert p["include_histogram"].default is False
+
+
+def test_las_tres_vias_del_histograma_coinciden():
+    """El censo: quien devuelva el histograma tiene que dejar pedirlo."""
+    import inspect
+    for nombre in ("estimate_and_diagnose", "confirm_and_estimate"):
+        fn = getattr(getattr(srv, nombre), "fn", getattr(srv, nombre))
+        p = inspect.signature(fn).parameters
+        assert p["include_histogram"].default is False, nombre

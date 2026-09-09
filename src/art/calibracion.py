@@ -199,6 +199,7 @@ class CalibracionCorrelograma:
     sigma_cal: float
     # False si la ACF omitida no es definida positiva y la PACF derivada no es
     # una PACF. Coste conocido de omitir: cada retardo usa pares distintos.
+    por_omision: bool = False
     pacf_valida: bool = True
 
     @property
@@ -235,7 +236,8 @@ class CalibracionCorrelograma:
 
 def calibra_correlograma(residuals: Sequence[float],
                          umbral: float = 2.5,
-                         max_lag: int = 12) -> CalibracionCorrelograma:
+                         max_lag: int = 12,
+                         omitir: "set[int] | None" = None) -> CalibracionCorrelograma:
     """Cuánto de la ACF y de la PACF se debe a los residuos extremos.
 
     Parameters
@@ -258,7 +260,20 @@ def calibra_correlograma(residuals: Sequence[float],
     if sd < 1e-20:
         raise ValueError("desviación típica nula: no hay correlograma que calibrar.")
     z = (r - mu) / sd
-    idx = [i for i in range(n) if abs(z[i]) > umbral]
+    # BUG-0133. Tres criterios de qué omitir, no uno: por UMBRAL (el de
+    # siempre), por OBSERVACIÓN o por INCIDENTE. Con `omitir` explícito el
+    # umbral no interviene — se quita lo que se pide, lo marque o no, que es lo
+    # que el nodo de intervención necesita cuando ya tiene el episodio
+    # delimitado y quiere ver el correlograma sin él.
+    #
+    # Y hace falta que ESTA tabla y la figura del escaneo usen el mismo: antes
+    # la figura omitía el incidente y la tabla seguía con el umbral, así que el
+    # veredicto «cambia / no cambia la identificación» contestaba a la pregunta
+    # que no era.
+    if omitir is not None:
+        idx = sorted({int(i) for i in omitir if 0 <= int(i) < n})
+    else:
+        idx = [i for i in range(n) if abs(z[i]) > umbral]
     extremos = [(i + 1, float(z[i])) for i in idx]
 
     a_obs, p_obs = _acf_pacf(r, K)
@@ -284,14 +299,15 @@ def calibra_correlograma(residuals: Sequence[float],
 
     return CalibracionCorrelograma(
         distorsiones=dis, extremos=extremos, n=n, banda=banda, umbral=umbral,
-        sigma_obs=sd, sigma_cal=sigma_cal)
+        sigma_obs=sd, sigma_cal=sigma_cal, por_omision=(omitir is not None))
 
 
 # ---------------------------------------------------------------------------
 # Presentación
 # ---------------------------------------------------------------------------
 
-def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = ""):
+def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = "",
+                         con_figura: bool = True):
     """El correlograma observado contra el calibrado, en las DOS funciones.
 
     La PACF va **arriba** porque es la que decide el orden AR y es la que el
@@ -309,40 +325,52 @@ def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = ""):
     lags = np.array([d.lag for d in cal.distorsiones])
     b = cal.banda
 
-    fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-    for ax, (obs, cl, titulo, decide) in zip(axs, [
-            ([d.pacf_obs for d in cal.distorsiones],
-             [d.pacf_cal for d in cal.distorsiones],
-             "PACF", "decide el orden AR"),
-            ([d.acf_obs for d in cal.distorsiones],
-             [d.acf_cal for d in cal.distorsiones],
-             "ACF", "decide el orden MA")]):
-        flips = [d.lag for d in cal.distorsiones
-                 if (d.pacf_flip if titulo == "PACF" else d.acf_flip)]
-        for L in flips:
-            ax.axvspan(L - .5, L + .5, color=FLIP, alpha=.22, lw=0, zorder=0)
-        ax.bar(lags - .19, obs, width=.36, color=OBS, label="observada", zorder=2)
-        ax.bar(lags + .19, cl, width=.36, color=CAL,
-               label="calibrada (sin el anómalo)", zorder=2)
-        for u in (-b, b):
-            ax.axhline(u, color="#b91c1c", ls="--", lw=1.0, zorder=1)
-        ax.axhline(0, color="#111", lw=.8, zorder=1)
-        ax.set_ylabel(titulo)
-        ax.set_title(f"{titulo} — {decide}"
-                     + (f"   ·   cambia de veredicto en el retardo "
-                        f"{', '.join(map(str, flips))}" if flips else
-                        "   ·   ningún retardo cambia de veredicto"),
-                     fontsize=9, loc="left")
-        ax.grid(alpha=.2, axis="y")
-        ax.set_xticks(lags)
-    axs[0].legend(fontsize=8, loc="best")
-    axs[1].set_xlabel("retardo")
-    cab = f"Calibración del correlograma{' — ' + nombre if nombre else ''}"
-    fig.suptitle(f"{cab}   (|z| > {cal.umbral:g}, n={cal.n}, banda ±{b:.3f})",
-                 fontsize=10)
-    fig.tight_layout()
-    b64 = _fig_b64(fig)
-    plt.close(fig)
+    if not con_figura:
+        # SIN FIGURA — BUG-0133. Desde que el escaneo de tres paneles es el
+        # gráfico de calibración de distorsiones, esta figura duplica: enseña
+        # observada contra calibrada, que es lo que aquélla enseña como
+        # contribución, y le falta el panel de la serie. Lo que se conserva —y
+        # es donde esta función sigue siendo la mejor— es su TABLA, con el
+        # veredicto por retardo.
+        #
+        # `residual_outlier_scan` la pedía entera y descartaba la imagen: se
+        # pagaba el render de matplotlib para tirarlo.
+        b64 = None
+    else:
+        fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+        for ax, (obs, cl, titulo, decide) in zip(axs, [
+                ([d.pacf_obs for d in cal.distorsiones],
+                 [d.pacf_cal for d in cal.distorsiones],
+                 "PACF", "decide el orden AR"),
+                ([d.acf_obs for d in cal.distorsiones],
+                 [d.acf_cal for d in cal.distorsiones],
+                 "ACF", "decide el orden MA")]):
+            flips = [d.lag for d in cal.distorsiones
+                     if (d.pacf_flip if titulo == "PACF" else d.acf_flip)]
+            for L in flips:
+                ax.axvspan(L - .5, L + .5, color=FLIP, alpha=.22, lw=0, zorder=0)
+            ax.bar(lags - .19, obs, width=.36, color=OBS, label="observada", zorder=2)
+            ax.bar(lags + .19, cl, width=.36, color=CAL,
+                   label="calibrada (sin el anómalo)", zorder=2)
+            for u in (-b, b):
+                ax.axhline(u, color="#b91c1c", ls="--", lw=1.0, zorder=1)
+            ax.axhline(0, color="#111", lw=.8, zorder=1)
+            ax.set_ylabel(titulo)
+            ax.set_title(f"{titulo} — {decide}"
+                         + (f"   ·   cambia de veredicto en el retardo "
+                            f"{', '.join(map(str, flips))}" if flips else
+                            "   ·   ningún retardo cambia de veredicto"),
+                         fontsize=9, loc="left")
+            ax.grid(alpha=.2, axis="y")
+            ax.set_xticks(lags)
+        axs[0].legend(fontsize=8, loc="best")
+        axs[1].set_xlabel("retardo")
+        cab = f"Calibración del correlograma{' — ' + nombre if nombre else ''}"
+        fig.suptitle(f"{cab}   (|z| > {cal.umbral:g}, n={cal.n}, banda ±{b:.3f})",
+                     fontsize=10)
+        fig.tight_layout()
+        b64 = _fig_b64(fig)
+        plt.close(fig)
 
     # ── texto ────────────────────────────────────────────────────────────
     if not cal.extremos:
@@ -357,7 +385,9 @@ def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = ""):
     ext = ", ".join(f"obs {o} (z={z:+.2f})" for o, z in cal.extremos)
     L = [f"### Calibración del correlograma{' — ' + nombre if nombre else ''}",
          "",
-         f"**{len(cal.extremos)} residuo(s) extremo(s)** con |z| > {cal.umbral:g}: {ext}",
+         (f"**{len(cal.extremos)} residuo(s) omitido(s)** por el criterio dado: {ext}"
+          if cal.por_omision else
+          f"**{len(cal.extremos)} residuo(s) extremo(s)** con |z| > {cal.umbral:g}: {ext}"),
          f"σ̂ pasa de **{cal.sigma_obs:.4f}** a **{cal.sigma_cal:.4f}** al quitarlos.",
          "",
          "| lag | ACF obs | ACF cal | | PACF obs | PACF cal | | ampl. |",

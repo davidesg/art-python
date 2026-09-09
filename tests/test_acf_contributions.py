@@ -152,11 +152,32 @@ class TestDescribePrelimScan:
             assert "contribution" in entry
             assert "pct" in entry
 
-    def test_figure_b64_present(self):
+    def test_hay_figura_solo_si_hay_extremos(self):
+        """BUG-0130. Esta prueba exigía figura siempre.
+
+        Sin observaciones extremas se devolvía un solo panel: la serie
+        tipificada dibujada a un umbral que los datos ni se acercan a tocar.
+        Las líneas de referencia eran decorado y el mensaje entero era «no hay
+        nada», que el texto dice en una línea. Y además cambiaba la FORMA de la
+        figura sin avisar —tres paneles con extremos, uno sin ellos—, que es el
+        «a veces viene en un formato y a veces en otro» que motivó el censo.
+
+        Lo que se comprueba ahora es la condición, no la presencia."""
         from art.describe import describe_prelim_scan
-        desc = describe_prelim_scan(self.ts, d=1, D=0, lam=0.0)
-        assert desc.figure_b64 is not None
-        assert len(desc.figure_b64) > 100
+        alto = describe_prelim_scan(self.ts, d=1, D=0, lam=0.0, threshold=3.5)
+        bajo = describe_prelim_scan(self.ts, d=1, D=0, lam=0.0, threshold=1.5)
+        assert bajo.figure_b64 and len(bajo.figure_b64) > 100, (
+            "con extremos tiene que haber figura")
+        if not alto.data.get("outliers"):
+            assert alto.figure_b64 is None, "sin extremos, sin figura"
+
+    def test_la_cabecera_dice_el_criterio_del_umbral(self):
+        """BUG-0130: el número solo no distingue política de descuido."""
+        from art.describe import describe_prelim_scan
+        d = describe_prelim_scan(self.ts, d=1, D=0, lam=0.0, threshold=2.5)
+        linea = next(l for l in d.summary.splitlines() if "Umbral" in l)
+        assert "escaneo latente" in linea
+        assert "calibrado para n=" in linea
 
     def test_summary_contains_series_name(self):
         from art.describe import describe_prelim_scan
@@ -200,3 +221,60 @@ def test_sample_acf_raw_matches_statsmodels():
 
     np.testing.assert_allclose(our_acf, sm, atol=1e-6,
                                err_msg="Our ACF diverges from statsmodels biased ACF")
+
+
+# ══════ BUG-0131 — el panel y la tabla, el mismo número ══════
+
+def test_la_contribucion_pacf_coincide_con_la_calibracion():
+    """El panel de la PACF y la tabla de calibración calculan LO MISMO en dos
+    módulos distintos, y nada los obligaba a coincidir. Durante meses el panel
+    omitió las observaciones ANTERIORES a los anómalos —un `-1` sobre índices
+    que ya eran 0-based— y dibujó, como «parte debida al outlier», el efecto de
+    quitar dos datos normales: +0,016 donde la tabla decía −0,108.
+
+    Visualmente decía que los anómalos NO tocan la PACF, que es la conclusión
+    contraria a la correcta en el nodo que decide el orden AR."""
+    import numpy as np
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.axes as maxes
+    import fue
+    from art.mcp_server import _load_fitted
+    from art.describe import describe_prelim_scan
+    from art.calibracion import calibra_correlograma
+
+    caso = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "bugs", "BUG-0126-repro", "caso", "RATIO_m10.inp")
+    if not os.path.exists(caso):
+        import pytest
+        pytest.skip("el caso del repro no está")
+
+    ts, m = _load_fitted(caso)
+    r = np.asarray(m._result.residuals, dtype=float)
+    res_ts = fue.TimeSeries(data=r, freq=ts.freq, start=ts.start, name="Resid")
+
+    dibujado = []
+    orig = maxes.Axes.bar
+
+    def espia(self, x, height, *a, **k):
+        if k.get("label", "").startswith("Contribución"):
+            dibujado.append(np.asarray(height, dtype=float))
+        return orig(self, x, height, *a, **k)
+
+    maxes.Axes.bar = espia
+    try:
+        describe_prelim_scan(res_ts, d=0, D=0, lam=1.0, threshold=3.0)
+    finally:
+        maxes.Axes.bar = orig
+
+    assert len(dibujado) == 2, "se esperan dos paneles de contribución (ACF y PACF)"
+    pacf_dibujada = dibujado[1]
+
+    cal = calibra_correlograma(r, umbral=3.0)
+    esperada = np.asarray([d.pacf_obs - d.pacf_cal for d in cal.distorsiones],
+                          dtype=float)
+
+    n = min(len(pacf_dibujada), len(esperada))
+    assert np.allclose(pacf_dibujada[:n], esperada[:n], atol=1e-6), (
+        f"el panel dibuja {np.round(pacf_dibujada[:6], 4)} y la calibración "
+        f"da {np.round(esperada[:6], 4)}")

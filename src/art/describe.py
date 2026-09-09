@@ -2789,10 +2789,101 @@ def _acf_outlier_contributions(
 # Pre-identification outlier scan
 # ---------------------------------------------------------------------------
 
+def _rejilla_estacional(ax, freq: int, n_lags: int) -> None:
+    """Las líneas verticales y los ticks del canónico — BUG-0132.
+
+    Copiado de `fue.plots._draw_acf_panel`, que es lo que dibuja la ACF/PACF de
+    la figura canónica de diagnosis. Ésta —el gráfico de calibración de
+    distorsiones— se lee AL LADO de aquélla: si los retardos no coinciden y las marcas
+    estacionales no están en el mismo sitio, comparar las dos exige contar
+    barras a mano.
+    """
+    if freq > 1:
+        grid = [freq * m for m in range(1, 4) if freq * m <= n_lags]
+    elif n_lags > 9:
+        gap = round(n_lags / 3)
+        grid = [gap * m for m in range(1, 4) if gap * m <= n_lags]
+    else:
+        grid = [x for x in (3, 6, 9) if x <= n_lags]
+    for xv in grid:
+        ax.axvline(xv, color="0.5", lw=0.8, zorder=1)
+    if grid:
+        ax.set_xticks(grid)
+        ax.set_xticklabels([str(x) for x in grid], fontsize=8)
+    ax.set_xlim(0.5, n_lags + 0.5)
+
+
+def _criterio_umbral(umbral: float, n: int) -> str:
+    """El umbral, dicho con el criterio que lo eligió — BUG-0130.
+
+    La cabecera imprimía sólo el número: «Umbral: |z| > 2.5». Y el número
+    cambia entre llamadas **por política**, no por descuido: `policy.THRESHOLDS`
+    tiene tres criterios con nombre —`outlier_user` 3.5 para lo que pide el
+    analista, `outlier_autonomous` 3.0 para el carril autónomo, y
+    `outlier_autoscan` 2.5 para el escaneo latente, más sensible a propósito
+    porque su trabajo es no dejar pasar nada—.
+
+    Está bien pensado y se leía como una incoherencia: el analista veía
+    `|z| > 2.5` en una llamada y `3.5` en la siguiente, sobre la misma serie, y
+    no tenía forma de saber cuál de las dos cosas era.
+
+    Se dice además el **calibrado por n** (BUG-0105): bajo especificación
+    correcta el máximo de n normales crece con n, así que un umbral fijo deja de
+    significar lo mismo. Con n=83 el criterio calibrado es 3,22 y el fijo del
+    usuario 3,5. Ninguno de los tres fijos lo usa hoy; decirlo al lado deja la
+    diferencia a la vista sin cambiar ningún veredicto.
+    """
+    # Sólo la familia `outlier_*`, y por una razón: los valores de
+    # `policy.THRESHOLDS` NO son únicos. `intervention_form` vale también 2.5, y
+    # `intervention_autoselect`, `mu_drift` e `intervention_vecino` valen 2.0.
+    # Un número no identifica un criterio — el criterio se pierde al pasar por
+    # la frontera como float pelado, que es la misma enfermedad que el censo de
+    # figuras encuentra en todas partes. Lo correcto sería que el criterio
+    # VIAJE con el umbral; mientras no lo haga, aquí sólo se nombra lo que se
+    # puede nombrar sin equivocarse.
+    etiquetas = {
+        "outlier_user": "criterio del analista",
+        "outlier_autonomous": "criterio del carril autónomo",
+        "outlier_autoscan": "escaneo latente, más sensible a propósito",
+    }
+    try:
+        from . import policy
+        quien = next((etiquetas[k] for k in etiquetas
+                      if abs(policy.THRESHOLDS.get(k, -1) - float(umbral)) < 1e-9), "")
+    except Exception:
+        quien = ""
+    txt = f"|z| > {umbral}" + (f"  ({quien})" if quien else "  (pedido)")
+    try:
+        from .mcp_server import umbral_extremo
+        cal = umbral_extremo(int(n))
+        txt += f"  ·  calibrado para n={int(n)}: {cal:.2f} (BUG-0105)"
+    except Exception:
+        pass
+    return txt
+
+
 def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
-                          threshold: float = 3.5) -> Description:
+                          threshold: float = 3.5,
+                          omitir=None, motivo: str = "") -> Description:
     """
     Scan the differenced series for extreme observations BEFORE ARMA identification.
+
+    **QUÉ SE CALIBRA — BUG-0133.** Éste es el gráfico para CALIBRAR
+    DISTORSIONES —no la figura canónica, que es la de residuos + ACF/PACF que
+    acompaña a cada modelo— y contesta siempre la misma pregunta con tres
+    criterios distintos de qué quitar:
+
+    * `omitir=None` (por defecto) — **por UMBRAL**: se quitan las observaciones
+      con `|z| > threshold`. Es el escaneo de siempre.
+    * `omitir=["Q2/2020"]` o `omitir=[64]` — **por OBSERVACIÓN**: se quita
+      exactamente ésa, la marque el umbral o no.
+    * `omitir=["Q4/2008", "Q1/2009", "Q2/2009"]` — **por INCIDENTE**: el
+      episodio entero, que es lo que el nodo de intervención necesita antes de
+      elegir la forma: «¿cómo quedaría el correlograma sin este suceso?».
+
+    `motivo` es el texto que acompaña al criterio en la cabecera y en el título
+    de la figura. Sin él, el gráfico no dice qué se ha quitado, y con tres
+    criterios posibles eso es justo lo que hay que decir.
 
     "Lo más obvio primero": if a giant outlier is killing the ACF/PACF, treat it
     before choosing p and q — those tools are not robust to outliers.
@@ -2839,10 +2930,40 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         else:
             return str(yr)
 
+    if omitir is not None:
+        # POR OBSERVACIÓN O POR INCIDENTE — BUG-0133. Se admite fecha
+        # ("Q2/2020", "03/2011") o índice 0-based sobre la serie diferenciada.
+        # Va aquí y no arriba porque `_idx_to_date` se define en medio.
+        _sel, _no = [], []
+        for x in omitir:
+            if isinstance(x, (int, np.integer)):
+                _sel.append(int(x))
+                continue
+            _t = str(x).strip()
+            _hit = next((i for i in range(len(w_std))
+                         if _idx_to_date(i) == _t), None)
+            (_sel if _hit is not None else _no).append(
+                _hit if _hit is not None else _t)
+        extreme_idx = np.array(
+            sorted({i for i in _sel if 0 <= i < len(w_std)}), dtype=int)
+        if _no:
+            motivo = (motivo or "") + f"  ⚠ fechas no encontradas: {', '.join(map(str, _no))}"
+
     outliers = [(int(i), float(w_std[i]), _idx_to_date(i)) for i in extreme_idx]
 
     # ── ACF contributions (computed before figure so we can use them in both) ─
-    n_lags = min(len(w_std) // 3, max(12, 2 * freq))
+    # RETARDOS DE LA CANÓNICA — BUG-0132. Ésta NO es la figura canónica: la
+    # canónica es la de residuos + ACF/PACF (`plot_diagnosis`), la compacta que
+    # acompaña a cada modelo. Ésta es el gráfico para CALIBRAR DISTORSIONES, y
+    # se lee AL LADO de aquélla: la misma contesta «¿intervengo antes del ARMA
+    # o al revés?» y
+    # «¿la ACF sucia y la Q grande son por un anómalo o porque falta
+    # estructura?». Para poder compararla con la de residuos + ACF/PACF tiene
+    # que llevar LOS MISMOS RETARDOS, y llevaba otros: `min(n//3, max(12, 2s))`
+    # daba 12 en trimestral donde el canónico da 15 (=3s+3), y en mensual se
+    # quedaba en 24 donde el canónico da 39.
+    from .identification import _default_lags_fug
+    n_lags = min(_default_lags_fug(len(w_std), int(freq)), max(1, len(w_std) - 2))
     acf_full   = _sample_acf_raw(w_std, n_lags)
     ci_val     = 1.96 / np.sqrt(len(w_std))
 
@@ -2865,9 +2986,76 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         from art.calibracion import _acf_pacf
         _, pacf_full = _acf_pacf(w_std, n_lags)
         if outliers:
-            om = {int(i) - 1 for i, _z, _d in outliers}
+            # BUG-0131: aquí había `int(i) - 1`. Los índices de `outliers` YA
+            # son 0-based —`outliers = [(int(i), …) for i in extreme_idx]`—, así
+            # que el -1 omitía las observaciones ANTERIORES a los anómalos: dos
+            # observaciones normales. El panel de la PACF llevaba dibujando el
+            # efecto de quitar dos datos cualesquiera, que es ~0,01, en vez de la
+            # contribución real, que en RATIO_m10 vale -0,11 en el retardo 6.
+            om = {int(i) for i, _z, _d in outliers}
             _, pacf_cal = _acf_pacf(w_std, n_lags, omitir=om)
             pacf_contrib = pacf_full - pacf_cal
+    except Exception:
+        pass
+
+    # LA Q, OBSERVADA Y CALIBRADA — BUG-0132.
+    #
+    # Es la pregunta que esta figura existe para contestar y que no contestaba:
+    # una ACF sucia con Q grande, ¿es por un anómalo o porque falta estructura?
+    # Si al quitar los anómalos la Q se derrumba, era el anómalo; si apenas se
+    # mueve, falta estructura y intervenir no lo va a arreglar.
+    # LA Q, Y EL EFECTO DE OMITIR — BUG-0132.
+    #
+    # Dos cosas distintas y por eso dos líneas, cada una con su base dicha:
+    #
+    #   · la Q, calculada como en la figura canónica de diagnosis (Ljung-Box de
+    #     `fue`), para que los dos números coincidan y se puedan comparar;
+    #   · el EFECTO de omitir, como cociente, calculado con la MISMA ACF
+    #     calibrada que la tabla del nodo — `_acf_pacf(..., omitir=)`, que omite
+    #     los productos y no empalma la serie.
+    #
+    # Lo que NO se hace: borrar las observaciones del vector y volver a llamar
+    # al Ljung-Box. Eso EMPALMA: los residuos a un lado y otro del hueco pasan a
+    # ser adyacentes y fabrican correlación en la costura.
+    #
+    # Y lo que no se hace tampoco: mezclar las dos bases. `_acf_pacf` y la ACF
+    # de `fue` normalizan distinto —sobre RATIO_m10, 26,0 contra 20,8 con los
+    # mismos datos—, así que un «observada» de una y un «calibrada» de la otra
+    # no se restan.
+    #
+    # NOTA METODOLÓGICA: omitir un incidente anómalo PUEDE SUBIR la Q, y no es
+    # un error.
+    #
+    # El mecanismo no es sólo que el anómalo infle la varianza: es que
+    # **distorsiona retardos concretos**, y en cuáles depende de dónde caiga y
+    # de su forma. Si su contribución en el retardo k tiene el signo CONTRARIO
+    # a la autocorrelación verdadera, la cancela — y el correlograma observado
+    # enseña un cero donde hay estructura. Quitarlo la destapa y la Q sube.
+    #
+    # Por eso el efecto sobre la Q es un RESUMEN y no el diagnóstico: la Q suma
+    # sobre todos los retardos y los signos se compensan. Dónde mirar es el
+    # panel por retardo, que dice en cuáles el anómalo pone y en cuáles quita.
+    q_obs = None
+    efecto = None
+    q_lag = None
+    try:
+        from fue.diagnostics import ljung_box as _lb
+        _k = min(n_lags, max(1, len(w_std) // 4))
+        q_obs = float(_lb(w_std, [_k])["statistic"][0])
+        q_lag = _k
+        if outliers:
+            from art.calibracion import _acf_pacf as _ap
+            _om = {int(i) for i, _z, _d in outliers}
+            _a_obs, _ = _ap(w_std, _k)
+            _a_cal, _ = _ap(w_std, _k, omitir=_om)
+            _n = len(w_std)
+            _nc = _n - len(_om)
+            _q = lambda a, m: m * (m + 2) * sum(
+                (float(a[j]) ** 2) / (m - j - 1)
+                for j in range(min(_k, m - 1)))
+            _base = _q(_a_obs, _n)
+            if _base > 0:
+                efecto = 100.0 * (_q(_a_cal, _nc) / _base - 1.0)
     except Exception:
         pass
 
@@ -2886,7 +3074,21 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
     n_w   = len(w_std)
     xs    = np.arange(n_w)
 
-    if outliers:
+    if not outliers:
+        # SIN EXTREMOS, SIN FIGURA — BUG-0130.
+        #
+        # Había aquí una versión de UN panel: la serie tipificada sola, dibujada
+        # a un umbral que los datos ni se acercan a tocar. Las dos líneas de
+        # referencia eran decorado y el mensaje entero de la figura era «no hay
+        # nada», que el texto dice en una línea. Y la serie con sus bandas ya
+        # está en el listado de identificación.
+        #
+        # Además cambiaba la FORMA de la figura sin avisar: quien esperaba tres
+        # paneles veía uno y no sabía si es que no había nada o si la figura
+        # había fallado. Ése era el «a veces viene en un formato y a veces en
+        # otro» que motivó el censo de figuras.
+        b64 = None
+    else:
         # TRES paneles: la serie arriba, y debajo la ACF y la PACF. La versión
         # de dos —serie + ACF— se sustituyó un día entero por una de dos paneles
         # SIN los datos, y eso fue una pérdida: el panel de la serie es donde el
@@ -2896,76 +3098,151 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
             3, 1, figsize=(13, 8.6),
             gridspec_kw={"height_ratios": [2, 1.2, 1.2]}
         )
-    else:
-        fig, ax = plt.subplots(figsize=(13, 3.5))
-        ax2 = ax3 = None
 
-    # Top panel — standardised series
-    ax.axhline(0,          color="black",   lw=0.7)
-    ax.axhline(+2,         color="#888888", lw=0.8, ls="--")
-    ax.axhline(-2,         color="#888888", lw=0.8, ls="--")
-    ax.axhline(+threshold, color="#cc3333", lw=0.9, ls=":")
-    ax.axhline(-threshold, color="#cc3333", lw=0.9, ls=":")
-    ax.plot(xs, w_std, color="#1f77b4", lw=1.0)
-    for i, z_i, date in outliers:
-        ax.plot(i, z_i, "o", color="#cc3333", ms=7, zorder=5)
-        va = "bottom" if z_i >= 0 else "top"
-        ax.annotate(date, (i, z_i), fontsize=7.5, color="#cc3333",
-                    xytext=(0, 6 if z_i >= 0 else -6),
-                    textcoords="offset points", ha="center", va=va)
-    ax.fill_between(xs, -2, 2, alpha=0.06, color="#1f77b4")
-    ax.set_ylabel("z-score", fontsize=9)
-    ax.set_title(f"{name} — {label}  (tipificada, umbral ±{threshold}σ)",
-                 fontsize=10, fontweight="bold")
-    ax.tick_params(axis="both", labelsize=8)
+        # Top panel — standardised series
+        ax.axhline(0,          color="black",   lw=0.7)
+        ax.axhline(+2,         color="#888888", lw=0.8, ls="--")
+        ax.axhline(-2,         color="#888888", lw=0.8, ls="--")
+        if omitir is None:
+            # Con `omitir` el umbral no interviene: pintar sus líneas sería
+            # decorar la figura con un criterio que no se ha usado.
+            ax.axhline(+threshold, color="#cc3333", lw=0.9, ls=":")
+            ax.axhline(-threshold, color="#cc3333", lw=0.9, ls=":")
+        ax.plot(xs, w_std, color="#1f77b4", lw=1.0)
 
-    # Bottom panel — ACF contributions (only when there are outliers)
-    if ax2 is not None:
-        lags_x = np.arange(1, n_lags + 1)
-        ax2.bar(lags_x, acf_full, color="#9ecae1", alpha=0.85,
-                label="ACF(k)", zorder=2)
-        ax2.bar(lags_x, total_contrib, color="#e74c3c", alpha=0.75,
-                label="Contribución outlier(s)", zorder=3)
-        ax2.axhline(0,       color="black",   lw=0.6)
-        ax2.axhline(+ci_val, color="#888888", lw=0.8, ls="--")
-        ax2.axhline(-ci_val, color="#888888", lw=0.8, ls="--")
-        ax2.set_ylabel("r(k)", fontsize=9)
-        ax2.set_title(
-            "ACF — decide el orden MA  ·  rojo = parte debida al outlier",
-            fontsize=9, fontweight="bold"
-        )
-        ax2.legend(fontsize=7, loc="upper right", framealpha=0.7)
-        ax2.tick_params(axis="both", labelsize=8)
+        # LA MARCA DE LO OMITIDO — BUG-0133.
+        #
+        # Con `omitir` las observaciones del episodio pueden estar en z≈0, así
+        # que el punto rojo y su etiqueta se apilan sobre el eje y se solapan
+        # entre sí: con un episodio de cinco escalones era ilegible. Lo que
+        # importa entonces no es el valor de cada una sino QUÉ TRAMO se ha
+        # quitado, así que se sombrea el tramo y se rotula una sola vez.
+        if omitir is not None and outliers:
+            _ii = sorted(i for i, _z, _d in outliers)
+            ax.axvspan(_ii[0] - 0.5, _ii[-1] + 0.5, color="#cc3333",
+                       alpha=0.10, zorder=0)
+            for i, z_i, _d in outliers:
+                ax.plot(i, z_i, "o", color="#cc3333", ms=5, zorder=5)
+            _f = [d for i, _z, d in sorted(outliers)]
+            _et = _f[0] if len(_f) == 1 else f"{_f[0]} – {_f[-1]}"
+            _alto = max(float(np.max(w_std)), 0.0)
+            ax.annotate(_et, ((_ii[0] + _ii[-1]) / 2.0, _alto),
+                        fontsize=8, color="#cc3333", fontweight="bold",
+                        xytext=(0, 8), textcoords="offset points", ha="center")
+        else:
+            for i, z_i, date in outliers:
+                ax.plot(i, z_i, "o", color="#cc3333", ms=7, zorder=5)
+                va = "bottom" if z_i >= 0 else "top"
+                ax.annotate(date, (i, z_i), fontsize=7.5, color="#cc3333",
+                            xytext=(0, 6 if z_i >= 0 else -6),
+                            textcoords="offset points", ha="center", va=va)
 
-    # Tercer panel — lo mismo para la PACF, que es la que decide el orden AR
-    if ax3 is not None:
-        lags_x = np.arange(1, n_lags + 1)
-        ax3.bar(lags_x, pacf_full, color="#9ecae1", alpha=0.85,
-                label="PACF(k)", zorder=2)
-        ax3.bar(lags_x, pacf_contrib, color="#e74c3c", alpha=0.75,
-                label="Contribución outlier(s)", zorder=3)
-        ax3.axhline(0,       color="black",   lw=0.6)
-        ax3.axhline(+ci_val, color="#888888", lw=0.8, ls="--")
-        ax3.axhline(-ci_val, color="#888888", lw=0.8, ls="--")
-        ax3.set_xlabel("Retardo k", fontsize=9)
-        ax3.set_ylabel("φ(k)", fontsize=9)
-        ax3.set_title(
-            "PACF — decide el orden AR  ·  rojo = parte debida al outlier",
-            fontsize=9, fontweight="bold"
-        )
-        ax3.legend(fontsize=7, loc="upper right", framealpha=0.7)
-        ax3.tick_params(axis="both", labelsize=8)
+        ax.fill_between(xs, -2, 2, alpha=0.06, color="#1f77b4")
+        # La banda ±2σ tiene que VERSE siempre: sin el umbral pintado el eje se
+        # encoge y desaparecía del cuadro, y entonces las dos figuras —la de
+        # umbral y la de incidente— no se pueden comparar de un vistazo.
+        _lim = max(2.4, float(np.max(np.abs(w_std))) * 1.12)
+        ax.set_ylim(-_lim, _lim)
+        ax.set_ylabel("z-score", fontsize=9)
+        _crit = (f"omitiendo {motivo or 'las observaciones dadas'} "
+                 f"({len(extreme_idx)} obs.)"
+                 if omitir is not None else f"umbral ±{threshold}σ")
+        ax.set_title(f"{name} — {label}  (tipificada, {_crit})",
+                     fontsize=10, fontweight="bold")
+        ax.tick_params(axis="both", labelsize=8)
 
-    fig.tight_layout()
-    b64 = _fig_b64(fig)
-    plt.close(fig)
+        # Bottom panel — ACF contributions (only when there are outliers)
+        if ax2 is not None:
+            lags_x = np.arange(1, n_lags + 1)
+            ax2.bar(lags_x, acf_full, color="#9ecae1", alpha=0.85,
+                    label="ACF(k)", zorder=2)
+            ax2.bar(lags_x, total_contrib, color="#e74c3c", alpha=0.75,
+                    label="Contribución outlier(s)", zorder=3)
+            ax2.axhline(0,       color="black",   lw=0.6)
+            ax2.axhline(+ci_val, color="#888888", lw=0.8, ls="--")
+            ax2.axhline(-ci_val, color="#888888", lw=0.8, ls="--")
+            _rejilla_estacional(ax2, int(freq), n_lags)
+            ax2.set_ylabel("r(k)", fontsize=9)
+            ax2.set_title(
+                "ACF — decide el orden MA  ·  rojo = parte debida al outlier",
+                fontsize=9, fontweight="bold"
+            )
+            ax2.legend(fontsize=7, loc="upper right", framealpha=0.7)
+            ax2.tick_params(axis="both", labelsize=8)
+
+        # Tercer panel — lo mismo para la PACF, que es la que decide el orden AR
+        if ax3 is not None:
+            lags_x = np.arange(1, n_lags + 1)
+            ax3.bar(lags_x, pacf_full, color="#9ecae1", alpha=0.85,
+                    label="PACF(k)", zorder=2)
+            ax3.bar(lags_x, pacf_contrib, color="#e74c3c", alpha=0.75,
+                    label="Contribución outlier(s)", zorder=3)
+            ax3.axhline(0,       color="black",   lw=0.6)
+            ax3.axhline(+ci_val, color="#888888", lw=0.8, ls="--")
+            ax3.axhline(-ci_val, color="#888888", lw=0.8, ls="--")
+            _rejilla_estacional(ax3, int(freq), n_lags)
+            ax3.set_xlabel("Retardo k", fontsize=9)
+            ax3.set_ylabel("φ(k)", fontsize=9)
+            ax3.set_title(
+                "PACF — decide el orden AR  ·  rojo = parte debida al outlier",
+                fontsize=9, fontweight="bold"
+            )
+            ax3.legend(fontsize=7, loc="upper right", framealpha=0.7)
+            ax3.tick_params(axis="both", labelsize=8)
+
+        # PIE DE LA FIGURA — BUG-0132/0133. La Q con y sin calibrar, y el
+        # criterio con el que se ha calibrado. La figura canónica de diagnosis
+        # lleva su Q dibujada bajo la ACF; ésta tiene que llevar la suya y, a
+        # diferencia de aquélla, decir además QUÉ se ha quitado: con tres
+        # criterios posibles —umbral, observación, incidente— el número solo no
+        # significa nada.
+        _pie = []
+        if q_obs is not None:
+            _pie.append(f"Q({q_lag}) = {q_obs:.1f}")
+            if efecto is not None:
+                _lect = ("la Q la ponían los anómalos" if efecto <= -50 else
+                         "el anómalo enmascaraba estructura" if efecto > 5 else
+                         "la Q baja poco: falta estructura" if efecto > -20 else
+                         "mixto")
+                _pie.append(f"omitiendo: {efecto:+.0f}% ({_lect})")
+        _pie.append("calibrado por " + (
+            f"{motivo or 'las observaciones dadas'} ({len(extreme_idx)} obs.)"
+            if omitir is not None else f"umbral |z| > {threshold}"))
+        fig.text(0.5, 0.005, "     ·     ".join(_pie), ha="center",
+                 va="bottom", fontsize=9)
+        fig.tight_layout(rect=(0, 0.028, 1, 1))
+        b64 = _fig_b64(fig)
+        plt.close(fig)
 
     # ── Summary text ──────────────────────────────────────────────────────────
     lines = [
         f"## Escaneo pre-identificación — {name}  ({label})",
         f"- Serie tipificada: n={len(w_std)}, μ̂={mu:.4f}, σ̂={sigma:.4f}",
-        f"- Umbral: |z| > {threshold}",
+        (f"- Calibrado por: {motivo or 'observaciones dadas'} "
+         f"({len(extreme_idx)} obs.)"
+         if omitir is not None else
+         f"- Umbral: {_criterio_umbral(threshold, len(w_std))}"),
     ]
+    if q_obs is not None:
+        lines.append(f"- Q({q_lag}) = **{q_obs:.1f}**  (Ljung-Box, la misma que "
+                     f"la figura de diagnosis)")
+        if efecto is not None:
+            _cae = -efecto            # positivo = la Q baja al omitir
+            lines.append(
+                f"- Efecto de omitir sobre la Q: **{efecto:+.0f}%**  "
+                f"*(resumen; los signos se compensan entre retardos — el "
+                f"detalle está en los paneles)*"
+                + ("\n  → **la Q la ponían los anómalos**: intervenir antes de "
+                   "tocar el ARMA" if _cae >= 50 else
+                   "\n  → **omitir SUBE la Q**: el anómalo estaba ENMASCARANDO "
+                   "estructura — su contribución tiene el signo contrario a la "
+                   "autocorrelación en algún retardo y la cancela. Mira en "
+                   "cuáles, en los paneles de abajo: intervenir la va a "
+                   "destapar, no a quitarla" if efecto > 5 else
+                   "\n  → **la Q NO es de los anómalos**: falta estructura, y "
+                   "una intervención no la va a arreglar" if _cae < 20 else
+                   "\n  → **mixto**: los anómalos explican parte de la Q y "
+                   "queda estructura debajo. Intervén y vuelve a mirar"))
 
     var_max = 0.0
     max_acf_pct = 0.0
@@ -2977,7 +3254,10 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
             "Procede directamente a elegir (p, q) a partir de las ACF/PACF."
         )
     else:
-        lines.append(f"- **{len(outliers)} observación(es) extrema(s)** detectada(s):")
+        lines.append(
+            f"- **{len(outliers)} observación(es) omitida(s)** por el criterio dado:"
+            if omitir is not None else
+            f"- **{len(outliers)} observación(es) extrema(s)** detectada(s):")
         for _, z_i, date in sorted(outliers, key=lambda x: -abs(x[1])):
             sign = "positivo" if z_i > 0 else "negativo"
             form_hint = "pulse" if abs(z_i) > 5 else "pulse o step"
@@ -3096,6 +3376,12 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
             "outliers": [{"obs_w": i, "z": z_i, "date": date}
                          for i, z_i, date in outliers],
             "has_distortion": len(outliers) > 0,
+            # BUG-0133: los índices REALMENTE omitidos y por qué criterio, para
+            # que la tabla de calibración y el veredicto puedan seguir el mismo
+            # y no calibrar cada uno por su lado.
+            "omitidos": [int(i) for i in extreme_idx],
+            "criterio": ("omitir" if omitir is not None else "umbral"),
+            "motivo": motivo,
             "acf_contributions": affected_lags,
             "var_outlier_pct": var_max,        # % varianza del mayor anómalo
             "acf_max_pct": max_acf_pct,         # % distorsión ACF en el retardo más afectado

@@ -2679,7 +2679,9 @@ def preliminary_outlier_scan(inp_path: str, d: int, D: int,
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
+def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER,
+                          omitir: list | None = None,
+                          motivo: str = "") -> list:
     """
     
     **Instrumento suelto del nodo de intervención.** La secuencia completa
@@ -2699,11 +2701,25 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
     there is no model yet to carry it. Passing a fitted model to that one
     silently scans the raw, untransformed series — see bugs/BUG-0028.
 
+    QUÉ SE CALIBRA — tres criterios, una sola figura (BUG-0133):
+
+    * por UMBRAL (por defecto)   `threshold=3.0`
+    * por OBSERVACIÓN            `omitir=["Q2/2020"]`
+    * por INCIDENTE              `omitir=["Q4/2008", "Q1/2009", "Q2/2009"]`
+
+    Con `omitir` el umbral no interviene: se quita exactamente lo que se pide,
+    lo marque o no. Es lo que el nodo de intervención necesita antes de elegir
+    la forma — «¿cómo queda el correlograma sin este suceso?» — y evita tener
+    dos figuras para la misma pregunta.
+
     Parameters
     ----------
     inp_path  : .inp of an estimated model (per the file convention, estimate
                 from the .inp, not the .pre)
     threshold : |z| threshold for flagging (default 3.5)
+    omitir    : fechas ("Q2/2020") o índices 0-based a omitir en la calibración.
+                Si se da, sustituye al umbral como criterio.
+    motivo    : qué se está omitiendo, para la cabecera («el episodio 2008-09»)
     """
     try:
         import fue as _fue
@@ -2719,7 +2735,9 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
             m.residuals.data, freq=ts.freq, start=_resid_start(m),
             name=f"Resid {ts.name or ''}".strip(),
         )
-        desc = describe_prelim_scan(res_ts, d=0, D=0, lam=1.0, threshold=threshold)
+        desc = describe_prelim_scan(res_ts, d=0, D=0, lam=1.0,
+                                    threshold=threshold,
+                                    omitir=omitir, motivo=motivo)
         cab = (f"*Escaneo sobre los RESIDUOS de `{os.path.basename(inp_path)}` "
                f"(n={len(m.residuals.data)}), no sobre la serie.*\n\n")
 
@@ -2755,8 +2773,23 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER) -> list:
         cal_txt, cal_b64 = "", None
         try:
             from art.calibracion import calibra_correlograma, describe_calibracion
-            _cal = calibra_correlograma(m._result.residuals, umbral=threshold)
-            _d = describe_calibracion(_cal, nombre=os.path.basename(inp_path))
+            # BUG-0133. La tabla tiene que calibrar por el MISMO criterio que
+            # la figura. Antes la figura omitía el incidente y la tabla seguía
+            # con el umbral: dos calibraciones distintas en la misma pantalla, y
+            # el veredicto —«cambia / no cambia la identificación»— salía de la
+            # que no era, contestando a una pregunta que nadie había hecho.
+            #
+            # Los índices los publica `describe_prelim_scan` ya resueltos, que
+            # es quien sabe traducir la fecha: hacerlo aquí otra vez sería la
+            # misma cuenta en dos sitios.
+            _om = ({int(i) for i in (desc.data or {}).get("omitidos", [])}
+                   if omitir is not None else None)
+            _cal = calibra_correlograma(m._result.residuals, umbral=threshold,
+                                        omitir=_om)
+            # BUG-0133: sólo la TABLA. La figura de esta llamada es la del
+            # escaneo, que es el gráfico de calibración de distorsiones.
+            _d = describe_calibracion(_cal, nombre=os.path.basename(inp_path),
+                                      con_figura=False)
             cal_txt = "\n\n---\n\n" + _d.summary + "\n\n" + _d.recommendation
             cal_b64 = _d.figure_b64
         except Exception as _ce:
@@ -2829,7 +2862,8 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
                           guion_decision: str = "",
                           guion_rationale: str = "",
                           guion_problems: str = "",
-                          guion_next: str = "") -> list:
+                          guion_next: str = "",
+                          include_histogram: bool = False) -> list:
     """
     Fit the model specified in an .inp file and run diagnosis.
 
@@ -2848,6 +2882,9 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
     Parameters
     ----------
     inp_path    : path to the .inp file with the model specification
+    include_histogram : devolver además el histograma de residuos (por defecto
+                  False, igual que en `confirm_and_estimate`). El histograma NO
+                  es parte del módulo básico de diagnosis: se pide (BUG-0129).
     output_path : if given, also persist the fitted model as the ``.pre``
                   (= .inp with the estimated parameters, to seed the next step)
                   and ``.out`` (ASCII results report) alongside this basename —
@@ -2944,12 +2981,31 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
                 text += (f"\n\n⚠ *guion NO registrado "
                          f"({type(_ge).__name__}: {_ge}). El modelo está en "
                          f"disco y el guion no lo refleja.*")
+        # BUG-0129. Tres sitios y tres respuestas sobre la misma pregunta:
+        # `confirm_and_estimate` tiene `include_histogram=False` («default
+        # False — saves tokens»), `model_histogram` existe para pedirlo aparte
+        # y su docstring dice «the histogram is not part of the basic
+        # diagnostic module — request it explicitly», y aquí se mandaba
+        # SIEMPRE. 34 KB por iteración que nadie pidió.
+        #
+        # Y las rutas no se decían: los ficheros se escriben, pero esta vía
+        # compone su sobre a mano y el BUG-0113 —«di dónde está la figura»—
+        # sólo cubrió el carril guiado y `_result`.
         items = [TextContent(type="text", text=text)]
+        _rutas = []
         if desc.figure_b64:
-            items.append(_imagen(desc.figure_b64, "estimate_and_diagnose"))
-        hist_b64 = desc.data.get("hist_b64")
-        if hist_b64:
-            items.append(_imagen(hist_b64, "estimate_and_diagnose"))
+            _rutas.append(_escribe_fig(desc.figure_b64, "diagnosis"))
+            items.append(_imagen(desc.figure_b64, "diagnosis"))
+        if include_histogram:
+            hist_b64 = (desc.data or {}).get("hist_b64")
+            if hist_b64:
+                _rutas.append(_escribe_fig(hist_b64, "histograma"))
+                items.append(_imagen(hist_b64, "histograma"))
+        _nota = "".join(_nota_figura(r) for r in _rutas if r)
+        if _nota:
+            items[0] = TextContent(type="text",
+                                   text=_con_nota_figura(text, _rutas[0])
+                                   if len(_rutas) == 1 else text + _nota)
         return items
     except Exception as e:
         return _err(traceback.format_exc())
@@ -7295,7 +7351,12 @@ def guided_intervention(inp_path: str,
         # ═════════════════ LLAMADA 1 — ¿hay que intervenir? ═════════════════
         from art.calibracion import calibra_correlograma, describe_calibracion
         cal = calibra_correlograma(m._result.residuals, umbral=threshold)
-        d_cal = describe_calibracion(cal, nombre=os.path.basename(inp_path))
+        # BUG-0133: de aquí sale la TABLA con su veredicto por retardo. La
+        # FIGURA de esta llamada es la del escaneo de tres paneles —el gráfico
+        # de calibración de distorsiones—, que enseña además dónde está el
+        # suceso y lleva la Q al pie. Tener las dos era duplicar.
+        d_cal = describe_calibracion(cal, nombre=os.path.basename(inp_path),
+                                     con_figura=False)
 
         L = ["## Llamada 1 — ¿hay que intervenir aquí?", "",
              "La pregunta NO es «¿hay anómalos?» sino «¿cambian la "
@@ -7344,10 +7405,18 @@ def guided_intervention(inp_path: str,
         else:
             L += [f"*No hay residuos con |z| > {threshold:g}.*"]
 
-        from art.describe import Description
-        _escribe_fig(d_cal.figure_b64, "guided_intervention_calibracion")
+        from art.describe import Description, describe_prelim_scan, _resid_start
+        _fig = None
+        try:
+            import fue as _fue
+            _res_ts = _fue.TimeSeries(data=m._result.residuals, freq=ts.freq,
+                                      start=_resid_start(m), name="Resid")
+            _fig = describe_prelim_scan(_res_ts, d=0, D=0, lam=1.0,
+                                        threshold=threshold).figure_b64
+        except Exception as _fe:
+            _warn(f"guided_intervention: figura del escaneo no disponible: {_fe}")
         return _result(Description(summary="\n".join(L),
-                                   figure_b64=d_cal.figure_b64,
+                                   figure_b64=_fig,
                                    recommendation=d_cal.recommendation,
                                    data=dict(llamada=1,
                                              cambia_identificacion=cambia)))
