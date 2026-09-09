@@ -14,3 +14,6 @@ cases/**/work/
 research/sf_meg/out/
 site/
 atsw-suite/_site/
+
+# BUG-0125: copia GENERADA por tools/sync_material.py. El original es bugs/ y docs/.
+src/art/material/

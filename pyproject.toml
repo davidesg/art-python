@@ -73,3 +73,11 @@ art-bug = "art.bug_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# BUG-0125: el material que los recursos MCP sirven en ejecución. Va DENTRO del
+# paquete porque un recurso se pide en una sesión instalada, no en el árbol de
+# trabajo; `tools/sync_material.py` lo genera desde `bugs/` y `docs/`, que
+# siguen siendo el único original. Sin esto la rueda salía con 27 ficheros y
+# `art://defectos` contestaba que no había nada.
+[tool.setuptools.package-data]
+art = ["material/bugs/*.md", "material/docs/*.md"]

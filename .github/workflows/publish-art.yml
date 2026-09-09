@@ -18,10 +18,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # BUG-0125. El material que los recursos MCP sirven en ejecucion
+      # -- el registro de defectos y la documentacion -- vive en bugs/ y docs/,
+      # que el empaquetado NO distribuye (`prune bugs` en MANIFEST.in, y
+      # pyproject empaqueta solo src/). Sin este paso la rueda sale con 27
+      # ficheros y `art://defectos` contesta que no hay nada: la 0.2.0 se
+      # publico asi. La copia va dentro del paquete y se genera aqui.
+      - name: Sync the material the MCP resources serve
+        run: |
+          python3 tools/sync_material.py
+          test -d src/art/material/bugs
       - name: Build sdist + wheel
         run: |
           pip install build
           python -m build
+      - name: The wheel must carry the material (BUG-0125)
+        run: |
+          python3 - <<'PY'
+          import glob, zipfile, sys
+          n = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist()
+          bugs = sum(1 for x in n if 'material/bugs/' in x)
+          docs = sum(1 for x in n if 'material/docs/' in x)
+          print(f'wheel: {len(n)} files, {bugs} reports, {docs} docs')
+          sys.exit(0 if bugs > 100 and docs else 'the wheel does not carry the material')
+          PY
       # INSTALL AND IMPORT WHAT IS ABOUT TO BE PUBLISHED.
       #
       # This step did not exist, on the reasoning that "art-tseries depends on

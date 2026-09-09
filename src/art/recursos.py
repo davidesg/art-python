@@ -37,8 +37,40 @@ from __future__ import annotations
 import os
 import re
 
-#: Raíz del paquete instalado o del árbol de trabajo.
-_RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+def _raiz_del_material() -> str:
+    """Dónde está el material que estos recursos sirven.
+
+    BUG-0125. Esto contaba tres directorios por encima del módulo, que es la
+    disposición del REPOSITORIO. En una instalación no existe, y además el
+    material tampoco viajaba: `pyproject.toml` empaqueta sólo `src/` y
+    `MANIFEST.in` lleva un `prune bugs` deliberado. La rueda 0.2.0 publicada
+    tiene 27 ficheros, cero de `bugs/` y cero de `docs/` — comprobado
+    descargándola, no leyendo la configuración. O sea que los cuatro recursos de
+    contenido existían en `resources/list`, se podían pedir, y contestaban que no
+    había nada. La peor forma de fallar: no un error, una ausencia.
+
+    Ahora se mira primero **dentro del paquete** —`art/material/`, que
+    `tools/sync_material.py` genera y el empaquetado distribuye— y sólo si no
+    está, el árbol de trabajo. Un desarrollador que no haya sincronizado sigue
+    viendo el original; una instalación ve la copia; y ninguno de los dos ve un
+    directorio que no le corresponde.
+    """
+    aqui = os.path.dirname(os.path.abspath(__file__))
+    empaquetado = os.path.join(aqui, "material")
+    if os.path.isdir(empaquetado):
+        return empaquetado
+    return os.path.dirname(os.path.dirname(aqui))      # árbol de trabajo
+
+
+#: Raíz del material: el paquete instalado o el árbol de trabajo.
+_RAIZ = _raiz_del_material()
+
+#: Qué decir cuando no hay material. NO es «no hay defectos»: es que esta
+#: instalación no lo trae, y el sitio donde está se dice explícitamente.
+SIN_MATERIAL = (
+    "*(esta instalación de `art` no incluye {qué}. El material vive en el "
+    "repositorio: github.com/davidesg/art-python. Si esperabas verlo aquí, "
+    "es el BUG-0125.)*")
 
 
 def _dir(nombre: str) -> str:
@@ -95,7 +127,7 @@ def indice_de_defectos() -> str:
     """El índice: qué se ha roto, cómo, y qué sigue abierto."""
     filas = _informes()
     if not filas:
-        return "*(no hay registro de defectos en esta instalación)*"
+        return SIN_MATERIAL.format(qué="el registro de defectos")
     abiertos = [f for f in filas if f[1] not in ("fixed", "wontfix", "duplicate")]
     L = [
         "# Registro de defectos de ART",
@@ -149,7 +181,7 @@ def _documentos() -> list[str]:
 def indice_de_documentos() -> str:
     docs = _documentos()
     if not docs:
-        return "*(no hay documentos de diseño en esta instalación)*"
+        return SIN_MATERIAL.format(qué="los documentos de diseño")
     L = ["# Documentos de diseño de ART", "",
          "Se piden por `art://doc/<NOMBRE>`, sin la extensión.", ""]
     for d in docs:

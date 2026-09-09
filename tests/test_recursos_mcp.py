@@ -131,11 +131,18 @@ def test_un_recurso_NO_se_recorta_como_una_descripcion():
 
 
 def test_leer_un_recurso_no_puede_tumbar_el_servidor(tmp_path, monkeypatch):
-    """Un recurso es conveniencia: si el fichero no está, se dice y ya."""
+    """Un recurso es conveniencia: si el fichero no está, se dice y ya.
+
+    La afirmación cambió con el BUG-0125, y en qué: antes buscaba la palabra
+    «no hay». Ese mensaje era el defecto — se lee como «no hay defectos» cuando
+    lo que pasa es que esta instalación no los trae, y decir la primera cosa
+    cuando pasa la segunda borra la razón (BUG-0090). Lo que se comprueba sigue
+    siendo lo mismo: que degrada en vez de reventar, y que lo dice."""
     from art import recursos
     monkeypatch.setattr(recursos, "_RAIZ", str(tmp_path))
-    assert "no hay" in recursos.indice_de_documentos().lower() or \
-           "no hay" in recursos.indice_de_defectos().lower()
+    for txt in (recursos.indice_de_documentos(), recursos.indice_de_defectos()):
+        assert txt.strip().startswith("*("), "no degrada con una nota"
+        assert "BUG-0125" in txt, "no dice por qué no hay material"
 
 
 # ── que el modelo SEPA que existen ────────────────────────────────────
