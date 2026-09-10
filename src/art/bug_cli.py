@@ -1,11 +1,22 @@
 """
 art-bug — command-line front end for the in-repo bug tracker (art.bugs).
 
-    art-bug list [--status S] [--component C]   list reports (open by default: all)
+    art-bug [--dir D] list [--status S] [--component C]   list reports
     art-bug show BUG-NNNN                        print a report
     art-bug new "title" --component pipeline     create a new report
     art-bug index                               regenerate bugs/README.md
     art-bug check                               validate all reports (CI-friendly)
+
+`--dir` apunta el registro a OTRO repositorio. La biblioteca (`art.bugs`) ya
+aceptaba `bugs_dir` en todas sus funciones; lo que faltaba era la puerta, y sin
+ella los demás programas de la escalera —`pyfug`, `drvec`, `drtran`,
+`drvarma`— no podían usar este registro sin copiarlo. Copiarlo habría sido la
+enfermedad de siempre: la misma capacidad en N sitios.
+
+Sin `--dir` se localiza subiendo desde el directorio actual, y si ahí no hay
+nada se cae a la ubicación del paquete — que es cómodo dentro de `art` y un
+cepo fuera: `art-bug index` desde un repo sin `bugs/` escribiría el índice de
+`art`.
 """
 
 from __future__ import annotations
@@ -17,7 +28,8 @@ from . import bugs as _bugs
 
 
 def _cmd_list(args):
-    items = _bugs.list_bugs(status=args.status, component=args.component)
+    items = _bugs.list_bugs(bugs_dir=args.dir, status=args.status,
+                            component=args.component)
     if not items:
         print("no bug reports found.")
         return 0
@@ -31,7 +43,7 @@ def _cmd_list(args):
 
 
 def _cmd_show(args):
-    for b in _bugs.list_bugs():
+    for b in _bugs.list_bugs(bugs_dir=args.dir):
         if b.id == args.id:
             print(_bugs.render_frontmatter(b))
             print()
@@ -45,22 +57,22 @@ def _cmd_new(args):
     path = _bugs.new_bug(
         args.title, component=args.component, severity=args.severity,
         found_in=args.found_in, reporter=args.reporter,
-        tags=args.tag or [])
+        tags=args.tag or [], bugs_dir=args.dir)
     print(f"created {path}")
     print("edit it, then run 'art-bug index' to refresh bugs/README.md")
     return 0
 
 
 def _cmd_index(args):
-    path = _bugs.write_index()
+    path = _bugs.write_index(args.dir)
     print(f"wrote {path}")
     return 0
 
 
 def _cmd_check(args):
-    report = _bugs.validate_all()
+    report = _bugs.validate_all(args.dir)
     if not report:
-        n = len(_bugs.list_bugs())
+        n = len(_bugs.list_bugs(bugs_dir=args.dir))
         print(f"OK — {n} report(s), all valid.")
         return 0
     print("INVALID bug reports:", file=sys.stderr)
@@ -73,6 +85,11 @@ def _cmd_check(args):
 def main(argv=None):
     p = argparse.ArgumentParser(prog="art-bug",
                                 description="ART in-repo bug tracker")
+    p.add_argument("--dir", metavar="BUGS_DIR", default=None,
+                   help="directorio bugs/ sobre el que operar; por omisión se "
+                        "localiza subiendo desde el directorio actual. Sirve "
+                        "para llevar este registro a otro repositorio de la "
+                        "escalera (pyfug, drvec, drtran, drvarma).")
     sub = p.add_subparsers(dest="cmd")
 
     pl = sub.add_parser("list", help="list bug reports")
