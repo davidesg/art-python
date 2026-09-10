@@ -4,12 +4,11 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**145 report(s), 6 open.**
+**145 report(s), 5 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
 | [BUG-0110](BUG-0110-decided-by-registra-el-carril-no-quien-decidio-cada-nodo.md) | open | medium | guion | decided_by registra el CARRIL y no quién decidió cada nodo — no se puede saber dónde el analista corrigió al asistente, que es la información que el guion existe para conservar | — |
-| [BUG-0116](BUG-0116-la-descripcion-de-la-herramienta-no-sobrevive-al-cliente.md) | open | high | mcp-tools | La descripción de las herramientas no sobrevive al cliente — lo que DECIDE está detrás del recorte, y easter, ar_f_freqs y Shin-Fuller se pierden | — |
 | [BUG-0123](BUG-0123-la-simplificacion-que-el-codigo-sabe-y-no-propone.md) | open | medium | interventions | test_interventions declara «no hay simplificación posible» cuando la hay — un escalón con ganancia nula es un impulso de un orden menos, y el código lo sabe pero no lo propone | — |
 | [BUG-0124](BUG-0124-los-dos-detectores-de-covarianza-semilla-se-excluye.md) | open | high | diagnosis | Los dos detectores de covarianza-semilla se excluyen mutuamente — con degeneración PARCIAL el aviso cuenta sólo las coincidencias exactas y calla las que están a 0,02 % de la semilla | — |
 | [BUG-0147](BUG-0147-la-figura-se-escribe-y-no-se-dice-donde.md) | open | medium | mcp-tools | Seis herramientas escriben su figura y no dicen dónde — el otro medio BUG-0122, y sólo se ve cruzando la frontera | — |
@@ -124,6 +123,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0113](BUG-0113-el-carril-guiado-descarta-la-ruta-que-devuelve-s.md) | fixed | high | mcp-tools | El carril guiado descarta la ruta que devuelve _show_fig y nunca llama a _nota_figura — si el cliente no renderiza, el analista se queda sin figura y sin ruta | 0.2.1 |
 | [BUG-0114](BUG-0114-el-registro-del-guion-consulta-git-por-subproces.md) | fixed | critical | guion | El registro del guion consulta git por subproceso y bajo servidor MCP se cuelga para siempre — el `timeout` de subprocess.run no acota, y la herramienta no responde nunca aunque el trabajo esté hecho | 0.2.1 |
 | [BUG-0115](BUG-0115-las-etiquetas-ar-f-ma-f-usan-el-indice-de-la-lis.md) | fixed | medium | diagnosis | Las etiquetas AR_f/MA_f usan el índice de la lista en vez de la frecuencia del factor — el testigo de f=3 se anuncia como f=0, que es la frecuencia cero y significa otra cosa | 0.2.1 |
+| [BUG-0116](BUG-0116-la-descripcion-de-la-herramienta-no-sobrevive-al-cliente.md) | fixed | high | mcp-tools | La descripción de las herramientas no sobrevive al cliente — lo que DECIDE está detrás del recorte, y easter, ar_f_freqs y Shin-Fuller se pierden | 0.2.2 |
 | [BUG-0117](BUG-0117-el-indice-de-defectos-lleva-en-rojo-y-nadie-se-entero.md) | fixed | medium | bugs | El índice de defectos lleva tiempo en rojo — 7 errores en 6 informes, y ninguna prueba lo miraba | 0.2.1 |
 | [BUG-0118](BUG-0118-el-repro-del-optimo-espurio-miente-en-dos-columnas.md) | fixed | medium | bugs | El repro del óptimo espurio muestra la semilla YA AJUSTADA y mezcla unidades — dos columnas que no dicen lo que dicen | 0.2.1 |
 | [BUG-0119](BUG-0119-la-misma-figura-se-escribe-dos-veces-con-nombres-distintos.md) | fixed | low | mcp-tools | La misma figura se escribe dos veces con nombres distintos y el mismo SHA — nada delata que son la misma imagen | 0.2.1 |
