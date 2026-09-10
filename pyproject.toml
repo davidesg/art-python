@@ -81,3 +81,13 @@ where = ["src"]
 # `art://defectos` contestaba que no había nada.
 [tool.setuptools.package-data]
 art = ["material/bugs/*.md", "material/docs/*.md"]
+
+[tool.pytest.ini_options]
+# ORDEN 0.1. `slow` marca lo que arranca un proceso y cruza la frontera MCP:
+# es lento por naturaleza —importa el paquete entero en otro intérprete— y es
+# lo único que ve los defectos que sólo existen al cruzarla.
+#     pytest -m "not slow"    la suite de siempre
+#     pytest -m slow          sólo la frontera
+markers = [
+    "slow: arranca el servidor MCP en un subproceso y habla con él por stdio",
+]

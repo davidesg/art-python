@@ -10,7 +10,7 @@ server's own `_INSTRUCTIONS` (loaded at runtime) and `docs/TOOLS.md`.
 |-----------|---------|--------------------------|
 | FUE (+FUF) | `fue` | exact ML estimation, residuals, forecasting (`.inp`/`.pre`/`.out`/`.fuf`) |
 | FUG | `pyfug` | high-definition graphics for time series analysis |
-| ART | `art-tseries` | the 32 MCP tools + the guided/autonomous protocol |
+| ART | `art-tseries` | the 46 MCP tools + the guided/autonomous protocol |
 
 Connect: `claude mcp add art -- art-mcp`. Tools are documented in `docs/TOOLS.md`.
 
@@ -58,7 +58,7 @@ decision the evidence does not support; never present a decision as forced.
 ## Methodology references (in this repo)
 
 - `docs/ARCHITECTURE.md` — layers, evidence-vs-criterion, the two modes.
-- `docs/TOOLS.md` — the 32 MCP tools.
+- `docs/TOOLS.md` — the 46 MCP tools.
 - DCD (non-invertibility, Davis-Chen-Dunsmuir): the constrained model RE-estimates
   all params with the factor fixed at the non-invertible value. MEG (stochastic
   seasonality) tests f=1…s/2 including the Nyquist (1+B). Critical values and the

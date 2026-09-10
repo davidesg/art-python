@@ -677,6 +677,119 @@ mcp = FastMCP("ART — A Real-Time Time-Series Analysis", instructions=_INSTRUCT
 
 
 # ---------------------------------------------------------------------------
+# Contador de llamadas — opt-in por ART_CALL_LOG
+# ---------------------------------------------------------------------------
+# Para comparar DOS carriles que corren en clientes distintos (y en LLM
+# distintos) hace falta una medida que no dependa del cliente. El precio en
+# tokens sólo lo sabe cada cliente y sus tokenizadores no son comparables; lo
+# que SÍ es común es el trabajo que pasa por el instrumento: cuántas llamadas,
+# a qué herramienta, cuánto tardó y --lo que de verdad mueve el contexto del
+# modelo-- cuántos BYTES devolvió cada una, separando texto de imagen.
+#
+# Sin la variable de entorno no se envuelve nada: cero coste y cero cambio de
+# comportamiento en el uso normal.
+_CALL_LOG = os.environ.get("ART_CALL_LOG", "").strip()
+
+if _CALL_LOG:
+    import functools as _ft
+    import json as _json
+    import time as _time
+
+    # Un fichero por PROCESO de servidor: dos sesiones abiertas a la vez no se
+    # mezclan, y cada corrida queda atribuible sin tener que acordarse de
+    # cambiar la ruta a mano entre una y otra.
+    _b, _e = os.path.splitext(os.path.expanduser(_CALL_LOG))
+    _CALL_LOG = f"{_b}-{os.getpid()}{_e or '.jsonl'}"
+    os.makedirs(os.path.dirname(os.path.abspath(_CALL_LOG)) or ".", exist_ok=True)
+
+    def _pesa_entrada(args, kwargs) -> int:
+        """Bytes de los ARGUMENTOS — ORDEN 0.3.
+
+        Se medía sólo lo que sale. Pero el coste de una llamada tiene dos
+        mitades y la de entrada es la que el analista controla: una ruta larga,
+        un `omitir` con cincuenta índices, un `label` de tres líneas. Sin ella
+        no se puede decir si un carril es más caro por lo que pide o por lo que
+        recibe.
+        """
+        try:
+            return len(_json.dumps([args, kwargs], ensure_ascii=False,
+                                   default=str).encode("utf-8"))
+        except Exception:                        # pragma: no cover
+            return 0
+
+    def _pesa(res) -> tuple[int, int]:
+        """Bytes de texto y de imagen devueltos. La imagen va en base64.
+
+        No todas las tools devuelven la misma forma: unas dan `list[TextContent
+        | ImageContent]`, otras un `str` pelado. Se pesan las dos.
+        """
+        txt = img = 0
+        for it in (res if isinstance(res, list) else [res]):
+            if isinstance(it, str):
+                txt += len(it.encode("utf-8"))
+                continue
+            t = getattr(it, "text", None)
+            if isinstance(t, str):
+                txt += len(t.encode("utf-8"))
+            d = getattr(it, "data", None)
+            if isinstance(d, str):
+                img += len(d)
+        return txt, img
+
+    _tool_orig = mcp.tool
+    _res_orig = mcp.resource
+
+    def _contado(deco_orig, clase):
+        """El MISMO envoltorio para herramientas y recursos — ORDEN 0.3.
+
+        `mcp.resource` no se envolvía, así que **el uso de recursos no era
+        medible**: la hipótesis de MATERIAL §6 es que es cero, y no había forma
+        de comprobarlo. Y el bloque entero vivía DESPUÉS de los `@mcp.resource`,
+        así que aunque se hubiera envuelto habría llegado tarde. Por eso ahora
+        va inmediatamente detrás de crear el servidor.
+        """
+
+        def _decorador(*a, **kw):
+            deco = deco_orig(*a, **kw)
+            return _envuelve(deco, clase)
+        return _decorador
+
+    def _envuelve(deco, clase):
+        def envuelve(fn):
+            @_ft.wraps(fn)
+            def medido(*args, **kwargs):
+                t0 = _time.perf_counter()
+                err = None
+                try:
+                    res = fn(*args, **kwargs)
+                    return res
+                except BaseException as e:          # se re-lanza; sólo se anota
+                    err, res = type(e).__name__, None
+                    raise
+                finally:
+                    txt, img = _pesa(res) if err is None else (0, 0)
+                    fila = {"t": _time.time(),
+                            "clase": clase,
+                            "tool": fn.__name__,
+                            "ms": round((_time.perf_counter() - t0) * 1000, 1),
+                            "bytes_recibidos": _pesa_entrada(args, kwargs),
+                            "bytes_texto": txt,
+                            "bytes_imagen": img,
+                            "error": err}
+                    try:
+                        with open(_CALL_LOG, "a", encoding="utf-8") as fh:
+                            fh.write(_json.dumps(fila, ensure_ascii=False) + "\n")
+                    except OSError:
+                        pass                        # medir nunca rompe el análisis
+            return deco(medido)
+        return envuelve
+
+    mcp.tool = _contado(_tool_orig, "tool")
+    mcp.resource = _contado(_res_orig, "resource")
+
+
+
+# ---------------------------------------------------------------------------
 # RECURSOS — lo que el modelo PIDE, frente a lo que se le empuja
 # ---------------------------------------------------------------------------
 #
@@ -737,84 +850,6 @@ def _r_protocolo() -> str:
     return _INSTRUCTIONS
 
 
-# ---------------------------------------------------------------------------
-# Contador de llamadas — opt-in por ART_CALL_LOG
-# ---------------------------------------------------------------------------
-# Para comparar DOS carriles que corren en clientes distintos (y en LLM
-# distintos) hace falta una medida que no dependa del cliente. El precio en
-# tokens sólo lo sabe cada cliente y sus tokenizadores no son comparables; lo
-# que SÍ es común es el trabajo que pasa por el instrumento: cuántas llamadas,
-# a qué herramienta, cuánto tardó y --lo que de verdad mueve el contexto del
-# modelo-- cuántos BYTES devolvió cada una, separando texto de imagen.
-#
-# Sin la variable de entorno no se envuelve nada: cero coste y cero cambio de
-# comportamiento en el uso normal.
-_CALL_LOG = os.environ.get("ART_CALL_LOG", "").strip()
-
-if _CALL_LOG:
-    import functools as _ft
-    import json as _json
-    import time as _time
-
-    # Un fichero por PROCESO de servidor: dos sesiones abiertas a la vez no se
-    # mezclan, y cada corrida queda atribuible sin tener que acordarse de
-    # cambiar la ruta a mano entre una y otra.
-    _b, _e = os.path.splitext(os.path.expanduser(_CALL_LOG))
-    _CALL_LOG = f"{_b}-{os.getpid()}{_e or '.jsonl'}"
-    os.makedirs(os.path.dirname(os.path.abspath(_CALL_LOG)) or ".", exist_ok=True)
-
-    def _pesa(res) -> tuple[int, int]:
-        """Bytes de texto y de imagen devueltos. La imagen va en base64.
-
-        No todas las tools devuelven la misma forma: unas dan `list[TextContent
-        | ImageContent]`, otras un `str` pelado. Se pesan las dos.
-        """
-        txt = img = 0
-        for it in (res if isinstance(res, list) else [res]):
-            if isinstance(it, str):
-                txt += len(it.encode("utf-8"))
-                continue
-            t = getattr(it, "text", None)
-            if isinstance(t, str):
-                txt += len(t.encode("utf-8"))
-            d = getattr(it, "data", None)
-            if isinstance(d, str):
-                img += len(d)
-        return txt, img
-
-    _tool_orig = mcp.tool
-
-    def _tool_contado(*a, **kw):
-        deco = _tool_orig(*a, **kw)
-
-        def envuelve(fn):
-            @_ft.wraps(fn)
-            def medido(*args, **kwargs):
-                t0 = _time.perf_counter()
-                err = None
-                try:
-                    res = fn(*args, **kwargs)
-                    return res
-                except BaseException as e:          # se re-lanza; sólo se anota
-                    err, res = type(e).__name__, None
-                    raise
-                finally:
-                    txt, img = _pesa(res) if err is None else (0, 0)
-                    fila = {"t": _time.time(),
-                            "tool": fn.__name__,
-                            "ms": round((_time.perf_counter() - t0) * 1000, 1),
-                            "bytes_texto": txt,
-                            "bytes_imagen": img,
-                            "error": err}
-                    try:
-                        with open(_CALL_LOG, "a", encoding="utf-8") as fh:
-                            fh.write(_json.dumps(fila, ensure_ascii=False) + "\n")
-                    except OSError:
-                        pass                        # medir nunca rompe el análisis
-            return deco(medido)
-        return envuelve
-
-    mcp.tool = _tool_contado
 
 # Execution layer (model construction, .inp I/O, fit and the autonomous loop)
 # lives in art.pipeline; the MCP tools below import its primitives + entry points.
