@@ -2760,29 +2760,107 @@ def _sample_acf_raw(w_std: "np.ndarray", lags: int) -> "np.ndarray":
 
 def _acf_outlier_contributions(
     w_std: "np.ndarray", outlier_idx: list[int], lags: int
-) -> "np.ndarray":
-    """
-    Contribution of each outlier to the sample ACF at each lag.
+) -> tuple["np.ndarray", "np.ndarray"]:
+    """Reparto, POR anómalo, de  r_obs(k) − r_cal(k)  — BUG-0143.
 
-    Returns contrib[i, k-1] where i indexes outlier_idx and k=1..lags.
+    Devuelve `(contrib, resto)` con
 
-    C_k(p) = [ẑ_p·ẑ_{p+k}  +  ẑ_{p-k}·ẑ_p] / Σ_j ẑ_j²
+        Σᵢ contrib[i, k−1]  +  resto[k−1]  ==  r_obs(k) − r_cal(k)
+
+    EXACTO, donde `r_cal` es la ACF calibrada del módulo `calibracion`
+    —relleno con ceros—, que es la misma que dibuja el panel de la PACF y la
+    misma que publica la tabla. Un solo significado del rojo en toda la figura.
+
+    LOS DOS CANALES, que es lo que faltaba
+    --------------------------------------
+    Un anómalo distorsiona el correlograma por dos vías, y la versión anterior
+    sólo medía la primera:
+
+        C_k(p) = [ẑ_p·ẑ_{p+k} + ẑ_{p−k}·ẑ_p] / Σⱼ ẑⱼ²
+
+    Eso es el canal del NUMERADOR: sus productos cruzados con los vecinos. Pero
+    el anómalo también **infla σ̂²**, y con ello hunde TODOS los r(k) hacia cero
+    — que es el efecto clásico de un atípico aditivo sobre la ACF, y suele ser
+    el dominante. Conservar el denominador contaminado lo deja fuera. Sobre
+    `RATIO_m10` con tres anómalos de |z|≈2,1 ese canal valía un **19,9%**, y las
+    dos lecturas de «la ACF sin el anómalo» diferían hasta **0,191** —casi la
+    banda entera— con la diferencia máxima justo en los retardos 4, 8 y 12.
+
+    EL ÁLGEBRA
+    ----------
+    Con `I` los anómalos, `R` lo retenido, μ_c la media de `R` y c = w − μ_c:
+
+        D_c = Σ_{t∈R} c_t²          D_m = Σ_t c_t² = D_c + Σ_{p∈I} c_p²
+        A_k(p) = c_p·c_{p+k}·1{p+k∈R} + c_{p−k}·c_p·1{p−k∈R}
+        B_k    = Σ_{p,q∈I, q−p=k} c_p c_q          (pares anómalo-anómalo)
+
+        contrib[p, k] = [ A_k(p) − r_cal(k)·c_p² ] / D_m
+                          ╰─numerador─╯   ╰─varianza─╯
+
+    El segundo término es el canal que faltaba, y es el que hace que la suma
+    cierre. `resto` recoge lo que NO es atribuible a un anómalo solo:
+
+        resto(k) = [ r_obs(k) − r_m(k) ]  +  B_k / D_m
+                     ╰─canal de la media─╯   ╰─pares─╯
+
+    donde r_m es la ACF con la media limpia pero SIN omitir: el eslabón que
+    separa el efecto de la media del de la omisión. Se calcula así, con su
+    fórmula, y no restando — la prueba comprueba que las dos vías coinciden.
     """
     import numpy as np
-    n = len(w_std)
-    denom = float(np.sum(w_std ** 2))
-    contrib = np.zeros((len(outlier_idx), lags))
-    if denom < 1e-15 or not outlier_idx:
-        return contrib
-    for ii, p in enumerate(outlier_idx):
+    from art.calibracion import _acf_pacf
+
+    w = np.asarray(w_std, dtype=float)
+    n = len(w)
+    I = sorted({int(p) for p in outlier_idx})
+    contrib = np.zeros((len(I), lags))
+    resto = np.zeros(lags)
+    if not I:
+        return contrib, resto
+
+    ret = np.ones(n, dtype=bool)
+    ret[np.array(I, dtype=int)] = False
+    if ret.sum() < 2:
+        return contrib, resto
+
+    # la observada, con la media de TODA la muestra: la de `fue` y la que se
+    # dibuja de azul.
+    a = w - w.mean()
+    d_obs = float(a @ a)
+    if d_obs < 1e-15:
+        return contrib, resto
+    r_obs = np.array([float(a[k:] @ a[:n - k]) / d_obs
+                      for k in range(1, lags + 1)])
+
+    # la calibrada, del mismo estimador que la PACF y la tabla
+    r_cal, _ = _acf_pacf(w, lags, omitir=set(I))
+
+    # el eslabón: media limpia, sin omitir
+    mu_c = float(w[ret].mean())
+    c = w - mu_c
+    d_m = float(c @ c)
+    if d_m < 1e-15:
+        return contrib, resto
+    r_m = np.array([float(c[k:] @ c[:n - k]) / d_m
+                    for k in range(1, lags + 1)])
+
+    for ii, p in enumerate(I):
         for k in range(1, lags + 1):
-            c = 0.0
-            if p + k < n:
-                c += w_std[p] * w_std[p + k]
-            if p - k >= 0:
-                c += w_std[p - k] * w_std[p]
-            contrib[ii, k - 1] = c / denom
-    return contrib
+            A = 0.0
+            if p + k < n and ret[p + k]:
+                A += c[p] * c[p + k]
+            if p - k >= 0 and ret[p - k]:
+                A += c[p - k] * c[p]
+            contrib[ii, k - 1] = (A - r_cal[k - 1] * c[p] ** 2) / d_m
+
+    B = np.zeros(lags)
+    for q in I:
+        for p in I:
+            k = q - p
+            if 1 <= k <= lags:
+                B[k - 1] += c[p] * c[q]
+    resto = (r_obs - r_m) + B / d_m
+    return contrib, resto
 
 
 # ---------------------------------------------------------------------------
@@ -2811,6 +2889,46 @@ def _rejilla_estacional(ax, freq: int, n_lags: int) -> None:
         ax.set_xticks(grid)
         ax.set_xticklabels([str(x) for x in grid], fontsize=8)
     ax.set_xlim(0.5, n_lags + 0.5)
+
+
+def _eje_de_fechas(ax, freq: int, start, desfase: int = 0,
+                   max_ticks: int = 9) -> None:
+    """Rotula un eje-x de ÍNDICES DE OBSERVACIÓN con fechas de calendario.
+
+    Las figuras del nodo de intervención dibujaban «observación 61» cuando el
+    calendario estaba a mano: `model.series` lleva `start` y `freq`, y nadie
+    los leía (BUG-0140). El analista discute el suceso por su FECHA —«el
+    escalón de 4Q/2008»—, escribe la fecha en el `.inp` (`step 4 2008`) y la
+    lee en el `.out`; la figura era el único sitio donde tenía que traducir a
+    mano de un índice a un trimestre.
+
+    Parameters
+    ----------
+    ax      : el eje a rotular.
+    freq    : 1 (anual), 4 (trimestral) o 12 (mensual).
+    start   : `(año, período)` de la serie ORIGINAL.
+    desfase : cuántas observaciones se comió la diferenciación, `d + D·s`. Es
+              el que separa los dos espacios de índices de BUG-0067: sobre
+              residuos de un modelo diferenciado, la observación 1 de los
+              residuos NO es la 1 de la serie.
+    """
+    from matplotlib.ticker import FuncFormatter, MaxNLocator
+    from art.guion import _at_to_date
+
+    try:
+        sy, sp = int(start[0]), int(start[1])
+    except Exception:                                     # pragma: no cover
+        return
+    f = int(freq or 1)
+
+    def _fmt(v, _pos):
+        at0 = int(round(v)) - 1 + int(desfase)   # 1-based en el eje → 0-based
+        if at0 < 0:
+            return ""
+        return _at_to_date(at0, sy, sp, f)
+
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=max_ticks, integer=True))
+    ax.xaxis.set_major_formatter(FuncFormatter(_fmt))
 
 
 def _criterio_umbral(umbral: float, n: int) -> str:
@@ -2968,8 +3086,12 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
     ci_val     = 1.96 / np.sqrt(len(w_std))
 
     outl_idx = [i for i, _, _ in outliers]
-    contribs = _acf_outlier_contributions(w_std, outl_idx, n_lags)
-    total_contrib = contribs.sum(axis=0)  # (n_lags,) — summed over all outliers
+    # BUG-0143: `contribs` reparte POR anómalo y `resto` cierra la identidad
+    # con los pares anómalo-anómalo y el canal de la media. La barra roja es la
+    # suma de los dos, y vale EXACTAMENTE r_obs(k) − r_cal(k) — la misma
+    # definición que el panel de la PACF y que la tabla.
+    contribs, resto_contrib = _acf_outlier_contributions(w_std, outl_idx, n_lags)
+    total_contrib = contribs.sum(axis=0) + resto_contrib
 
     # La PACF, y la parte de ella que ponen los anómalos. La ACF admite una
     # descomposición exacta por pares; la PACF no —es una transformación NO
@@ -3144,11 +3266,16 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         _lim = max(2.4, float(np.max(np.abs(w_std))) * 1.12)
         ax.set_ylim(-_lim, _lim)
         ax.set_ylabel("z-score", fontsize=9)
-        _crit = (f"omitiendo {motivo or 'las observaciones dadas'} "
+        _crit = (f"omitting {motivo or 'the given observations'} "
                  f"({len(extreme_idx)} obs.)"
-                 if omitir is not None else f"umbral ±{threshold}σ")
-        ax.set_title(f"{name} — {label}  (tipificada, {_crit})",
+                 if omitir is not None else f"threshold ±{threshold}σ")
+        ax.set_title(f"{name} — {label}  (standardised, {_crit})",
                      fontsize=10, fontweight="bold")
+        # EL EJE, EN FECHAS — BUG-0140. Las anotaciones de los anómalos ya
+        # decían la fecha («Q2/2020») y el eje debajo decía «60»: dos idiomas
+        # en la misma figura. `desfase` es lo que se comió la diferenciación.
+        _eje_de_fechas(ax, int(freq), getattr(ts, "start", (1, 1)),
+                       int(d) + int(D) * int(freq))
         ax.tick_params(axis="both", labelsize=8)
 
         # Bottom panel — ACF contributions (only when there are outliers)
@@ -3157,14 +3284,14 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
             ax2.bar(lags_x, acf_full, color="#9ecae1", alpha=0.85,
                     label="ACF(k)", zorder=2)
             ax2.bar(lags_x, total_contrib, color="#e74c3c", alpha=0.75,
-                    label="Contribución outlier(s)", zorder=3)
+                    label="outlier contribution", zorder=3)
             ax2.axhline(0,       color="black",   lw=0.6)
             ax2.axhline(+ci_val, color="#888888", lw=0.8, ls="--")
             ax2.axhline(-ci_val, color="#888888", lw=0.8, ls="--")
             _rejilla_estacional(ax2, int(freq), n_lags)
             ax2.set_ylabel("r(k)", fontsize=9)
             ax2.set_title(
-                "ACF — decide el orden MA  ·  rojo = parte debida al outlier",
+                "ACF — sets the MA order  ·  red = the outlier's share",
                 fontsize=9, fontweight="bold"
             )
             ax2.legend(fontsize=7, loc="upper right", framealpha=0.7)
@@ -3176,15 +3303,15 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
             ax3.bar(lags_x, pacf_full, color="#9ecae1", alpha=0.85,
                     label="PACF(k)", zorder=2)
             ax3.bar(lags_x, pacf_contrib, color="#e74c3c", alpha=0.75,
-                    label="Contribución outlier(s)", zorder=3)
+                    label="outlier contribution", zorder=3)
             ax3.axhline(0,       color="black",   lw=0.6)
             ax3.axhline(+ci_val, color="#888888", lw=0.8, ls="--")
             ax3.axhline(-ci_val, color="#888888", lw=0.8, ls="--")
             _rejilla_estacional(ax3, int(freq), n_lags)
-            ax3.set_xlabel("Retardo k", fontsize=9)
+            ax3.set_xlabel("lag k", fontsize=9)
             ax3.set_ylabel("φ(k)", fontsize=9)
             ax3.set_title(
-                "PACF — decide el orden AR  ·  rojo = parte debida al outlier",
+                "PACF — sets the AR order  ·  red = the outlier's share",
                 fontsize=9, fontweight="bold"
             )
             ax3.legend(fontsize=7, loc="upper right", framealpha=0.7)
@@ -3200,14 +3327,14 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         if q_obs is not None:
             _pie.append(f"Q({q_lag}) = {q_obs:.1f}")
             if efecto is not None:
-                _lect = ("la Q la ponían los anómalos" if efecto <= -50 else
-                         "el anómalo enmascaraba estructura" if efecto > 5 else
-                         "la Q baja poco: falta estructura" if efecto > -20 else
-                         "mixto")
-                _pie.append(f"omitiendo: {efecto:+.0f}% ({_lect})")
-        _pie.append("calibrado por " + (
-            f"{motivo or 'las observaciones dadas'} ({len(extreme_idx)} obs.)"
-            if omitir is not None else f"umbral |z| > {threshold}"))
+                _lect = ("the anomalies were making Q" if efecto <= -50 else
+                         "the anomaly was masking structure" if efecto > 5 else
+                         "Q barely drops: structure is missing" if efecto > -20
+                         else "mixed")
+                _pie.append(f"omitting: {efecto:+.0f}% ({_lect})")
+        _pie.append("calibrated by " + (
+            f"{motivo or 'the given observations'} ({len(extreme_idx)} obs.)"
+            if omitir is not None else f"threshold |z| > {threshold}"))
         fig.text(0.5, 0.005, "     ·     ".join(_pie), ha="center",
                  va="bottom", fontsize=9)
         fig.tight_layout(rect=(0, 0.028, 1, 1))
@@ -3301,6 +3428,55 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
                 "(Porcentaje = contribución del outlier / ACF total en ese retardo.)"
                 + nota_denom,
             ]
+
+            # QUÉ FECHAS HACEN ESOS RETARDOS — BUG-0144.
+            #
+            # Ésta es la ruta de PRE-IDENTIFICACIÓN: la serie todavía no tiene
+            # modelo, así que no hay `describe_calibracion` que acompañe a la
+            # figura, y era el único sitio donde la calibración de distorsiones
+            # aparecía sin la tabla de pares. Y es donde más falta hace, porque
+            # es donde se eligen p y q.
+            #
+            # Va acotada a los retardos que la línea de arriba ya ha marcado
+            # como afectados: no es una sección nueva, es la fila de arriba
+            # dicha con nombres. Si no hay retardos afectados no aparece nada.
+            try:
+                from art.calibracion import (_pares_dominantes,
+                                             CUOTA_PAR_DOMINANTE)
+                _desf = int(d) + int(D) * int(freq)
+                _pd = _pares_dominantes(w_std, n_lags, top=3)
+
+                def _f(i0):
+                    from art.guion import _at_to_date
+                    try:
+                        return _at_to_date(int(i0) + _desf, int(ts.start[0]),
+                                           int(ts.start[1]), int(freq))
+                    except Exception:
+                        return f"obs {int(i0) + 1}"
+
+                _filas = []
+                for r in sorted(top, key=lambda r: r["lag"])[:4]:
+                    _ps = _pd[r["lag"] - 1]
+                    # sólo donde unos pocos pares SE LLEVAN el retardo
+                    if not _ps or abs(r["acf"]) < 1e-9 or \
+                            abs(_ps[0][2] / r["acf"]) < CUOTA_PAR_DOMINANTE:
+                        continue
+                    for _m, (i, j, c) in enumerate(_ps):
+                        _cab = (f"| **{r['lag']}** | {r['acf']:+.3f} "
+                                if _m == 0 else "| | ")
+                        _filas.append(f"{_cab}| {_f(i)} – {_f(j)} | {c:+.3f} |")
+                if _filas:
+                    lines += ["", "| lag | r(k) | fechas | contribución |",
+                              "|---|---|---|---|"] + _filas + [
+                        "", "*Los pares que HACEN cada retardo. Descomposición "
+                        "exacta —suman r(k) sin residuo— y es el bloque "
+                        "«Calibration of distortions of the ACF» del `.out`. "
+                        "Dice qué dos fechas, no cuánto pone cada anómalo.*",
+                        f"*Sólo los retardos donde el par mayor se lleva ≥"
+                        f"{100*CUOTA_PAR_DOMINANTE:.0f}% de r(k): ahí el retardo "
+                        "es un artefacto de unas fechas.*"]
+            except Exception:
+                pass
 
         # ── Criterion: should we intervene? ──────────────────────────────────
         intervene_strong = var_max > 15.0 or max_acf_pct > 30.0

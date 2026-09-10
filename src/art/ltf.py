@@ -227,10 +227,10 @@ def describe_ltf(omega: Sequence[float],
 
     fig, ax = plt.subplots(2, 2, figsize=(11, 6.2), sharex=True)
     paneles = [
-        (ax[0][0], niv.nu,  "IRF — nivel",            "#1d4ed8"),
-        (ax[0][1], niv.srf, "SRF — nivel (camino del nivel)", "#b91c1c"),
-        (ax[1][0], dif.nu,  "IRF — primeras diferencias",     "#1d4ed8"),
-        (ax[1][1], dif.srf, "SRF — primeras diferencias",     "#b91c1c"),
+        (ax[0][0], niv.nu,  "IRF — level",                    "#1d4ed8"),
+        (ax[0][1], niv.srf, "SRF — level (the level path)",    "#b91c1c"),
+        (ax[1][0], dif.nu,  "IRF — first differences",         "#1d4ed8"),
+        (ax[1][1], dif.srf, "SRF — first differences",         "#b91c1c"),
     ]
     for a, y, titulo, color in paneles:
         a.stem(k, y, linefmt=color, markerfmt="o", basefmt=" ")
@@ -240,17 +240,17 @@ def describe_ltf(omega: Sequence[float],
     # la ganancia, donde la acumulada del nivel converge
     if np.isfinite(niv.gain):
         ax[0][1].axhline(niv.gain, ls="--", lw=1.0, color="#111")
-        ax[0][1].annotate(f"ganancia {niv.gain:.4f}", (K, niv.gain),
+        ax[0][1].annotate(f"gain {niv.gain:.4f}", (K, niv.gain),
                           textcoords="offset points", xytext=(-4, 5),
                           ha="right", fontsize=8)
-    ax[1][0].set_xlabel("retardo k")
-    ax[1][1].set_xlabel("retardo k")
+    ax[1][0].set_xlabel("lag k")
+    ax[1][1].set_xlabel("lag k")
     cab = etiqueta or f"ω{tuple(round(v, 4) for v in niv.omega)}"
     if niv.delta:
         cab += f" / δ{tuple(round(v, 4) for v in niv.delta)}"
     if b:
         cab += f", b={b}"
-    fig.suptitle(f"Respuesta de la FLT — {cab}", fontsize=11)
+    fig.suptitle(f"LTF response — {cab}", fontsize=11)
     fig.tight_layout()
     b64 = _fig_b64(fig)
     plt.close(fig)
@@ -568,6 +568,18 @@ def superpone(observado: Sequence[float],
                          soporte=int(fin_sop) + 1)
 
 
+def _fecha_de(at: int, freq: int, start: Sequence[int], desfase: int = 0) -> str:
+    """La fecha de una observación 1-based, o "" si no hay calendario."""
+    if not freq or len(start) < 2:
+        return ""
+    try:
+        from art.guion import _at_to_date
+        return _at_to_date(int(at) - 1 + int(desfase),
+                           int(start[0]), int(start[1]), int(freq))
+    except Exception:                                     # pragma: no cover
+        return ""
+
+
 def describe_superposicion(observado: Sequence[float],
                            at: int,
                            omega: Sequence[float],
@@ -576,9 +588,20 @@ def describe_superposicion(observado: Sequence[float],
                            d: int = 0,
                            ventana: int = 8,
                            entrada: str = "escalon",
-                           etiqueta: str = ""):
+                           etiqueta: str = "",
+                           freq: int = 0,
+                           start: Sequence[int] = (),
+                           desfase: int = 0):
     """La superposición, presentada. Figura para el carril guiado; los tres
-    números de `Superposicion` sirven en los dos."""
+    números de `Superposicion` sirven en los dos.
+
+    `freq`, `start` y `desfase` son EL CALENDARIO, y viajan juntos porque por
+    separado no significan nada (BUG-0140). Con ellos el eje se rotula con
+    fechas; sin ellos, con índices de observación, que es lo único que se puede
+    decir cuando `observado` llega como una lista pelada. `desfase` es
+    `d + D·s` del modelo cuando lo observado son RESIDUOS, y 0 cuando es la
+    serie: son dos espacios de índices distintos (BUG-0067).
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -608,7 +631,8 @@ def describe_superposicion(observado: Sequence[float],
     a1.legend(fontsize=8, loc="best")
     a1.set_ylabel("level" if d == 0 else "∇")
     a1.grid(alpha=0.25)
-    a1.set_title(etiqueta or f"Overlay around obs {sp.at}", fontsize=10)
+    _cuando = _fecha_de(sp.at, freq, start, desfase) or f"obs {sp.at}"
+    a1.set_title(etiqueta or f"Overlay around {_cuando}", fontsize=10)
 
     # EL RESTO, TIPIFICADO, CON SUS ±2σ — BUG-0135.
     #
@@ -625,7 +649,13 @@ def describe_superposicion(observado: Sequence[float],
     a2.set_ylim(-max(2.4, float(np.max(np.abs(_z))) * 1.15),
                 +max(2.4, float(np.max(np.abs(_z))) * 1.15))
     a2.set_ylabel("residual (z)")
-    a2.set_xlabel("observation")
+    if freq and len(start) >= 2:
+        from art.describe import _eje_de_fechas
+        for _a in (a1, a2):
+            _eje_de_fechas(_a, int(freq), start, int(desfase))
+        a2.set_xlabel("date")
+    else:
+        a2.set_xlabel("observation")
     a2.grid(alpha=0.25)
     fig.tight_layout()
     b64 = _fig_b64(fig)

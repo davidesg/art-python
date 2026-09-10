@@ -58,25 +58,51 @@ def test_el_atipico_infla_sigma_y_la_calibracion_lo_corrige():
 
 # ───────────────── el método, que es una decisión de diseño ─────────────────
 
-def test_calibrar_es_OMITIR_y_no_sustituir():
-    """No se sustituye por nada, y la razón es metodológica, no numérica.
+def test_calibrar_es_la_desviacion_a_CERO_sobre_lo_retenido():
+    """El estimador, fijado — y la historia de por qué es éste (BUG-0142).
 
-    Sustituir el residuo por la media equivale a un IMPULSO con ω libre —es lo
-    que hace la condición de primer orden—, y esta herramienta existe para
-    informar la elección de forma: no puede suponer una para calcularse.
+    Esta prueba fijaba antes la ELIMINACIÓN POR PARES, con este argumento:
+    sustituir el residuo por la media equivale a un impulso con ω libre —la
+    condición de primer orden—, y la herramienta que informa la elección de
+    forma no puede suponer una para calcularse.
 
-    Se fija reproduciendo el cálculo: μ, σ² y cada r(k) sobre lo RETENIDO.
+    El argumento cayó por donde no se miraba. Cada r(k) por pares retenidos se
+    estima sobre un subconjunto DISTINTO, así que la secuencia no es una función
+    de autocovarianza, la Toeplitz no es definida positiva y Durbin-Levinson
+    diverge: sobre `RATIO_m10` la PACF calibrada llegó a **+3,394**. Y la
+    disyuntiva no era la que parecía: cualquier estimador que quite la
+    contribución de una observación a TODOS los retardos y siga siendo admisible
+    tiene que poner su desviación a cero.
+
+    Se fija reproduciendo el cálculo: μ̂ sobre lo retenido, desviación cero en lo
+    omitido, y de ahí el estimador de Bartlett —el mismo de `fue.acf`—.
     """
     x = _ar1_con_atipico()
     cal = calibra_correlograma(x, umbral=2.5)
     n = len(x); mu0, sd0 = x.mean(), x.std(ddof=0)
     om = {i for i in range(n) if abs((x[i]-mu0)/sd0) > 2.5}
     keep = np.array([i for i in range(n) if i not in om])
-    mu = x[keep].mean(); var = ((x[keep]-mu)**2).mean()
-    pares = [(x[i]-mu)*(x[i+1]-mu) for i in range(n-1)
-             if i not in om and i+1 not in om]
-    esperado = float(np.mean(pares))/var
+    mu = x[keep].mean()
+    z = np.array([0.0 if i in om else x[i] - mu for i in range(n)])
+    esperado = float(z[1:] @ z[:-1]) / float(z @ z)
     assert cal.distorsiones[0].acf_cal == pytest.approx(esperado, abs=1e-12)
+
+
+def test_sin_omitir_coincide_EXACTAMENTE_con_fue():
+    """La propiedad que hace que el paquete tenga UN correlograma y no dos.
+
+    La eliminación por pares daba r(1)=+0,5819 sobre ∇ln PGAS donde la diagnosis
+    daba +0,5749, y la tabla de BUG-0048 llegó a publicar los dos números en la
+    misma tabla —`ACF(1)` y `PACF(1)`— cuando son idénticos por definición.
+    """
+    import fue
+    from art.calibracion import _acf_pacf
+    x = _ar1_con_atipico()
+    r, p = _acf_pacf(x, 20)
+    assert np.max(np.abs(r - fue.acf(x, lags=20))) == pytest.approx(0.0, abs=1e-14)
+    assert np.max(np.abs(p - fue.pacf(x, lags=20))) == pytest.approx(0.0, abs=1e-12)
+    # y la identidad que antes NO se cumplía en la herramienta
+    assert p[0] == pytest.approx(r[0], abs=1e-14)
 
 
 def test_normalizar_con_la_sigma_CONTAMINADA_seria_otra_cosa():

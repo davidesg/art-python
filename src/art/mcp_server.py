@@ -2369,7 +2369,7 @@ def intervention_plot(omega: list[float],
     RAMPA en el nivel y el diccionario de arriba tiene otra fila.
     """
     try:
-        from art.ltf import describe_ltf, describe_superposicion
+        from art.ltf import describe_ltf, describe_superposicion, _fecha_de
         if not inp_path:
             # BUG-0136: la entrada decide qué es ν(1) — desplazamiento del
             # nivel con escalón, área acumulada con impulso.
@@ -2398,10 +2398,20 @@ def intervention_plot(omega: list[float],
             d_eff = 0
         else:
             return _err(f"sobre={sobre!r}: 'residuos' o 'serie'.")
+        # EL CALENDARIO CRUZA LA FRONTERA — BUG-0140. `describe_superposicion`
+        # recibe `observado` como una lista pelada; el `start`/`freq` los tiene
+        # el servidor, y el desfase depende de SOBRE QUÉ se mira: cero sobre la
+        # serie, `d + D·s` sobre residuos (BUG-0067).
+        _f = int(getattr(ts, "freq", 1) or 1)
+        _desf = (int(getattr(m, "d", 0)) + int(getattr(m, "D", 0)) * _f
+                 if sobre == "residuos" else 0)
+        _cuando = _fecha_de(int(at), _f, getattr(ts, "start", ()), _desf)
         desc = describe_superposicion(
             y, int(at), omega, delta or (), b=b, d=d_eff,
             ventana=int(ventana), entrada=entrada,
-            etiqueta=label or f"{os.path.basename(inp_path)} — entorno de obs {at}")
+            freq=_f, start=getattr(ts, "start", ()), desfase=_desf,
+            etiqueta=label or (f"{os.path.basename(inp_path)} — around "
+                               f"{_cuando or f'obs {at}'}"))
         desc = _con_convenio(desc, omega, delta, b, entrada)
         _escribe_fig(desc.figure_b64, "intervention_plot")
         return _result(desc)
@@ -2789,8 +2799,11 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER,
             # misma cuenta en dos sitios.
             _om = ({int(i) for i in (desc.data or {}).get("omitidos", [])}
                    if omitir is not None else None)
-            _cal = calibra_correlograma(m._result.residuals, umbral=threshold,
-                                        omitir=_om)
+            _f = int(getattr(ts, "freq", 1) or 1)
+            _cal = calibra_correlograma(
+                m._result.residuals, umbral=threshold, omitir=_om,
+                freq=_f, start=getattr(ts, "start", ()),
+                desfase=int(getattr(m, "d", 0)) + int(getattr(m, "D", 0)) * _f)
             # BUG-0133: sólo la TABLA. La figura de esta llamada es la del
             # escaneo, que es el gráfico de calibración de distorsiones.
             _d = describe_calibracion(_cal, nombre=os.path.basename(inp_path),
@@ -3149,9 +3162,11 @@ def overparameterization_analysis(inp_path: str, threshold: float = 0.7) -> list
         # decisión. 212 líneas de matplotlib DENTRO del servidor, y 1 llamada en
         # 1.114 registradas.
         #
-        # Lo que sí quedó anotado del censo y no se arregla aquí: las etiquetas
-        # no distinguen dos parámetros distintos —`ω(S)` aparecía dos veces, una
-        # por intervención, sin la fecha—, y eso afecta también a la TABLA.
+        # Lo que quedó anotado del censo y no se arreglaba aquí —las etiquetas
+        # no distinguían dos parámetros distintos: `ω(S)` aparecía dos veces,
+        # una por intervención, sin la fecha— está arreglado en BUG-0141. La
+        # tabla de abajo dice ahora `ω(S,Q4/2008)`, que es la misma fecha del
+        # `.inp` y del `.out`.
         b64 = None
 
         # ── text summary ──────────────────────────────────────────────────
@@ -4228,8 +4243,12 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
             # la PACF?», y eso se calcula.
             try:
                 from art.calibracion import calibra_correlograma
-                cal = calibra_correlograma(m._result.residuals,
-                                           umbral=_autoscan_z)
+                _f = int(getattr(ts, "freq", 1) or 1)
+                cal = calibra_correlograma(
+                    m._result.residuals, umbral=_autoscan_z,
+                    freq=_f, start=getattr(ts, "start", ()),
+                    desfase=int(getattr(m, "d", 0))
+                    + int(getattr(m, "D", 0)) * _f)
             except Exception:
                 cal = None
             lvl = "moderada" if level == "moderate" else "leve"
@@ -7353,9 +7372,14 @@ def guided_intervention(inp_path: str,
                         _om = list(_itv[-1].omega or [])
                         _ent = ("impulso" if _itv[-1].type in
                                 ("pulse", "impulse", "compimp") else "escalon")
+                        # el calendario, con el desfase de los residuos — BUG-0140
+                        _f = int(getattr(ts, "freq", 1) or 1)
                         _fig2 = describe_superposicion(
                             m._result.residuals, at=int(ep.inicio),
                             omega=_om, entrada=_ent,
+                            freq=_f, start=getattr(ts, "start", ()),
+                            desfase=(int(getattr(m, "d", 0))
+                                     + int(getattr(m, "D", 0)) * _f),
                             etiqueta=f"{mejor.etiqueta} — {mejor.en_palabras}",
                         ).figure_b64
                 except Exception as _se:
@@ -7374,7 +7398,11 @@ def guided_intervention(inp_path: str,
 
         # ═════════════════ LLAMADA 1 — ¿hay que intervenir? ═════════════════
         from art.calibracion import calibra_correlograma, describe_calibracion
-        cal = calibra_correlograma(m._result.residuals, umbral=threshold)
+        _f = int(getattr(ts, "freq", 1) or 1)
+        cal = calibra_correlograma(
+            m._result.residuals, umbral=threshold,
+            freq=_f, start=getattr(ts, "start", ()),
+            desfase=int(getattr(m, "d", 0)) + int(getattr(m, "D", 0)) * _f)
         # BUG-0133: de aquí sale la TABLA con su veredicto por retardo. La
         # FIGURA de esta llamada es la del escaneo de tres paneles —el gráfico
         # de calibración de distorsiones—, que enseña además dónde está el

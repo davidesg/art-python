@@ -73,48 +73,110 @@ class TestAcfOutlierContributions:
         from art.describe import _acf_outlier_contributions
         rng = np.random.default_rng(1)
         w = rng.standard_normal(100)
-        contrib = _acf_outlier_contributions(w, outlier_idx=[10, 50], lags=12)
+        contrib, resto = _acf_outlier_contributions(w, outlier_idx=[10, 50],
+                                                    lags=12)
         assert contrib.shape == (2, 12)
+        assert resto.shape == (12,)
 
     def test_empty_outlier_list(self):
         from art.describe import _acf_outlier_contributions
         w = np.random.default_rng(2).standard_normal(80)
-        contrib = _acf_outlier_contributions(w, outlier_idx=[], lags=8)
+        contrib, resto = _acf_outlier_contributions(w, outlier_idx=[], lags=8)
         assert contrib.shape == (0, 8)
         assert contrib.size == 0
+        assert np.all(resto == 0.0)
 
     def test_zero_series_zero_contrib(self):
         from art.describe import _acf_outlier_contributions
         w = np.zeros(80)
-        contrib = _acf_outlier_contributions(w, outlier_idx=[5, 20], lags=6)
+        contrib, resto = _acf_outlier_contributions(w, outlier_idx=[5, 20],
+                                                    lags=6)
         assert np.all(contrib == 0.0)
+        assert np.all(resto == 0.0)
 
-    def test_spike_at_t_contributes_to_lag1(self):
-        """A single spike at position p contributes to ACF(1) via ẑ_p·ẑ_{p+1}."""
-        from art.describe import _acf_outlier_contributions
-        n = 100
-        w = np.zeros(n)
-        p = 30
-        w[p] = 10.0          # big spike
-        w[p + 1] = 5.0       # also elevated
-        denom = float(np.sum(w ** 2))
-        expected_c1 = (w[p] * w[p + 1] + w[p - 1] * w[p]) / denom
-        contrib = _acf_outlier_contributions(w, outlier_idx=[p], lags=4)
-        assert abs(contrib[0, 0] - expected_c1) < 1e-12
+    def test_la_identidad_CIERRA_exacta(self):
+        """LA propiedad, y la que no se cumplía — BUG-0143.
 
-    def test_contribution_bounded_by_acf(self):
-        """Sum of per-outlier contributions should not dominate ACF by much."""
+            Σᵢ contrib[i,k] + resto[k]  ==  r_obs(k) − r_cal(k)
+
+        Antes el reparto conservaba el denominador CONTAMINADO, así que sólo
+        medía el canal del numerador y no sumaba nada en particular. Aquí las
+        dos partes se calculan por caminos independientes —el reparto por su
+        fórmula, la calibrada por `_acf_pacf`— y se exige que coincidan.
+        """
         from art.describe import _acf_outlier_contributions, _sample_acf_raw
-        rng = np.random.default_rng(3)
-        w = rng.standard_normal(200)
-        w[50] += 8.0   # one big outlier
+        from art.calibracion import _acf_pacf
+        for semilla in range(8):
+            g = np.random.default_rng(semilla)
+            n = int(g.integers(50, 150))
+            w = np.cumsum(g.standard_normal(n)) + g.standard_normal(n)
+            w = (w - w.mean()) / w.std(ddof=0)
+            for i in g.choice(n, size=int(g.integers(1, 5)), replace=False):
+                w[i] += float(g.choice([-1, 1])) * g.uniform(4, 10)
+            w = (w - w.mean()) / w.std(ddof=0)
+            om = [i for i in range(n) if abs(w[i]) > 2.5]
+            if not om:
+                continue
+            K = 12
+            r_obs = _sample_acf_raw(w - w.mean(), K)
+            r_cal, _ = _acf_pacf(w, K, omitir=set(om))
+            contrib, resto = _acf_outlier_contributions(w, om, K)
+            izq = contrib.sum(axis=0) + resto
+            assert np.max(np.abs(izq - (r_obs - r_cal))) < 1e-12, \
+                f"semilla {semilla}: la identidad no cierra"
+
+    def test_el_canal_de_la_VARIANZA_esta_dentro(self):
+        """El canal que faltaba, aislado.
+
+        Un anómalo infla σ̂² y con ello hunde TODOS los r(k) hacia cero. Con el
+        denominador contaminado ese canal no aparecía. Aquí se comprueba que el
+        reparto lo incluye: el término de varianza vale −r_cal(k)·c_p²/D_m, y
+        sin él la contribución sería la del numerador solo.
+        """
+        from art.describe import _acf_outlier_contributions
+        from art.calibracion import _acf_pacf
+        n, p, K = 120, 60, 8
+        g = np.random.default_rng(4)
+        w = g.standard_normal(n)
+        w[p] += 9.0
         w = (w - w.mean()) / w.std(ddof=0)
-        acf = _sample_acf_raw(w, 12)
-        contrib = _acf_outlier_contributions(w, [50], 12)
-        total = contrib.sum(axis=0)
-        # At each lag, |contribution| ≤ |ACF| + some rounding
-        for k in range(12):
-            assert abs(total[k]) <= abs(acf[k]) + 1e-6 or True  # informational
+        contrib, _resto = _acf_outlier_contributions(w, [p], K)
+        r_cal, _ = _acf_pacf(w, K, omitir={p})
+        ret = np.ones(n, bool); ret[p] = False
+        c = w - w[ret].mean(); d_m = float(c @ c)
+        for k in range(1, K + 1):
+            A = 0.0
+            if p + k < n and ret[p + k]:
+                A += c[p] * c[p + k]
+            if p - k >= 0 and ret[p - k]:
+                A += c[p - k] * c[p]
+            solo_numerador = A / d_m
+            varianza = -r_cal[k - 1] * c[p] ** 2 / d_m
+            assert contrib[0, k - 1] == pytest.approx(
+                solo_numerador + varianza, abs=1e-12)
+        # y el canal de la varianza NO es despreciable: con un anómalo de |z|=9
+        # sobre n=120 se lleva una fracción apreciable de Σz²
+        assert abs(c[p] ** 2 / d_m) > 0.05
+
+    def test_dos_anomalos_a_distancia_k_fabrican_correlacion_en_el_retardo_k(self):
+        """El canal de los PARES, que es lo que `resto` recoge.
+
+        Dos anómalos del mismo signo separados k períodos fabrican correlación
+        en el retardo k, y no es atribuible a ninguno de los dos por separado.
+        Sobre `RATIO_m10` las obs. 71 y 75 —ambas de z≈−2,1, un año aparte—
+        ponían **+0,055** en el retardo 4, que es el estacional.
+        """
+        from art.describe import _acf_outlier_contributions
+        n, K = 120, 8
+        w = np.random.default_rng(5).standard_normal(n) * 0.2
+        w[40] += 8.0
+        w[44] += 8.0          # cuatro períodos después, mismo signo
+        w = (w - w.mean()) / w.std(ddof=0)
+        _contrib, resto = _acf_outlier_contributions(w, [40, 44], K)
+        assert resto[3] > 0.05, f"el par no aparece en el retardo 4: {resto}"
+        otros = [abs(resto[k]) for k in range(K) if k != 3]
+        assert resto[3] > 3 * max(otros), \
+            f"el retardo 4 tiene que destacar: {resto}"
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +319,10 @@ def test_la_contribucion_pacf_coincide_con_la_calibracion():
     orig = maxes.Axes.bar
 
     def espia(self, x, height, *a, **k):
-        if k.get("label", "").startswith("Contribución"):
+        # El rótulo va en inglés desde BUG-0139. Se acepta el viejo para que
+        # esta prueba siga siendo legible al lado del defecto que documenta.
+        if k.get("label", "").lower().startswith(("outlier contribution",
+                                                  "contribución")):
             dibujado.append(np.asarray(height, dtype=float))
         return orig(self, x, height, *a, **k)
 

@@ -390,6 +390,21 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
 # Presentación — aquí es donde vive la navaja
 # ---------------------------------------------------------------------------
 
+def _nombre_en(p) -> str:
+    """El nombre del peldaño, en inglés, para la FIGURA.
+
+    `p.nombre` está en español porque viaja a la tabla y al dict de datos, que
+    son narrativa —el asistente los traduce al idioma del usuario—. Dentro de
+    la figura no hay quien traduzca: lo que se dibuja se lee tal cual, y por eso
+    va en inglés como el resto de los rótulos (BUG-0139).
+    """
+    if p.tipo in ("impulse", "pulse"):
+        return "impulse in level (transitory)"
+    if p.n_omega and p.n_omega > 1:
+        return f"episode — {p.n_omega} steps in level"
+    return "step in level (permanent)"
+
+
 def describe_escalera(escalera: "Escalera"):
     """Presenta la escalera EN ORDEN: lo simple primero, y el porqué de subir.
 
@@ -429,13 +444,25 @@ def describe_escalera(escalera: "Escalera"):
                 ax.axhline(u, color="#b91c1c", ls=":", lw=.9)
             ax.axvspan(ep.inicio - .5, ep.fin + .5, color="#f59e0b", alpha=.25, lw=0)
             ax.bar(k, z[ini - 1:hi], color=col, width=.6)
-            ax.set_ylabel(f"peldaño {p.nivel}", fontsize=9)
+            ax.set_ylabel(f"rung {p.nivel}", fontsize=9)
             ax.grid(alpha=.25)
-            marca = "se sostiene" if p.se_sostiene else (
-                "deja vecino" if p.deja_vecino else "inadecuado")
-            ax.set_title(f"{p.nombre} — {marca}", fontsize=9, loc="left")
-        axs[-1].set_xlabel("observación (residuos)")
-        fig.suptitle("Residuos en el entorno del suceso, bajo cada peldaño",
+            marca = "holds" if p.se_sostiene else (
+                "leaves a neighbour" if p.deja_vecino else "inadequate")
+            ax.set_title(f"{_nombre_en(p)} — {marca}", fontsize=9, loc="left")
+        # EL EJE, EN FECHAS — BUG-0140. El calendario ya estaba aquí
+        # (`model.series`); lo que faltaba era leerlo. `desfase` es lo que se
+        # comió la diferenciación: sobre residuos, la observación 1 NO es la 1
+        # de la serie (BUG-0067).
+        _ser = getattr(vivos[0].model, "series", None)
+        if _ser is not None:
+            from art.describe import _eje_de_fechas
+            _f = int(getattr(_ser, "freq", 1) or 1)
+            _desf = int(getattr(vivos[0].model, "d", 0)) \
+                + int(getattr(vivos[0].model, "D", 0)) * _f
+            for _a in axs:
+                _eje_de_fechas(_a, _f, getattr(_ser, "start", (1, 1)), _desf)
+        axs[-1].set_xlabel("date", fontsize=9)
+        fig.suptitle("Residuals around the event, under each rung",
                      fontsize=10)
         fig.tight_layout()
 

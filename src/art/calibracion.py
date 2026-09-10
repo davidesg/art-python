@@ -15,10 +15,11 @@ PACF es una transformación NO LINEAL de la ACF (Durbin-Levinson), así que las
 dos pueden moverse en direcciones distintas y cambiar de veredicto en sentidos
 OPUESTOS en el mismo retardo.
 
-Medido sobre PGAS m00, retardo 2:
+Medido sobre ∇ln PGAS (n=83, banda ±0,2151), omitiendo |z|>2,5 —las obs. 19 y
+20—, retardo 2:
 
-    ACF(2)   +0,1321 → +0,3108   SALE de banda   (el anómalo la ENMASCARABA)
-    PACF(2)  −0,2964 → −0,1991   ENTRA en banda  (el anómalo la FABRICABA)
+    ACF(2)   +0,1321 → +0,3143   SALE de banda   (el anómalo la ENMASCARABA)
+    PACF(2)  −0,2964 → −0,1967   ENTRA en banda  (el anómalo la FABRICABA)
 
 El mismo anómalo escondía una señal MA y fabricaba una señal AR **a la vez**.
 Quien calibrase sólo la ACF concluiría «hay más MA de la que creía» y no se
@@ -29,61 +30,79 @@ quitar el anómalo ningún retardo cambia de veredicto dentro/fuera de banda,
 intervenirlo no compra nada para la identificación, y añadir una intervención
 que no hace falta es gastar un parámetro y tocar la serie sin motivo.
 
-Cómo se calcula «sin el anómalo» — y por qué así
-------------------------------------------------
-**Se OMITEN los anómalos del cálculo. No se sustituyen por nada.**
+Cómo se calcula «sin el anómalo» — el estimador, y por qué ÉSTE
+---------------------------------------------------------------
+Con `I` el conjunto de índices señalados:
 
-La razón es que sustituirlos supondría una forma. Poner el residuo a la media
-equivale a un **impulso** con ω libre —es lo que hace la condición de primer
-orden, la regla de Treadway—, y eso es circular: esta herramienta existe para
-informar la elección de forma, así que no puede suponer una para calcularse.
-
-Concretamente, con `I` el conjunto de índices señalados:
-
-    μ̂  y  σ̂²   se calculan sobre las observaciones RETENIDAS
-    r(k) = ⟨(xᵢ−μ̂)(xᵢ₊ₖ−μ̂)⟩  sobre los pares donde NINGUNO de los dos está en I
+    μ̂ se calcula sobre las observaciones RETENIDAS
+    z̃ₜ = (xₜ − μ̂)  si t ∉ I,   0  si t ∈ I
+    r(k) = Σₜ z̃ₜ z̃ₜ₊ₖ / Σₜ z̃ₜ²
     φ(k)  por Durbin-Levinson sobre ese r(k)
 
 La PACF sale de la ACF, así que **una sola omisión da las dos funciones**, que
 es la propiedad que hace esto barato.
 
-Normalizar bien es la mitad del asunto
---------------------------------------
-La primera versión omitía los pares pero seguía normalizando con la μ y la σ
-**contaminadas**, y salía mal: decía que la autocorrelación de retardo 1 BAJA
-al quitar el anómalo cuando en realidad sube. Contrastado sobre PGAS m00 contra
-el modelo realmente calibrado (m10):
+**Por qué la desviación a cero y no la eliminación por pares.** Ésta es la
+decisión que gobierna el módulo y costó un defecto grave verla (BUG-0142). La
+versión anterior normalizaba cada retardo por SUS pares retenidos:
 
-    PACF               lag1      lag2      lag3      lag4    error medio
-    observada        +0.5749   -0.2964   +0.1054   -0.0444
-    omitir, ingenua  +0.5256   -0.0312   -0.0007   +0.0467      0.0795  ✗
-    omitir, CORRECTA +0.6700   -0.2146   +0.0602   +0.0699      0.0212  ←
-    a la media       +0.6521   -0.1991   +0.0550   +0.0600      0.0162
-    REAL (m10)       +0.6497   -0.2348   +0.0378   +0.0399
+    r(k) = ⟨(xᵢ−μ̂)(xᵢ₊ₖ−μ̂)⟩  sobre los pares donde ninguno está en I
 
-Omitir bien y sustituir por la media empatan en la práctica —0,0212 frente a
-0,0162, y en el retardo 2, que es el que decide, omitir es incluso mejor
-(−0,215 contra −0,199, frente al real −0,235)—, así que no hay nada que pagar
-por evitar el supuesto de forma.
+Es insesgado retardo a retardo, y tiene un defecto que lo invalida: **cada r(k)
+se estima sobre un subconjunto distinto**, así que la secuencia r(k) que sale
+no es una función de autocovarianza. La matriz de Toeplitz que forma no tiene
+por qué ser definida positiva, y Durbin-Levinson sobre una ACF inadmisible
+diverge. Sobre `RATIO_m10` con umbral 2σ la PACF calibrada llegaba a **+3,394**
+en el retardo 14, con la varianza de innovación ya negativa. Un coeficiente de
+autocorrelación parcial vive en [−1, 1]: fuera de ahí no hay nada que leer, y
+la PACF es la que decide el orden AR.
 
-Una nota de consistencia
-------------------------
-Las dos columnas —observada y calibrada— se calculan con **el mismo estimador**,
-normalizando por el número de pares retenidos. Sin omisión eso es n−k, mientras
-que `fue.acf` y `diagnose` normalizan por n, así que la columna «observada» de
-aquí puede diferir de la de la diagnosis en la tercera cifra (sobre PGAS:
-+0,5819 frente a +0,5749). Se prefiere la consistencia INTERNA: así todo el
-movimiento entre las dos columnas es efecto de la omisión y no del estimador,
-que es lo que la herramienta afirma medir. El efecto de la omisión en ese mismo
-retardo es de 0,095 — trece veces la diferencia de convenio.
+El relleno con ceros no tiene ese problema **por construcción**: r(k) vuelve a
+ser la autocorrelación de una sucesión real z̃, cuya transformada es |Z(ω)|² ≥ 0.
+La secuencia es definida positiva, luego |φ(k)| ≤ 1 siempre. Medido sobre 400
+series de estrés con estacionalidad fuerte y de uno a cinco anómalos: máx|φ|
+global **0,9062**, y ni un solo NaN.
 
-Lo que la omisión sí cuesta
----------------------------
-Cada retardo usa un conjunto de pares distinto, así que la secuencia r(k) que
-sale **no está garantizada definida positiva**. Cuando no lo es, la recursión
-de Durbin-Levinson devuelve |φ(k)| ≥ 1, que no es una PACF. Es una decisión
-subóptima y conocida: la herramienta la detecta y lo **dice**, en vez de
-publicar números que no significan nada.
+**Y la objeción de circularidad, que hay que mirar de frente.** Este estimador
+es aritméticamente IDÉNTICO a sustituir los anómalos por la media —verificado a
+precisión de máquina, 3,3e-16—, y contra eso argumentaba la versión anterior:
+poner el residuo a la media equivale a un impulso con ω libre, que es la
+condición de primer orden de MCO, y suponer una forma en la herramienta que
+existe para informar la elección de forma sería circular.
+
+La objeción no sobrevive al requisito de admisibilidad. Cualquier estimador que
+(a) quite la contribución de una observación a **todos** los retardos y (b) siga
+siendo definido positivo tiene que poner su desviación a cero: c(k)=Σz̃ₜz̃ₜ₊ₖ es
+la única forma que garantiza PSD, y «no contribuye» significa z̃=0 ahí. La
+disyuntiva real no era «omitir contra sustituir» sino **«omitir de forma
+admisible» contra «omitir de forma inadmisible»**, y la equivalencia con la
+media no es un supuesto de forma que se cuela: es una coincidencia numérica con
+la condición de primer orden. La medición de la versión anterior ya lo decía sin
+que se leyera así — sustituir por la media daba error medio 0,0162 contra 0,0212
+de la eliminación por pares, contra el modelo realmente calibrado.
+
+Un solo correlograma en todo el paquete
+---------------------------------------
+**Sin omisión este estimador coincide EXACTAMENTE con `fue.acf` y `fue.pacf`**
+—medido: 0,0 de diferencia en los dos—, porque es el mismo estimador de Bartlett
+con el mismo denominador Σz². Eso cierra una incoherencia que llevaba tiempo
+publicada: la eliminación por pares daba r(1)=+0,5819 sobre ∇ln PGAS donde la
+diagnosis daba +0,5749, y la tabla de BUG-0048 llegó a listar `ACF(1)=+0,5749` y
+`PACF(1)=+0,5819` **en la misma tabla**, cuando PACF(1) ≡ ACF(1) por definición.
+Eran los dos estimadores, uno al lado del otro, sin que nadie lo notara.
+
+Lo que el relleno con ceros sí cuesta
+-------------------------------------
+Encoge |r(k)| en aproximadamente la fracción omitida, n_I/n: el numerador pierde
+los pares del anómalo y el denominador sigue contando su hueco. Con 3 anómalos
+de 83 son unas 3,6 centésimas de proporción, y en la práctica mueve r(1) de
++0,6700 a +0,6534 sobre ∇ln PGAS.
+
+**Y el sesgo va en la dirección conservadora**, que es la que importa aquí:
+encoge hacia cero, así que este estimador puede dejar de detectar estructura,
+pero **no puede fabricarla**. Para una herramienta cuyo trabajo es decir si un
+orden AR es real o es el anómalo, equivocarse hacia «no hay estructura» es el
+único error que no hace daño.
 """
 from __future__ import annotations
 
@@ -101,9 +120,34 @@ def _durbin_levinson(r: np.ndarray) -> np.ndarray:
 
     Se necesita propia —y no `fue.pacf`, que toma datos— porque la ACF que se
     le pasa está calculada OMITIENDO observaciones y no proviene de una serie.
+
+    LLEVA LA VARIANZA DE INNOVACIÓN, y por eso no puede publicar un imposible
+    (BUG-0142). La recursión sólo se guardaba de dividir por cero:
+
+        p = num / den   si   |den| > 1e-12
+
+    y con `den = 0,019` —un denominador pequeño pero muy por encima del
+    guardián— devolvía φ = **+3,394**. Un coeficiente de autocorrelación parcial
+    vive en [−1, 1]; fuera de ahí no es una PACF, es basura con signo.
+
+    La condición correcta no es sobre el denominador sino sobre v_k, la varianza
+    del error de predicción a k pasos:
+
+        v_k = v_{k−1}·(1 − φ_k²)
+
+    que decrece monótonamente y es POSITIVA para toda ACF admisible. En cuanto
+    v_k ≤ 0 —o |φ_k| > 1, que es lo mismo— la secuencia r(k) que ha entrado no
+    es una función de autocovarianza y lo que salga de ahí en adelante no
+    significa nada. Se devuelve NaN, que es lo que el dibujo y la tabla saben
+    tratar como «indefinido».
+
+    Con el estimador de relleno con ceros esto NO DEBERÍA SALTAR NUNCA: es la
+    red, no el arreglo. El arreglo es `_acf_pacf`, que ahora entrega una r(k)
+    admisible por construcción.
     """
     K = len(r)
     phi, prev = [], []
+    v = 1.0
     for k in range(1, K + 1):
         if k == 1:
             p = float(r[0])
@@ -113,6 +157,13 @@ def _durbin_levinson(r: np.ndarray) -> np.ndarray:
             den = 1.0 - sum(prev[j] * r[j] for j in range(k - 1))
             p = float(num / den) if abs(den) > 1e-12 else float("nan")
             prev = [prev[j] - p * prev[k - 2 - j] for j in range(k - 1)] + [p]
+        if not np.isfinite(p) or abs(p) > 1.0:
+            phi.extend([float("nan")] * (K - k + 1))
+            return np.array(phi)
+        v *= (1.0 - p * p)
+        if v <= 0.0:
+            phi.extend([float("nan")] * (K - k + 1))
+            return np.array(phi)
         phi.append(p)
     return np.array(phi)
 
@@ -121,23 +172,122 @@ def _acf_pacf(x: np.ndarray, K: int,
               omitir: set[int] | None = None) -> tuple[np.ndarray, np.ndarray]:
     """ACF y PACF de `x` hasta K, OMITIENDO los índices de `omitir`.
 
-    μ̂ y σ̂² se calculan sobre lo retenido, y cada r(k) promedia sólo los pares
-    donde ninguno de los dos miembros está omitido. Normalizar con la μ y la σ
-    contaminadas invierte el signo del efecto — ver la cabecera del módulo.
+    ESTIMADOR DE RELLENO CON CEROS — BUG-0142. μ̂ se calcula sobre lo retenido,
+    la desviación de las omitidas se pone a CERO, y a partir de ahí es el
+    estimador de Bartlett, el mismo de `fue.acf`:
+
+        z̃ₜ = (xₜ − μ̂)  si t retenida,   0  si omitida
+        r(k) = Σₜ z̃ₜ z̃ₜ₊ₖ / Σₜ z̃ₜ²
+
+    El anómalo sigue sin contribuir a ningún retardo —que es lo que `omitir`
+    significa— y r(k) vuelve a ser la autocorrelación de una sucesión REAL: su
+    transformada es |Z(ω)|² ≥ 0, luego la secuencia es definida positiva, luego
+    |φ(k)| ≤ 1 **siempre**.
+
+    Lo que había antes normalizaba cada retardo por SUS pares retenidos, que es
+    un divisor distinto en cada k, y eso destruye la definición positiva. Sobre
+    `RATIO_m10` con umbral 2σ la PACF calibrada llegaba a **+3,394**.
+
+    Y sin omisión esto coincide **exactamente** con `fue.acf` —medido: 0,0 de
+    diferencia—, así que el paquete deja de tener dos correlogramas observados.
     """
     om = omitir or set()
     n = len(x)
     keep = np.array([i for i in range(n) if i not in om])
+    if len(keep) < 2:
+        raise ValueError("no quedan observaciones suficientes tras omitir.")
     mu = float(x[keep].mean())
-    var = float(((x[keep] - mu) ** 2).mean())
-    if var < 1e-20:
+    z = np.asarray(x, dtype=float) - mu
+    if om:
+        z = z.copy()
+        z[np.array(sorted(om), dtype=int)] = 0.0
+    c0 = float(z @ z)
+    if c0 < 1e-20:
         raise ValueError("varianza nula sobre las observaciones retenidas.")
-    r = np.empty(K)
-    for k in range(1, K + 1):
-        pares = [(x[i] - mu) * (x[i + k] - mu) for i in range(n - k)
-                 if i not in om and (i + k) not in om]
-        r[k - 1] = (float(np.mean(pares)) / var) if pares else 0.0
+    r = np.array([float(z[k:] @ z[:n - k]) / c0 for k in range(1, K + 1)])
     return r, _durbin_levinson(r)
+
+
+# Cuota mínima del par mayor sobre r(k) para que listar los pares diga algo
+# — BUG-0144. No es un número de gusto: separa dos regímenes medidos.
+#
+#   residuos de RATIO_m10, donde un anómalo domina   el par mayor: 46 – 116%
+#   ∇ln RATIO, estacionalidad repartida por la muestra           :  5 –  10%
+#
+# Y tiene lectura, que es lo que la hace útil: si unos pocos pares se llevan el
+# retardo, ese retardo es un ARTEFACTO DE UNAS FECHAS; si el mayor se lleva un
+# 5%, el retardo es estructura repartida por toda la muestra y nombrarle dos
+# fechas engaña. Por eso la tabla no se dibuja siempre.
+CUOTA_PAR_DOMINANTE = 0.25
+
+
+def _pares_dominantes(x: np.ndarray, K: int,
+                      top: int = 4) -> "list[list[tuple[int, int, float]]]":
+    """Los PARES de fechas que más pesan en cada r(k) — BUG-0144.
+
+    El estimador de Bartlett es una suma sobre PARES, y por eso admite una
+    descomposición exacta que la atribución por observación no tiene:
+
+        r(k) = Σₜ (xₜ−μ̂)(xₜ₊ₖ−μ̂) / (n·σ̂²)
+
+    Cada sumando es el par (t, t+k) y **suman r(k) sin residuo**: no hay canal
+    de varianza que separar ni pares de anómalos que sobren. Es la calibración
+    que `fue` imprime en cada `.out` bajo «Calibration of distortions of the
+    ACF» —puerto de `PlotCalibACF` de `diagnose.c`—, y es la más específica de
+    las dos que tiene la suite: dice **qué dos fechas** hacen un retardo, no
+    cuánto pone cada anómalo.
+
+    Las dos hacen falta y contestan cosas distintas:
+
+        r_obs(k) − r_cal(k)   ¿cuánto se movería si intervengo?   ← decide
+        pares dominantes      ¿qué fechas hacen este retardo?     ← explica
+
+    y la segunda no necesita que nadie declare nada anómalo primero.
+
+    Devuelve, por retardo, los `top` pares con mayor |contribución|, como
+    `(i, j, c)` con i, j 0-based sobre `x`.
+    """
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    mu = float(x.mean())
+    var = float(x.var())
+    z = x - mu
+    if var < 1e-20 or n < 2:
+        return [[] for _ in range(K)]
+    den = n * var
+    # EL CRITERIO ES EL DE `fue`, no «los mayores en valor absoluto». Se listan
+    # los pares que HACEN el retardo: los más positivos si r(k)>0, los más
+    # negativos si r(k)<0. Un par que compensa no explica el retardo, lo
+    # disimula, y mezclarlos deja una lista que no suma hacia el número que
+    # encabeza. `THRESH` es la deduplicación de `PlotCalibACF`: dos pares con
+    # la misma contribución a cuatro cifras se cuentan una vez.
+    THRESH = 0.9999
+    fuera = []
+    for k in range(1, K + 1):
+        c = z[: n - k] * z[k:] / den
+        if len(c) == 0:
+            fuera.append([])
+            continue
+        r_k = float(c.sum())
+        if r_k > 0:
+            orden = np.argsort(-c)
+            avanza = lambda v, prev: prev is None or v < prev * THRESH
+        elif r_k < 0:
+            orden = np.argsort(c)
+            avanza = lambda v, prev: prev is None or v > prev * THRESH
+        else:                                             # pragma: no cover
+            fuera.append([])
+            continue
+        sel, prev = [], None
+        for i in orden:
+            v = float(c[i])
+            if avanza(v, prev):
+                sel.append((int(i), int(i) + k, v))
+                prev = v
+                if len(sel) >= max(0, int(top)):
+                    break
+        fuera.append(sel)
+    return fuera
 
 
 @dataclass
@@ -150,6 +300,10 @@ class Distorsion:
     pacf_obs: float
     pacf_cal: float
     banda: float
+    # Los pares de fechas que hacen este retardo (BUG-0144). Van con `default`
+    # porque son opcionales; y AL FINAL, que es donde tienen que ir los campos
+    # con valor por omisión en un dataclass.
+    pares: tuple = ()
 
     @staticmethod
     def _flip(obs: float, cal: float, banda: float) -> str | None:
@@ -201,6 +355,26 @@ class CalibracionCorrelograma:
     # una PACF. Coste conocido de omitir: cada retardo usa pares distintos.
     por_omision: bool = False
     pacf_valida: bool = True
+    # EL CALENDARIO — BUG-0140/0144. Los pares dominantes sólo dicen algo si se
+    # pueden nombrar por su fecha, y `residuals` llega como lista pelada. Los
+    # tres viajan juntos porque por separado no significan nada; `desfase` es
+    # `d + D·s`, lo que se comió la diferenciación (BUG-0067).
+    freq: int = 0
+    start: tuple = ()
+    desfase: int = 0
+
+    def fecha(self, i0: int) -> str:
+        """La fecha de la observación 0-based `i0` de los residuos, o su índice
+        si esta calibración no trae calendario."""
+        if not self.freq or len(self.start) < 2:
+            return f"obs {i0 + 1}"
+        try:
+            from art.guion import _at_to_date
+            return _at_to_date(int(i0) + int(self.desfase),
+                               int(self.start[0]), int(self.start[1]),
+                               int(self.freq))
+        except Exception:                                 # pragma: no cover
+            return f"obs {i0 + 1}"
 
     @property
     def flips_ar(self) -> list[Distorsion]:
@@ -237,7 +411,11 @@ class CalibracionCorrelograma:
 def calibra_correlograma(residuals: Sequence[float],
                          umbral: float = 2.5,
                          max_lag: int = 12,
-                         omitir: "set[int] | None" = None) -> CalibracionCorrelograma:
+                         omitir: "set[int] | None" = None,
+                         top_pares: int = 4,
+                         freq: int = 0,
+                         start: Sequence[int] = (),
+                         desfase: int = 0) -> CalibracionCorrelograma:
     """Cuánto de la ACF y de la PACF se debe a los residuos extremos.
 
     Parameters
@@ -246,9 +424,14 @@ def calibra_correlograma(residuals: Sequence[float],
     umbral    : |z| a partir del cual un residuo se considera extremo.
     max_lag   : hasta qué retardo calibrar.
 
-    Los extremos se sustituyen por la media y se recalcula TODO —media, σ, ACF
-    y PACF—, que es lo que hace una intervención de impulso con ω libre. Ver la
-    validación en la cabecera del módulo.
+    top_pares : cuántos pares de fechas listar por retardo (BUG-0144).
+    freq, start, desfase : EL CALENDARIO, para poder nombrar esos pares por su
+                fecha. Viajan juntos; sin ellos se nombran por su índice.
+
+    Los extremos se omiten poniendo su desviación a CERO y se recalcula TODO
+    —media, σ, ACF y PACF— con el estimador de Bartlett, el mismo de `fue.acf`.
+    Ver la cabecera del módulo: el porqué de ese estimador y no otro es la
+    decisión que gobierna este archivo (BUG-0142).
     """
     r = np.asarray(residuals, dtype=float)
     n = len(r)
@@ -278,28 +461,34 @@ def calibra_correlograma(residuals: Sequence[float],
 
     a_obs, p_obs = _acf_pacf(r, K)
     if idx:
-        # OMITIR, no sustituir: sustituir supondría una forma (un impulso), y
-        # esta herramienta existe para informar la elección de forma.
+        # Relleno con ceros sobre las desviaciones (BUG-0142): quita la
+        # contribución del anómalo a TODOS los retardos y deja una ACF
+        # admisible, que es la única forma de que la PACF derivada sea una PACF.
         a_cal, p_cal = _acf_pacf(r, K, omitir=set(idx))
         keep = np.array([i for i in range(n) if i not in set(idx)])
         sigma_cal = float(r[keep].std(ddof=0))
     else:
         a_cal, p_cal, sigma_cal = a_obs.copy(), p_obs.copy(), sd
 
-    # La secuencia omitida no está garantizada definida positiva: cada retardo
-    # usa un conjunto de pares distinto. Si no lo es, Durbin-Levinson devuelve
-    # |φ| ≥ 1, que no es una PACF, y hay que decirlo en vez de publicarla.
+    # La red de BUG-0142. Con el estimador de relleno con ceros la ACF calibrada
+    # es definida positiva POR CONSTRUCCIÓN y esto no debería ser nunca False;
+    # se comprueba igual, porque publicar una |φ| ≥ 1 sería publicar algo que no
+    # es una PACF.
     pd_ok = bool(np.all(np.isfinite(p_cal)) and np.max(np.abs(p_cal)) < 1.0)
 
     banda = 2.0 / np.sqrt(n)
+    pares = _pares_dominantes(r, K, top=top_pares) if top_pares else \
+        [[] for _ in range(K)]
     dis = [Distorsion(lag=k + 1, banda=banda,
                       acf_obs=float(a_obs[k]), acf_cal=float(a_cal[k]),
-                      pacf_obs=float(p_obs[k]), pacf_cal=float(p_cal[k]))
+                      pacf_obs=float(p_obs[k]), pacf_cal=float(p_cal[k]),
+                      pares=tuple(pares[k]))
            for k in range(K)]
 
     return CalibracionCorrelograma(
         distorsiones=dis, extremos=extremos, n=n, banda=banda, umbral=umbral,
-        sigma_obs=sd, sigma_cal=sigma_cal, por_omision=(omitir is not None))
+        sigma_obs=sd, sigma_cal=sigma_cal, por_omision=(omitir is not None),
+        freq=int(freq or 0), start=tuple(start), desfase=int(desfase))
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +591,45 @@ def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = "",
     L += ["", f"*Banda ±{cal.banda:.3f}. «SALE» = estaba dentro y al calibrar "
           "sale (el anómalo la **enmascaraba**); «ENTRA» = estaba fuera y al "
           "calibrar entra (el anómalo la **fabricaba**).*", ""]
+
+    # QUÉ FECHAS HACEN EL RETARDO — BUG-0144.
+    #
+    # La tabla de arriba contesta «¿cuánto se movería si intervengo?». Ésta
+    # contesta la otra mitad, que es más específica: **qué dos fechas** hacen
+    # ese retardo. Son objetos distintos y hacen falta los dos —la primera
+    # decide, la segunda explica— y esta segunda no necesita que nadie declare
+    # nada anómalo primero, porque el estimador de Bartlett es una suma sobre
+    # pares y admite la descomposición exacta.
+    #
+    # Reproduce el bloque «Calibration of distortions of the ACF» del `.out`,
+    # con su mismo criterio de selección: los pares que HACEN el retardo, no
+    # los mayores en valor absoluto.
+    _prio = [d for d in cal.distorsiones if d.acf_flip or d.pacf_flip]
+    if not _prio:
+        _prio = sorted((d for d in cal.distorsiones
+                        if abs(d.acf_obs) > cal.banda),
+                       key=lambda d: -abs(d.acf_obs))
+    _prio = sorted(_prio[:4], key=lambda d: d.lag)
+    # Sólo donde unos pocos pares SE LLEVAN el retardo. Ver `CUOTA_PAR_DOMINANTE`.
+    _prio = [d for d in _prio if d.pares and abs(d.acf_obs) > 1e-9
+             and abs(d.pares[0][2] / d.acf_obs) >= CUOTA_PAR_DOMINANTE]
+    if _prio:
+        L += ["#### Qué fechas hacen cada retardo", "",
+              "| lag | r(k) | fechas | contribución |",
+              "|---|---|---|---|"]
+        for d in _prio:
+            for m, (i, j, c) in enumerate(d.pares):
+                cab = f"| **{d.lag}** | {d.acf_obs:+.3f} " if m == 0 else "| | "
+                L.append(f"{cab}| {cal.fecha(i)} – {cal.fecha(j)} | {c:+.3f} |")
+        L += ["", "*Descomposición EXACTA: los pares suman r(k) sin residuo. Es "
+              "el bloque «Calibration of distortions of the ACF» del `.out`, y "
+              "es el instrumento **específico**: dice qué dos fechas hacen el "
+              "retardo, no cuánto pone cada anómalo.*",
+              "", f"*Sólo aparecen los retardos donde el par mayor se lleva al "
+              f"menos el {100*CUOTA_PAR_DOMINANTE:.0f}% de r(k) — ahí el retardo "
+              "es un **artefacto de unas fechas**. Si ningún par destaca, el "
+              "retardo es estructura repartida por la muestra y nombrarle dos "
+              "fechas engañaría.*", ""]
 
     if not cal.cambia_la_identificacion:
         L += ["#### Veredicto — **no cambia la identificación**", "",

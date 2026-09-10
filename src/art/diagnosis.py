@@ -326,6 +326,25 @@ def _build_param_labels(model) -> list[str]:
     """
     labels: list[str] = []
     freq = model.series.freq if model.series is not None else 12
+    _start = getattr(model.series, "start", (1, 1)) if model.series is not None \
+        else (1, 1)
+
+    def _cuando(itv) -> str:
+        """La FECHA de la intervención — BUG-0141.
+
+        Sin ella dos intervenciones distintas comparten etiqueta. En el `m41`
+        de la réplica —`impulse 2 2020` y `step 4 2008`— la tabla de
+        sobreparametrización listaba `ω(S)` y `ω(I)` sin decir cuál era cuál, y
+        con dos escalones en el modelo habría listado `ω(S)` DOS VECES. Una
+        etiqueta que no identifica su parámetro no sirve para lo único que hace
+        esa tabla: decir qué par hay que tocar.
+        """
+        try:
+            from art.guion import _at_to_date
+            return _at_to_date(int(getattr(itv, "at", 0)),
+                               int(_start[0]), int(_start[1]), int(freq))
+        except Exception:                                 # pragma: no cover
+            return ""
 
     # 1. Intervention omega_free
     for itv in (model.interventions or []):
@@ -345,15 +364,21 @@ def _build_param_labels(model) -> list[str]:
             else:
                 xi = {"step": "S", "pulse": "I", "impulse": "I",
                       "ramp": "R", "compimp": "CI"}.get(t, t)
-                labels.append(f"ω({xi})" if i == 0 else f"ω({xi},l{i})")
+                # Las armónicas y `alter` NO llevan fecha, y no es un olvido:
+                # su `at` no significa nada —actúan sobre toda la muestra— y lo
+                # que las identifica es el orden del armónico, que ya está.
+                cu = _cuando(itv)
+                cab = f"{xi},{cu}" if cu else xi
+                labels.append(f"ω({cab})" if i == 0 else f"ω({cab},l{i})")
 
     # 2. Intervention delta_free
     for itv in (model.interventions or []):
         df = (list(itv.delta_free)
               if (hasattr(itv, "delta_free") and itv.delta_free) else [])
+        cu = _cuando(itv)
         for i, free in enumerate(df):
             if free:
-                labels.append(f"δ(l{i})")
+                labels.append(f"δ({cu},l{i})" if cu else f"δ(l{i})")
 
     # 3. AR regular
     for fi, factor in enumerate(model.ar or []):
