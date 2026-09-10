@@ -198,6 +198,7 @@ def respuesta_flt(omega: Sequence[float],
 
 def describe_ltf(omega: Sequence[float],
                  delta: Sequence[float] = (),
+                 entrada: str = "escalon",
                  b: int = 0,
                  K: int = 24,
                  d: int = 0,
@@ -262,6 +263,13 @@ def describe_ltf(omega: Sequence[float],
         lectura = ("**INADMISIBLE** — δ(1) = 0: la ganancia no está acotada. "
                    "La respuesta no converge y la figura no se puede leer como "
                    "un efecto de nivel.")
+    elif str(entrada).lower().startswith(("imp", "pul")):
+        # BUG-0136: con entrada de impulso el efecto permanente es CERO por
+        # construcción. ν(1) es el ÁREA acumulada, no un desplazamiento.
+        lectura = (f"**TRANSITORIO POR CONSTRUCCIÓN** — la entrada es un "
+                   f"impulso y no persiste, así que el nivel vuelve sea cual "
+                   f"sea ω. El **{niv.gain:+.4f}** es el ÁREA acumulada de la "
+                   f"respuesta, no un desplazamiento del nivel.")
     else:
         lectura = (f"**PERMANENTE** — ganancia **{niv.gain:+.4f}**: el nivel se "
                    f"queda desplazado.")
@@ -384,7 +392,8 @@ class Superposicion:
                 and abs(self.z_resto) >= 2.0)
 
 
-def operador_en_palabras(omega, delta=(), b: int = 0, K: int = 6) -> str:
+def operador_en_palabras(omega, delta=(), b: int = 0, K: int = 6,
+                         entrada: str = "escalon") -> str:
     """El operador escrito, y el CAMINO DEL NIVEL que produce.
 
     El convenio de fue es el de Box-Jenkins, y es el mismo para todo operador
@@ -426,8 +435,24 @@ def operador_en_palabras(omega, delta=(), b: int = 0, K: int = 6) -> str:
         f"  el operador                    : {op}",
         f"  camino del NIVEL               : {camino}"
         + (", …" if len(r.srf) > K else ""),
+        # QUÉ ES ν(1), Y DEPENDE DE LA ENTRADA — BUG-0136.
+        #
+        # Con entrada ESCALÓN, ν(1) es el desplazamiento permanente del nivel.
+        # Con entrada IMPULSO es el ÁREA acumulada de la respuesta, y el efecto
+        # permanente es CERO POR CONSTRUCCIÓN: la entrada no persiste, así que
+        # el nivel vuelve sea cual sea ω. `interventions.py` ya lo sabe desde el
+        # BUG-0076 —tiene la propiedad `efecto_permanente`— y este bloque, que
+        # es el que se imprime en TODAS las salidas del nodo, seguía rotulando
+        # «PERMANENTE» por el mero hecho de que ν(1) ≠ 0.
+        #
+        # Se vio tres veces en el análisis de RATIO: el mismo programa decía
+        # «el nivel se queda desplazado (PERMANENTE)» en este bloque y «efecto
+        # permanente en el nivel: 0 por construcción» tres líneas más abajo.
         f"  ganancia ν(1) = ω(1)/δ(1)      : {r.gain:+.4f}"
-        + ("   → vuelve a la línea base (TRANSITORIO)"
+        + ("   → área acumulada; el efecto permanente es 0 POR CONSTRUCCIÓN "
+           "(la entrada no persiste)"
+           if str(entrada).lower().startswith(("imp", "pul")) else
+           "   → vuelve a la línea base (TRANSITORIO)"
            if abs(r.gain) < 1e-9 else
            "   → el nivel se queda desplazado (PERMANENTE)"),
         "```",

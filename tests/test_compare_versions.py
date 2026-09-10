@@ -188,14 +188,23 @@ def test_compare_lr_test_when_nested(two_models):
     assert "LR" in text or "Test" in text
 
 
-def test_compare_figure_returned(two_models):
-    """Should return a figure with ACF/PACF comparison."""
+def test_compare_no_devuelve_figura_pero_si_la_tabla(two_models):
+    """BUG-0137. Esta prueba exigía la figura de seis paneles.
+
+    No servía en ninguno de los dos casos posibles: cuando los modelos se
+    parecen los seis paneles son indistinguibles —m41 y m31 de RATIO difieren
+    en σ_a en 0,0012 y las dos columnas se superponen— y cuando difieren, dos
+    paneles con la misma escala obligan a ir y venir con la vista. 1515×1076 px
+    y 106 KB, la figura más pesada del sistema, con CERO llamadas en 1.114.
+
+    Lo que decide una comparación de versiones está en la tabla: loglik, AIC,
+    BIC, npar y su Δ, más el aviso de si los modelos están anidados."""
     from art.mcp_server import compare_versions
     a, b = two_models
     result = compare_versions(a, b)
-    assert len(result) == 2
-    assert result[1].type == "image"
-    assert len(result[1].data) > 100
+    assert len(result) == 1
+    assert result[0].type == "text"
+    assert "loglik" in result[0].text and "AIC" in result[0].text
 
 
 def test_compare_same_model_no_diff(tmp_path):

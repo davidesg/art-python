@@ -94,14 +94,30 @@ def test_llamada1_avisa_de_sobre_intervenir_si_no_cambia_nada(tmp_path):
 
 # ───────────────── llamada 2 ─────────────────
 
-def test_llamada2_da_las_tres_cosas_en_una_respuesta(base):
+def test_llamada2_da_el_episodio_las_configuraciones_y_el_veredicto(base):
+    """BUG-0138: la escalera ya no va aquí por defecto.
+
+    Exigía «Escalera de Ockham» en la respuesta. La escalera ESTIMA TRES
+    MODELOS, y se disparaba antes de que el analista hubiera discutido la forma
+    — la superposición lleva la sugerencia y la escalera es el argumento si
+    hace falta. Se pide con `escalera=True`."""
     f, _ = base
     t = _txt(GI(f, date="Q1/2015", threshold=2.5))
     assert "Llamada 2" in t
     assert "El suceso" in t                    # el episodio
     assert "Configuraciones del incidente" in t
-    assert "Escalera de Ockham" in t
     assert "## Veredicto" in t
+    assert "Escalera de Ockham" not in t       # no por defecto
+    assert "escalera=True" in t                # pero se ofrece
+
+
+def test_llamada2_da_la_escalera_si_se_pide(base):
+    """BUG-0138: y con `escalera=True` vuelve entera, con su lectura escalar."""
+    f, _ = base
+    t = _txt(GI(f, date="Q1/2015", threshold=2.5, escalera=True))
+    assert "Escalera de Ockham" in t
+    assert "Lectura escalar" in t
+    assert "El AIC no arbitra" in t
 
 
 def test_llamada2_nombra_el_arbitro_de_la_forma(base):
@@ -112,11 +128,13 @@ def test_llamada2_nombra_el_arbitro_de_la_forma(base):
     assert "MECANISMO" in t
 
 
-def test_llamada2_dice_la_lectura_escalar_y_que_no_la_decide_el_aic(base):
+def test_llamada2_sin_escalera_no_inventa_lectura_escalar(base):
+    """BUG-0138. La lectura escalar sale de la escalera; sin ella no se dice.
+    Lo que la sustituye es el ofrecimiento del argumento, con su llamada."""
     f, _ = base
     t = _txt(GI(f, date="Q1/2015", threshold=2.5))
-    assert "Lectura escalar" in t
-    assert "El AIC no arbitra" in t
+    assert "Lectura escalar" not in t
+    assert "¿No te convence esta forma?" in t
 
 
 def test_llamada2_propone_la_llamada_3_con_su_orden(base):

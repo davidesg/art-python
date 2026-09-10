@@ -454,13 +454,14 @@ def test_test_interventions_returns_significance_table(tmp_path):
 
 
 def test_compare_versions_block_q():
-    """Block Q: compare_versions returns text+figure with LR test and dated diff."""
+    """Block Q: compare_versions returns the stats table with LR test and dated
+    diff. La figura se retiró en el BUG-0137 — era sobre-elaborar."""
     _skip_if_missing(_IPC_ES_M02)
     m00 = os.path.join(os.path.dirname(__file__), "..", "cases", "IPC_ES", "IPC_ES_m00.pre")
     _skip_if_missing(m00)
     from art.mcp_server import compare_versions
     result = compare_versions(m00, _IPC_ES_M02)
-    assert len(result) == 2
+    assert len(result) == 1                      # BUG-0137: sin figura
     assert result[0].type == "text"
     text = result[0].text
     # Stats table
@@ -473,9 +474,8 @@ def test_compare_versions_block_q():
     # Dated diff (not None)
     assert "step(" in text
     assert "None" not in text
-    # Figure: 3x2 layout (residuals + ACF + PACF)
-    assert result[1].type == "image"
-    assert len(result[1].data) > 10_000
+    # BUG-0137: sin figura. Los seis paneles se retiraron — la tabla de arriba
+    # es lo que decide una comparación de versiones.
 
 
 # ---------------------------------------------------------------------------

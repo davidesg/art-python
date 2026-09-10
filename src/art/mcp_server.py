@@ -2239,7 +2239,8 @@ def intervention_ladder(inp_path: str,
 # Tool: gráfico de intervención
 # ---------------------------------------------------------------------------
 
-def _con_convenio(desc, omega, delta=None, b: int = 0):
+def _con_convenio(desc, omega, delta=None, b: int = 0,
+                  entrada: str = "escalon"):
     """Añade a la descripción el operador leído EN EL NIVEL.
 
     El convenio de signo de fue —Box-Jenkins, los retardos restan— es
@@ -2257,7 +2258,8 @@ def _con_convenio(desc, omega, delta=None, b: int = 0):
     try:
         from art.ltf import operador_en_palabras
         from art.describe import Description
-        bloque = operador_en_palabras(list(omega), list(delta or ()), b=b)
+        bloque = operador_en_palabras(list(omega), list(delta or ()), b=b,
+                                      entrada=entrada)
         return Description(summary=desc.summary + "\n\n---\n\n" + bloque,
                            figure_b64=desc.figure_b64,
                            recommendation=desc.recommendation,
@@ -2369,8 +2371,11 @@ def intervention_plot(omega: list[float],
     try:
         from art.ltf import describe_ltf, describe_superposicion
         if not inp_path:
-            desc = describe_ltf(omega, delta or (), b=b, K=K, etiqueta=label)
-            desc = _con_convenio(desc, omega, delta, b)
+            # BUG-0136: la entrada decide qué es ν(1) — desplazamiento del
+            # nivel con escalón, área acumulada con impulso.
+            desc = describe_ltf(omega, delta or (), entrada=entrada,
+                                b=b, K=K, etiqueta=label)
+            desc = _con_convenio(desc, omega, delta, b, entrada)
             _escribe_fig(desc.figure_b64, "intervention_plot")
             return _result(desc)
 
@@ -2397,7 +2402,7 @@ def intervention_plot(omega: list[float],
             y, int(at), omega, delta or (), b=b, d=d_eff,
             ventana=int(ventana), entrada=entrada,
             etiqueta=label or f"{os.path.basename(inp_path)} — entorno de obs {at}")
-        desc = _con_convenio(desc, omega, delta, b)
+        desc = _con_convenio(desc, omega, delta, b, entrada)
         _escribe_fig(desc.figure_b64, "intervention_plot")
         return _result(desc)
     except Exception as e:
@@ -3131,51 +3136,23 @@ def overparameterization_analysis(inp_path: str, threshold: float = 0.7) -> list
 
         n = corr.shape[0]
 
-        # ── heatmap figure ────────────────────────────────────────────────
-        fig, ax = plt.subplots(figsize=(max(6, n * 0.42 + 1.5),
-                                        max(5, n * 0.38 + 1.2)))
-        im = ax.imshow(corr, vmin=-1, vmax=1, cmap="RdBu_r", aspect="auto")
-        plt.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
-
-        # Tick labels — show all if ≤20 params, else abbreviated
-        tick_labels = labels if n <= 20 else [
-            lbl if i in (0, n - 1) or i % max(1, n // 10) == 0 else ""
-            for i, lbl in enumerate(labels)
-        ]
-        ax.set_xticks(range(n))
-        ax.set_yticks(range(n))
-        ax.set_xticklabels(tick_labels, rotation=90, fontsize=7)
-        ax.set_yticklabels(tick_labels, fontsize=7)
-
-        # Highlight cells with |corr| > threshold
-        for i in range(n):
-            for j in range(n):
-                if i != j and abs(corr[i, j]) > threshold:
-                    ax.add_patch(plt.Rectangle(
-                        (j - 0.5, i - 0.5), 1, 1,
-                        fill=False, edgecolor="gold", lw=1.5
-                    ))
-
-        # Draw box around ARMA+mu block (last ARMA params)
-        n_arma = (
-            sum(len(f) for f in (m.ar or []))
-            + sum(len(f) for f in (m.ar_s or []))
-            + sum(len(f) for f in (m.ma or []))
-            + sum(len(f) for f in (m.ma_s or []))
-            + (1 if getattr(m, "estimate_mu", False) else 0)
-        )
-
-        if n_arma > 0:
-            i0 = n - n_arma
-            rect = plt.Rectangle((i0 - 0.5, i0 - 0.5), n_arma, n_arma,
-                                  fill=False, edgecolor="black", lw=2.0, linestyle="--")
-            ax.add_patch(rect)
-
-        ax.set_title(f"Correlación de parámetros — {m.series.name if m.series else ''}\n"
-                     f"(n_param={n}, umbral={threshold})", fontsize=10)
-        fig.tight_layout()
-        b64 = _fig_b64(fig)
-        plt.close(fig)
+        # SIN HEATMAP — BUG-0137.
+        #
+        # Aquí había un mapa de calor de la matriz de correlación, con recuadro
+        # en el bloque ARMA+μ y borde dorado en los pares marcados. Se retira
+        # por decisión del analista en el censo de figuras: «no es necesaria; la
+        # tabla hace su trabajo y avisa. Esto es sobre-elaborar».
+        #
+        # Y es correcto: la tabla de arriba da los pares, su r y su diagnóstico
+        # —estructural o redundante—, que es lo que se hace con ellos. El
+        # heatmap enseñaba el mismo dato en dos dimensiones sin cambiar ninguna
+        # decisión. 212 líneas de matplotlib DENTRO del servidor, y 1 llamada en
+        # 1.114 registradas.
+        #
+        # Lo que sí quedó anotado del censo y no se arregla aquí: las etiquetas
+        # no distinguen dos parámetros distintos —`ω(S)` aparecía dos veces, una
+        # por intervención, sin la fecha—, y eso afecta también a la TABLA.
+        b64 = None
 
         # ── text summary ──────────────────────────────────────────────────
         # Classify each pair:  "flt" = always structural, "arma" = check RV test,
@@ -4062,7 +4039,9 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
                     continue
                 _et = f"{_r.itv_type}[obs {_r.itv_at + 1}]"
                 _bloques.append(f"**`{_et}`**\n\n"
-                                + operador_en_palabras(list(_r.omega)))
+                                + operador_en_palabras(
+                                    list(_r.omega),
+                                    entrada=getattr(_r, 'entrada', 'escalon')))
             if _bloques:
                 convenio = ("\n\n---\n\n### Los ω, leídos en el nivel\n\n"
                             + "\n\n".join(_bloques) + "\n")
@@ -6969,35 +6948,23 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
         all_pacf = np.concatenate([pacf_a_arr, pacf_b_arr])
         cmax = _snap_cmax(all_acf, all_pacf)
 
-        fig, axes = plt.subplots(3, 2, figsize=(14, 10))
-        fig.suptitle(f"Comparación: {name_a}  vs  {name_b}", fontsize=11, fontweight="bold")
-
-        # Row 0: standardized residuals
-        for col, (res, name_lbl) in enumerate([(res_a, name_a), (res_b, name_b)]):
-            ax = axes[0, col]
-            r_std_v = res.std(ddof=1) if len(res) > 1 else 1.0
-            r_z = (res - res.mean()) / r_std_v if r_std_v > 0 else res
-            ax.axhline(0, color="black", lw=0.8)
-            ax.axhline(+2, color="red", lw=0.6, ls="--")
-            ax.axhline(-2, color="red", lw=0.6, ls="--")
-            ax.plot(np.arange(len(r_z)), r_z, color="#333333", lw=0.8)
-            ax.set_title(f"Residuos — {name_lbl}", fontsize=9)
-            _tj_spines(ax)
-
-        # Rows 1-2: ACF and PACF
-        acf_pacf_panels = [
-            (axes[1, 0], acf_a_arr,  band_a, f"ACF — {name_a}"),
-            (axes[1, 1], acf_b_arr,  band_b, f"ACF — {name_b}"),
-            (axes[2, 0], pacf_a_arr, band_a, f"PACF — {name_a}"),
-            (axes[2, 1], pacf_b_arr, band_b, f"PACF — {name_b}"),
-        ]
-        for ax, vals, band, title in acf_pacf_panels:
-            _draw_acf_panel(ax, lag_x, vals, band=band, cmax=cmax,
-                            freq=freq, lags=lags, label=title)
-
-        fig.tight_layout()
-        b64 = _fig_b64(fig)
-        plt.close(fig)
+        # SIN FIGURA — BUG-0137.
+        #
+        # Aquí había SEIS paneles: residuos, ACF y PACF de cada modelo, lado a
+        # lado. 1515 × 1076 px y 106 KB — la figura más pesada del sistema— para
+        # cero llamadas en 1.114 registradas.
+        #
+        # Y no servía en ninguno de los dos casos posibles. Cuando los modelos
+        # se parecen, los seis paneles son indistinguibles: comparando el m41 y
+        # el m31 de RATIO, que difieren en σ_a en 0,0012, las dos columnas se
+        # superponen. Y cuando difieren, dos paneles con la misma escala
+        # obligan a ir y venir con la vista.
+        #
+        # Lo que decide una comparación de versiones está entero en la tabla que
+        # esta misma salida ya imprime — loglik, AIC, BIC, npar y su Δ— más el
+        # aviso de si los modelos están anidados. Cuatro números y una
+        # advertencia. El dibujo era sobre-elaborar.
+        b64 = None
 
         # ── Compose text ───────────────────────────────────────────────────
         lines = [
@@ -7027,6 +6994,7 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
 
 @mcp.tool()
 def guided_intervention(inp_path: str,
+                        escalera: bool = False,
                         date: str = "",
                         form: str = "",
                         n_omega: int = 0,
@@ -7292,12 +7260,27 @@ def guided_intervention(inp_path: str,
             d_cfg = describe_configuraciones(conj)
             L += ["---", "", d_cfg.summary, ""]
 
-            # ── la escalera ──
-            from art.escalera import describe_escalera, escalera_de_ockham
-            esc = escalera_de_ockham(m, ep, dominio=dom,
-                                     umbral_vecino=umbral_vecino)
-            d_esc = describe_escalera(esc)
-            L += ["---", "", d_esc.summary, ""]
+            # ── la escalera: SÓLO SI SE PIDE — BUG-0138 ──
+            #
+            # Decisión del analista en el censo de figuras: «la superposición
+            # lleva la sugerencia y la escalera es el argumento si es
+            # necesario». El analista pregunta qué forma se adapta; la
+            # herramienta le dice una. Si replica con otra, ENTONCES la escalera
+            # es el argumento.
+            #
+            # Cuesta TRES ESTIMACIONES, y hasta ahora se disparaban siempre —
+            # antes de que nadie hubiera discutido nada. En carril autónomo
+            # sigue siendo obligatoria: ahí no hay quien discuta, y su
+            # información ES el criterio. La corre
+            # `suggest_intervention_form(form="auto")`, que no se toca.
+            esc = None
+            d_esc = None
+            if escalera:
+                from art.escalera import describe_escalera, escalera_de_ockham
+                esc = escalera_de_ockham(m, ep, dominio=dom,
+                                         umbral_vecino=umbral_vecino)
+                d_esc = describe_escalera(esc)
+                L += ["---", "", d_esc.summary, ""]
 
             # ── EL VEREDICTO ÚNICO, con el árbitro dicho ──
             L += ["---", "", "## Veredicto", ""]
@@ -7314,12 +7297,22 @@ def guided_intervention(inp_path: str,
                 L += [f"- **Forma** — la gobierna la configuración, que extiende "
                       f"el arranque por el MECANISMO: `{mejor.etiqueta}`, es "
                       f"decir {mejor.en_palabras}.", ""]
-                if esc.nivel_simple:
+                if esc is not None and esc.nivel_simple:
                     L += [f"- **Lectura escalar** — `{esc.nivel_simple}` por la "
                           f"firma del residuo: {esc.criterio_simple}. *El AIC no "
                           "arbitra entre las dos lecturas del peldaño 1: no "
                           "están anidadas y cuestan lo mismo.*", ""]
-                if esc.razones_para_subir:
+                if esc is None:
+                    L += ["- **¿No te convence esta forma?** La escalera de "
+                          "Ockham es el argumento: estima las rivales EN ORDEN "
+                          "y dice qué justifica subir de peldaño —Treadway, "
+                          "inadecuación, dominio—, con el AIC mirando y sin "
+                          "arbitrar. Cuesta tres estimaciones, así que se pide:",
+                          "", "```",
+                          f'guided_intervention(inp_path="{inp_path}",',
+                          f'                    date="{date}", escalera=True)',
+                          "```", ""]
+                elif esc.razones_para_subir:
                     L += ["- **Razones para subir de peldaño**: "
                           + str(len(esc.razones_para_subir)) + " (arriba).", ""]
                 else:
@@ -7339,14 +7332,45 @@ def guided_intervention(inp_path: str,
                       "errores de la tabla."]
 
             from art.describe import Description
-            _escribe_fig(d_esc.figure_b64, "guided_intervention_escalera")
+            # LA FIGURA DE ESTA LLAMADA — BUG-0138.
+            #
+            # Sin escalera, la figura es la SUPERPOSICIÓN de la forma sugerida
+            # sobre lo observado: es la que contesta la pregunta del analista
+            # —«¿qué forma se adapta a los datos?»— y no cuesta ninguna
+            # estimación, porque dibuja una hipótesis, no un ajuste.
+            #
+            # Con `escalera=True` la figura pasa a ser la de los peldaños, que
+            # es la del argumento.
+            _fig2 = None
+            if d_esc is not None:
+                _fig2 = d_esc.figure_b64
+            elif mejor is not None and getattr(mejor, "model", None) is not None:
+                try:
+                    from art.ltf import describe_superposicion
+                    _itv = [i for i in (mejor.model.interventions or [])
+                            if i.type in ("step", "pulse", "impulse", "compimp")]
+                    if _itv:
+                        _om = list(_itv[-1].omega or [])
+                        _ent = ("impulso" if _itv[-1].type in
+                                ("pulse", "impulse", "compimp") else "escalon")
+                        _fig2 = describe_superposicion(
+                            m._result.residuals, at=int(ep.inicio),
+                            omega=_om, entrada=_ent,
+                            etiqueta=f"{mejor.etiqueta} — {mejor.en_palabras}",
+                        ).figure_b64
+                except Exception as _se:
+                    _warn(f"guided_intervention: superposición no disponible: {_se}")
+
             return _result(Description(summary="\n".join(L),
-                                       figure_b64=d_esc.figure_b64,
+                                       figure_b64=_fig2,
                                        recommendation=d_cfg.recommendation,
                                        data=dict(llamada=2,
                                                  identificado=conj.identificado,
                                                  n_construidas=len(conj.vivos),
-                                                 nivel_simple=esc.nivel_simple)))
+                                                 escalera=bool(esc is not None),
+                                                 nivel_simple=(esc.nivel_simple
+                                                               if esc is not None
+                                                               else None))))
 
         # ═════════════════ LLAMADA 1 — ¿hay que intervenir? ═════════════════
         from art.calibracion import calibra_correlograma, describe_calibracion
@@ -7800,7 +7824,11 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                 if _itvs:
                     from art.ltf import operador_en_palabras
                     conv_txt = ("\n\n---\n\n"
-                                + operador_en_palabras(list(_itvs[-1].omega)))
+                                + operador_en_palabras(
+                                    list(_itvs[-1].omega),
+                                    entrada=('impulso' if _itvs[-1].type in
+                                             ('pulse', 'impulse', 'compimp')
+                                             else 'escalon')))
         except Exception as _cv:
             _warn("lectura del operador en el nivel", _cv)
 
