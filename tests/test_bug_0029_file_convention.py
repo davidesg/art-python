@@ -10,6 +10,19 @@ invitación a reestimar sobre el óptimo, o sea a BUG-0027.
 El convenio SÍ estaba escrito, pero en drtran, que es un escalón POSTERIOR. Los
 tres ficheros nacen en art.
 """
+
+# ORDEN 1.1 — DÓNDE VIVE AHORA ESTA DOCTRINA.
+#
+# Estas afirmaciones se hacían sobre `_INSTRUCTIONS`, que hasta el 10-sep-2026
+# eran los 35.941 caracteres del método entero y viajaban EN CADA LLAMADA.
+# Ahora `_INSTRUCTIONS` es una cabecera de 2.000 y el método vive en
+# `_PROTOCOLO`, que se sirve por `art://protocolo` y se PIDE.
+#
+# La propiedad que estas pruebas guardan —que la doctrina exista y esté
+# enunciada— no cambia. Lo que cambia es el canal, y con él la garantía: antes
+# se empujaba (y el cliente recortaba el 77%, BUG-0116), ahora se pide. Lo que
+# tiene que estar en la CABECERA, sí o sí, lo fija
+# `tests/test_presupuesto_del_semaforo.py`.
 import os
 import re
 import tempfile
@@ -27,7 +40,7 @@ FUENTE = open(SRC, encoding="utf-8").read()
 # ── el convenio está escrito, y en art ─────────────────────────────────────
 
 def test_las_instrucciones_traen_el_convenio():
-    assert "EL CONVENIO DE FICHEROS" in A._INSTRUCTIONS
+    assert "EL CONVENIO DE FICHEROS" in A._PROTOCOLO
 
 
 @pytest.mark.parametrize("regla", [
@@ -36,20 +49,20 @@ def test_las_instrucciones_traen_el_convenio():
     "VUELVE A SER UN .inp",         # tocar un .pre lo devuelve a especificación
 ])
 def test_las_tres_reglas_estan_enunciadas(regla):
-    assert regla in A._INSTRUCTIONS
+    assert regla in A._PROTOCOLO
 
 
 def test_el_convenio_nombra_la_herramienta_que_lee_el_out():
-    assert "get_out_report" in A._INSTRUCTIONS
+    assert "get_out_report" in A._PROTOCOLO
 
 
 def test_el_convenio_remite_al_defecto_medido():
     """Una regla sin su medición es una opinión."""
-    assert "BUG-0027" in A._INSTRUCTIONS
+    assert "BUG-0027" in A._PROTOCOLO
 
 
 def test_la_secuencia_marca_el_paso_que_se_salta():
-    assert "REFORMULAS LEYENDO EL .out" in A._INSTRUCTIONS
+    assert "REFORMULAS LEYENDO EL .out" in A._PROTOCOLO
 
 
 def test_la_cabecera_ya_no_dice_que_sean_intercambiables():

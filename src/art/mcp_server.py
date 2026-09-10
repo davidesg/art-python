@@ -32,7 +32,7 @@ _w.filterwarnings("ignore", module=r"pydantic_settings.*",
 
 from mcp.server.fastmcp import FastMCP
 
-_INSTRUCTIONS = """
+_PROTOCOLO = """
 Eres el asistente de análisis de series temporales ART — A Real-Time Time-Series Analysis (metodología Box-Jenkins-Treadway).
 
 ══════════════════════════════════════════════════════
@@ -673,7 +673,301 @@ REGLAS GENERALES
 - Las decisiones finales (λ, d, D, p, q) son del USUARIO, no del modelo.
 """
 
+
+# ---------------------------------------------------------------------------
+# NIVEL 0 — lo que se empuja en CADA llamada
+# ---------------------------------------------------------------------------
+#
+# ORDEN 1.1 / BUG-0116. `_INSTRUCTIONS` medía 35.941 caracteres y viajaba
+# ENTERO en cada llamada, junto con 76.531 de descripciones: 112.472 por turno.
+# Un cliente real entregó al modelo el 23% de las descripciones, y lo que se
+# pierde no es aleatorio —es la COLA, donde está lo que decide—.
+#
+# Acortar no era el arreglo: el texto hace falta. Lo que estaba mal era el
+# CANAL. Aquí queda lo que hay que saber ANTES de poder preguntar; todo lo
+# demás se sirve entero por `art://protocolo`, que se PIDE en vez de empujarse.
+#
+# Regla para quien edite esto: si algo cabe en `art://`, no va aquí. Esta
+# cabecera tiene un presupuesto de 2.000 caracteres y una prueba que lo exige
+# (`tests/test_presupuesto_del_semaforo.py`).
+
+_INSTRUCTIONS = """\
+Eres el asistente de ART — series temporales por el método Box-Jenkins-Treadway.
+Responde SIEMPRE en el idioma del usuario (inglés por defecto). Las salidas de
+las herramientas vienen en español: tradúcelas, nunca las pegues tal cual.
+
+PREGUNTA PRIMERO, antes de tocar datos:
+  1) GUIADO    paso a paso, con confirmación en cada nodo.
+  2) AUTÓNOMO  pipeline completo.
+Si elige AUTÓNOMO pregunta además PARA QUÉ es el modelo —decide la ruta
+estacional cuando los contrastes no deciden—: UNIVARIANTE (por defecto) ·
+MULTIVARIANTE (fuerza estacionalidad DETERMINISTA: sin eso los órdenes de
+integración del sistema no son comparables) · ESTRUCTURAL.
+
+LAS DOS PUERTAS. No uses los instrumentos sueltos para avanzar:
+  guiado    guided_identification → confirm_and_estimate → guided_intervention
+            → formal_tests
+  autónomo  build_model (una serie) · batch_build (varias)
+En guiado cada llamada termina en ⏸ y ahí ACABA TU TURNO: presenta lo que
+devuelve y espera al analista.
+
+EL CONVENIO DE FICHEROS:
+  .inp  especificación; los valores son SEMILLAS. Se ESTIMA desde aquí.
+  .out  el registro de una estimación. Los errores típicos válidos están AHÍ
+        (get_out_report), y sólo ahí.
+  .pre  el óptimo, reejecutable. Encadena modelos (base_pre_path). NUNCA
+        reestimes desde un .pre para leer errores típicos.
+
+CÓMO PEDIR MÁS. Esta cabecera está recortada a propósito, y las descripciones
+pueden llegarte cortadas por el cliente. Lo que falte, pídelo:
+  art://protocolo          el método entero
+  art://protocolo/<etapa>  identificacion estimacion intervencion contrastes
+                           datos modelo reglas
+  art://defectos           por qué el método es como es
+  art://docs · art://doc/<nombre>   los documentos de diseño
+Consulta art://defectos antes de proponer una simplificación que parezca obvia
+—capar un AR, podar un armónico, fiarte de un error típico—: art://defectos/BUG-0103.
+
+UNA SERIE DETRÁS DE OTRA: nunca varias en paralelo en el mismo turno.
+"""
+
+
+
+# Las etapas del protocolo, DERIVADAS del texto y no listadas aparte: una lista
+# a mano seria un segundo sitio que mantener, que es la enfermedad de siempre.
+_ETAPAS_PROTOCOLO = (
+    ("datos",          r"DATOS DE ENTRADA"),
+    ("modelo",         r"CONSTRUCCION DEL MODELO|CONSTRUCCIÓN DEL MODELO"),
+    ("identificacion", r"PROTOCOLO GUIADO"),
+    ("estimacion",     r"ETAPA 2"),
+    ("intervencion",   r"ETAPA 3"),
+    ("contrastes",     r"ETAPA 4"),
+    ("reglas",         r"REGLAS GENERALES"),
+)
+
+
+def _corta_protocolo(etapa: str = "") -> str:
+    """El protocolo entero, o una etapa. Sin etapa devuelve el texto completo.
+
+    Corta por las cabeceras en mayusculas del propio texto: si alguien anade o
+    renombra una seccion, esto la sigue o deja de encontrarla -- y lo dice-,
+    pero no puede quedarse desincronizado en silencio.
+    """
+    import re as _re
+    if not etapa:
+        return _PROTOCOLO
+    clave = etapa.strip().lower().strip("/")
+    patron = dict(_ETAPAS_PROTOCOLO).get(clave)
+    if patron is None:
+        disponibles = ", ".join(k for k, _ in _ETAPAS_PROTOCOLO)
+        return (f"No hay etapa «{etapa}» en el protocolo.\n\n"
+                f"Las que hay: {disponibles}.\n"
+                f"El texto entero esta en art://protocolo.")
+    lineas = _PROTOCOLO.splitlines()
+    marcas = []
+    for i, l in enumerate(lineas):
+        for k, pat in _ETAPAS_PROTOCOLO:
+            if _re.match(r"^\s*(" + pat + r")", l.strip()):
+                marcas.append((i, k))
+                break
+    ini = next((i for i, k in marcas if k == clave), None)
+    if ini is None:
+        return (f"La etapa «{clave}» no aparece en el texto del protocolo. "
+                f"El texto entero esta en art://protocolo.")
+    fin = next((i for i, _k in marcas if i > ini), len(lineas))
+    # una linea de contexto por arriba: la fila de «═» que encabeza la seccion
+    if ini > 0 and set(lineas[ini - 1].strip()) <= {"═", "="} and lineas[ini - 1].strip():
+        ini -= 1
+    return "\n".join(lineas[ini:fin]).rstrip() + "\n"
+
+
+
+# ---------------------------------------------------------------------------
+# NIVEL 1 — las descripciones que viajan EN EL ESQUEMA
+# ---------------------------------------------------------------------------
+#
+# ORDEN 1.2 / SEMAFORO §4.1. La sección «Parameters» estilo numpy ordenaba la
+# descripción por la firma de Python y se la llevaba entera al canal que se
+# empuja y que el cliente recorta. Un `Field(description=…)` viaja en el
+# ESQUEMA, que el cliente no recorta porque lo necesita para construir la
+# llamada. Mismo texto, canal distinto.
+from typing import Annotated as _An
+from pydantic import Field as _F
+
+_P_ORDEN = _An[int | list[int], _F(description=(
+    "Orden AR regular. Un ENTERO (un operador de ese orden) o una LISTA DE "
+    "ÓRDENES POR FACTOR: [1,1,2,2] son cuatro factores, el modelo FACTORIZADO. "
+    "La forma factorizada es una reparametrización exactamente identificada "
+    "—misma verosimilitud, mismos grados de libertad— y su valor es que cada "
+    "factor obtiene su d±SE y su período±SE, sin los cuales no se puede "
+    "contrastar si admite la frecuencia estacional. "
+    "Ver art://doc/DISENO-nodo-arma."))]
+
+_AR_F_FREQS = _An[list | None, _F(description=(
+    "Frecuencias k de los factores AR(2) de FRECUENCIA FIJADA, p.ej. [4,2] con "
+    "s=12. Cada uno es (1−φ₁B−φ₂B²) con la frecuencia clavada en 2πk/s: sólo "
+    "se estima φ₂ y φ₁ se deriva. Es la versión CONTRASTABLE de «este factor es "
+    "estacional» —anidada en el factor libre, una razón de verosimilitudes con "
+    "1 g.l. lo decide—. Sin ella, la única forma de afirmarlo era imponerlo."))]
+
+_P_ESTACIONAL = _An[int, _F(description=(
+    "Orden AR estacional. FUNCIONA CON D=0, y no es un caso raro: una "
+    "estacionalidad estocástica estacionaria encima de los armónicos "
+    "deterministas es la forma que tiene la ruta B1 de absorber lo que los "
+    "armónicos dejan. Creer que exige D=1 lleva a la ruta B2, que "
+    "objetivo='multivariante' prohíbe (BUG-0050)."))]
+
+_BASE_PRE = _An[str, _F(description=(
+    "Si se da, hereda intervenciones, armónicos y deterministas de ese `.pre` y "
+    "sustituye sólo la parte ARMA. Uso típico: el paso final de ARMA tras el "
+    "ciclo de anómalos. Con él, `n_harmonics`, `easter` y `seasonal` se ignoran "
+    "—los deterministas vienen del `.pre`—."))]
+
+_ESTIMATE_MU = _An[bool, _F(description=(
+    "Estimar la media μ. Ponlo a True cuando la DERIVA DE LA SERIE DIFERENCIADA "
+    "tenga |t|>2 — no la media de los residuos de un modelo que ya ajustó una "
+    "μ, que sale ~0 por construcción (BUG-0013). Si `base_pre_path` trae una "
+    "media ajustada, pasa True para conservarla."))]
+
+_SEASONAL = _An[bool | None, _F(description=(
+    "Interruptor del paquete estacional determinista entero (pares cos/sin + "
+    "alter de Nyquist). None deriva de n_harmonics>0. False para una serie NO "
+    "estacional —evita el Nyquist espurio de BUG-0005—. True para una "
+    "semestral (freq=2), cuyo único término estacional es el alter."))]
+
+_EASTER = _An[bool, _F(description=(
+    "Regresor de Semana Santa. SÓLO MENSUALES; el motor lo construye. Es un "
+    "término DETERMINISTA como los armónicos, NO una intervención: no tiene "
+    "fecha ni forma, así que no pasa por el nodo de intervención. Añádelo "
+    "cuando los residuos muestren anomalías de marzo/abril que se mueven con el "
+    "calendario."))]
+
+_DOMAIN = _An[str, _F(description=(
+    "Qué CLASE de serie es: price_index | multiplicative | ratio | generic. Es "
+    "un dato del analista —no se recupera releyendo el `.inp`—, se registra en "
+    "el guion y se CONTRASTA con la λ: declarar price_index con λ=1 es una "
+    "contradicción y la herramienta lo dice (BUG-0080)."))]
+
+
+
+# ---------------------------------------------------------------------------
+# LAS ANOTACIONES — ORDEN 1.3
+# ---------------------------------------------------------------------------
+#
+# Información que el cliente usa para no pedir confirmación y el modelo para
+# elegir, y que NO cuesta presupuesto de descripción: va en un campo aparte del
+# esquema.
+#
+# `readOnlyHint` es una AFIRMACIÓN sobre la herramienta, no una etiqueta
+# decorativa: dice que no toca el disco ni el guion. Ponerla mal en una que
+# escribe es peor que no ponerla —el cliente deja de preguntar antes de una
+# acción que sí modifica—, así que se declara aquí y se VERIFICA contra el AST
+# en `tests/test_orden_13_anotaciones.py`: si una declarada de sólo lectura
+# llama a un escritor, la prueba falla.
+#
+# `destructiveHint=False` en todas: ninguna borra ni sobrescribe nada que no
+# haya creado ella. La única que destruye información es `guion_abandon`, y no
+# borra —marca—, con su `why` obligatorio.
+
+_SOLO_LECTURA = frozenset({
+    # miran la serie o el fichero y devuelven texto o figura
+    "series_info", "preview_data", "boxcox_analysis", "unit_root_analysis",
+    "seasonal_analysis", "seasonal_param_analysis", "identification_analysis",
+    "ar_factorization", "model_equation_display", "get_out_report",
+    "overparameterization_analysis", "meg_frequency",
+    # miran un modelo ya estimado
+    "formal_tests", "intervention_analysis", "test_interventions",
+    "test_seasonal_simplification", "residual_episodes",
+    "residual_outlier_scan", "preliminary_outlier_scan",
+    "incident_configurations", "intervention_ladder", "intervention_plot",
+    "model_histogram", "generate_forecast", "sps_dashboard",
+    # leen el guion
+    "guion_map", "guion_diff", "guion_evidencia", "compare_versions",
+})
+
+# Nombre corto para la lista de herramientas del cliente. Sin él, el cliente
+# enseña el identificador; con él, lo que la herramienta hace.
+_TITULOS = {
+    "guided_identification": "Identificación guiada",
+    "guided_intervention": "Intervención guiada",
+    "confirm_and_estimate": "Confirmar y estimar",
+    "estimate_and_diagnose": "Estimar y diagnosticar",
+    "build_model": "Pipeline (una serie)",
+    "batch_build": "Pipeline (lote)",
+    "formal_tests": "Contrastes formales",
+    "series_info": "Info de la serie",
+    "preview_data": "Vista previa",
+    "load_data": "Cargar datos",
+    "create_inp": "Crear .inp",
+    "get_out_report": "Informe .out",
+    "boxcox_analysis": "Box-Cox",
+    "unit_root_analysis": "Raíz unitaria",
+    "seasonal_analysis": "Estacionalidad",
+    "seasonal_param_analysis": "Parámetros estacionales",
+    "identification_analysis": "Identificación",
+    "save_identification_report": "Guardar informe",
+    "ar_factorization": "Factorizar AR",
+    "model_equation_display": "Ecuación del modelo",
+    "model_histogram": "Histograma de residuos",
+    "overparameterization_analysis": "Sobreparametrización",
+    "preliminary_outlier_scan": "Escaneo pre-identificación",
+    "residual_outlier_scan": "Escaneo de residuos",
+    "residual_episodes": "Episodios",
+    "incident_configurations": "Configuraciones del incidente",
+    "intervention_ladder": "Escalera de Ockham",
+    "intervention_plot": "Forma de la intervención",
+    "intervention_analysis": "Análisis de intervenciones",
+    "suggest_intervention_form": "Añadir intervención",
+    "test_interventions": "Contrastar intervenciones",
+    "test_seasonal_simplification": "Simplificar estacionalidad",
+    "meg_frequency": "MEG por frecuencia",
+    "meg_reformulate": "Reformular (MEG)",
+    "generate_forecast": "Previsión",
+    "update_and_forecast": "Actualizar y prever",
+    "full_report": "Informe completo",
+    "sps_dashboard": "Panel SPS",
+    "compare_versions": "Comparar versiones",
+    "record_version": "Registrar versión",
+    "export_guion": "Exportar guion",
+    "guion_node": "Nodo de decisión",
+    "guion_map": "Mapa del guion",
+    "guion_diff": "Diferencias del guion",
+    "guion_evidencia": "Evidencia del nodo",
+    "guion_abandon": "Abandonar rama",
+}
+
+
+def _anotaciones(nombre: str):
+    """La anotación de una herramienta, o None si no hay nada que decir."""
+    from mcp.types import ToolAnnotations
+    return ToolAnnotations(
+        title=_TITULOS.get(nombre),
+        readOnlyHint=(nombre in _SOLO_LECTURA) or None,
+        destructiveHint=False,
+    )
+
+
 mcp = FastMCP("ART — A Real-Time Time-Series Analysis", instructions=_INSTRUCTIONS)
+
+# Las anotaciones se inyectan EN EL REGISTRO, no escribiendo `annotations=` en
+# los 46 decoradores: un sitio, no cuarenta y seis (ORDEN 1.3).
+_tool_sin_anotar = mcp.tool
+
+
+def _tool_anotado(*a, **kw):
+    deco = _tool_sin_anotar(*a, **kw)
+
+    def envuelve(fn):
+        if "annotations" not in kw:
+            an = _anotaciones(fn.__name__)
+            deco2 = _tool_sin_anotar(*a, annotations=an, **kw)
+            return deco2(fn)
+        return deco(fn)
+    return envuelve
+
+
+mcp.tool = _tool_anotado
+
 
 
 # ---------------------------------------------------------------------------
@@ -844,10 +1138,21 @@ def _r_doc(nombre: str) -> str:
 def _r_protocolo() -> str:
     """El protocolo completo y la doctrina del método, entero.
 
-    Es el mismo texto que el servidor entrega como `instructions`, expuesto
-    también aquí para poder RELEERLO a mitad de un análisis sin depender de que
-    siga en la ventana."""
-    return _INSTRUCTIONS
+    Ya NO es el mismo texto que las `instructions` del servidor: desde ORDEN
+    1.1 aquéllas son una cabecera de 2.000 caracteres y esto es el método
+    entero, 36.000. Pídelo cuando la cabecera no baste — y parte por etapas con
+    `art://protocolo/<etapa>` en vez de traerte 36.000 caracteres cada vez."""
+    return _corta_protocolo()
+
+
+@mcp.resource("art://protocolo/{etapa}")
+def _r_protocolo_etapa(etapa: str) -> str:
+    """Una etapa del protocolo: `identificacion`, `estimacion`, `intervencion`,
+    `contrastes`, `datos`, `modelo` o `reglas`.
+
+    Traerse el protocolo entero para consultar una etapa cuesta 36.000
+    caracteres de contexto. Esto trae la que toca."""
+    return _corta_protocolo(etapa)
 
 
 
@@ -1672,7 +1977,64 @@ def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
         "retroceder es el método funcionando, no un fallo.\n"
         + (f"   `guion_map(guion_path=\"{guion_path}\")`" if guion_path
            else "   `guion_map(guion_path=<guion>)`"))
+
+    # 6 · LEE ANTES DE DECIDIR — ORDEN 1.5.
+    #
+    # Un recurso que sólo se anuncia en la cabecera se lee una vez, al abrir la
+    # sesión, y para cuando hace falta ya salió de la ventana. El disparador
+    # tiene que aparecer DONDE se toma la decisión, no en un párrafo que hay que
+    # haber leído antes — que es la misma lección del easter de arriba.
+    #
+    # Se cita sólo cuando el caso lo pide: un aviso que sale siempre se ignora.
+    for cond, cita in _citas_pertinentes(d, model, inp_path):
+        if cond:
+            alts.append(cita)
     return alts
+
+
+def _citas_pertinentes(d, model, inp_path: str):
+    """(condición, cita) para el «lee antes de decidir» — ORDEN 1.5.
+
+    Cada una empareja una situación de la diagnosis con el defecto MEDIDO que
+    documenta por qué la decisión obvia ahí es la equivocada.
+    """
+    npar = 0
+    niter = None
+    try:
+        r = getattr(model, "_result", None)
+        npar = int(getattr(r, "npar", 0) or 0)
+        niter = getattr(r, "niter", None)
+    except Exception:                                     # pragma: no cover
+        pass
+    n_ar = 0
+    try:
+        n_ar = sum(len(f) for f in (model.ar or []))
+    except Exception:                                     # pragma: no cover
+        pass
+    hay_intervenciones = bool(getattr(model, "interventions", None))
+    es_pre = str(inp_path).endswith(".pre")
+
+    return [
+        # un AR de orden ≥2 invita a capar el factor de módulo pequeño
+        (n_ar >= 2,
+         "**Antes de capar o simplificar el AR** — factorízalo y contrasta. "
+         "Sustituir un AR(p) por un operador capado porque los módulos se "
+         "parezcan impone p−1 restricciones sin contrastar y cierra "
+         "Shin-Fuller.\n"
+         "   `art://defectos/BUG-0103` · `art://doc/DISENO-nodo-arma`"),
+        # con intervenciones ya puestas, cerrar el nodo tiene su regla
+        (hay_intervenciones,
+         "**Antes de cerrar el nodo de intervención** — un escalón con ganancia "
+         "nula ES un impulso de un orden menos, y ésa es una simplificación que "
+         "se contrasta, no que se supone.\n"
+         "   `art://defectos/BUG-0123` · `art://protocolo/intervencion`"),
+        # un `.pre` reejecutado casi no itera: la covarianza se queda en la semilla
+        (es_pre or (niter is not None and int(niter or 0) <= 1 and npar),
+         "**No leas los errores típicos de aquí** — con pocas iteraciones la "
+         "covarianza se queda en la semilla del BFGS y los t salen enormes y "
+         "falsos. Los válidos están en el `.out` de la estimación real.\n"
+         "   `get_out_report(inp_path=...)` · `art://defectos/BUG-0027`"),
+    ]
 
 
 def envuelve_iteracion(*, nombre: str,
@@ -2035,62 +2397,29 @@ def incident_configurations(inp_path: str,
                             evento_fuente: str = "",
                             aportada_por: str = "") -> list:
     """
-    
-    **Instrumento suelto del nodo de intervención.** La secuencia completa
-    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
-    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
-    Ésta sirve para mirar qué configuraciones del incidente admite el dato sin avanzar el flujo.
+    Instrumento suelto del nodo; la puerta es `guided_intervention`.
+
     Enumera las CONFIGURACIONES del incidente compatibles con el dato, y dice
-    si el dato las identifica o no.
+    **si el dato las identifica o no**.
 
-    EL PROBLEMA. Con d=1 un spike observado en ∇ puede ser el ARRANQUE de un
-    suceso o la COLA de uno que empezó un período antes: un impulso de nivel en
-    T da +ω en T y −ω en T+1. Si la serie deambula, el primer spike puede quedar
-    tapado y sólo cruzar el umbral el segundo — y la intervención cae un período
-    tarde, con Δ logL de 0,03 entre la fecha buena y la mala (BUG-0030).
+    EL PROBLEMA: con d=1, un pico observado en ∇ puede ser el ARRANQUE de un
+    suceso o la COLA de uno que empezó un período antes —un impulso de nivel en
+    T da +ω en T y −ω en T+1—. Si la serie deambula, el primer pico puede quedar
+    tapado y la intervención cae un período tarde, con Δ logL de 0,03 entre la
+    fecha buena y la mala (BUG-0030). Y el arranque **decide la línea base**:
+    arrancar antes absorbe parte del movimiento previo y encoge la ganancia.
 
-    Y el arranque no es un detalle de fecha: DECIDE LA LÍNEA BASE. Arrancar
-    antes absorbe parte del movimiento previo y encoge la ganancia estimada.
+    LO QUE NO HACE, y es su razón de ser: **no elige cuando el dato no
+    identifica**. Medido sobre una serie real: tres configuraciones dentro de 2
+    puntos de AIC, ninguna dejando vecino anómalo, con ganancias de −0,27 a
+    −0,58 y el veredicto permanente/transitorio **invertido** entre ellas.
+    Publicar una con su error típico sería fabricar una precisión que no existe.
 
-    LO QUE ESTA HERRAMIENTA NO HACE, y es su razón de ser: **no elige cuando el
-    dato no identifica**. Medido sobre una serie real, tres configuraciones
-    dentro de 2 puntos de AIC, ninguna dejando vecino anómalo, con ganancias de
-    −0,27 a −0,58 y el veredicto permanente/transitorio invertido entre ellas.
-    Publicar una y su error típico sería fabricar una precisión que no existe.
+    LA TRAMPA: la configuración de arranque MÁS TARDÍO tiende a tener el
+    intervalo MÁS ESTRECHO y a parecer la única significativa. Es un artefacto
+    de la línea base, no evidencia.
 
-    LA TRAMPA que avisa: la configuración de arranque MÁS TARDÍO tiende a tener
-    el intervalo MÁS ESTRECHO y a ser la única que excluye el cero. No es suerte
-    — acortar la ventana quita parámetros y aprieta la identificación dentro del
-    modelo mientras empeora la línea base. La lectura más segura es la más
-    sospechosa.
-
-    EL CONJUNTO ESTÁ ACOTADO POR EL MECANISMO, no por rejilla: se anda hacia
-    atrás desde el primer extremo mientras los residuos contiguos sigan ACTIVOS
-    (|z| ≥ `umbral_activo`), y cada arranque determina UNA longitud. No hay
-    barrido, que es lo que sobre-elaboraría.
-
-    INFORMACIÓN EXTRAMUESTRAL — LÉASE ANTES DE RELLENARLA.
-    Es lo único que identifica de verdad, y **la herramienta no la sabe ni debe
-    inventarla**: entra por estos parámetros y queda registrada con quién la
-    aportó. Si eres un LLM y no te consta el suceso, **deja los campos vacíos**;
-    no rellenes `evento_fuente` con un recuerdo. `naturaleza` sin `fuente` se
-    rechaza: afirmar que un suceso fue permanente exige decir por qué se sabe.
-
-    Parameters
-    ----------
-    inp_path          : .inp de un modelo estimado SIN la intervención
-    at                : obs 1-based (espacio de RESIDUOS) dentro del episodio a
-                        analizar. 0 = el de mayor |z|. **Se analiza UN episodio
-                        por llamada**: las configuraciones son de un suceso, no
-                        del conjunto de anómalos de la serie
-    threshold         : |z| para marcar un residuo como extremo
-    umbral_activo     : |z| a partir del cual un residuo contiguo cuenta como
-                        parte del suceso aunque no sea extremo (1,0)
-    evento_desde      : fecha declarada de inicio, "QN/AAAA" — fija el arranque
-    evento_naturaleza : "permanente" | "transitorio" | "" — se contrasta contra
-                        la ganancia: la explicación debe explicar la FORMA
-    evento_fuente     : qué se está citando. Obligatorio si hay `naturaleza`
-    aportada_por      : "analista" | "LLM"
+    El mecanismo, en `art://doc/DISENO-configuracion-del-incidente`.
     """
     try:
         import numpy as np
@@ -2180,53 +2509,32 @@ def intervention_ladder(inp_path: str,
                         threshold: float = 3.0,
                         umbral_vecino: float = 0.0) -> list:
     """
-    
-    **Instrumento suelto del nodo de intervención.** La secuencia completa
-    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
-    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
-    Ésta sirve para mirar los peldaños de Ockham de un suceso sin avanzar el flujo.
-    ESCALERA DE OCKHAM — estima las especificaciones rivales de un suceso EN
-    ORDEN de sofisticación, y dice qué justifica subir de peldaño.
+    Instrumento suelto del nodo; la puerta es `guided_intervention`.
 
-      peldaño 1   UNA intervención escalar. Dos lecturas del MISMO coste —un
-                  parámetro cada una— y no anidadas entre sí:
-                    1a  escalón en el nivel  → efecto PERMANENTE
-                    1b  impulso en el nivel  → efecto TRANSITORIO
-      peldaño 2   EPISODIO: L+1 escalones en el nivel, con el contraste de
-                  ganancia ω(1)=0 que separa transitorio de permanente.
+    ESCALERA DE OCKHAM — estima las especificaciones rivales de un suceso **en
+    orden de sofisticación** y dice qué justifica subir de peldaño.
 
-    LO QUE ESTA HERRAMIENTA PROHÍBE, y es su razón de ser: **el AIC no arbitra
-    la subida de peldaño**. Compara dentro de uno, o confirma una subida ya
-    justificada. Una escalera que se quedase con el mejor AIC subiría siempre,
-    porque el modelo más sofisticado casi siempre ajusta mejor — tiene más
-    parámetros. Eso es lo contrario de la navaja.
+      1a  escalón en el nivel   → efecto PERMANENTE   ┐ mismo coste, un
+      1b  impulso en el nivel   → efecto TRANSITORIO  ┘ parámetro, NO anidadas
+      2   EPISODIO: L+1 escalones, con el contraste ω(1)=0 que separa
+          transitorio de permanente
 
-    LO QUE SÍ JUSTIFICA SUBIR, en este orden:
-      1. **Treadway** — la forma de abajo deja un anómalo de vecino. Evidencia
-         objetiva: la parte no modelizada del suceso cae entera ahí.
-      2. **Inadecuación** — la forma de abajo no deja ruido blanco.
-      3. **Dominio** — la lectura simple es implausible para esta clase de
-         serie (una caída PERMANENTE en un índice de precios es poco usual).
-      4. **Ausencia de explicación extramuestral** — y ésta la herramienta NO
-         la sabe: la pregunta y espera respuesta del analista.
+    LO QUE PROHÍBE, y es su razón de ser: **el AIC no arbitra la subida de
+    peldaño.** Compara dentro de uno, o confirma una subida ya justificada por
+    otra cosa. Una escalera que se quedara con el mejor AIC subiría siempre —el
+    modelo más sofisticado casi siempre ajusta mejor porque tiene más
+    parámetros—, que es lo contrario de la navaja.
 
-    LA EXPLICACIÓN TIENE QUE EXPLICAR LA FORMA, no sólo la fecha. Una bajada de
-    impuestos explica un escalón permanente; una huelga, un impulso
-    transitorio. Si el analista aporta una explicación de suceso permanente y el
-    contraste de ganancia dice transitorio, no cubre lo que hay y se sube igual.
+    LO QUE SÍ JUSTIFICA SUBIR, en este orden: (1) Treadway —la forma de abajo
+    deja un vecino anómalo—; (2) inadecuación —no deja ruido blanco—;
+    (3) dominio —la lectura simple es implausible para esta clase de serie—;
+    (4) ausencia de explicación extramuestral. Los dos primeros los ve la
+    herramienta; el cuarto **sólo lo sabe el analista**, y por eso lo pregunta.
 
-    Parameters
-    ----------
-    inp_path      : .inp de un modelo estimado **SIN** la intervención en
-                    cuestión — sus residuos son justo lo que ella debe explicar
-    at            : obs 1-based (espacio de RESIDUOS) donde arranca el suceso.
-                    0 = tomar el episodio de mayor |z| que detecte el escaneo
-    ventana       : ventana de agrupación en episodios; 0 usa la de la política
-    threshold     : |z| para marcar un residuo como extremo
-    umbral_vecino : |z| a partir del cual un vecino cuenta como anómalo.
-                    0 = el de la política (2.0). Estaba clavado a 3.0 —el de los
-                    anómalos sueltos— y daba por exitosa una intervención que
-                    deja un vecino a 2.4σ (BUG-0087).
+    Es ARGUMENTAL: se usa cuando el analista discute la forma sugerida. La
+    sugerencia la lleva la superposición de `guided_intervention`.
+
+    La doctrina, en `art://doc/DISENO-nodo-intervencion`.
     """
     try:
         import numpy as np
@@ -2316,92 +2624,37 @@ def intervention_plot(omega: list[float],
                       sobre: str = "residuos",
                       label: str = "") -> list:
     """
-    
-    **Instrumento suelto del nodo de intervención.** La secuencia completa
-    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
-    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
-    Ésta sirve para mirar una respuesta impulso concreta sobre los datos sin avanzar el flujo.
-    GRÁFICO DE INTERVENCIÓN — la forma de una intervención, sola o superpuesta
-    a lo observado.
+    Dibuja la FORMA de una intervención. **No escribe modelo**, sólo la figura.
 
-    Dos modos, según se pase `inp_path` y `at`:
+    Instrumento suelto del nodo: la secuencia la lleva `guided_intervention`.
 
-      SIN inp_path  → dibuja la HIPÓTESIS SOLA: respuesta al impulso y al
-                      escalón, en el nivel y en primeras diferencias, con la
-                      ganancia a largo plazo. Para razonar sobre una forma antes
-                      de tener modelo.
-      CON inp_path
-      y `at`        → SUPERPONE esa hipótesis sobre lo observado en el ENTORNO
-                      del suceso, y devuelve tres números que dicen si encaja.
+    DOS MODOS: sin `inp_path`, la HIPÓTESIS SOLA —impulso y escalón, en nivel y
+    en diferencias, con la ganancia—; con `inp_path` y `at`, la SUPERPONE sobre
+    lo observado y da tres números que dicen si encaja.
 
-    POR QUÉ EXISTE. La forma de una intervención no se identifica a ojo: `fue`
-    permite modelizar un suceso con varios parámetros (FLT), y en cuanto `s`
-    crece la figura deja de tener lectura obvia. Se usa ANTES de estimar — si la
-    forma ya se ve incompatible, estimarla gasta un modelo para confirmar lo que
-    el gráfico decía gratis.
-
-    EL CONVENIO. Toda intervención se especifica **en el nivel de la serie**,
+    EL CONVENIO — toda intervención se especifica **en el nivel de la serie**,
     sea cual sea la d con la que se trabaje:
+      · escalón en el nivel  → efecto PERMANENTE   → un impulso en ∇
+      · impulso en el nivel  → efecto TRANSITORIO  → un (1−B) en ∇
 
-      · escalón en el nivel  → efecto PERMANENTE  → un impulso en ∇
-      · impulso en el nivel  → efecto TRANSITORIO → dos impulsos en ∇ que suman 0
-      · N escalones en el nivel con ganancia NULA ≡ N−1 impulsos en el nivel,
-        es decir un EPISODIO de duración N−1
-
-    LA CONVENCIÓN DE SIGNO, que es donde se cae. fue guarda el numerador con el
-    convenio de Box-Jenkins, el mismo para TODO operador —AR, MA, δ y ω—: los
+    LA CONVENCIÓN DE SIGNO, que es donde se cae. `fue` guarda el numerador con
+    el convenio de Box-Jenkins, el mismo para TODO operador —AR, MA, δ y ω—: los
     coeficientes de retardo entran **restando**.
 
         ω(B) = ω₀ − ω₁B − ω₂B² − ⋯ − ω_sB^s
 
-    Así que la ganancia es (ω₀−ω₁−⋯−ω_s)/(1−δ₁−⋯−δ_r) y **NO la suma de los ω**.
+    Así que la ganancia es (ω₀−ω₁−⋯−ω_s)/(1−δ₁−⋯−δ_r) y **no la suma de los ω**.
     Pásalos tal como salen del `.out`, sin cambiarles el signo.
+    **No hace falta que hagas la resta**: la respuesta trae el CAMINO DEL NIVEL
+    que producen los ω que has pasado, y si no es el que tenías en la cabeza, el
+    signo estaba mal — y lo ves antes de estimar nada.
 
-    **No hace falta que hagas la resta.** La respuesta trae el CAMINO DEL NIVEL
-    que producen los ω que has pasado, que es lo que quieres decir cuando
-    escribes una hipótesis. Si el camino no es el que tenías en la cabeza, el
-    signo estaba mal — y lo ves antes de estimar nada. Ejemplo real de la
-    réplica: ω = (0.5700, +0.7236) tiene coeficientes que uno «sumaría» a
-    +1.29, y su ganancia es **−0.15**.
+    LO QUE NUNCA: no identifiques la forma a ojo. Úsala ANTES de estimar. Y no
+    le pidas lo que no puede: NO distingue una forma correcta de otra que deja
+    una cola permanente pequeña — eso lo dirime ω(1)=0 en `test_interventions`.
 
-    LOS TRES NÚMEROS del modo superpuesto separan tres preguntas, y se leen sin
-    mirar la figura — así sirven también al carril autónomo:
-
-      escala       cuánto hay que multiplicar la forma para que encaje. Cerca de
-                   1 con ω estimados: la amplitud era la que se creía. Muy
-                   lejos: se está estirando una forma que no da.
-      R²           qué fracción del entorno explica la forma YA escalada. Bajo
-                   con escala buena ⇒ el problema no es la amplitud, es el
-                   PERFIL.
-      mayor resto  el pico que sobrevive a quitar la forma, en desviaciones
-                   típicas. Si tras ajustar sigue habiendo un 4, la hipótesis no
-                   cubre lo que hay.
-
-    DÓNDE NO LLEGA: la superposición **no** distingue una forma correcta de otra
-    que deja una cola permanente pequeña — el R² apenas se mueve, porque la
-    diferencia está en la GANANCIA A LARGO PLAZO, propiedad del comportamiento
-    futuro y no de la forma local. Eso lo dirime el contraste ω(1)=0 de
-    `test_interventions`. El gráfico descarta lo incompatible barato; el
-    contraste ve lo que el gráfico no puede.
-
-    Parameters
-    ----------
-    omega    : ω₀…ω_s del numerador, en el orden del `.out`
-    delta    : δ₁…δ_r del denominador; vacío o None si no hay
-    b        : retardo muerto en períodos
-    inp_path : (superposición) .inp de un modelo estimado SIN la intervención
-               que se hipotetiza — sus residuos son justo lo que ella debe
-               explicar
-    at       : (superposición) posición 1-based donde arranca el suceso
-    ventana  : (superposición) períodos a mostrar antes y después del soporte
-    K        : (hipótesis sola) hasta qué retardo simular
-    entrada  : "escalon" usa la respuesta al escalón —el camino del nivel, que
-               es el lenguaje homogeneizado del nodo—; "impulso" usa la IRF
-    sobre    : (superposición) "residuos" (por defecto) o "serie"
-    label    : etiqueta para el título
-
-    Alcance: d = 0 y d = 1. Con d=2 un impulso en la serie transformada es una
-    RAMPA en el nivel y el diccionario de arriba tiene otra fila.
+    La FLT, el diccionario de formas y la lectura de los tres números, en
+    `art://doc/DISENO-nodo-intervencion`.
     """
     try:
         from art.ltf import describe_ltf, describe_superposicion, _fecha_de
@@ -2464,10 +2717,7 @@ def residual_episodes(inp_path: str,
                       threshold: float = 3.0) -> list:
     """
     
-    **Instrumento suelto del nodo de intervención.** La secuencia completa
-    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
-    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
-    Ésta sirve para mirar cómo se agrupan los extremos en sucesos sin avanzar el flujo.
+    Instrumento suelto del nodo; la puerta es `guided_intervention`.
     Agrupa los residuos extremos de un modelo estimado en EPISODIOS.
 
     LA PREGUNTA DE ESTE NODO no es «cuántos atípicos hay» sino **«esto es un
@@ -2629,10 +2879,7 @@ def preliminary_outlier_scan(inp_path: str, d: int, D: int,
                               threshold: float = _Z_USER) -> list:
     """
     
-    **Instrumento suelto del nodo de intervención.** La secuencia completa
-    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
-    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
-    Ésta sirve para mirar los anómalos de una serie aún sin modelo sin avanzar el flujo.
+    Instrumento suelto del nodo; la puerta es `guided_intervention`.
     Scan the differenced series for extreme observations BEFORE choosing ARMA orders.
 
     "Lo más obvio primero": a large outlier in the differenced series distorts
@@ -2734,10 +2981,7 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER,
                           motivo: str = "") -> list:
     """
     
-    **Instrumento suelto del nodo de intervención.** La secuencia completa
-    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
-    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
-    Ésta sirve para mirar los anómalos de un modelo ya estimado sin avanzar el flujo.
+    Instrumento suelto del nodo; la puerta es `guided_intervention`.
     Scan the RESIDUALS of an estimated model for outliers, with each one's
     contribution to every ACF lag.
 
@@ -2918,48 +3162,26 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
                           guion_next: str = "",
                           include_histogram: bool = False) -> list:
     """
-    Fit the model specified in an .inp file and run diagnosis.
+    Estima el modelo de un `.inp` y devuelve la diagnosis. **Escribe** el `.pre`
+    si se da `output_path`, y registra la versión si se da `guion_path`.
 
-    Estimates the model by maximum likelihood (fue MVENC) and runs the
-    full diagnosis: standardised residuals, ACF/PACF, Ljung-Box Q-test,
-    Jarque-Bera normality test, and residual seasonality check.
+    Máxima verosimilitud (fue MVENC) y diagnosis completa: residuos
+    tipificados, ACF/PACF, Q de Ljung-Box, Jarque-Bera y estacionalidad
+    residual.
 
-    **base_pre_path — DECLARA DE QUÉ MODELO SALE ÉSTE.** This tool re-reads an
-    `.inp` as it stands, so it has no other way of knowing the lineage: without
-    it the guion records the LAST entry as the parent, which need not be the
-    real one. That matters because `guion_abandon` propagates to descendants BY
-    DESIGN — a false parent turns a correct abandonment into a destructive one.
-    Pass it whenever the `.inp` was built from another model, which is the usual
-    case for hand-built factorised or fixed-frequency AR models.
+    PRECONDICIÓN: un `.inp` con la especificación ya escrita. Para construirlo
+    desde una especificación confirmada, `confirm_and_estimate`.
 
-    Parameters
-    ----------
-    inp_path    : path to the .inp file with the model specification
-    include_histogram : devolver además el histograma de residuos (por defecto
-                  False, igual que en `confirm_and_estimate`). El histograma NO
-                  es parte del módulo básico de diagnosis: se pide (BUG-0129).
-    output_path : if given, also persist the fitted model as the ``.pre``
-                  (= .inp with the estimated parameters, to seed the next step)
-                  and ``.out`` (ASCII results report) alongside this basename —
-                  the same trio confirm_and_estimate writes, so a model estimated
-                  through this clean path is not left without artefacts.  Empty
-                  (default) keeps the old screen-only behaviour.
-    guion_*     : lo mismo que en `confirm_and_estimate`. Con `output_path` la
-                  entrada de guion **se escribe igual que allí**, y `guion_path`
-                  se deriva si no se da: el guion es obligatorio, no opcional.
+    LO QUE NUNCA: no dejes `base_pre_path` vacío cuando este `.inp` salga de
+    otro modelo. Esta herramienta relee el `.inp` tal cual y no tiene otra forma
+    de saber de quién desciende: sin él, el guion anota como padre la ÚLTIMA
+    entrada, que puede no serlo. Y `guion_abandon` propaga a los descendientes
+    **por diseño**, así que un padre falso convierte un abandono correcto en uno
+    destructivo. Es el caso normal en modelos factorizados o de frecuencia
+    fijada construidos a mano.
 
-                  BUG-0088. Esta herramienta persistía el trío `.pre`/`.out`
-                  —el docstring lo prometía con esas palabras— y NO el guion.
-                  Un modelo estimado por esta vía quedaba con artefactos y sin
-                  su entrada, y el guion se desincronizaba **en silencio**. En
-                  la sesión FOOD_UEM la escalera de Ucrania entera se construyó
-                  así y hubo que reescribir el guion a mano.
-
-                  De las tres salidas que el reporte proponía, ésta es la que
-                  mantiene la promesa del docstring: lo inconsistente era
-                  persistir los artefactos y no el registro, y quitar los
-                  artefactos habría quitado también la razón de ser de la
-                  herramienta.
+    El histograma no viene por defecto: no es parte del módulo básico de
+    diagnosis, se pide con `include_histogram` (BUG-0129).
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -3295,82 +3517,35 @@ def overparameterization_analysis(inp_path: str, threshold: float = 0.7) -> list
 @mcp.tool()
 def formal_tests(inp_path: str, run_meg: bool = True) -> list:
     """
-    Run formal hypothesis tests on a fitted model.
+    Contrastes formales sobre un modelo estimado. **No escribe nada.**
 
-    ⚠ MARCA ESTA RUTA COMO (EXPERIMENTAL) — Y SI TE PREGUNTAN QUÉ SIGNIFICA,
-      EXPLÍCALO BIEN, PORQUE NO ES LO QUE PARECE.
+    PRECONDICIÓN: un `.inp`/`.pre` de un modelo ya estimado.
 
-    QUÉ ESTÁ PUBLICADO Y ESTABLECIDO (casi todo):
-      · los MODELOS son antiguos: Abraham y Box (1978).
-      · la IDEA de resolver la estacionalidad frecuencia por frecuencia está en
-        HEGY (Hylleberg, Engle, Granger y Yoo).
-      · el contraste DCD (Davis, Chen y Dunsmuir) está PUBLICADO.
-      · el Shin-Fuller está PUBLICADO.
+    QUÉ CONTRASTA:
+      Shin-Fuller  raíz casi unitaria en el AR regular (Φ₁ᵤ; crítico 5% ≈ 1,75)
+      DCD / DCD_f  no invertibilidad de factores MA regulares / estacionales
+      RV           frecuencia fijada para factores AR(2)
+      MEG          barrido HSM: estacionalidad estocástica frente a determinista,
+                   frecuencia por frecuencia. Exige D=0 + armónicos.
 
-    QUÉ ES NUEVO (poco, y menos de lo que "experimental" sugiere):
-      · los VALORES CRÍTICOS derivados por Monte Carlo, que difieren por un
-        margen MARGINAL de los interpolados que están publicados.
-      · y, sobre todo, LA IMPLEMENTACIÓN DE ART -- que es donde están los tres
-        defectos abiertos de abajo. Eso es lo realmente nuevo aquí.
+    LO QUE NUNCA:
+      · **El MEG va ANTES de podar armónicos.** Podar uno no significativo anula
+        el barrido entero y la excepción se traga: el informe cierra diciendo
+        que el modelo es adecuado mientras se pierde una frecuencia
+        genuinamente estocástica (BUG-0010).
+      · No decidas una especificación apoyándote SÓLO en el MEG. Contrástalo con
+        Shin-Fuller y con la acf/pacf; si contradice al resto del informe, hoy
+        es más probable que falle esta implementación.
 
-    Así que "(experimental)" es una SALVAGUARDIA, no una advertencia de que el
-    método sea dudoso. El método está establecido; lo que aún no está avalado
-    es esta implementación y el último decimal de los críticos.
+    MARCA LA RUTA MEG COMO «(experimental)» y ofrécela, no la des por defecto.
+    Y si preguntan qué significa, explícalo: el MÉTODO está publicado —Abraham y
+    Box (1978), HEGY, DCD, Shin-Fuller—; lo experimental es la implementación de
+    `art` y el último decimal de los críticos. En prosa el modelo se llama HSM;
+    `MEG` es el identificador del código.
 
-    NOMBRE: la clase se llama HSM --Hybrid Seasonal Models-- que es como la
-    nombra el artículo de referencia (SF_MEG). `MEG`, Modelos de Estacionalidad
-    Generalizada (Gallego, 1995), es su nombre en la literatura española y el
-    identificador que conserva el código; en prosa, di HSM.
-
-    LAS DOS LÍNEAS DE ESTACIONALIDAD son:
-      · DETERMINISTA   armónicos con coeficientes de previsión fijos
-      · ESTOCÁSTICA    SARIMA multiplicativo, la diferencia anual 1-B^s entera
-
-    HSM no es una tercera línea: es la FORMA CANÓNICA de Abraham y Box (1978),
-    en la que cada frecuencia es independientemente una u otra, y que anida las
-    dos líneas como casos especiales. Ellos ya distinguen componentes
-    deterministas de "forecast-adaptive" y notan que un modelo puede ser
-    adaptativo en unos parámetros y no en otros. ESA RUTA ES LA EXPERIMENTAL.
-
-    Los tres defectos ABIERTOS y reproducidos de la implementación, todos en
-    esta familia:
-
-      BUG-0009  dcd_overdiff_regular pisa el testigo de Nyquist --comparten la
-                ranura de MA regular y miden raíces OPUESTAS (B=+1 frente a
-                B=-1)-- y recomienda d+1 sobre una d correcta.
-      BUG-0010  podar un armónico no significativo anula el barrido MEG
-                ENTERO, la excepción se traga, y el informe cierra diciendo
-                que el modelo es adecuado mientras se pierde una frecuencia
-                genuinamente estocástica.
-      BUG-0011  dcd_overdiff_regular recomienda d+1 en toda especificación de
-                un índice de precios, incluida la línea base que su propio
-                docstring prescribe. Causa establecida: los armónicos
-                deterministas compiten con el testigo, y la precondición del
-                docstring nombra al competidor equivocado.
-
-    PUEDES OFRECERLA. Preguntar al analista si quiere evaluar la NATURALEZA de
-    la estacionalidad --determinista o estocástica, frecuencia por frecuencia--
-    es una pregunta legítima y hay analistas que la quieren siempre. Ofrécela
-    marcada "(experimental)", no como el camino por defecto.
-
-    Lo que sí: no tomes una decisión de especificación apoyándote SÓLO en ella.
-    Contrástala con Shin-Fuller y con la acf/pacf, y si el veredicto contradice
-    al resto del informe, hoy es más probable que el fallo esté en esta
-    implementación que en los otros instrumentos.
-
-    Tests run (where applicable to the model structure):
-    - Shin-Fuller (1998): Phi_1u test; H0: rho=1-4/n (near-unit-root); crit 5%≈1.75
-    - DCD: non-invertibility of regular MA factors (H0: theta=1)          [exper.]
-    - DCD_f: non-invertibility of seasonal MA factors (H0: lambda2=-1)    [exper.]
-    - RV: fixed frequency for AR(2) factors
-    - MEG: HSM sweep — stochastic vs deterministic seasonality, frequency by
-      frequency (requires D=0 + harmonics). `meg` is the API name; the class is
-      HSM (Hybrid Seasonal Models).                                       [exper.]
-
-    Parameters
-    ----------
-    inp_path : path to .inp or .pre file
-    run_meg  : whether to run MEG (slow, default True; EXPERIMENTAL, see above)
+    Los tres defectos abiertos de esta familia (BUG-0009, 0010, 0011), el porqué
+    del nombre y la forma canónica de Abraham-Box, en
+    `art://doc/DISENO-contrastes-formales`.
     """
     try:
         from mcp.types import TextContent
@@ -3560,45 +3735,29 @@ def meg_reformulate(inp_path: str, freq: int, output_path: str,
                     guion_decision: str = "",
                     guion_rationale: str = "") -> list:
     """
-    Reformulate the model for STOCHASTIC seasonality at frequency `freq`, after the
-    MEG (DCD_f / Shin-Fuller AR_f) has concluded stochastic there.
+    Reformula el modelo para estacionalidad ESTOCÁSTICA en la frecuencia
+    `freq`. **Escribe** el `.pre`/`.out` en `output_path`.
 
-    Builds the model the MEG recommends, FROM THE LAST .pre, without editing files by
-    hand. It loads the last fitted model (base_pre_path if given, else inp_path),
-    activates the seasonal AR_f unit root at `freq` (ifadf[freq]=1: the operator
-    1-2cos(w)B+B^2 for an interior frequency, or 1+B at the Nyquist f=s/2), removes the
-    now-annihilated deterministic harmonics at `freq`, re-estimates, writes the
-    reformulated .pre/.out to output_path and shows the model equation + diagnosis.
+    PRECONDICIÓN: que el MEG (DCD_f / Shin-Fuller AR_f) haya concluido
+    estocástica en esa frecuencia. Parte del último `.pre` —`base_pre_path` si
+    se da, si no `inp_path`— y no exige editar ficheros a mano.
 
-    with_witness=True (DEFAULT) also adds the free invertible MA_f testigo
-    (1-2λcos(w)B+λ²B²), so the reformulated model is EXACTLY what the MEG/DCD_f
-    contrasts — the AR_f unit root AND the MA_f witness together. This is the correct
-    stochastic model S. After fitting, run `formal_tests` to read the witness DCD_f:
-    LR>crit ⇒ genuine stochastic; λ→boundary (−1) ⇒ quasi-cancellation (frontier).
+    QUÉ HACE: activa la raíz unitaria AR_f en `freq` (`ifadf[freq]=1`: el
+    operador 1−2cos(ω)B+B² en una frecuencia interior, o 1+B en el Nyquist
+    f=s/2), retira los armónicos deterministas que quedan anulados ahí,
+    reestima, y muestra la ecuación y la diagnosis.
 
-    with_witness=False gives the AR-only form (no witness): this OVER-DIFFERENCES the
-    seasonal (inflated σ, exploded Q-test) and is only a diagnostic subproduct, NOT S.
+    `with_witness=True` (por defecto) añade además el testigo MA_f libre
+    invertible (1−2λcos(ω)B+λ²B²), de modo que el modelo reformulado es
+    EXACTAMENTE lo que contrastan el MEG y el DCD_f —la raíz AR_f y el testigo
+    juntos—. Ése es el modelo estocástico correcto. Después, `formal_tests` lee
+    el testigo: LR>crítico ⇒ estocástica genuina; λ→−1 (frontera) ⇒
+    cuasi-cancelación.
 
-    BUG-0053. `guion_path`/`guion_name`/`guion_decision`/`guion_rationale` work
-    exactly as in `confirm_and_estimate`. Without them this tool wrote a model to
-    disk that the guion never saw, and the lineage broke at the worst possible
-    place: the reformulated model became an orphan, and whatever was chained on
-    top of it was recorded as descending from the model BEFORE the
-    reformulation. The one branch the MEG exercise exists to document was the one
-    the map could not show.
-    Use it only to inspect the bare over-differenced residuals.
+    LO QUE NUNCA: no reformules sin el MEG delante, y no podes armónicos antes
+    de correrlo (BUG-0010).
 
-    Multiple stochastic frequencies: call iteratively (strongest first), passing the
-    previous output's .pre as base_pre_path, re-running formal_tests after each — the
-    per-frequency MEG on the all-deterministic model has cross-frequency contamination.
-
-    Parameters
-    ----------
-    inp_path      : source .inp/.pre (series data; also the model if base_pre_path="")
-    freq          : seasonal frequency to make stochastic (1..s/2)
-    output_path   : path to write the reformulated model (.pre/.out alongside)
-    base_pre_path : the last .pre (the deterministic model); if empty, uses inp_path
-    with_witness  : add the free MA_f testigo (default True → the correct S model)
+    Ruta experimental: `art://doc/DISENO-contrastes-formales`.
     """
     try:
         from art.formal_tests import reformulate_stochastic
@@ -3939,10 +4098,7 @@ def test_seasonal_simplification(inp_path: str,
 def intervention_analysis(inp_path: str, threshold: float = _Z_USER) -> list:
     """
     
-    **Instrumento suelto del nodo de intervención.** La secuencia completa
-    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
-    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
-    Ésta sirve para mirar los anómalos antes de decidir nada sin avanzar el flujo.
+    Instrumento suelto del nodo; la puerta es `guided_intervention`.
     Detect extreme residuals and assess their impact on ACF/PACF and tests.
 
     Identifies residuals with |z| > threshold and reports:
@@ -3974,10 +4130,7 @@ def intervention_analysis(inp_path: str, threshold: float = _Z_USER) -> list:
 def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
     """
     
-    **Instrumento suelto del nodo de intervención.** La secuencia completa
-    —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
-    verificar— la lleva `guided_intervention`, que es la puerta del nodo.
-    Ésta sirve para mirar si las intervenciones ya puestas se sostienen sin avanzar el flujo.
+    Instrumento suelto del nodo; la puerta es `guided_intervention`.
     Test H₀: ω=0 for every non-structural intervention in a fitted model.
 
     Runs a t-test on each free omega parameter of pulse, step, ramp, and
@@ -4361,69 +4514,30 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                            objetivo: str = "univariante",
                            domain: str = "") -> list:
     """
-    Sequential identification — ONE decision node per call.
+    La PUERTA de la identificación: un nodo de decisión por llamada.
 
-    DECISION TREE — call in this sequence, one at a time:
+    **No decide**: presenta la evidencia y espera — WAIT for user. Cada llamada
+    termina en ⏸ y ahí acaba tu turno. Los parámetros a −1 son «pregunta».
 
-    Call 1  lam=-1  (default)
-      → Box-Cox scatter. Decide λ. WAIT for user.
+    LAS CUATRO LLAMADAS:
+      1  `lam=-1`                    Box-Cox. Decide λ.
+      2  `lam=X, d=-1`               serie(λ) + ACF/PACF en nivel. ¿Tendencia?
+      3  `lam=X, d=<n>, D=-1`        diferenciada + ACF/PACF + estacionalidad
+                                     HAC. Confirma d y D.
+      4  `lam, d, D` confirmados     órdenes ARMA candidatos.
 
-    Call 2  lam=X  d=-1  (default)
-      → Series(λ) + ACF/PACF at level d=0.
-        ¿Trend? → next call with d=1.
-        ¿No trend? → next call with d=0, D confirmed.
-        Support: unit_root_analysis available if needed.
-      WAIT for user.
+    LA BIFURCACIÓN ESTACIONAL, en la llamada 3:
+      B1  determinista (armónicos, D=0) → estima m00 con armónicos solos, cicla
+          anómalos hasta limpiar, y entra en la llamada 4 con `pre_path=<.pre>`
+      B2  estocástica (D=1) → llamada 4 directa sobre ∇∇ₛ
+    `objetivo="multivariante"` VETA B2: las series de un sistema tienen que
+    llevar el mismo tratamiento estacional o sus órdenes de integración no son
+    comparables.
 
-    Call 3  lam=X  d=<level>  D=-1
-      → Series(λ) differenced d times + ACF/PACF + HAC seasonality.
-        Seasonal? + B1 (deterministic seasonality: harmonics, D=0):
-          Confirm d and D=0, then:
-            a) confirm_and_estimate(m00: harmonics only, p=0, q=0)
-            b) preliminary_outlier_scan on m00 residuals
-            c) [cycle: add steps → re-estimate → scan] until clean
-            d) Call 4 with pre_path=<mNN.pre> (ARMA on clean residuals)
-        Seasonal? + B2 (stochastic seasonality: seasonal differencing, D=1):
-          → Call 4 with lam, d, D=1 (ARMA+P+Q on ∇∇_s series)
-        ¿No seasonality? → D=0, no harmonics, Call 4 directly.
-      WAIT for user to confirm d and D.
+    LO QUE NUNCA: no confirmes d y D en la misma llamada que λ. Cada nodo se
+    decide con su evidencia delante.
 
-    Call 4  lam=X  d=<confirmed>  D=<confirmed>  [pre_path=<.pre>]
-      B1 path (D=0, pre_path given):
-        → ACF/PACF of clean model RESIDUALS from pre_path.
-          PACF cuts → AR(p).  ACF cuts → MA(q).
-          Also: mean significant? (μ̄/SE > 2) → estimate_mu=True
-      B2 path (D=1, no pre_path):
-        → ACF/PACF of ∇^d ∇_s y(λ).
-          Also check lags s,2s,3s for seasonal P and Q.
-      B1 no-outliers (D=0, no pre_path):
-        → ACF/PACF of ∇^d y(λ) directly.
-      WAIT for user to confirm p, q (and P, Q if D=1).
-
-    Parameters
-    ----------
-    inp_path : path to series .inp file (all calls)
-    lam      : Box-Cox lambda  (-1 = not yet decided → Call 1)
-    d        : differencing order (-1 = not yet decided → Call 2)
-    D        : seasonal differencing (-1 = not yet decided → Call 3)
-    domain   : what KIND of series this is — "price_index" | "multiplicative" |
-               "ratio" | "generic". Empty = inferred by `policy.decide_domain`.
-               **Lo declarado gana**, que es lo que la política dice de sí misma
-               y no podía cumplirse: el parámetro sólo existía en `build_model`,
-               así que un analista recorriendo los nodos uno a uno no tenía
-               forma de declararlo (BUG-0080). Muerde en el nodo Box-Cox
-               (Call 1), que es donde el dominio decide: un índice va en log
-               SIEMPRE —su base es una convención y un modelo en niveles no
-               tiene escala interpretable—, y una magnitud multiplicativa o un
-               cociente van en log salvo que el dato lo desmienta.
-    objetivo : what the model is FOR — "univariante" | "multivariante" |
-               "estructural". Only bites at the seasonal node (Call 3), where it
-               says what the purpose implies for the B1/B2 route. It was
-               reachable only from `build_model`, so an analyst walking the nodes
-               one at a time could not state the purpose at all — and the route
-               is precisely where the purpose matters.
-    pre_path : path to fitted .pre (Call 4, B1): ARMA identified on
-               its residuals instead of the raw transformed series.
+    El detalle de cada nodo, en `art://protocolo/identificacion`.
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -5637,158 +5751,62 @@ def _orden_ar(p):
 
 
 @mcp.tool()
-def confirm_and_estimate(inp_path: str, output_path: str,
-                          lam: float = 0.0, d: int = 1, D: int = 0,
-                          p: int | list[int] = 0, q: int = 1,
-                          ar_seeds: list | None = None,
-                          ar_f_freqs: list | None = None,
-                          n_harmonics: int = 5,
-                          P: int = 0, Q: int = 0,
-                          base_pre_path: str = "",
-                          estimate_mu: bool = False,
-                          seasonal: bool | None = None,
-                          easter: bool = False,
-                          include_histogram: bool = False,
-                          domain: str = "",
-                          guion_path: str = "",
-                          guion_name: str = "",
-                          guion_decision: str = "",
-                          guion_rationale: str = "",
-                          guion_problems: str = "",
-                          guion_next: str = "") -> list:
+def confirm_and_estimate(
+    inp_path: str,
+    output_path: str,
+    lam: float = 0.0,
+    d: int = 1,
+    D: int = 0,
+    p: _P_ORDEN = 0,
+    q: int = 1,
+    ar_seeds: list | None = None,
+    ar_f_freqs: _AR_F_FREQS = None,
+    n_harmonics: int = 5,
+    P: _P_ESTACIONAL = 0,
+    Q: int = 0,
+    base_pre_path: _BASE_PRE = "",
+    estimate_mu: _ESTIMATE_MU = False,
+    seasonal: _SEASONAL = None,
+    easter: _EASTER = False,
+    include_histogram: bool = False,
+    domain: _DOMAIN = "",
+    guion_path: str = "",
+    guion_name: str = "",
+    guion_decision: str = "",
+    guion_rationale: str = "",
+    guion_problems: str = "",
+    guion_next: str = "",
+) -> list:
     """
-    Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
+    Estima el ARMA confirmado y devuelve la diagnosis. **Escribe** `output_path`
+    (.inp), su `.pre` y su `.out`, y registra la versión si se da `guion_path`.
 
-    Two modes:
-    - Fresh model (base_pre_path=""): constructs from scratch using series in
-      inp_path and the analyst-confirmed (lam, d, D, p, q, P, Q) spec.
-    - Incremental (base_pre_path=<.pre>): loads all existing interventions and
-      harmonics from the .pre, then replaces/adds only the ARMA part (p, q,
-      P, Q) and mu. Use this to add ARMA to a model after the outlier cycle.
+    DOS MODOS:
+      fresco       `base_pre_path=""` — construye desde cero con la serie de
+                   `inp_path` y la especificación confirmada (lam, d, D, p, q,
+                   P, Q).
+      incremental  `base_pre_path=<.pre>` — hereda intervenciones, armónicos y
+                   deterministas de ese `.pre` y sustituye SÓLO la parte ARMA y
+                   μ. Es el paso final de ARMA tras el ciclo de anómalos.
 
-    Always returns:
-      - Parameter table with SE and t-stats
-      - Diagnosis verdict (Q-test, JB, outliers)
-      - Residual ACF/PACF + histogram
+    PRECONDICIÓN: un `.inp` con datos, y la especificación ya decidida — la da
+    `guided_identification`. Esta herramienta no identifica: confirma y estima.
 
-    Parameters
-    ----------
-    inp_path        : source .inp/.pre (series data and name; spec ignored
-                      unless base_pre_path is given)
-    output_path     : path to write the new .inp
-    lam             : Box-Cox lambda (0.0=log, 1.0=identity)
-    d               : regular differencing order
-    D               : seasonal differencing order (0=B1 harmonics, 1=B2 multiplicative)
-    p               : regular AR order — an INT or a LIST OF ORDERS PER FACTOR.
-                      `fue` estimates the regular AR as a PRODUCT of factors, and
-                      that is how this school reads an operator: each factor has
-                      its own damping and period.
+    LO QUE NUNCA:
+      · Nunca sustituyas un AR(p) por un operador **capado o disperso** porque
+        sus módulos se parezcan: impone p−1 restricciones sin contrastar y cierra
+        Shin-Fuller. Estima entero → factoriza (`p` como lista) → contrasta.
+      · Nunca reestimes desde un `.pre` para leer errores típicos: los válidos
+        están en el `.out` (`get_out_report`).
+      · `P`/`Q` **funcionan con D=0** — no es un caso raro, es la ruta B1.
 
-                          6          one operator of order 6
-                          [1,1,2,2]  four factors — the FACTORISED model
+    Devuelve tabla de parámetros con SE y t, veredicto de diagnosis (Q, JB,
+    anómalos) y la figura de residuos + ACF/PACF.
 
-                      The factorised form is an EXACTLY IDENTIFIED
-                      reparametrisation of the same model: same likelihood, same
-                      degrees of freedom. Its point is not a better fit — it is
-                      that each factor gets its `d ± SE` and `period ± SE`,
-                      without which you cannot test whether a factor admits the
-                      seasonal frequency.
-
-                      **Never replace an AR(p) by a capped or sparse operator on
-                      the strength of similar moduli.** That IMPOSES p−1
-                      untested restrictions and forecloses Shin-Fuller. Estimate
-                      the full operator, factorise it, then test.
-    ar_seeds        : starting values per factor, e.g. [[0.78],[-0.77],[.9,-.6]].
-                      `ar_factorization` computes them; pass them when splitting
-                      an estimated operator into factors so the fit starts at the
-                      optimum it already found. Ignored unless `p` is a list of
-                      matching length.
-    ar_f_freqs      : frequencies k of FIXED-FREQUENCY AR(2) factors, e.g. [4,2]
-                      for s=12. Each is (1 − φ₁B − φ₂B²) with the frequency
-                      NAILED to 2πk/s: only φ₂ is estimated and φ₁ is derived.
-                      This is the CONTRASTABLE version of «this factor is
-                      seasonal» — nested in the free factor, so a likelihood
-                      ratio with 1 d.f. decides it. Without it the only way to
-                      claim a factor is seasonal was to impose it.
-    q               : regular MA order
-    n_harmonics     : harmonic pairs cos/sin (D=0 fresh only; ignored when
-                      base_pre_path is given — harmonics come from the .pre)
-    easter          : add the EASTER (Semana Santa) calendar regressor. MONTHLY
-                      series only — the engine builds it itself: 1.0 in the month
-                      of Easter Sunday, split 0.5 March + 0.5 April when Good
-                      Friday falls in March. It is a deterministic term like the
-                      harmonics, NOT an intervention: it has no date and no form,
-                      so it does not go through the intervention node. Add it when
-                      the residuals show recurring April/March anomalies that move
-                      with the calendar. Like n_harmonics, it is ignored when
-                      base_pre_path is given — the deterministics come from the
-                      .pre, and if the .pre already carries it, it is inherited.
-    seasonal        : on/off switch for the whole deterministic seasonal package
-                      (cos/sin pairs + Nyquist alter). None (default) => derive from
-                      n_harmonics>0, correct for freq>=4. Pass False for a
-                      NON-seasonal series (no seasonal terms at all — avoids the
-                      spurious Nyquist of BUG-0005). Pass True for a SEMI-ANNUAL
-                      seasonal series (freq=2), whose only seasonal term is the
-                      Nyquist alter while n_harmonics (pairs) is 0.
-    P               : seasonal AR order. Works with D=0 TOO, and that is not a
-                      corner case: a stationary stochastic seasonality riding on
-                      top of the deterministic harmonics is the B1 route's own
-                      way of absorbing what the harmonics leave behind. Both
-                      RATIO finals of this project are exactly that — P=1 with
-                      D=0 — and `_make_model` has built it all along
-                      (pipeline.py, "Stationary stochastic seasonality on top of
-                      the deterministic harmonics").
-                      BUG-0050: this line used to read "(D=1 only)". It was
-                      false, and expensively so: an analyst who believes it
-                      concludes that a residual seasonal AR forces D=1, i.e.
-                      route B2 — the one route `objetivo="multivariante"`
-                      forbids. The documentation sent you to the forbidden route
-                      to solve a problem the allowed route solves.
-    Q               : seasonal MA order — same as P, D=0 included. NOTE: the
-                      fixed-frequency operators (`ar_f`/`ma_f`, where the MEG's
-                      MA_f witness lives) are NOT controlled by Q — they are
-                      inherited from base_pre_path as structure, together with
-                      `ifadf` (BUG-0034).
-    base_pre_path   : if given, load interventions+harmonics from this .pre and
-                      add only the ARMA spec. Typical use: final ARMA step after
-                      outlier cycle in B1 flow.
-    estimate_mu     : include mean parameter μ in estimation (default False).
-                      Set True when the DRIFT of the differenced series has
-                      |t| > 2 -- not the mean of residuals of a model that
-                      already fitted a mu, which reads ~0 by construction
-                      (BUG-0013). When base_pre_path carries a fitted mean it is
-                      inherited, so pass True to keep it.
-    include_histogram : return histogram PNG as third item (default False).
-                      Keep False during the outlier cycle to save tokens; set True
-                      for the final model only.
-    domain          : what KIND of series this is — "price_index" |
-                      "multiplicative" | "ratio" | "generic". Se REGISTRA en el
-                      guion (no se puede recuperar releyendo el `.inp`: es un
-                      dato del analista) y se CONTRASTA con la λ que se pasa.
-                      Declarar `price_index` con λ=1 es una contradicción y la
-                      herramienta la dice — es exactamente el fallo que motivó
-                      BUG-0080: art recomendó «identidad (λ=1)» sobre un índice
-                      de precios y el carril guiado no ofrecía la corrección.
-    guion_path      : (optional) path to guion.json — records this version
-    guion_name      : version name (e.g. "PC3"); auto-assigned if empty
-    guion_decision  : brief description of what this model tests or concludes
-    objetivo        : what the model is FOR — "univariante" (forecasting the
-                      series itself), "multivariante" (it enters a system: VECM,
-                      transfer function) or "estructural" (read the components).
-
-                      It is the one thing the data cannot supply, and it is asked
-                      as a PURPOSE rather than as a method so that one answer
-                      informs several nodes. It matters most at the seasonal
-                      route: with seasonality detected the pipeline estimates
-                      BOTH B1 (D=0 + harmonics) and B2 (D=1) and adjudicates them
-                      with the MEG/DCD_f pair; `objetivo` breaks the tie when the
-                      tests do not decide, and VETOES B2 under "multivariante" —
-                      seasonal unit roots complicate cointegration and every
-                      series of a system must carry the same seasonal treatment
-                      or their integration orders are not comparable.
-    guion_rationale : justification for the choices made
-    guion_problems  : problems found in the diagnosis of this model
-    guion_next      : description of the next version to try
+    Detalle y doctrina —el AR como producto de factores, `ar_seeds`,
+    `ar_f_freqs`, `objetivo`, `domain`, con qué t se decide μ— en
+    `art://doc/DISENO-nodo-arma`. Los parámetros llevan su descripción en el
+    esquema.
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -6423,45 +6441,23 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                alternativas: str = "", decidido_por: str = "",
                parent: int = -1) -> list:
     """
-    Record a DECISION NODE in the guion — a specification choice, not a model.
+    Registra un NODO DE DECISIÓN en el guion — una elección de especificación,
+    no un modelo. **Escribe** el guion.
 
-    Why this exists. A guion that records only MODELS starts the story late. By
-    the time the first estimated model exists, λ has been decided, d has been
-    decided, whether there is seasonality and of what kind has been decided, and
-    the orders have been picked — and none of that leaves a trace. On PGAS of
-    the Bolivia replication the ENTIRE divergence between the two lanes is λ,
-    decided before any model existed: the guion could not show it.
+    POR QUÉ EXISTE: un guion que sólo anota MODELOS empieza la historia tarde.
+    Cuando existe el primer modelo estimado ya se decidieron λ, d, si hay
+    estacionalidad y de qué clase, y los órdenes — y nada de eso deja rastro.
+    Sobre PGAS de la réplica, **toda** la divergencia entre los dos carriles es
+    λ, decidida antes de que existiera modelo alguno: el guion no podía
+    enseñarlo.
 
-    Nodes and models live in the SAME chain, because the order in which they
-    happened is itself information: a node that comes AFTER a model is a
-    reformulation, and that only shows if they are interleaved.
+    Nodos y modelos van en la MISMA cadena, porque el orden en que ocurrieron es
+    información: un nodo posterior a un modelo es una reformulación, y eso sólo
+    se ve si están entrelazados.
 
-    `razon` is required. A decision recorded without its reason is a number, and
-    a number cannot be argued with later — which is the whole point of writing
-    it down. This is the same principle as `why` in guion_abandon.
-
-    Parameters
-    ----------
-    guion_path   : path to guion.json (created if absent)
-    nodo         : which node — "lambda", "d", "estacionalidad", "ordenes",
-                   "media", "intervenciones", "reformulacion", "dominio"
-    decidido     : the value chosen, as text ("0", "1", "B1 + 1 armónico",
-                   "ARMA(0,2)×(1,0)₄", "escalón en 2009:1")
-    razon        : WHY. Required.
-    evidencia    : the statistics it was decided on ("gap=+0.161",
-                   "ADF p=0.013, KPSS p=0.09", "F-HAC=50.2")
-    alternativas : what was considered and discarded, and why
-    decidido_por : "analista+LLM" (guided) | "LLM" (autonomous) | "heurística"
-    parent       : version this node descends from (-1 = the last one recorded).
-
-    WHEN TO SET `parent` EXPLICITLY. A node that records the REJECTION of a
-    branch must not hang from the branch it rejects. If it does, abandoning that
-    branch cascades onto the very reasoning that condemned it — and the cascade
-    is right to do so for models, because a contaminated decision contaminates
-    what follows, but a node that says "I tried this and it failed" is not
-    downstream of the failure: it is the conclusion drawn from it, and it belongs
-    to the surviving trunk. Point it at the version you are keeping (the safe
-    ancestor), not at the one you are about to abandon.
+    LO QUE NUNCA: `razon` no es opcional. Una decisión registrada sin su razón
+    es un número, y con un número no se puede discutir después — que es para lo
+    que se escribe. Mismo principio que el `why` de `guion_abandon`.
     """
     try:
         from mcp.types import TextContent
@@ -7068,81 +7064,37 @@ def guided_intervention(inp_path: str,
                         guion_problems: str = "",
                         guion_next: str = "") -> list:
     """
-    Sequential INTERVENTION — ONE decision node per call.
+    La PUERTA del nodo de intervención: un nodo de decisión por llamada.
 
-    La entrada del nodo de intervención, paralela a `guided_identification`. El
-    nodo tiene nueve instrumentos y era el único de la suite sin puerta: el
-    analista tenía que elegir a ciegas entre ellos y ninguno remitía a otro.
-    Esta herramienta los SECUENCIA y presenta un veredicto por llamada. **No
-    decide**: el analista decide en cada paso, igual que en identificación.
+    Paralela a `guided_identification`. **No decide**: secuencia los nueve
+    instrumentos del nodo y presenta un veredicto por llamada:
+    **el analista decide en cada paso**.
+    Cada llamada termina en ⏸ (WAIT for user) y ahí acaba tu turno.
 
-    DECISION TREE — call in this sequence, one at a time:
+    PRECONDICIÓN: un modelo estimado (`confirm_and_estimate`).
 
-    Call 1   date=""   (default)
-      → ¿HAY QUE INTERVENIR? Calibra el correlograma OMITIENDO los anómalos y
-        dice si la identificación cambia: qué órdenes AR (PACF) y MA (ACF)
-        entran o salen. **Si no cambia nada, lo dice y avisa de que intervenir
-        aquí es sobre-intervenir** — cada intervención encoge σ̂ y promueve al
-        siguiente anómalo, así que la escalada no para sola.
-        Devuelve además las fechas candidatas con su |z|.
-      WAIT for user: qué fecha, o parar.
+    LAS TRES LLAMADAS:
+      1  `date=""`          ¿HAY QUE INTERVENIR? Calibra el correlograma
+                            omitiendo los anómalos y dice si la identificación
+                            cambia —qué órdenes AR (PACF) y MA (ACF) entran o
+                            salen—. Devuelve las fechas candidatas con su |z|.
+      2  `date="Q3/2008"`   ¿QUÉ FORMA ADMITE EL DATO? El episodio, las
+                            configuraciones con su ganancia ω(1) y el veredicto.
+                            `escalera=True` añade la escalera como argumento.
+      3  `+ form="..."`     CONSTRUYE, estima y verifica: Treadway (¿vecino
+                            anómalo?) y ω(1)=0 (permanente o transitorio).
 
-    Call 2   date="Q3/2008"   form=""
-      → ¿QUÉ FORMA ADMITE EL DATO? En UNA respuesta:
-          · el EPISODIO — cuántos períodos del nivel altera el suceso;
-          · las CONFIGURACIONES que el dato admite, acotadas por el mecanismo,
-            con su ganancia ω(1) y su lectura permanente/transitorio;
-          · la ESCALERA de Ockham con lo que justifica subir de peldaño.
-        Y un veredicto único, con el árbitro explícito: para la FORMA gobierna
-        `incident_configurations` sobre `residual_episodes`, porque extiende el
-        arranque por el mecanismo y el otro sólo agrupa extremos.
-        Si el dato NO identifica la configuración, lo dice y pide lo
-        extramuestral en vez de elegir por AIC.
-      WAIT for user: qué forma y de CUÁNTOS ESCALONES.
+    `n_omega` = **cuántos escalones** en el nivel, que es la lengua de este
+    nodo: N escalones ⇔ ω(B) de orden N−1. Se construye con N escalón(es), de
+    orden N−1 en el numerador. Un escalón con ganancia nula ES un impulso de un
+    orden menos.
 
-    Call 3   date="Q3/2008"   form="step"   n_omega=5   output_path=...
-             (n_omega = cuántos escalones; 5 escalones ⇔ ω(B) de orden 4)
-      → CONSTRUYE la forma elegida, estima, y verifica:
-          · Treadway — ¿queda un anómalo de vecino? ¿el residuo en la fecha
-            está en la media?
-          · ganancia — Wald sobre ω(1)=0: ¿permanente o transitorio?
-        Deja el nodo en el guion. Éste es el paso que faltaba (BUG-0079).
+    LO QUE NUNCA: si la llamada 1 dice que la identificación NO cambia,
+    intervenir ahí es sobre-intervenir. Cada intervención encoge σ̂ y promueve al
+    siguiente anómalo: **la escalada no para sola**.
 
-    Parameters
-    ----------
-    inp_path      : .inp del modelo estimado **SIN** la intervención
-    date          : "" → Call 1. "MM/YYYY", "QN/YYYY" o "YYYY" → Call 2 ó 3
-    form          : "" → Call 2. "step"|"pulse"|"impulse"|"ramp" → Call 3
-    n_omega       : **cuántos ω**, que es lo mismo que cuántos ESCALONES en el
-                    nivel — la lengua en la que habla todo este nodo:
-                    `incident_configurations` dice «N escalones», la escalera
-                    dice «N escalones», y la Call 2 te devuelve el `n_omega` ya
-                    calculado. 0 = lo decide la escalera.
-
-                    La equivalencia, por si vienes del operador: **N escalones
-                    ⇔ ω(B) de orden N−1**. Así que `n_omega=2` son DOS escalones
-                    y un ω(B) = ω₀ − ω₁B.
-
-                    ⚠ Esta línea documentaba el parámetro como si fuera el
-                    grado del polinomio, y no lo es: cuenta coeficientes. Un
-                    analista al que Treadway le ordenaba subir de peldaño pasaba
-                    `n_omega=1` creyendo pedir la escalera de dos, recibía un
-                    escalón simple, y la cabecera se lo confirmaba en las
-                    unidades equivocadas. No se le ignoraba: se le había
-                    documentado otra cosa (BUG-0093).
-    output_path   : obligatorio en la Call 3 — dónde se escribe el modelo nuevo
-    threshold     : |z| para marcar un residuo como extremo
-    umbral_activo : |z| a partir del cual un vecino cuenta como parte del suceso
-                    aunque no sea extremo (Call 2)
-    umbral_vecino : |z| a partir del cual un vecino cuenta como anómalo
-                    (Treadway, Call 2). 0 = el de la política (2.0)
-    dominio       : clase de serie ("price_index", "generic"…). Vacío = la
-                    infiere `policy.decide_domain`. Lo declarado gana.
-    evento_*      : lo extramuestral, que sólo sabe el analista. `evento_fuente`
-                    es obligatoria si se declara `evento_naturaleza`: no se
-                    afirma que un suceso fue permanente sin decir por qué se
-                    sabe.
-    guion_*       : registro del nodo, como en el resto de la suite
+    La escalera de Ockham, la regla de Treadway y el diccionario de formas, en
+    `art://doc/DISENO-nodo-intervencion` y `art://protocolo/intervencion`.
     """
     try:
         import numpy as np
@@ -7529,42 +7481,30 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                                guion_problems: str = "",
                                guion_next: str = "") -> list:
     """
-    Add an intervention to the .inp, re-estimate and show updated diagnosis.
+    Añade una intervención, reestima y devuelve la diagnosis actualizada.
+    **Escribe** `output_path`.
 
-    Adds a pulse, step or ramp intervention at the given date, saves to
-    output_path, re-estimates and returns the updated parameter table and
-    diagnosis. Use this iteratively — one intervention at a time.
+    Instrumento suelto del nodo; la puerta es `guided_intervention`. Úsala
+    iterativamente: **una intervención cada vez**.
 
-    Parameters
-    ----------
-    inp_path          : current .inp/.pre (with any previous interventions)
-    output_path       : path to write the updated .inp
-    date              : observation date "MM/YYYY" or "QN/YYYY" or "YYYY".
-                        Leave empty ("") to auto-select the most extreme residual.
-    n_omega           : nº de coeficientes ω del numerador. **0 = automático**
-                        (1 con forma explícita; lo que decida la escalera con
-                        `form="auto"`). Con `form="step"` y `n_omega=N` se
-                        construye la FLT de N escalones consecutivos en el
-                        nivel que `incident_configurations` identifica como
-                        «fecha×N» — antes no había forma de construirla desde
-                        aquí, aunque el motor la soportaba (BUG-0079).
-    form              : "pulse", "step", "ramp" — o **"auto"**, que corre la
-                        ESCALERA DE OCKHAM: estima los peldaños en orden (1a
-                        escalón permanente, 1b impulso transitorio, 2 episodio
-                        de L+1 escalones) y sube sólo cuando algo lo justifica
-                        —Treadway, inadecuación, duración del episodio o
-                        dominio—. **El AIC no arbitra la subida.** Deja el nodo
-                        de decisión en el guion con las alternativas descartadas
-                        y la razón de cada descarte.
-    context_hint      : free-text note about the economic event (for logging)
-    include_histogram : return histogram PNG (default False — saves tokens
-                        during the outlier cycle; set True for final round)
-    guion_path        : (optional) path to guion.json — records this version
-    guion_name        : version name (e.g. "PC3"); auto-assigned if empty
-    guion_decision    : brief description of what this model tests or concludes
-    guion_rationale   : justification for the intervention choice
-    guion_problems    : problems found in the diagnosis
-    guion_next        : description of the next version to try
+    PRECONDICIÓN: un `.inp`/`.pre` estimado, con las intervenciones previas si
+    las hay.
+
+    LA FORMA:
+      `form="step"|"pulse"|"ramp"`  la que decida el analista
+      `form="auto"`                 la elige la escalera de Ockham
+      `n_omega=0`                   automático (1 con forma explícita)
+      `form="step"`, `n_omega=N`    la FLT de N escalones consecutivos en el
+                                    nivel que `incident_configurations`
+                                    identifica como «fecha×N»
+      `date=""`                     toma el residuo más extremo
+
+    LO QUE NUNCA: no encadenes intervenciones sin volver a mirar la diagnosis
+    entre una y otra. Cada una encoge σ̂ y promueve al siguiente anómalo: la
+    escalada no para sola.
+
+    El diccionario de formas y el convenio de nivel, en
+    `art://doc/DISENO-nodo-intervencion`.
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -7976,50 +7916,29 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
                 guion_rationale: str = "",
                 objetivo: str = "univariante") -> list:
     """
-    Box-Jenkins-Treadway pipeline for a single series — autonomous or guided.
+    Pipeline completo sobre UNA serie. **Escribe** el `.inp` final, su `.pre`,
+    su `.out` y el guion.
 
-    Runs ONE engine (pipeline.run_full): decides the spec, estimates, adds
-    interventions for detected outliers and re-estimates until the diagnosis is
-    clean or max_rounds. The only difference between modes is WHO supplies each
-    decision:
+    Un solo motor (`pipeline.run_full`): decide la especificación, estima, añade
+    intervenciones para los anómalos detectados y reestima hasta que la
+    diagnosis salga limpia o se agote `max_rounds`. Lo único que cambia entre
+    modos es QUIÉN pone cada decisión:
 
-      - Autonomous (all spec params left at their sentinel): the heuristic
-        DefaultPolicy decides λ, d, D, harmonics, p, q and the mean.
-      - Guided (any of lam/d/D/p/q/n_harmonics/estimate_mu/decision provided): those
-        analyst/Claude-confirmed choices are honoured (ClaudePolicy) and the
-        heuristic fills only what was left unspecified. Use after
-        guided_identification to run the build with the confirmed spec while
-        the outlier cycle proceeds automatically.
+      autónomo  todos los parámetros de especificación en su centinela: decide
+                la heurística (`DefaultPolicy`).
+      guiado    cualquiera de lam/d/D/p/q/n_harmonics/estimate_mu dado: se
+                respeta (`ClaudePolicy`) y la heurística rellena sólo lo que
+                quedó sin especificar. Úsalo tras `guided_identification` para
+                correr el ciclo de anómalos automáticamente con la
+                especificación ya confirmada.
 
-    Always returns parameters + residual diagnosis figure; DCD/MEG at the end.
+    PRECONDICIÓN: un `.inp` con datos — sólo se usa la serie.
 
-    Parameters
-    ----------
-    inp_path      : source .inp file — only the series is used
-    output_path   : path for the final estimated .inp
-    max_rounds    : maximum intervention-addition rounds (default 5)
-    run_meg       : run MEG stochastic seasonality test (slow; default False)
-    lam           : confirmed Box-Cox λ (0/0.5/1); -1 = let the heuristic decide
-    d, D          : confirmed differencing orders; -1 = heuristic
-    p, q          : confirmed ARMA orders; -1 = heuristic
-    n_harmonics   : confirmed cos/sin pairs (B1); -1 = heuristic
-    estimate_mu   : free mean? 1 = yes, 0 = no, -1 = let the policy decide from
-                    the drift of the differenced series (|t| > 2). For a price
-                    index the mean IS the inflation rate, so -1 usually gives 1;
-                    force 0 only when you mean "this series has no drift".
-    domain        : what KIND of series this is — "price_index" or "generic".
-                    "" (default) = infer from the name, which is WEAK evidence
-                    and is why declaring it wins. A price index has no natural
-                    zero (its base year is a convention), so it takes λ=0
-                    whatever the Box-Cox statistic says; measured on eight CPI
-                    indices the statistic split them 4/4 on a |gap| that never
-                    exceeded 0.304. Declare it when the name does not say so —
-                    "EMU" is a price index and does not look like one.
-    decision      : confirmed "A"/"B1"/"B2"; "" = heuristic
-    guion_path    : (optional) path to guion.json — records the final model
-    guion_name    : version name (e.g. "PC1"); auto-assigned if empty
-    guion_decision: brief description of the model or pipeline result
-    guion_rationale: justification for the spec
+    LO QUE NUNCA: no lo uses para «probar» una especificación que el analista no
+    ha confirmado. En carril guiado la especificación viene de la puerta.
+
+    Devuelve parámetros y la figura de residuos + ACF/PACF; DCD/MEG al final.
+    El objetivo y la ruta estacional, en `art://doc/DISENO-nodo-arma`.
     """
     try:
         from mcp.types import TextContent, ImageContent

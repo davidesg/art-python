@@ -16,6 +16,19 @@ corregirlo a mano. El propio caso mide lo que se estaba imponiendo: la
 factorización libre daba periodos 3.03 y 6.67 frente a los 3.00 y 6.00 que el
 operador en B⁶ fija por decreto — 11.1% de desvío en el segundo.
 """
+
+# ORDEN 1.1 — DÓNDE VIVE AHORA ESTA DOCTRINA.
+#
+# Estas afirmaciones se hacían sobre `_INSTRUCTIONS`, que hasta el 10-sep-2026
+# eran los 35.941 caracteres del método entero y viajaban EN CADA LLAMADA.
+# Ahora `_INSTRUCTIONS` es una cabecera de 2.000 y el método vive en
+# `_PROTOCOLO`, que se sirve por `art://protocolo` y se PIDE.
+#
+# La propiedad que estas pruebas guardan —que la doctrina exista y esté
+# enunciada— no cambia. Lo que cambia es el canal, y con él la garantía: antes
+# se empujaba (y el cliente recortaba el 77%, BUG-0116), ahora se pide. Lo que
+# tiene que estar en la CABECERA, sí o sí, lo fija
+# `tests/test_presupuesto_del_semaforo.py`.
 import os
 import warnings
 
@@ -143,7 +156,7 @@ def test_un_AR_corto_no_dispara_nada(tmp_path):
 def test_la_doctrina_esta_en_las_instrucciones():
     """El asistente propuso capar creyendo que hacía lo correcto, y no estaba
     escrito en ninguna parte que no se hace."""
-    ins = srv._INSTRUCTIONS
+    ins = srv._PROTOCOLO
     assert "NUNCA SE CAPA UN AR" in ins
     assert "AR(1)×AR(5)" in ins, "el caso concreto que se pierde al capar"
     assert "Shin-Fuller" in ins, "lo que capar de entrada hace imposible"
@@ -152,7 +165,7 @@ def test_la_doctrina_esta_en_las_instrucciones():
 def test_la_doctrina_da_el_procedimiento_completo():
     """Prohibir sin dar la ruta no sirve: el asistente impone igual porque es
     lo único que puede hacer."""
-    ins = srv._INSTRUCTIONS
+    ins = srv._PROTOCOLO
     for paso in ("COMPLETO", "ar_factorization", "FACTORIZADO",
                  "razón de verosimilitudes", "MEG"):
         assert paso in ins, paso
@@ -160,7 +173,7 @@ def test_la_doctrina_da_el_procedimiento_completo():
 
 def test_la_doctrina_dice_que_el_BIC_no_autoriza():
     """Fue el argumento con el que se propuso: BIC mejor y t no significativas."""
-    assert "Ni el BIC ni las t autorizan" in srv._INSTRUCTIONS
+    assert "Ni el BIC ni las t autorizan" in srv._PROTOCOLO
 
 
 # ══════ La ruta correcta EXISTE: los cinco pasos, desde la superficie ══════
@@ -295,10 +308,39 @@ def test_p_entero_sigue_significando_lo_mismo(ciclo):
 
 
 def test_la_herramienta_documenta_las_tres_cosas():
-    from tests._fuente import fuente_de
-    ce = getattr(srv.confirm_and_estimate, "fn", srv.confirm_and_estimate)
-    src = fuente_de(ce)
-    assert "LIST OF ORDERS PER FACTOR" in src
-    assert "EXACTLY IDENTIFIED" in src
-    assert "Shin-Fuller" in src
-    assert "ar_f_freqs" in src and "NAILED" in src
+    """Las tres cosas siguen dichas, en los TRES canales que les tocan.
+
+    Antes vivían las tres en el docstring de `confirm_and_estimate`, que son
+    8.968 caracteres empujados en cada llamada y recortados por el cliente
+    justo por la cola —donde estaba Shin-Fuller—. ORDEN 1.2 las reparte:
+
+      la regla que DECIDE   →  la descripción (se empuja; es corta y sobrevive)
+      la forma del parámetro →  el ESQUEMA (viaja entero: el cliente lo necesita
+                                para construir la llamada)
+      la doctrina completa   →  art://doc/DISENO-nodo-arma (se pide)
+
+    Que estén las tres es lo que esta prueba guarda; en cuál de los tres canales
+    está cada una es la decisión de la fase 1.
+    """
+    import asyncio
+    from art.recursos import documento
+
+    t = [x for x in asyncio.run(srv.mcp.list_tools())
+         if x.name == "confirm_and_estimate"][0]
+
+    # 1 · la regla que decide, en la descripción que se empuja
+    assert "capado o disperso" in t.description
+    assert "Shin-Fuller" in t.description
+    assert "factoriza" in t.description
+
+    # 2 · la forma del parámetro, en el esquema
+    props = t.inputSchema["properties"]
+    assert "LISTA DE ÓRDENES POR FACTOR" in props["p"]["description"]
+    assert "exactamente identificada" in props["p"]["description"]
+    assert "clavada" in props["ar_f_freqs"]["description"]
+
+    # 3 · la doctrina entera, en el recurso que se pide
+    doc = documento("DISENO-nodo-arma")
+    for x in ("PRODUCTO de factores", "sin contrastar", "Shin-Fuller",
+              "ar_f_freqs", "BUG-0103"):
+        assert x in doc, f"falta «{x}» en art://doc/DISENO-nodo-arma"

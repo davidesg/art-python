@@ -134,3 +134,33 @@ def test_una_herramienta_con_figura_devuelve_imagen_Y_ruta():
     texto = "\n".join(c.text for c in r.content if getattr(c, "text", None))
     assert any("Image" in t for t in tipos), f"sin figura: {tipos}"
     assert ".png" in texto, "la figura viaja sin ruta escrita"
+
+
+# ────────── ORDEN 1.1, cruzando la frontera ──────────
+
+def test_la_cabecera_que_recibe_el_cliente_cabe_en_2000():
+    """Medido donde importa: lo que el servidor ANUNCIA en `initialize`, no lo
+    que dice la constante del módulo. Son la misma cadena hoy, y esta prueba
+    existe para que sigan siéndolo."""
+    async def _mide():
+        async with stdio_client(_servidor()) as (lectura, escritura):
+            async with ClientSession(lectura, escritura) as s:
+                r = await asyncio.wait_for(s.initialize(), timeout=60)
+                return r.instructions or ""
+    cab = asyncio.run(_mide())
+    assert cab, "el servidor no anuncia instrucciones"
+    assert len(cab) <= 2000, f"la cabecera mide {len(cab):,} caracteres"
+    for x in ("guided_identification", "guided_intervention", "art://"):
+        assert x in cab, f"falta «{x}» en la cabecera"
+
+
+def test_una_etapa_del_protocolo_se_puede_pedir():
+    """El otro lado de 1.1: lo que sale de la cabecera tiene que poder pedirse.
+    Un recurso con plantilla —`art://protocolo/{etapa}`— es lo que hace que
+    acortar no sea perder."""
+    async def _f(s):
+        return await s.read_resource("art://protocolo/intervencion")
+    r = _corre(_f)
+    texto = "\n".join(c.text for c in r.contents if getattr(c, "text", None))
+    assert len(texto) > 1000, f"la etapa vino con {len(texto)} caracteres"
+    assert "ETAPA 3" in texto, texto[:200]

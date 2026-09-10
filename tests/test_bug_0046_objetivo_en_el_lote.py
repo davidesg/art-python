@@ -9,6 +9,19 @@ defecto.
 Se contrasta el COMPORTAMIENTO (qué D sale), no la redacción, salvo en el caso
 de las instrucciones del servidor, donde el texto ES la entrega.
 """
+
+# ORDEN 1.1 — DÓNDE VIVE AHORA ESTA DOCTRINA.
+#
+# Estas afirmaciones se hacían sobre `_INSTRUCTIONS`, que hasta el 10-sep-2026
+# eran los 35.941 caracteres del método entero y viajaban EN CADA LLAMADA.
+# Ahora `_INSTRUCTIONS` es una cabecera de 2.000 y el método vive en
+# `_PROTOCOLO`, que se sirve por `art://protocolo` y se PIDE.
+#
+# La propiedad que estas pruebas guardan —que la doctrina exista y esté
+# enunciada— no cambia. Lo que cambia es el canal, y con él la garantía: antes
+# se empujaba (y el cliente recortaba el 77%, BUG-0116), ahora se pide. Lo que
+# tiene que estar en la CABECERA, sí o sí, lo fija
+# `tests/test_presupuesto_del_semaforo.py`.
 import inspect
 import warnings
 
@@ -129,9 +142,9 @@ def test_el_lote_declara_su_objetivo_y_avisa_si_las_D_no_coinciden(tmp_path):
 
 def test_la_pregunta_del_objetivo_esta_en_la_apertura():
     """Las instrucciones son la entrega: sin la pregunta, nadie declara nada."""
-    from art.mcp_server import _INSTRUCTIONS
+    from art.mcp_server import _PROTOCOLO
 
-    apertura = _INSTRUCTIONS.split("DATOS DE ENTRADA")[0]
+    apertura = _PROTOCOLO.split("DATOS DE ENTRADA")[0]
     assert "PREGUNTA INICIAL OBLIGATORIA" in apertura
     for opcion in ("UNIVARIANTE", "MULTIVARIANTE", "ESTRUCTURAL"):
         assert opcion in apertura, f"falta la opción {opcion}"
