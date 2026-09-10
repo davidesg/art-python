@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**145 report(s), 5 open.**
+**146 report(s), 5 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -151,6 +151,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0143](BUG-0143-el-panel-de-la-acf-no-ve-el-canal-de-la-varianza.md) | fixed | medium | figuras | El panel de la ACF mide sólo medio anómalo — le falta el canal de la varianza, que aquí vale el 20% | 0.2.2 |
 | [BUG-0144](BUG-0144-la-calibracion-no-decia-que-fechas.md) | fixed | medium | calibracion | La calibración decía «retardo 4, +0,067» y no decía qué fechas — el `.out` lo lleva desde siempre y art no lo referenciaba | 0.2.2 |
 | [BUG-0146](BUG-0146-el-registro-de-defectos-no-salia-de-art.md) | fixed | medium | bugs | El registro de defectos no salía de art — la biblioteca aceptaba cualquier directorio, el CLI no, y el índice se firmaba como ART fuera donde fuera | 0.2.2 |
+| [BUG-0148](BUG-0148-la-pregunta-inicial-dejo-de-ser-obligatoria.md) | fixed | high | mcp-tools | Dos reglas de la cabecera se debilitaron al acortarla —la pregunta inicial y el idioma— y las pruebas que las guardaban siguieron en verde | 0.2.2 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 
