@@ -1,7 +1,7 @@
 ---
 id: BUG-0150
 title: Las configuraciones y la escalera se estiman SIN las intervenciones que ya lleva el modelo base
-status: open
+status: fixed
 severity: high
 component: interventions
 found_in: 0.2.2
@@ -91,6 +91,21 @@ Conservar todas las intervenciones del base salvo, si acaso, la que cae en la
 MISMA fecha/episodio que se está estudiando (el caso de «rehacer la forma de un
 suceso ya intervenido»), y decirlo en la salida cuando se retira alguna. Lo
 mismo en `_estructurales` de la escalera.
+
+## Fix aplicado (11-sep-2026)
+
+`escalera.hereda_del_base(model, at_estudiado, ventana)` — un solo sitio, que
+`configuracion.py` importa. Antes el mismo filtro estaba escrito dos veces, que
+es cómo se consigue arreglar la mitad.
+
+Devuelve `(heredadas, retiradas)`: retirar una intervención en silencio es
+cambiar el modelo base sin avisar, y el caso legítimo —rehacer la forma de un
+suceso ya intervenido— tiene que poder decirse en la salida.
+
+Verificado sobre el caso real: la llamada 2 en `Q2/2009` sobre `ITCER_m01.pre`
+da ahora **373,92** para `Q2/2009×1` —el número calculado a mano en las notas de
+la corrida— y los tres candidatos por debajo del base (381,93), con **2**
+intervenciones cada uno en vez de 1.
 
 ## Validation
 

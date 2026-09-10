@@ -369,8 +369,18 @@ def evalua_configuraciones(model_base, candidatos: Sequence[tuple[int, int]],
     from art.interventions import test_intervention, check_intervention_fit
 
     desfase = int(d) + int(getattr(model_base, "D", 0)) * int(freq)
-    base_itvs = [i for i in (model_base.interventions or [])
-                 if i.type in ("cos", "sin", "alter")]
+    # BUG-0150. Este filtro se quedaba sólo con la estructura estacional y
+    # tiraba TODAS las intervenciones de suceso ya estimadas, así que cada
+    # candidato se evaluaba contra un base que no era el del analista. Sobre
+    # ITCER los tres AIC salían PEORES que el del propio base al añadir un
+    # parámetro. Se hereda lo ya estimado y se retira sólo lo que cae sobre el
+    # mismo suceso.
+    from art.escalera import hereda_del_base
+    _ats = [at for at, _n in candidatos]
+    _centro = (min(_ats) + max(_ats)) // 2 + desfase if _ats else None
+    _radio = (max(_ats) - min(_ats)) + max((n for _a, n in candidatos), default=1)
+    base_itvs, retiradas = hereda_del_base(model_base, at_estudiado=_centro,
+                                           ventana=max(1, int(_radio)))
 
     def etiqueta(at_resid0):
         o = at_resid0 + desfase              # 0-based en la SERIE

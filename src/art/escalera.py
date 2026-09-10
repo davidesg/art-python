@@ -250,11 +250,48 @@ def _clona_con(model, itvs):
     return fue.Model(model.series, interventions=itvs, **kw)
 
 
+#: Tipos que son ESTRUCTURA estacional y no sucesos. Sobreviven siempre.
+_ESTRUCTURA = ("cos", "sin", "alter")
+
+
+def hereda_del_base(model, at_estudiado=None, ventana=0):
+    """Las intervenciones del base que un candidato tiene que LLEVAR — BUG-0150.
+
+    Aquí había un filtro que se quedaba sólo con `cos`, `sin` y `alter`, o sea
+    que **tiraba todas las intervenciones de suceso ya estimadas**. El docstring
+    prometía «el modelo ajustado SIN la intervención» —la que se estudia— y el
+    código hacía algo más fuerte: sin NINGUNA. Las dos cosas coinciden en la
+    primera intervención de una serie, que es donde se escribió y se probó.
+
+    Con la segunda ya no. Sobre ITCER, la llamada 2 en Q2/2009 sobre un base que
+    llevaba la caída de 2008 daba AIC ≈396 para los tres candidatos cuando el
+    propio base estaba en 381,93: añadir un parámetro «empeoraba» el ajuste, que
+    es imposible. Y las ganancias salían de la base equivocada (11,64/15,07
+    frente a 11,13/14,30).
+
+    Lo que se retira es SÓLO la intervención que cae en la misma fecha —o dentro
+    de `ventana` períodos—, que es el caso de rehacer la forma de un suceso ya
+    intervenido. Devuelve `(heredadas, retiradas)` para que la salida pueda
+    decir cuál se quitó: retirar una intervención en silencio es cambiar el
+    modelo base sin avisar.
+    """
+    itvs = list(model.interventions or [])
+    if at_estudiado is None:
+        return [i for i in itvs if i.type in _ESTRUCTURA], []
+    hereda, retira = [], []
+    for i in itvs:
+        if i.type in _ESTRUCTURA:
+            hereda.append(i)
+        elif abs(int(getattr(i, "at", -10**9)) - int(at_estudiado)) <= int(ventana):
+            retira.append(i)
+        else:
+            hereda.append(i)
+    return hereda, retira
+
+
 def _estructurales(model):
-    """Armónicos y `alter`: son estructura estacional, no sucesos, y tienen que
-    sobrevivir a cada peldaño."""
-    return [i for i in (model.interventions or [])
-            if i.type in ("cos", "sin", "alter")]
+    """Compatibilidad: sólo la estructura estacional. Ver `hereda_del_base`."""
+    return hereda_del_base(model)[0]
 
 
 def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
@@ -280,7 +317,10 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
         + int(getattr(model_base, "D", 0)) * freq
     at = episodio.at_0based(desfase)
     L = episodio.duracion_nivel
-    base_itvs = _estructurales(model_base)
+    # BUG-0150: se heredan las intervenciones YA ESTIMADAS del base; sólo se
+    # retira la que cae sobre el mismo suceso que se está estudiando.
+    base_itvs, _retiradas = hereda_del_base(model_base, at_estudiado=at,
+                                            ventana=max(1, int(L)))
 
     def construye(nivel, nombre, tipo, n_om):
         p = Peldano(nivel=nivel, nombre=nombre, tipo=tipo, n_omega=n_om)
