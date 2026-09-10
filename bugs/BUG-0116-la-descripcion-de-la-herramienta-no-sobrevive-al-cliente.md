@@ -1,11 +1,11 @@
 ---
 id: BUG-0116
 title: La descripción de las herramientas no sobrevive al cliente — lo que DECIDE está detrás del recorte, y easter, ar_f_freqs y Shin-Fuller se pierden
-status: fixed
+status: open
 severity: high
 component: mcp-tools
 found_in: 0.2.0
-fixed_in: 0.2.2
+fixed_in:
 reported: 2026-09-08
 reporter: David / sesión de Windows — análisis guiado del IPC español
 tags:
@@ -237,36 +237,16 @@ que hacen que se usen:
     modelo no puede saber por sí mismo —no ve el original— con la salida:
     pedirlo como recurso.
 
-### Puntos 1 y 2 aplicados (2026-09-10): la FASE 1 de `ORDEN.md`
+### Lo que sigue abierto
 
-**Punto 1 — el presupuesto por descripción. CERRADO.** Las catorce que pasaban
-de 1.800 —eran doce cuando se escribió esto y crecieron a catorce mientras se
-hacía el censo de figuras, lo que dice por sí solo que el canal atrae texto—
-están reescritas con la plantilla de SEMAFORO §4.1. **Ninguna pasa de 1.800.**
+**Punto 1** — el presupuesto por descripción: 12 de 46 siguen por encima, y con
+un cliente que recorte se pierden todavía `ar_f_freqs` y Shin-Fuller. Ahora hay
+dónde ponerlo, que era lo que faltaba.
 
-`ar_f_freqs` y Shin-Fuller, que eran los dos ejemplos nombrados arriba, ya no
-dependen de que el cliente no recorte: el primero viaja en el ESQUEMA
-(`Field(description=…)`, que el cliente necesita para construir la llamada y por
-tanto no recorta) y el segundo está en la descripción de `formal_tests`, ahora
-de 1.573 caracteres, y entero en `art://doc/DISENO-contrastes-formales`.
+**Punto 2** — la doctrina a `_INSTRUCTIONS`. Parcialmente hecho: la regla de no
+capar el AR ya está ahí, y ahora también el mapa de recursos.
 
-**Punto 2 — la doctrina. CERRADO, y por el otro lado.** No se metió más doctrina
-en `_INSTRUCTIONS`: se sacó. La cabecera pasa de 35.941 a 1.991 caracteres con
-lo que hay que saber ANTES de poder preguntar, y el método entero se sirve por
-`art://protocolo` y sus siete etapas.
-
-    descripciones    76.531  →  46.144
-    cabecera         35.941  →   1.991
-    por llamada     112.472  →  48.758      −57%
-
-Y ORDEN 1.5 añadió lo que faltaba para que el canal que se pide funcione: la
-cita aparece **donde se decide** y sólo cuando el caso lo pide. Un recurso que
-sólo se anuncia en la cabecera se lee al abrir la sesión y, cuando hace falta,
-ya salió de la ventana.
-
-### Lo que este informe destapó y sigue abierto
-
-Excede a un defecto, y por eso no se cierra con él: que
+Y queda apuntado lo que este informe destapó y **excede a un defecto**: que
 `DefaultPolicy` tiene todas las reglas en código mientras `ClaudePolicy` recibe
 el 23% del texto, o sea que **los dos decisores no están igual de informados**.
 Eso amenaza la comparabilidad que `guion_diff` afirma dar, y es medible.

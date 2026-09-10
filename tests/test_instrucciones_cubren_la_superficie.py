@@ -1,4 +1,4 @@
-"""`_PROTOCOLO` es el mapa de la superficie: lo que no está ahí, no existe.
+"""`_INSTRUCTIONS` es el mapa de la superficie: lo que no está ahí, no existe.
 
 El servidor entrega este texto al modelo. Una herramienta registrada pero
 ausente de él no está rota — es que el LLM no sabe que puede llamarla.
@@ -13,29 +13,6 @@ llamar.
 
 > La capacidad está en la capa de abajo y la superficie no la nombra.
 """
-
-# ORDEN 1.1 — DÓNDE VIVE AHORA ESTA DOCTRINA.
-#
-# Estas afirmaciones se hacían sobre `_INSTRUCTIONS`, que hasta el 10-sep-2026
-# eran los 35.941 caracteres del método entero y viajaban EN CADA LLAMADA.
-# Ahora `_INSTRUCTIONS` es una cabecera de 2.000 y el método vive en
-# `_PROTOCOLO`, que se sirve por `art://protocolo` y se PIDE.
-#
-# La propiedad que estas pruebas guardan —que la doctrina exista y esté
-# enunciada— no cambia. Lo que cambia es el canal, y con él la garantía: antes
-# se empujaba (y el cliente recortaba el 77%, BUG-0116), ahora se pide. Lo que
-# tiene que estar en la CABECERA, sí o sí, lo fija
-# `tests/test_presupuesto_del_semaforo.py`.
-#
-# DECISIÓN DEL ANALISTA (10-sep-2026), sobre si la cabecera debe llevar además
-# la lista pelada de las 46: **no, se confía en la arquitectura**. Si las
-# medidas del `ART_CALL_LOG` —que desde ORDEN 0.3 cuenta también los recursos—
-# muestran que el modelo no pide `art://protocolo`, entonces se añade. Antes
-# no: sería pagar 1.400 caracteres por llamada contra una sospecha.
-#
-# Y el descubrimiento de una herramienta no depende de este texto: va en
-# `tools/list`, que el cliente manda siempre. Lo que este texto da es CUÁNDO
-# usar cuál.
 import asyncio
 
 import pytest
@@ -51,17 +28,17 @@ def registradas():
 def test_todas_las_herramientas_estan_en_las_instrucciones(registradas):
     """La prueba que impide la reincidencia: una herramienta nueva que nadie
     nombre hace fallar la suite."""
-    ins = srv._PROTOCOLO
+    ins = srv._INSTRUCTIONS
     faltan = [t for t in registradas if t not in ins]
     assert not faltan, (
-        "herramientas registradas y ausentes de _PROTOCOLO "
+        "herramientas registradas y ausentes de _INSTRUCTIONS "
         f"({len(faltan)}/{len(registradas)}): {faltan}. "
         "Una herramienta que el LLM no ve es una herramienta que no existe.")
 
 
 def test_las_dos_puertas_estan_en_su_etapa():
     """No basta con nombrarlas: tienen que estar donde se decide usarlas."""
-    ins = srv._PROTOCOLO
+    ins = srv._INSTRUCTIONS
     i_ident = ins.index("guided_identification")
     i_etapa3 = ins.index("ETAPA 3")
     i_itv = ins.index("guided_intervention")
@@ -71,7 +48,7 @@ def test_las_dos_puertas_estan_en_su_etapa():
 
 def test_el_mapa_y_la_evidencia_van_juntos():
     """Son pareja: el mapa dice a dónde volver, la evidencia qué hay allí."""
-    ins = srv._PROTOCOLO
+    ins = srv._INSTRUCTIONS
     assert "guion_evidencia" in ins
     assert "guion_map" in ins
     bloque = ins[ins.index("EL GUION"):ins.index("EL GUION") + 2500]
@@ -82,7 +59,7 @@ def test_la_puerta_del_nodo_dice_el_criterio_de_parada():
     """La escalada no se detiene sola: cada intervención encoge σ̂ y promueve
     al siguiente anómalo. Sin el criterio escrito, el protocolo invita a
     sobre-intervenir."""
-    ins = srv._PROTOCOLO
+    ins = srv._INSTRUCTIONS
     assert "no se detiene sola" in ins or "NO se detiene sola" in ins
     assert "sobre-intervenir" in ins
 
@@ -90,21 +67,21 @@ def test_la_puerta_del_nodo_dice_el_criterio_de_parada():
 def test_el_convenio_de_signo_esta_donde_se_usa():
     """Está en tres docstrings y aun así se falló dos veces. En el protocolo
     va con su remedio: no hagas la resta, mira el camino del nivel."""
-    ins = srv._PROTOCOLO
+    ins = srv._INSTRUCTIONS
     assert "CAMINO" in ins and "restan" in ins.lower()
 
 
 def test_el_arbitro_entre_los_dos_criterios_de_forma_esta_dicho():
     """`incident_configurations` gobierna sobre `residual_episodes` para la
     FORMA. Eran dos respuestas a la misma pregunta sin árbitro."""
-    ins = srv._PROTOCOLO
+    ins = srv._INSTRUCTIONS
     assert "GOBIERNA sobre residual_episodes" in ins
 
 
 def test_la_regla_del_out_sigue_escrita():
     """Estaba antes de esta sesión y el código la incumplía (BUG-0091). Ahora
     la cumple; la regla no debe desaparecer al arreglarla."""
-    ins = srv._PROTOCOLO
+    ins = srv._INSTRUCTIONS
     assert "NUNCA DE REEJECUTAR" in ins
     assert "get_out_report" in ins
 
@@ -112,7 +89,7 @@ def test_la_regla_del_out_sigue_escrita():
 def test_las_instrucciones_no_nombran_herramientas_inexistentes(registradas):
     """El otro lado del mismo defecto: prometer algo que no está."""
     import re
-    ins = srv._PROTOCOLO
+    ins = srv._INSTRUCTIONS
     citadas = set(re.findall(r"\b([a-z][a-z0-9_]{6,})\(", ins))
     conocidas = set(registradas) | {
         "guion_abandon", "print", "range", "len", "float", "int", "str",

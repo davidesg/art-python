@@ -11,19 +11,6 @@ Y había una causa concreta: `confirm_and_estimate` —la herramienta del carril
 guiado— no declaraba su modo, así que el sobre siempre tomaba la forma del
 registro.
 """
-
-# ORDEN 1.1 — DÓNDE VIVE AHORA ESTA DOCTRINA.
-#
-# Estas afirmaciones se hacían sobre `_INSTRUCTIONS`, que hasta el 10-sep-2026
-# eran los 35.941 caracteres del método entero y viajaban EN CADA LLAMADA.
-# Ahora `_INSTRUCTIONS` es una cabecera de 2.000 y el método vive en
-# `_PROTOCOLO`, que se sirve por `art://protocolo` y se PIDE.
-#
-# La propiedad que estas pruebas guardan —que la doctrina exista y esté
-# enunciada— no cambia. Lo que cambia es el canal, y con él la garantía: antes
-# se empujaba (y el cliente recortaba el 77%, BUG-0116), ahora se pide. Lo que
-# tiene que estar en la CABECERA, sí o sí, lo fija
-# `tests/test_presupuesto_del_semaforo.py`.
 import os
 import warnings
 
@@ -199,5 +186,5 @@ def test_confirm_and_estimate_declara_que_es_guiado():
 
 
 def test_las_instrucciones_prohiben_decidir_por_el_analista():
-    assert "EL QUE DECIDE ES EL ANALISTA" in srv._PROTOCOLO
-    assert "TU TURNO TERMINA EN ESA MARCA" in srv._PROTOCOLO
+    assert "EL QUE DECIDE ES EL ANALISTA" in srv._INSTRUCTIONS
+    assert "TU TURNO TERMINA EN ESA MARCA" in srv._INSTRUCTIONS

@@ -164,23 +164,12 @@ def test_en_series_no_mensuales_se_niega():
 
 
 def test_la_herramienta_lo_acepta_y_lo_documenta():
-    """Desde ORDEN 1.2 la descripción del parámetro vive en el ESQUEMA
-    (`Field(description=…)`) y no en el docstring: viaja entera porque el
-    cliente la necesita para construir la llamada, en vez de ir en la cola de
-    8.968 caracteres que el cliente recortaba. Lo que se exige es lo mismo —que
-    diga que es SÓLO MENSUAL y que es determinista, no una intervención."""
-    import asyncio
+    from tests._fuente import fuente_de
     import art.mcp_server as srv
-
-    t = [x for x in asyncio.run(srv.mcp.list_tools())
-         if x.name == "confirm_and_estimate"][0]
-    props = t.inputSchema["properties"]
-    assert props["easter"]["type"] == "boolean"
-    assert props["easter"]["default"] is False
-    d = props["easter"]["description"]
-    assert "MENSUAL" in d.upper(), "tiene que decir que es sólo mensual"
-    assert "DETERMINISTA" in d.upper() and "intervención" in d, (
-        "tiene que decir que NO pasa por el nodo de intervención")
+    ce = getattr(srv.confirm_and_estimate, "fn", srv.confirm_and_estimate)
+    src = fuente_de(ce)
+    assert "easter: bool = False" in src
+    assert "MONTHLY" in src, "el docstring tiene que decir que es sólo mensual"
 
 
 # ── el contrato de ficheros aguanta con el easter dentro ──────────────

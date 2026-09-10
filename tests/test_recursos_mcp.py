@@ -115,16 +115,8 @@ def test_el_protocolo_se_puede_RELEER():
     vez: a mitad de un análisis largo puede haber salido de la ventana. Como
     recurso se vuelve a pedir."""
     t = _leer("art://protocolo")
-    # Desde ORDEN 1.1 el recurso YA NO es el mismo texto que las
-    # `instructions`: aquéllas son una cabecera de 2.000 caracteres y esto es
-    # el método entero. La propiedad que la prueba guarda —que se pueda releer
-    # y llegue entero— no cambia; cambia dónde vive.
-    assert t == srv._PROTOCOLO
-    assert len(t) > 30_000, f"el protocolo vino con {len(t):,} caracteres"
+    assert t == srv._INSTRUCTIONS
     assert "NUNCA SE CAPA UN AR" in t
-    assert t != srv._INSTRUCTIONS, (
-        "si volvieran a ser el mismo texto, la cabecera habría vuelto a "
-        "llevarse los 36.000 caracteres en cada llamada (BUG-0116)")
 
 
 # ── la propiedad que justifica todo esto ──────────────────────────────
