@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**145 report(s), 6 open.**
+**148 report(s), 9 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -13,6 +13,9 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0123](BUG-0123-la-simplificacion-que-el-codigo-sabe-y-no-propone.md) | open | medium | interventions | test_interventions declara «no hay simplificación posible» cuando la hay — un escalón con ganancia nula es un impulso de un orden menos, y el código lo sabe pero no lo propone | — |
 | [BUG-0124](BUG-0124-los-dos-detectores-de-covarianza-semilla-se-excluye.md) | open | high | diagnosis | Los dos detectores de covarianza-semilla se excluyen mutuamente — con degeneración PARCIAL el aviso cuenta sólo las coincidencias exactas y calla las que están a 0,02 % de la semilla | — |
 | [BUG-0147](BUG-0147-la-figura-se-escribe-y-no-se-dice-donde.md) | open | medium | mcp-tools | Seis herramientas escriben su figura y no dicen dónde — el otro medio BUG-0122, y sólo se ve cruzando la frontera | — |
+| [BUG-0149](BUG-0149-la-superposicion-dibuja-el-nivel-sobre-diferencias.md) | open | high | figuras | La superposición de la llamada 2 dibuja la hipótesis en el NIVEL sobre residuos en ∇ y en la fecha del episodio, no en la de la configuración | — |
+| [BUG-0150](BUG-0150-las-configuraciones-y-la-escalera-se-estiman-sin.md) | open | high | interventions | Las configuraciones y la escalera se estiman SIN las intervenciones que ya lleva el modelo base | — |
+| [BUG-0151](BUG-0151-la-covarianza-del-out-conserva-la-semilla-del-bf.md) | open | high | estimation | La covarianza del .out conserva la semilla del BFGS en direcciones ROTADAS — ningún detector por parámetro la ve | — |
 | [BUG-0011](BUG-0011-dcd-overdiff-recommends-d2-on-seasonal-price-index.md) | in-progress | medium | formal-tests | dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
