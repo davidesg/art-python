@@ -1,11 +1,11 @@
 ---
 id: BUG-0172
 title: La regla de Treadway lee los residuos DESPLAZADOS cuando hay raíces estacionales integradas — publica «2 de 4 pasan» donde pasan las cuatro
-status: open
-severity: high
+status: fixed
+severity: critical
 component: interventions
 found_in: 0.1.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: David — run 3 de SF_MEG, incidencia C-21
 tags:
@@ -70,14 +70,64 @@ fecha conocida: los `fechas` que devuelve `check_intervention_fit` apuntan
 
     consumo = Σ (2 si f interior, 1 si f == s/2)  sobre las f con ifadf[f] == 1
 
-## Fix propuesto
+## No eran dos sitios: eran ONCE
 
-Sumar al `desfase` el consumo de `ifadf`. La cuenta ya existe en el proyecto —el
-convenio de `ornsop` de `fug` la hace para el eje de las figuras— así que es
-llevarla a un solo sitio en vez de tenerla en dos.
+«Conviene revisar los demás» se quedó corto. El censo del fuente encontró **once**
+sitios haciendo la misma cuenta a mano, todos sin `ifadf`:
 
-Y conviene revisar los demás sitios que hacen `at → índice de residuo` con el
-mismo `d + D·s`: si Treadway lo tenía mal, es probable que no sea el único.
+| sitio | qué desplazaba |
+|---|---|
+| `interventions.py` · Treadway | los residuos que juzgan la intervención |
+| `mcp_server.py` · `suggest_intervention_form` | **DÓNDE se coloca la intervención pedida** |
+| `mcp_server.py` · `guided_intervention` llamada 2 | la fecha del episodio |
+| `mcp_server.py` · `guided_intervention` llamada 1 | las fechas de la tabla de calibración |
+| `mcp_server.py` · `intervention_plot` | la fecha de la superposición |
+| `mcp_server.py` · `residual_episodes` | el fechado de los episodios |
+| `mcp_server.py` · escaneo y autoscan (×3) | las fechas de las distorsiones |
+| `configuracion.py` | el arranque de cada configuración candidata |
+| `escalera.py` | el arranque de los peldaños |
+
+**Y el segundo no desplaza una etiqueta: desplaza el modelo.** Sobre
+`ES_CPI_B_m11` —dos frecuencias reformuladas, consumo 4— una intervención pedida
+para 03/2022 se colocaba en 07/2022.
+
+## Fix
+
+**Una sola función**, `identification.desfase_observaciones(model)`:
+
+    d          cada diferencia regular consume 1
+    D · s      cada diferencia estacional consume s
+    ifadf[f]   cada raíz estacional consume el GRADO de su factor:
+               2 en frecuencia interior (1 − 2cos(ω)B + B²), 1 en Nyquist (1 + B)
+
+Verificada **contra el recuento real de residuos del motor**, no contra el
+razonamiento, en siete combinaciones de `(d, D, ifadf)` y en los cuatro modelos
+del run 3:
+
+    B_m11  n=293  nres=288  ifadf=[2,3]  desfase 5  ✓
+    B_m08  n=293  nres=290  ifadf=[2]    desfase 3  ✓
+    A_m06  n=216  nres=213  ifadf=[3]    desfase 3  ✓
+    B_m01  n=293  nres=292  ifadf=[]     desfase 1  ✓
+
+Y Treadway sobre `B_m11`, que es el caso que lo destapó:
+
+    step    03/2022  z [−0.50, −0.74, −0.09, +0.76]  ✓ absorbido
+    step    09/2021  z [−0.47, −0.24]                ✓ absorbido
+    step    12/2021  z [+0.56]                       ✓ absorbido
+    impulse 01/2021  z [−0.39]                       ✓ absorbido
+
+    4 de 4 pasan la regla     (el run publicó «2 de 4»)
+
+Los z coinciden con los que el analista leyó a mano del `.out`.
+
+**La prueba que importa no es ninguna de ésas**: es la que recorre el FUENTE y
+falla si alguien vuelve a escribir `d + D·s` a mano. Escrita en once sitios era
+una costumbre — basta que se añada un operador nuevo para que vuelva a divergir.
+
+*(Nota de método: la primera versión de esa prueba usaba `re.S` sin acotar y
+cruzaba líneas hasta una `D` lejana, marcando como defecto un `d_reg` que es otra
+cosa. Una prueba sobre el fuente tiene que acotar su ventana o inventa
+defectos.)*
 
 ## Validation
 

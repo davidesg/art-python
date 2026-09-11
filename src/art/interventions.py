@@ -1234,7 +1234,11 @@ def check_intervention_fit(model,
     z = (res - float(res.mean())) / std
 
     freq = int(getattr(model.series, "freq", 1) or 1)
-    desfase = int(getattr(model, "d", 0)) + int(getattr(model, "D", 0)) * freq
+    # BUG-0172: `d + D·s` no contaba las raíces estacionales de `ifadf`, así que
+    # con un modelo reformulado Treadway leía los residuos de 2 o 4 meses
+    # DESPUÉS de la fecha intervenida y publicaba un veredicto sobre otro mes.
+    from .identification import desfase_observaciones
+    desfase = desfase_observaciones(model)
 
     fuera = []
     for idx, itv in enumerate(model.interventions or []):

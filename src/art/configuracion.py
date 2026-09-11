@@ -520,7 +520,11 @@ def evalua_configuraciones(model_base, candidatos: Sequence[tuple[int, int]],
     import fue
     from art.interventions import test_intervention, check_intervention_fit
 
-    desfase = int(d) + int(getattr(model_base, "D", 0)) * int(freq)
+    # BUG-0172: incluye el consumo de `ifadf`. `d` llega por parámetro, así que
+    # se respeta si difiere del modelo, pero el resto sale de la cuenta única.
+    from art.identification import desfase_observaciones
+    desfase = (int(d) - int(getattr(model_base, "d", 0) or 0)
+               + desfase_observaciones(model_base))
     # BUG-0150. Este filtro se quedaba sólo con la estructura estacional y
     # tiraba TODAS las intervenciones de suceso ya estimadas, así que cada
     # candidato se evaluaba contra un base que no era el del analista. Sobre

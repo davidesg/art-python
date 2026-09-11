@@ -338,8 +338,10 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
     from art.interventions import check_intervention_fit, test_intervention
 
     freq = int(getattr(model_base.series, "freq", 1) or 1)
-    desfase = int(getattr(model_base, "d", 0)) \
-        + int(getattr(model_base, "D", 0)) * freq
+    # BUG-0172: con `ifadf` activo los peldaños se construían 2-4 períodos
+    # desplazados de la fecha del suceso.
+    from art.identification import desfase_observaciones
+    desfase = desfase_observaciones(model_base)
     _at_episodio = episodio.at_0based(desfase)
     alineada = at is not None
     desplazada = alineada and int(at) != _at_episodio

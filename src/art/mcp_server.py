@@ -33,6 +33,7 @@ _w.filterwarnings("ignore", module=r"pydantic_settings.*",
                   message=r".*incomplete definition.*")
 
 from mcp.server.fastmcp import FastMCP
+from art.identification import desfase_observaciones as _desfase_obs
 
 _INSTRUCTIONS = """
 Eres el asistente de análisis de series temporales ART — A Real-Time Time-Series Analysis (metodología Box-Jenkins-Treadway).
@@ -2520,8 +2521,9 @@ def intervention_plot(omega: list[float],
         # el servidor, y el desfase depende de SOBRE QUÉ se mira: cero sobre la
         # serie, `d + D·s` sobre residuos (BUG-0067).
         _f = int(getattr(ts, "freq", 1) or 1)
-        _desf = (int(getattr(m, "d", 0)) + int(getattr(m, "D", 0)) * _f
-                 if sobre == "residuos" else 0)
+        # BUG-0172: la cuenta incluye `ifadf`; escrita a mano se quedaba corta.
+        from art.identification import desfase_observaciones as _desf_obs
+        _desf = _desf_obs(m) if sobre == "residuos" else 0
         _cuando = _fecha_de(int(at), _f, getattr(ts, "start", ()), _desf)
         desc = describe_superposicion(
             y, int(at), omega, delta or (), b=b, d=d_eff,
@@ -2597,7 +2599,8 @@ def residual_episodes(inp_path: str,
         v = int(ventana) or THRESHOLDS["ventana_episodio"]
         d_reg = int(getattr(m, "d", 0))
         eps = decide_episodios(ext, ventana=v, d=d_reg)
-        off = int(getattr(m, "d", 0)) + int(getattr(m, "D", 0)) * int(ts.freq or 1)
+        from art.identification import desfase_observaciones as _desf_obs
+        off = _desf_obs(m)                                    # BUG-0172
         desc = describe_episodios(r, eps, ventana=v, umbral=threshold, offset=off)
         _escribe_fig(desc.figure_b64, "episodios")
         return _result(desc)
@@ -2920,7 +2923,7 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER,
             _cal = calibra_correlograma(
                 m._result.residuals, umbral=threshold, omitir=_om,
                 freq=_f, start=getattr(ts, "start", ()),
-                desfase=int(getattr(m, "d", 0)) + int(getattr(m, "D", 0)) * _f)
+                desfase=_desfase_obs(m))                      # BUG-0172
             # BUG-0133: sólo la TABLA. La figura de esta llamada es la del
             # escaneo, que es el gráfico de calibración de distorsiones.
             _d = describe_calibracion(_cal, nombre=os.path.basename(inp_path),
@@ -4441,8 +4444,7 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
                 cal = calibra_correlograma(
                     m._result.residuals, umbral=_autoscan_z,
                     freq=_f, start=getattr(ts, "start", ()),
-                    desfase=int(getattr(m, "d", 0))
-                    + int(getattr(m, "D", 0)) * _f)
+                    desfase=_desfase_obs(m))              # BUG-0172
             except Exception:
                 cal = None
             lvl = "moderada" if level == "moderate" else "leve"
@@ -7404,7 +7406,10 @@ def guided_intervention(inp_path: str,
 
         freq = int(ts.freq or 1)
         d_reg = int(getattr(m, "d", 0))
-        desfase = d_reg + int(getattr(m, "D", 0)) * freq
+        # BUG-0172: sin el consumo de `ifadf`, los episodios salían fechados
+        # 2-4 meses tarde sobre un modelo reformulado.
+        from art.identification import desfase_observaciones as _desf_obs
+        desfase = d_reg - int(getattr(m, "d", 0) or 0) + _desf_obs(m)
         dom = dominio.strip() or (decide_domain(ts) if True else "generic")
 
         r = np.asarray(m.residuals.data, dtype=float)
@@ -7743,8 +7748,7 @@ def guided_intervention(inp_path: str,
                             omega=_om, entrada=_ent,
                             d=int(getattr(m, "d", 0)),
                             freq=_f, start=getattr(ts, "start", ()),
-                            desfase=(int(getattr(m, "d", 0))
-                                     + int(getattr(m, "D", 0)) * _f),
+                            desfase=_desfase_obs(m),      # BUG-0172
                             etiqueta=f"{mejor.etiqueta} — {mejor.en_palabras}",
                         ).figure_b64
                 except Exception as _se:
@@ -7779,7 +7783,7 @@ def guided_intervention(inp_path: str,
         cal = calibra_correlograma(
             m._result.residuals, umbral=threshold,
             freq=_f, start=getattr(ts, "start", ()),
-            desfase=int(getattr(m, "d", 0)) + int(getattr(m, "D", 0)) * _f)
+            desfase=_desfase_obs(m))                          # BUG-0172
         # BUG-0133: de aquí sale la TABLA con su veredicto por retardo. La
         # FIGURA de esta llamada es la del escaneo de tres paneles —el gráfico
         # de calibración de distorsiones—, que enseña además dónde está el
@@ -7980,7 +7984,11 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         #
         # Se convierte UNA vez, aquí, y a partir de este punto todo va en índices
         # de la SERIE.
-        _desfase = m_src.d + m_src.D * (freq if freq > 0 else 1)
+        # BUG-0172. Éste es el grave: de aquí sale DÓNDE se coloca la
+        # intervención que el analista pide. Sobre `ES_CPI_B_m11` —dos
+        # frecuencias reformuladas— una pedida para 03/2022 se ponía en 07/2022.
+        from art.identification import desfase_observaciones as _desf_obs
+        _desfase = _desf_obs(m_src)
 
         if not date.strip():
             # Auto-select most extreme residual not already covered by an intervention

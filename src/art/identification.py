@@ -34,6 +34,51 @@ from .seasonal_detection import detect_seasonality, plot_seasonality
 # Box-Cox transform (mirrors fug BoxCox with geometric=False, shift=0)
 # ---------------------------------------------------------------------------
 
+def desfase_observaciones(model) -> int:
+    """Cuántas observaciones consume la diferenciación — BUG-0172.
+
+    Los residuos de un modelo diferenciado empiezan N observaciones después de
+    la serie, y **hay que contarlas todas**:
+
+        d          · cada diferencia regular consume 1
+        D · s      · cada diferencia estacional consume s
+        ifadf[f]   · cada RAÍZ ESTACIONAL ESTOCÁSTICA consume el grado de su
+                     factor: 2 en una frecuencia interior
+                     (1 − 2cos(ω)B + B²), 1 en el Nyquist (1 + B)
+
+    **El tercer sumando faltaba en los CINCO sitios que hacían esta cuenta**, y
+    cada uno la escribía a mano como `d + D·s`:
+
+        configuracion.py   las configuraciones candidatas del incidente
+        escalera.py        el arranque de los peldaños
+        interventions.py   la regla de Treadway
+        mcp_server.py ×2   la fecha de un episodio y DÓNDE se coloca la
+                           intervención que el analista pide
+
+    Los dos últimos son los graves: no desplazan una etiqueta, desplazan **el
+    modelo**. Medido sobre `ES_CPI_B_m11` —dos frecuencias reformuladas, consumo
+    4— una intervención pedida para 03/2022 se colocaba en 07/2022, y Treadway
+    leía el residuo de 07/2022 para juzgarla. Publicaba «2 de 4 pasan» donde las
+    cuatro pasaban.
+
+    Comprobado contra el recuento real de residuos en cuatro modelos del run 3:
+
+        B_m11  n=293  nres=288  d=1  ifadf=[2,3]  consumo 4  ✓
+        B_m08  n=293  nres=290  d=1  ifadf=[2]    consumo 2  ✓
+        A_m06  n=216  nres=213  d=1  ifadf=[3]    consumo 2  ✓
+        B_m01  n=293  nres=292  d=1  ifadf=[]     consumo 0  ✓
+
+    Vive aquí, en un solo sitio, porque escrita en cinco es una costumbre: basta
+    que alguien añada un operador nuevo para que vuelva a divergir.
+    """
+    s = int(getattr(getattr(model, "series", None), "freq", 1) or 1)
+    n = int(getattr(model, "d", 0) or 0) + int(getattr(model, "D", 0) or 0) * s
+    for f, v in enumerate(list(getattr(model, "ifadf", None) or [])):
+        if v == 1:
+            n += 1 if (s >= 2 and f == s // 2) else 2
+    return n
+
+
 def _default_lags_fug(n: int, freq: int) -> int:
     """Default ACF/PACF lags matching fug diagnose.c formula."""
     if n < 3 * (freq + 1):
