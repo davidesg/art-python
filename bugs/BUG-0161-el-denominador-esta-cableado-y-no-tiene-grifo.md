@@ -72,11 +72,10 @@ Es así en las dos puertas que lo hacen —`guided_intervention` y
 (`escalera.escalera_de_ockham`, `configuracion.evalua_configuraciones`), que
 montan siempre `omega=[0.0]*n, omega_free=[True]*n` sin tocar δ.
 
-Y no hay **retardo muerto**: `fue.Intervention(type, at, omega, delta,
-omega_free, delta_free, harmonic, data)` no tiene campo `b`. El retardo va en
-`at` o como ceros de cabeza en ω. `art.ltf` sí lo modela (`respuesta_flt(...,
-b=)`, `operador_en_palabras(..., b=)`), así que se puede DIBUJAR un retardo que
-no se puede CONSTRUIR.
+*(Lo que NO falta es el retardo muerto. `fue.Intervention` no tiene campo `b` y
+no lo necesita: ω(B)·Bᵇ es ω(B) con b ceros de cabeza, y `at` mueve el arranque.
+`art.ltf` lleva `b=` sólo como comodidad de dibujo. Lo apunté como hueco al hacer
+el censo y el analista lo corrigió.)*
 
 ## Impact
 
