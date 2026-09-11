@@ -208,6 +208,17 @@ class Escalera:
     # lo que decidía antes (BUG-0086).
     nivel_simple: str = ""
     criterio_simple: str = ""
+    # DE DÓNDE ARRANCAN LOS PELDAÑOS — BUG-0156.
+    #
+    # La escalera camina desde el primer extremo del episodio; las
+    # configuraciones exploran arranques HACIA ATRÁS por el mecanismo. Cuando
+    # las dos se publican juntas y no parten del mismo sitio, sus ganadoras no
+    # son comparables: hablan de sucesos que empiezan en fechas distintas. Se
+    # guarda el arranque efectivo para poder decirlo, y para poder alinearlas.
+    at_arranque: int = -1        # 0-based en la SERIE
+    fecha_arranque: str = ""
+    alineada_con_configuracion: bool = False   # el llamante pasó el arranque
+    desplazada_del_episodio: bool = False      # …y NO es el primer extremo
 
     def por_nivel(self, nivel: str) -> Peldano | None:
         return next((p for p in self.peldanos if p.nivel == nivel), None)
@@ -295,7 +306,9 @@ def _estructurales(model):
 
 
 def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
-                       umbral_vecino: float = 0.0) -> Escalera:
+                       umbral_vecino: float = 0.0,
+                       at: int | None = None, n_alto: int = 0,
+                       fecha_arranque: str = "") -> Escalera:
     # `umbral_vecino=0` significa «usa el de la política» —el mismo idioma que
     # `ventana=0` en este nodo—. Estaba clavado a 3.0, que es el umbral de los
     # anómalos SUELTOS, y dejaba ciego el tramo (2, 3)σ justo donde la regla de
@@ -308,6 +321,18 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
                  Sus residuos son justo lo que la intervención debe explicar.
     episodio   : el `episodes.Episodio` que sitúa el suceso.
     dominio    : de `policy.decide_domain`. Gobierna la lectura de plausibilidad.
+    at         : arranque 0-based en la SERIE. Por defecto el primer extremo del
+                 episodio. **Pásalo para ALINEAR la escalera con la
+                 configuración que el mecanismo eligió** (BUG-0156): si no, los
+                 peldaños hablan de un suceso que empieza en otra fecha y
+                 comparar su ganadora con la de `incident_configurations` no es
+                 comparar.
+    n_alto     : nº de escalones del peldaño 2. Por defecto L+1, la forma
+                 general de un episodio de L períodos. Con `at` viene de la
+                 configuración, y entonces el peldaño alto ES la configuración
+                 ganadora — que es lo que hace que la escalera conteste a la
+                 única pregunta que le queda: ¿hace falta tanto?
+    fecha_arranque : etiqueta del arranque, sólo para el informe.
     """
     import fue
     from art.interventions import check_intervention_fit, test_intervention
@@ -315,8 +340,12 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
     freq = int(getattr(model_base.series, "freq", 1) or 1)
     desfase = int(getattr(model_base, "d", 0)) \
         + int(getattr(model_base, "D", 0)) * freq
-    at = episodio.at_0based(desfase)
+    _at_episodio = episodio.at_0based(desfase)
+    alineada = at is not None
+    desplazada = alineada and int(at) != _at_episodio
+    at = _at_episodio if at is None else int(at)
     L = episodio.duracion_nivel
+    _n_alto = int(n_alto) if n_alto else L + 1
     # BUG-0150: se heredan las intervenciones YA ESTIMADAS del base; sólo se
     # retira la que cae sobre el mismo suceso que se está estudiando.
     base_itvs, _retiradas = hereda_del_base(model_base, at_estudiado=at,
@@ -360,8 +389,10 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
     # El peldaño 2 sólo tiene sentido si el episodio dura más de un período o si
     # el 1 no se sostiene: la forma general de un episodio de L es L+1 escalones.
     peldanos.append(construye(
-        "2", f"episodio de {L} período(s) — {L + 1} escalones en el nivel",
-        "step", L + 1))
+        "2", (f"episodio de {L} período(s) — {_n_alto} escalones en el nivel"
+              if not alineada else
+              f"la configuración del mecanismo — {_n_alto} escalones en el nivel"),
+        "step", _n_alto))
 
     # ── por qué subir, o por qué no ─────────────────────────────────────
     p1a, p1b, p2 = (peldanos[0], peldanos[1], peldanos[2])
@@ -423,7 +454,10 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
                     pregunta_extramuestral=pregunta,
                     nivel_simple=(mejor_simple.nivel if mejor_simple
                                   else nivel_simple),
-                    criterio_simple=criterio_simple)
+                    criterio_simple=criterio_simple,
+                    at_arranque=at, fecha_arranque=fecha_arranque,
+                    alineada_con_configuracion=alineada,
+                    desplazada_del_episodio=desplazada)
 
 
 # ---------------------------------------------------------------------------
@@ -523,6 +557,22 @@ def describe_escalera(escalera: "Escalera"):
     L = [f"### Escalera de Ockham — episodio {ep.inicio}"
          + (f"–{ep.fin}" if not ep.aislado else "")
          + f", {ep.duracion_nivel} período(s) en el nivel", ""]
+
+    # DE DÓNDE PARTEN LOS PELDAÑOS — BUG-0156. Sin esto la escalera y las
+    # configuraciones se publicaban juntas arrancando en fechas distintas, y sus
+    # ganadoras se leían como dos recomendaciones rivales cuando ni siquiera
+    # hablaban del mismo suceso.
+    if escalera.alineada_con_configuracion and escalera.desplazada_del_episodio:
+        L += [f"*Los peldaños parten de **{escalera.fecha_arranque}**, el "
+              "arranque que el MECANISMO admite, y **no** del primer extremo "
+              "del episodio: así los tres comparan la misma fecha que las "
+              "configuraciones y la única pregunta que queda es cuánta forma "
+              "hace falta.*", ""]
+    elif escalera.alineada_con_configuracion:
+        L += [f"*Los peldaños parten de **{escalera.fecha_arranque}**, que es a "
+              "la vez el primer extremo del episodio y el arranque que el "
+              "MECANISMO admite: los dos instrumentos miran la misma fecha.*",
+              ""]
 
     L += ["#### Peldaño 1 — una intervención escalar", "",
           "Dos lecturas del **mismo coste**, un parámetro cada una, y no "

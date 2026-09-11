@@ -7465,8 +7465,27 @@ def guided_intervention(inp_path: str,
             d_esc = None
             if escalera:
                 from art.escalera import describe_escalera, escalera_de_ockham
+                # ALINEADA CON LA CONFIGURACIÓN — BUG-0156.
+                #
+                # La escalera caminaba desde el primer extremo del episodio
+                # mientras las configuraciones exploran arranques hacia atrás
+                # por el mecanismo. Sobre ITCER eso ponía los peldaños en
+                # Q4/2008 y la configuración ganadora en Q2/2008: dos
+                # recomendaciones en la misma salida que ni siquiera hablaban
+                # del mismo suceso, y el analista arbitrando entre ellas.
+                #
+                # Con el arranque del mecanismo los tres peldaños comparan la
+                # MISMA fecha, el peldaño alto ES la configuración ganadora, y
+                # a la escalera le queda la única pregunta que sabe contestar:
+                # ¿hace falta tanta forma?
+                _mj = conj.mejor
+                _al = {}
+                if _mj is not None and _mj.estimado:
+                    _al = dict(at=_mj.arranque_resid - 1 + desfase,
+                               n_alto=_mj.n_escalones,
+                               fecha_arranque=_mj.fecha)
                 esc = escalera_de_ockham(m, ep, dominio=dom,
-                                         umbral_vecino=umbral_vecino)
+                                         umbral_vecino=umbral_vecino, **_al)
                 d_esc = describe_escalera(esc)
                 L += ["---", "", d_esc.summary, ""]
 
@@ -7485,6 +7504,49 @@ def guided_intervention(inp_path: str,
                 L += [f"- **Forma** — la gobierna la configuración, que extiende "
                       f"el arranque por el MECANISMO: `{mejor.etiqueta}`, es "
                       f"decir {mejor.en_palabras}.", ""]
+                # DOS INSTRUMENTOS, DOS PREGUNTAS — BUG-0156.
+                #
+                # La escalera y las configuraciones se publicaban juntas y cada
+                # una con su recomendación, sin decir cuál gobierna. Sobre
+                # ITCER: la escalera `1a` —un parámetro— y el veredicto
+                # `Q2/2008×3` —tres—. El analista tenía que arbitrar entre dos
+                # partes de la misma salida.
+                #
+                # No se resuelve eligiendo una: que discrepen es INFORMACIÓN, y
+                # cada una contesta lo suyo. El mecanismo acota la FORMA —qué
+                # arranque y cuántos escalones admite el dato—; la navaja acota
+                # la SOFISTICACIÓN —cuánta forma se sostiene—. Lo que hay que
+                # decir es eso, y que la discrepancia se discute, no se arbitra
+                # por AIC.
+                if esc is not None and esc.recomendado:
+                    _alto = esc.por_nivel("2")
+                    _n_esc = (_alto.n_omega if _alto is not None
+                              else mejor.n_escalones)
+                    if esc.recomendado != "2" and mejor.n_escalones > 1:
+                        L += [
+                            "- ⚠ **Los dos instrumentos no dicen lo mismo, y es "
+                            "información.** El mecanismo admite "
+                            f"`{mejor.etiqueta}` ({mejor.n_escalones} "
+                            f"parámetro(s)); la navaja se queda en "
+                            f"`{esc.recomendado}` (1 parámetro).", "",
+                            "  No lo arbitra el AIC. **El mecanismo acota la "
+                            "FORMA** —qué arranque y cuántos escalones cabe "
+                            "que tenga el suceso— **y la navaja acota la "
+                            "SOFISTICACIÓN** —cuánta de esa forma sostiene el "
+                            "dato—. Que la forma admisible sea más rica que la "
+                            "que la navaja sostiene es exactamente lo que hay "
+                            "que discutir: o el suceso es más simple de lo que "
+                            "el mecanismo permite, o falta la información "
+                            "extramuestral que lo justifique.", "",
+                            "  *Y si lo que falla es que ninguna forma de una "
+                            "sola fecha resuelve el suceso, mira si hay vuelta "
+                            "diferida: eso son dos intervenciones y su "
+                            "ganancia NETA, no una forma más rica "
+                            "(BUG-0157).*", ""]
+                    elif esc.recomendado == "2" and _n_esc == mejor.n_escalones:
+                        L += ["- ✓ **Los dos instrumentos coinciden**: el "
+                              "mecanismo admite esta forma y la navaja la "
+                              "sostiene. No hay nada que arbitrar.", ""]
                 if esc is not None and esc.nivel_simple:
                     L += [f"- **Lectura escalar** — `{esc.nivel_simple}` por la "
                           f"firma del residuo: {esc.criterio_simple}. *El AIC no "
@@ -7831,13 +7893,6 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                     dom = policy.decide_domain(ts)
                 except Exception:
                     dom = "generic"
-                esc = escalera_de_ockham(m_src, ep, dominio=dom)
-                # El respaldo era `"1b"` —el impulso transitorio— y eso es la
-                # forma menos conservadora de las dos: afirma que el suceso
-                # revierte. Cuando la escalera no recomienda, lo que queda es la
-                # lectura que dio la firma del residuo (BUG-0086).
-                rec = esc.recomendado or esc.nivel_simple or "1a"
-
                 # EL ÁRBITRO (arquitectura §4.2). La longitud del peldaño 2 la
                 # da `incident_configurations` —que extiende el arranque por el
                 # MECANISMO mientras los vecinos sigan activos— y no
@@ -7847,6 +7902,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                 # y el primero quedaba a 6,15 puntos de AIC del segundo. Eran
                 # dos respuestas a la misma pregunta sin árbitro.
                 n_esc, at_esc, nota_cfg = ep.n_escalones, at_0, ""
+                _al_esc: dict = {}
                 try:
                     import numpy as _np
                     from art.configuracion import (arranques_candidatos,
@@ -7864,6 +7920,8 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                     if _mejor is not None and _mejor.estimado:
                         n_esc = _mejor.n_escalones
                         at_esc = _mejor.arranque_resid - 1 + _desfase
+                        _al_esc = dict(at=at_esc, n_alto=n_esc,
+                                       fecha_arranque=_mejor.fecha)
                         if not _conj.identificado:
                             nota_cfg = (
                                 f"\n\n⚠ **El dato no identifica la "
@@ -7882,6 +7940,21 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                                 "escalones desde su primer extremo.*")
                 except Exception as _ce:
                     nota_cfg = f"\n\n*[configuraciones no disponibles: {_ce}]*"
+
+                # Y LA ESCALERA VA DESPUÉS, ALINEADA CON EL ÁRBITRO — BUG-0156.
+                #
+                # Estaba antes, así que juzgaba L+1 escalones desde el primer
+                # extremo del episodio mientras el código de abajo CONSTRUYE
+                # `n_esc` escalones desde `at_esc`. El peldaño que se evaluaba
+                # no era el peldaño que se construía — y el comentario del
+                # árbitro, dos párrafos más arriba, ya decía que la longitud la
+                # fija el mecanismo. Sólo que la escalera no se había enterado.
+                esc = escalera_de_ockham(m_src, ep, dominio=dom, **_al_esc)
+                # El respaldo era `"1b"` —el impulso transitorio— y eso es la
+                # forma menos conservadora de las dos: afirma que el suceso
+                # revierte. Cuando la escalera no recomienda, lo que queda es la
+                # lectura que dio la firma del residuo (BUG-0086).
+                rec = esc.recomendado or esc.nivel_simple or "1a"
 
                 form, n_omega = {"1a": ("step", 1), "1b": ("impulse", 1),
                                  "2": ("step", n_esc)}[rec]
