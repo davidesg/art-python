@@ -2758,6 +2758,66 @@ def _sample_acf_raw(w_std: "np.ndarray", lags: int) -> "np.ndarray":
     return acf
 
 
+class _LecturaQ:
+    """Qué dice el efecto de omitir sobre la Q — UNA sola vez (BUG-0153).
+
+    `clave` es el dato; `pie` va en la figura (inglés, como el resto del
+    dibujo) y `texto` en el escaneo (español). Salen del mismo sitio por
+    construcción, que es lo que impide que vuelvan a contradecirse.
+    """
+
+    __slots__ = ("clave", "pie", "texto")
+
+    def __init__(self, clave, pie, texto):
+        self.clave, self.pie, self.texto = clave, pie, texto
+
+
+def _lectura_de_la_q(q_obs, q_p, efecto, alpha: float = 0.05) -> "_LecturaQ":
+    """La lectura, y lo PRIMERO es si hay algo que leer.
+
+    «Falta estructura» sólo significa algo cuando hay estructura que falte. Con
+    una Q que ya pasa, el efecto de omitir es un dato descriptivo —cuánto se
+    mueve— y no un diagnóstico: no hay nada que una intervención tenga que
+    arreglar ahí.
+    """
+    if q_obs is None or efecto is None:
+        return _LecturaQ("sin_datos", "", "")
+    if q_p is not None and q_p >= alpha:
+        # La Q PASA. Se dice el efecto y se calla el diagnóstico.
+        return _LecturaQ(
+            "q_adecuada",
+            "Q already passes: this is how much it moves, not a diagnosis",
+            "\n  → **la Q ya pasa**, así que esto mide cuánto se mueve, no un "
+            "problema que arreglar. Si hay que intervenir el anómalo será por "
+            "otra razón —la identificación, la normalidad, o el suceso en sí— "
+            "y eso lo dice la calibración del correlograma, no la Q.")
+    cae = -efecto                      # positivo = la Q BAJA al omitir
+    if cae >= 50:
+        return _LecturaQ(
+            "la_ponian_los_anomalos",
+            "the anomalies were making Q",
+            "\n  → **la Q la ponían los anómalos**: intervenir antes de tocar "
+            "el ARMA")
+    if efecto > 5:
+        return _LecturaQ(
+            "enmascaraba",
+            "the anomaly was masking structure",
+            "\n  → **omitir SUBE la Q**: el anómalo estaba ENMASCARANDO "
+            "estructura — su contribución tiene el signo contrario a la "
+            "autocorrelación en algún retardo y la cancela. Mira en cuáles, en "
+            "los paneles de abajo: intervenir la va a destapar, no a quitarla")
+    if cae < 20:
+        return _LecturaQ(
+            "falta_estructura",
+            "Q barely drops: structure is missing",
+            "\n  → **la Q NO es de los anómalos**: falta estructura, y una "
+            "intervención no la va a arreglar")
+    return _LecturaQ(
+        "mixto", "mixed",
+        "\n  → **mixto**: los anómalos explican parte de la Q y queda "
+        "estructura debajo. Intervén y vuelve a mirar")
+
+
 def _acf_outlier_contributions(
     w_std: "np.ndarray", outlier_idx: list[int], lags: int
 ) -> tuple["np.ndarray", "np.ndarray"]:
@@ -3160,10 +3220,13 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
     q_obs = None
     efecto = None
     q_lag = None
+    q_p = None
     try:
         from fue.diagnostics import ljung_box as _lb
         _k = min(n_lags, max(1, len(w_std) // 4))
-        q_obs = float(_lb(w_std, [_k])["statistic"][0])
+        _lbr = _lb(w_std, [_k])
+        q_obs = float(_lbr["statistic"][0])
+        q_p = float(_lbr["pvalue"][0])
         q_lag = _k
         if outliers:
             from art.calibracion import _acf_pacf as _ap
@@ -3180,6 +3243,23 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
                 efecto = 100.0 * (_q(_a_cal, _nc) / _base - 1.0)
     except Exception:
         pass
+
+    # LA LECTURA DE LA Q, EN UN SOLO SITIO — BUG-0153.
+    #
+    # El pie de la figura y el texto del escaneo clasificaban por su cuenta, con
+    # umbrales distintos sobre la misma cifra, y llegaban a conclusiones
+    # OPUESTAS en la misma pantalla. Sobre ITCER m00 el pie decía «Q barely
+    # drops: structure is missing» mientras el veredicto de la tabla decía que
+    # el anómalo FABRICABA la señal.
+    #
+    # Y ninguno miraba si la Q **pasa**. Con Q(15)=10,4 —adecuada— «falta
+    # estructura» es un enunciado sin contenido: no falta nada que la Q pueda
+    # ver. La frase venía de otro caso —Q grande que no baja al omitir— y se
+    # aplicaba donde no significa lo mismo.
+    #
+    # Ahora hay UNA función, los dos la llaman, y lo primero que hace es
+    # preguntar si hay algo que diagnosticar.
+    _lect_q = _lectura_de_la_q(q_obs, q_p, efecto)
 
     # Lags whose |contribution| is meaningful (> half CI)
     affected_lags = [
@@ -3325,13 +3405,10 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         # significa nada.
         _pie = []
         if q_obs is not None:
-            _pie.append(f"Q({q_lag}) = {q_obs:.1f}")
-            if efecto is not None:
-                _lect = ("the anomalies were making Q" if efecto <= -50 else
-                         "the anomaly was masking structure" if efecto > 5 else
-                         "Q barely drops: structure is missing" if efecto > -20
-                         else "mixed")
-                _pie.append(f"omitting: {efecto:+.0f}% ({_lect})")
+            _pie.append(f"Q({q_lag}) = {q_obs:.1f}"
+                        + (f" (p={q_p:.3f})" if q_p is not None else ""))
+            if _lect_q.pie:
+                _pie.append(f"omitting: {efecto:+.0f}% ({_lect_q.pie})")
         _pie.append("calibrated by " + (
             f"{motivo or 'the given observations'} ({len(extreme_idx)} obs.)"
             if omitir is not None else f"threshold |z| > {threshold}"))
@@ -3351,25 +3428,17 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
          f"- Umbral: {_criterio_umbral(threshold, len(w_std))}"),
     ]
     if q_obs is not None:
-        lines.append(f"- Q({q_lag}) = **{q_obs:.1f}**  (Ljung-Box, la misma que "
-                     f"la figura de diagnosis)")
+        lines.append(
+            f"- Q({q_lag}) = **{q_obs:.1f}**"
+            + (f" (p={q_p:.3f}) — **{'pasa' if q_p >= 0.05 else 'RECHAZA'}**"
+               if q_p is not None else "")
+            + "  (Ljung-Box, la misma que la figura de diagnosis)")
         if efecto is not None:
-            _cae = -efecto            # positivo = la Q baja al omitir
             lines.append(
                 f"- Efecto de omitir sobre la Q: **{efecto:+.0f}%**  "
                 f"*(resumen; los signos se compensan entre retardos — el "
                 f"detalle está en los paneles)*"
-                + ("\n  → **la Q la ponían los anómalos**: intervenir antes de "
-                   "tocar el ARMA" if _cae >= 50 else
-                   "\n  → **omitir SUBE la Q**: el anómalo estaba ENMASCARANDO "
-                   "estructura — su contribución tiene el signo contrario a la "
-                   "autocorrelación en algún retardo y la cancela. Mira en "
-                   "cuáles, en los paneles de abajo: intervenir la va a "
-                   "destapar, no a quitarla" if efecto > 5 else
-                   "\n  → **la Q NO es de los anómalos**: falta estructura, y "
-                   "una intervención no la va a arreglar" if _cae < 20 else
-                   "\n  → **mixto**: los anómalos explican parte de la Q y "
-                   "queda estructura debajo. Intervén y vuelve a mirar"))
+                + _lect_q.texto)
 
     var_max = 0.0
     max_acf_pct = 0.0
@@ -3562,6 +3631,11 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
             "var_outlier_pct": var_max,        # % varianza del mayor anómalo
             "acf_max_pct": max_acf_pct,         # % distorsión ACF en el retardo más afectado
             "distortion_level": distortion_level,  # none|light|moderate|strong
+            # BUG-0153: la lectura de la Q, una sola, la misma que el pie de la
+            # figura. Y su p, que es lo que nadie miraba.
+            "q_stat": q_obs, "q_lag": q_lag, "q_pvalue": q_p,
+            "q_efecto_pct": efecto,
+            "q_lectura": _lect_q.clave,
         },
     )
 

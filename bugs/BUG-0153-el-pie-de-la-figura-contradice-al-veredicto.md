@@ -1,11 +1,11 @@
 ---
 id: BUG-0153
 title: El pie de la figura de calibración dice «falta estructura» mientras el veredicto dice que el anómalo fabricaba la señal
-status: open
+status: fixed
 severity: medium
 component: describe
 found_in: 0.2.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: David — corrida guiada de ITCER
 tags:
@@ -57,16 +57,35 @@ El analista recibe dos conclusiones opuestas y tiene que decidir cuál se cree.
 Es el arranque del nodo de intervención, donde la pregunta es precisamente
 «¿hay que intervenir?».
 
-## Fix propuesto
+## Fix
 
-1. El pie **no clasifica si la Q pasa**: dice el efecto y calla el diagnóstico.
-   «Falta estructura» sólo tiene sentido cuando hay estructura que falte.
-2. Pie y veredicto salen del **mismo sitio**. Hoy son dos cálculos
-   independientes con dos lenguajes; que uno cite al otro o que los dos vengan
-   de la calibración.
+**1 · Una sola lectura, en una sola función.** `_lectura_de_la_q(q_obs, q_p,
+efecto)` devuelve la clave, el texto del pie (inglés, como el resto del dibujo)
+y el del escaneo (español). Los dos consumidores la llaman; no queda ninguna
+clasificación suelta. Eran dos cadenas de `if` con **umbrales distintos sobre la
+misma cifra**, y por eso podían —y solían— llegar a conclusiones opuestas.
+
+**2 · Y lo PRIMERO que hace es preguntar si hay algo que diagnosticar.** Con la
+Q pasando, el efecto de omitir es un dato descriptivo, no un problema:
+
+    Q already passes: this is how much it moves, not a diagnosis
+
+    → **la Q ya pasa**, así que esto mide cuánto se mueve, no un problema que
+      arreglar. Si hay que intervenir el anómalo será por otra razón —la
+      identificación, la normalidad, o el suceso en sí— y eso lo dice la
+      calibración del correlograma, no la Q.
+
+Esa última frase es la que cierra el defecto: manda al instrumento que sí
+contesta, en vez de emitir un veredicto que contradice al de al lado.
+
+**3 · Y se publica la p.** Nadie miraba si la Q pasaba, entre otras cosas porque
+la salida no lo decía: imprimía `Q(15) = 10.4` a secas. Ahora va con su p y con
+«pasa» / «RECHAZA», y `q_pvalue` y `q_lectura` están en `data` para el carril.
 
 ## Validation
 
-Sobre un modelo con Q adecuada y anómalos presentes, el pie y el veredicto no
-pueden afirmar cosas contrarias, y ninguno de los dos puede decir «falta
-estructura».
+La prueba comprueba las cinco lecturas —incluida la nueva— y, sobre todo, que
+**no puedan volver a divergir**: cuenta cada frase del diagnóstico en el fuente
+y exige que aparezca **una sola vez** y dentro de `_lectura_de_la_q`. El conteo
+ignora los comentarios a propósito: éstos citan el texto viejo como explicación
+del defecto, y contarlos haría que documentar el arreglo rompiera la prueba.

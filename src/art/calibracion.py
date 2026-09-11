@@ -18,8 +18,8 @@ OPUESTOS en el mismo retardo.
 Medido sobre ∇ln PGAS (n=83, banda ±0,2151), omitiendo |z|>2,5 —las obs. 19 y
 20—, retardo 2:
 
-    ACF(2)   +0,1321 → +0,3143   SALE de banda   (el anómalo la ENMASCARABA)
-    PACF(2)  −0,2964 → −0,1967   ENTRA en banda  (el anómalo la FABRICABA)
+    ACF(2)   +0,1321 → +0,3143   ENMASCARADA  (el anómalo la tapaba: FALTA)
+    PACF(2)  −0,2964 → −0,1967   FABRICADA    (no existe sin él: SOBRA)
 
 El mismo anómalo escondía una señal MA y fabricaba una señal AR **a la vez**.
 Quien calibrase sólo la ACF concluiría «hay más MA de la que creía» y no se
@@ -307,18 +307,37 @@ class Distorsion:
 
     @staticmethod
     def _flip(obs: float, cal: float, banda: float) -> str | None:
+        """Qué le hacía el anómalo a esta señal — BUG-0152.
+
+        Esto devolvía `"entra"` / `"sale"`, y esas dos palabras toman como
+        sujeto **la banda**: «entra en la banda». La decisión que el analista
+        toma con la fila es sobre **el modelo**, y va en sentido contrario —
+        una señal que entra en la banda es un orden que SALE del modelo—. El
+        cálculo estaba bien y el nombre invertía la conclusión.
+
+        Se nombra lo que se decide. Las dos palabras ya existían en la glosa y
+        en el veredicto; lo que faltaba era que fueran el DATO, para que ningún
+        sitio pueda volver a invertirlas al presentarlas.
+
+            fabricada     fuera de banda y al calibrar entra
+                          → el anómalo la fabricaba; el orden SOBRA
+            enmascarada   dentro de banda y al calibrar sale
+                          → el anómalo la enmascaraba; el orden FALTA
+        """
         fo, fc = abs(obs) > banda, abs(cal) > banda
         if fo == fc:
             return None
-        return "entra" if fo and not fc else "sale"
+        return "fabricada" if fo and not fc else "enmascarada"
 
     @property
     def acf_flip(self) -> str | None:
-        """'sale' si el retardo estaba dentro y al calibrar sale; 'entra' al revés."""
+        """`'fabricada'` si el anómalo inventaba la señal MA; `'enmascarada'`
+        si la tapaba. `None` si el retardo no cambia de veredicto."""
         return self._flip(self.acf_obs, self.acf_cal, self.banda)
 
     @property
     def pacf_flip(self) -> str | None:
+        """Lo mismo para la señal AR."""
         return self._flip(self.pacf_obs, self.pacf_cal, self.banda)
 
     @property
@@ -588,9 +607,11 @@ def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = "",
                                             and d.d_acf > 0.01) else "—"
         L.append(f"| {d.lag} | {d.acf_obs:+.4f} | {d.acf_cal:+.4f} | {fa} "
                  f"| {d.pacf_obs:+.4f} | {d.pacf_cal:+.4f} | {fp} | {amp} |")
-    L += ["", f"*Banda ±{cal.banda:.3f}. «SALE» = estaba dentro y al calibrar "
-          "sale (el anómalo la **enmascaraba**); «ENTRA» = estaba fuera y al "
-          "calibrar entra (el anómalo la **fabricaba**).*", ""]
+    L += ["", f"*Banda ±{cal.banda:.3f}. La columna dice qué le hacía el "
+          "anómalo a esa señal, que es lo que decide: «**FABRICADA**» = no "
+          "existe sin el anómalo, así que ese orden **sobra**; "
+          "«**ENMASCARADA**» = el anómalo la tapaba, así que ese orden "
+          "**falta**.*", ""]
 
     # QUÉ FECHAS HACEN EL RETARDO — BUG-0144.
     #
@@ -642,22 +663,20 @@ def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = "",
               "sino que **no es un requisito previo a elegir p y q**."]
     else:
         L += ["#### Veredicto — **cambia la identificación**", ""]
-        if cal.flips_ar:
-            for d in cal.flips_ar:
-                que = ("una señal AR que el anómalo **fabricaba**"
-                       if d.pacf_flip == "entra" else
-                       "una señal AR que el anómalo **enmascaraba**")
-                L.append(f"- **PACF({d.lag})**: {d.pacf_obs:+.4f} → "
-                         f"{d.pacf_cal:+.4f} ({d.pacf_flip}) — {que}. "
-                         f"Afecta al **orden AR**.")
-        if cal.flips_ma:
-            for d in cal.flips_ma:
-                que = ("una señal MA que el anómalo **fabricaba**"
-                       if d.acf_flip == "entra" else
-                       "una señal MA que el anómalo **enmascaraba**")
-                L.append(f"- **ACF({d.lag})**: {d.acf_obs:+.4f} → "
-                         f"{d.acf_cal:+.4f} ({d.acf_flip}) — {que}. "
-                         f"Afecta al **orden MA**.")
+        # Y se dice UNA vez. Llevaba el rótulo entre paréntesis y la frase
+        # completa a continuación —«(fabricada) — una señal AR que el anómalo
+        # fabricaba»—, que es la misma palabra dos veces en la misma línea.
+        def _linea(d, quien, flip, obs, cal_, orden):
+            que = ("no existe sin el anómalo: ese orden **sobra**"
+                   if flip == "fabricada" else
+                   "el anómalo la tapaba: ese orden **falta**")
+            return (f"- **{quien}({d.lag})**: {obs:+.4f} → {cal_:+.4f} "
+                    f"**{flip.upper()}** — {que}. Afecta al **orden {orden}**.")
+
+        for d in cal.flips_ar:
+            L.append(_linea(d, "PACF", d.pacf_flip, d.pacf_obs, d.pacf_cal, "AR"))
+        for d in cal.flips_ma:
+            L.append(_linea(d, "ACF", d.acf_flip, d.acf_obs, d.acf_cal, "MA"))
         if cal.flips_opuestos:
             ls = ", ".join(str(d.lag) for d in cal.flips_opuestos)
             L += ["", f"⚠ **En el retardo {ls} las dos cambian en sentidos "

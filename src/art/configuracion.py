@@ -587,8 +587,20 @@ def evalua_configuraciones(model_base, candidatos: Sequence[tuple[int, int]],
                               umbral_activo=umbral_activo)
 
 
-def describe_configuraciones(conj: "ConjuntoCandidatos"):
+def describe_configuraciones(conj: "ConjuntoCandidatos",
+                            veredicto: bool = True):
     """El conjunto entero, con el rango de la ganancia como titular.
+
+    `veredicto=False` cuando esta salida va DENTRO de otra que ya publica el
+    suyo — BUG-0154. La llamada 2 de `guided_intervention` empotra este bloque,
+    añade su sección «Veredicto» y remata con esta recomendación: la misma
+    frase, tres veces, en la respuesta más larga del nodo. Repetir entierra lo
+    que NO se repite —las configuraciones rivales, la lectura de dominio, el
+    aviso de que el dato no identifica— y es lo que hace que el nodo se lea
+    «enrevesado».
+
+    Suelto —`incident_configurations`— sigue publicando el suyo: ahí es lo
+    único que hay.
 
     **No elige cuando el dato no identifica.** Publicar una configuración y su
     error típico cuando hay seis empatadas es fabricar una precisión que no
@@ -625,9 +637,10 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
 
     if conj.identificado and conj.unica_construida:
         u = emp[0] if emp else conj.mejor
-        L += ["#### Sólo se construyó **una** configuración", "",
-              f"→ {u.en_palabras}", "",
-              "Esto **no** es que el dato la identifique: es que no hubo nada "
+        L += ["#### Sólo se construyó **una** configuración", ""]
+        L += ([f"→ {u.en_palabras}", ""] if veredicto else
+              [f"→ **`{u.etiqueta}`**", ""])
+        L += ["Esto **no** es que el dato la identifique: es que no hubo nada "
               "que comparar. La marcha del mecanismo no encontró ningún vecino "
               "activo —ni antes ni después— con el que formar una alternativa, "
               f"así que el umbral de activo ({conj.umbral_activo:g}σ) o el "
@@ -635,9 +648,12 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
               "Baja el umbral si crees que el suceso tiene cola."]
     elif conj.identificado:
         u = emp[0] if emp else conj.mejor
-        L += ["#### El dato **sí** identifica la configuración", "",
-              f"→ {u.en_palabras}", "",
-              f"Se construyeron {len(conj.vivos)}; sólo una cae dentro de la "
+        L += ["#### El dato **sí** identifica la configuración", ""]
+        # Empotrado, este bloque aporta el HECHO —cuál gana y con cuánto
+        # margen—; la lectura entera es del veredicto de quien lo empotra.
+        L += ([f"→ {u.en_palabras}", ""] if veredicto else
+              [f"→ **`{u.etiqueta}`**", ""])
+        L += [f"Se construyeron {len(conj.vivos)}; sólo una cae dentro de la "
               "banda de AIC y las demás quedan fuera."]
     else:
         rg = conj.rango_ganancia

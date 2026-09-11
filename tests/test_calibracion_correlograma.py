@@ -155,11 +155,17 @@ def test_avisa_si_la_pacf_omitida_no_es_valida():
 
 # ───────────────── los veredictos por retardo ─────────────────
 
-def test_sale_y_entra_significan_lo_que_dicen():
+def test_el_flip_nombra_lo_que_se_DECIDE_no_la_banda():
+    """BUG-0152. Decía `"sale"` / `"entra"`, con la BANDA de sujeto: «entra en
+    la banda». Lo que el analista decide con la fila es sobre el MODELO, y va
+    al revés — una señal que entra en la banda es un orden que sale del modelo.
+    El cálculo estaba bien; el nombre invertía la conclusión."""
     d = Distorsion(lag=2, banda=0.2, acf_obs=0.10, acf_cal=0.30,
                    pacf_obs=-0.30, pacf_cal=-0.10)
-    assert d.acf_flip == "sale"      # dentro → fuera: estaba enmascarada
-    assert d.pacf_flip == "entra"    # fuera → dentro: estaba fabricada
+    # dentro de banda → fuera al calibrar: el anómalo la tapaba
+    assert d.acf_flip == "enmascarada"
+    # fuera de banda → dentro al calibrar: el anómalo la inventaba
+    assert d.pacf_flip == "fabricada"
 
 
 def test_un_retardo_que_no_cruza_no_es_un_flip():

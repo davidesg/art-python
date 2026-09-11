@@ -1,11 +1,11 @@
 ---
 id: BUG-0152
 title: «ENTRA» y «SALE» hablan de la BANDA mientras la decisión es sobre el MODELO, y se leen al revés
-status: open
+status: fixed
 severity: medium
 component: calibracion
 found_in: 0.2.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: David — corrida guiada de ITCER
 tags:
@@ -48,25 +48,37 @@ Anotado por el analista corriendo ITCER: *«Las etiquetas de la tabla se leen al
 revés: ENTRA significa que el retardo vuelve DENTRO de la banda, es decir, que
 el orden SALE del modelo.»*
 
-## Fix propuesto
+## Fix
 
-No cambiar el cálculo —está bien—, sino **nombrar lo que se decide**. Dos
-opciones, y la segunda me parece mejor:
+Se toma la opción **(b)**, y un paso más: las palabras no son la etiqueta, son
+**el dato**.
 
-**a)** invertir las palabras, que obliga a cambiar la glosa y deja el mismo
-problema con el sujeto implícito.
+```python
+return "fabricada" if fo and not fc else "enmascarada"
+```
 
-**b)** rotular por el efecto sobre el MODELO, que es lo que el analista hace
+`acf_flip` y `pacf_flip` devolvían `"entra"` / `"sale"`, así que cada sitio que
+las presentaba tenía que acordarse de traducirlas — y la traducción es justo
+donde estaba el error. Con el valor ya nombrado por lo que decide, **ningún
+sitio puede volver a invertirlo**. Es la misma lección de BUG-0159 y BUG-0160:
+lo que se sostiene porque todo el mundo se acuerda es una costumbre.
+
+La glosa pasa a decir el efecto sobre el modelo, que es lo que el analista hace
 con la fila:
 
-    el anómalo FABRICABA este orden   →  al calibrar, desaparece
-    el anómalo ENMASCARABA este orden →  al calibrar, aparece
+    «FABRICADA»    = no existe sin el anómalo, así que ese orden **sobra**
+    «ENMASCARADA»  = el anómalo la tapaba, así que ese orden **falta**
 
-Las dos frases ya están en la glosa; lo que falta es que sean la etiqueta en
-vez del pie. Y entonces la columna se lee sin glosa.
+Y la columna se lee sin glosa, que era el objetivo.
+
+**De paso, el veredicto decía la palabra dos veces en la misma línea** —«…
+(fabricada) — una señal AR que el anómalo **fabricaba**»—. Ahora el rótulo va
+una vez y lo que sigue es lo que aporta: qué hacer con ese orden. Es BUG-0154 en
+pequeño, en la misma pantalla.
 
 ## Validation
 
-La prueba tiene que fijar la DIRECCIÓN, no el texto: para un retardo cuya ACF
-observada está fuera de banda y la calibrada dentro, la etiqueta debe decir que
-el anómalo lo **fabricaba**.
+`tests/test_bugs_0152_0153_0154_la_pantalla_del_nodo.py`. Lo que fija la prueba
+es la **dirección**, no el texto: un retardo fuera de banda que al calibrar
+entra tiene que decir que el anómalo lo **fabricaba**, y al revés. Y que la
+glosa hable del modelo —«sobra», «falta»— y no de la banda.

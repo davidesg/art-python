@@ -7467,7 +7467,9 @@ def guided_intervention(inp_path: str,
                 start_year=int(list(ts.start)[0]),
                 start_per=int(list(ts.start)[1] if freq > 1 else 1),
                 umbral_vecino=umbral_vecino, umbral_activo=umbral_activo)
-            d_cfg = describe_configuraciones(conj)
+            # BUG-0154: sin su veredicto, porque esta llamada publica el suyo
+            # unas líneas más abajo. Una conclusión, una vez, donde se decide.
+            d_cfg = describe_configuraciones(conj, veredicto=False)
             L += ["---", "", d_cfg.summary, ""]
 
             # ── la escalera: SÓLO SI SE PIDE — BUG-0138 ──
@@ -7656,9 +7658,21 @@ def guided_intervention(inp_path: str,
                 except Exception as _se:
                     _warn(f"guided_intervention: superposición no disponible: {_se}")
 
+            # Y la recomendación de esta llamada es LO QUE TOCA HACER, no la
+            # conclusión otra vez: la sección «Veredicto» de arriba ya la
+            # enuncia y `d_cfg.recommendation` la reenunciaba con las mismas
+            # palabras (BUG-0154). Se conserva lo que d_cfg añade y el veredicto
+            # no lleva: el aviso de cuando el dato NO identifica, que es una
+            # orden de no elegir por AIC.
+            _rec2 = (f"**Construye la forma del veredicto**: `date="
+                     f'"{mejor.fecha}"`, `form="step"`, '
+                     f"`n_omega={mejor.n_escalones}` — y verifica el ajuste."
+                     if (mejor is not None and mejor.estimado
+                         and conj.identificado)
+                     else d_cfg.recommendation)
             return _result(Description(summary="\n".join(L),
                                        figure_b64=_fig2,
-                                       recommendation=d_cfg.recommendation,
+                                       recommendation=_rec2,
                                        data=dict(llamada=2,
                                                  identificado=conj.identificado,
                                                  n_construidas=len(conj.vivos),
