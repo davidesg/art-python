@@ -649,6 +649,9 @@ INSTRUMENTOS DE APOYO — no avanzan el flujo
 Se usan para mirar algo concreto. Ninguno sustituye a un nodo del protocolo.
 
   DATOS      load_data · preview_data · series_info · create_inp
+             extend_sample — MÁS observaciones sobre el MISMO modelo, para
+             validarlo contra lo que vino después o incorporar un episodio
+             nuevo sin rehacer la identificación. No reestima.
   MODELO     estimate_and_diagnose (estima un .inp y persiste .inp/.pre/.out +
              guion) · model_equation_display · model_histogram
   REGISTRO   get_out_report — LEE el .out de un modelo estimado; es de donde
@@ -9397,6 +9400,108 @@ def preview_data(source_path: str, sheet: str = "") -> list:
         )
         return [TextContent(type="text", text=text)]
 
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+@mcp.tool()
+def extend_sample(pre_path: str, source_path: str, output_inp: str,
+                  column: str = "", sheet: str = "",
+                  guion_path: str = "", guion_name: str = "",
+                  guion_rationale: str = "") -> list:
+    """
+    EXTIENDE la muestra de un modelo: el mismo modelo, más observaciones.
+
+    Es el paso que valida un modelo contra lo que vino después, y el que
+    incorpora un episodio nuevo —un covid, una crisis— **sin rehacer la
+    identificación**. Se parte del `.pre` del modelo y de la serie completa
+    (la vieja MÁS lo nuevo), y se escribe el `.inp` extendido.
+
+    CONSERVA TODO: deterministas con sus posiciones, ARMA regular y estacional,
+    operadores de frecuencia fija, `ifadf`, μ, Box-Cox y el factor de reescala.
+    Los valores estimados quedan como SEMILLAS, que es lo que un `.pre` es.
+
+    **NO reestima.** Extender la muestra y reestimar son dos decisiones, y la
+    segunda es tuya: después de esto, `confirm_and_estimate` sobre el `.inp` que
+    escribe, o el nodo de intervención si lo nuevo trae sucesos.
+
+    Se NIEGA en dos casos, y los dos son de método:
+
+    * si la serie nueva **no empieza donde la del modelo** — extender por el
+      principio desplaza la posición de todas las intervenciones y cada suceso
+      quedaría en otra fecha;
+    * si el **tramo común no coincide** — entonces no es esta serie extendida
+      sino otra, y heredar una especificación ajustada sobre otros datos no
+      significa nada.
+
+    Antes de esto la única vía era editar el `.inp` a mano —el número de
+    observaciones y el bloque de datos— con dos costes: equivocarse, y que lo
+    editado a mano **no queda en el guion**, así que el recorrido perdía el
+    punto donde la muestra cambió (BUG-0173).
+
+    Parameters
+    ----------
+    pre_path    : el `.pre` del modelo que se extiende
+    source_path : fichero con la serie COMPLETA (.csv/.xlsx), la vieja más lo nuevo
+    output_inp  : dónde escribir el `.inp` extendido
+    column      : columna a leer (vacío = la primera numérica)
+    sheet       : hoja, para Excel
+    guion_*     : registro del cambio de muestra, como en el resto de la suite
+    """
+    try:
+        import pandas as pd
+        from mcp.types import TextContent
+        from art.pipeline import ErrorDeExtension, extiende_muestra
+
+        if not os.path.exists(pre_path):
+            return _err(f"No existe el `.pre`: {pre_path}")
+        df = (pd.read_excel(source_path, sheet_name=sheet or 0)
+              if source_path.lower().endswith((".xlsx", ".xls"))
+              else pd.read_csv(source_path))
+        num = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+        if not num:
+            return _err("El fichero no tiene ninguna columna numérica.")
+        col = column if (column and column in df.columns) else num[0]
+        y = df[col].dropna().to_numpy(dtype=float)
+
+        try:
+            ts, m, n_add = extiende_muestra(pre_path, y, output_inp)
+        except ErrorDeExtension as e:
+            return [TextContent(type="text", text=(
+                "⛔ **Eso no es extender esta serie.**\n\n" + str(e)))]
+
+        _f = int(ts.freq or 1)
+        y0, p0 = ts.start
+        _o = p0 - 1 + ts.nobs - 1
+        _fin = (f"{_o % _f + 1:02d}/{y0 + _o // _f}" if _f == 12 else
+                f"Q{_o % _f + 1}/{y0 + _o // _f}" if _f == 4 else
+                str(y0 + _o))
+        n_itv = len([i for i in (m.interventions or [])
+                     if i.type in ("pulse", "impulse", "step", "ramp")])
+
+        txt = (
+            f"## Muestra extendida — {ts.name or 'serie'}\n\n"
+            f"**+{n_add} observaciones** → n = {ts.nobs}, hasta **{_fin}**.\n\n"
+            f"Especificación conservada entera: {len(m.interventions or [])} "
+            f"deterministas ({n_itv} de suceso), d={m.d}, D={m.D}, "
+            f"λ={m.boxlam}, μ={'sí' if getattr(m, 'estimate_mu', False) else 'no'}"
+            + (f", ifadf={list(m.ifadf)}" if any(m.ifadf or []) else "") + ".\n\n"
+            f"*Escrito en `{output_inp}`. **No se ha reestimado**: los valores "
+            f"del `.pre` quedan como semillas. Estima cuando decidas, con "
+            f"`confirm_and_estimate`; y si lo nuevo trae sucesos, el nodo de "
+            f"intervención va después.*")
+        try:
+            gp = guion_path or _derive_guion_path(output_inp, m)
+            _record_node_to_guion(
+                gp, nodo="muestra",
+                decidido=f"muestra extendida +{n_add} obs → n={ts.nobs} ({_fin})",
+                razon=(guion_rationale or
+                       "validar el modelo contra lo que vino después"),
+                evidencia=f"desde {os.path.basename(pre_path)}",
+                decidido_por="analista")
+        except Exception as _g:
+            _warn("registro del cambio de muestra en el guion", _g)
+        return [TextContent(type="text", text=txt)]
     except Exception:
         return _err(traceback.format_exc())
 

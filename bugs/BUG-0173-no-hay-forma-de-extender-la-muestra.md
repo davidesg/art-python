@@ -1,11 +1,11 @@
 ---
 id: BUG-0173
 title: No hay forma de EXTENDER la muestra de un modelo — el encadenado que el propio método pide se hace editando el `.inp` a mano
-status: open
+status: fixed
 severity: medium
 component: mcp-tools
 found_in: 0.1.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: David — run 3 de SF_MEG, incidencia C-26
 tags:
@@ -60,14 +60,37 @@ Y en el mismo run apareció una cuarta cara: tampoco hay forma de **cambiar un
 escalón por un impulso** — se quitó a mano de la especificación y se reconstruyó
 con `guided_intervention`. (BUG-0162 abrió `rehacer=True` después de esa corrida.)
 
-## Fix propuesto
+## Fix
 
-Una operación `extender` que tome el `.pre`, los datos nuevos y escriba el `.inp`
-extendido conservando la especificación entera — y que deje constancia en el
-guion de que la muestra cambió, con el rango viejo y el nuevo.
+`pipeline.extiende_muestra(pre_path, datos, output_inp)` y la herramienta
+`extend_sample` que la publica. Conserva **todo**: deterministas con sus
+posiciones, ARMA regular y estacional, operadores de frecuencia fija, `ifadf`,
+μ, Box-Cox y `refactor`. Los valores estimados quedan como SEMILLAS, que es lo
+que un `.pre` es.
 
-Lo que **no** debe hacer es reestimar por su cuenta: extender la muestra y
-reestimar son dos decisiones, y la segunda es del analista.
+**No reestima**, y lo dice: extender la muestra y reestimar son dos decisiones, y
+la segunda es del analista. Y registra el cambio de muestra en el guion, que era
+la mitad del defecto — lo editado a mano no dejaba rastro.
+
+Sobre el caso que lo motivó, `ES_CPI_A_m06` → etapa B:
+
+    +77 observaciones → n = 293, hasta 05/2026
+    Especificación conservada entera: 10 deterministas, d=1, D=0, λ=0.0, μ=sí,
+    ifadf=[0, 0, 0, 1, 0, 0, 0]
+
+### Las dos negativas, que son lo que le da valor
+
+* **Si la serie nueva no empieza donde la del modelo, se niega.** Extender por el
+  principio desplaza el `at` de todas las intervenciones y cada suceso quedaría
+  en otra fecha — que es BUG-0172 por otra puerta.
+* **Si el tramo común no coincide, se niega**, diciendo cuántas observaciones
+  difieren y dónde está la mayor. No es esta serie extendida: es otra, y heredar
+  una especificación ajustada sobre otros datos no significa nada.
+
+Las dos llegan como **regla y no como avería** —sin traceback—, que es la lección
+de BUG-0159. Y extender con la misma longitud **no** es un error: cero
+observaciones nuevas es el resultado legítimo de refrescar un fichero que aún no
+las trae.
 
 ## Validation
 

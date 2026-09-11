@@ -274,6 +274,86 @@ def _obs_to_date(begyear, begtime, freq, at_0based):
     return offset % freq + 1, begyear + offset // freq
 
 
+class ErrorDeExtension(ValueError):
+    """Lo que se pide no es una EXTENSIÓN de esta serie."""
+
+
+def extiende_muestra(pre_path: str, datos_nuevos, output_inp: str,
+                     tolerancia: float = 1e-8):
+    """El mismo modelo sobre una muestra MÁS LARGA — BUG-0173.
+
+    Extender la muestra es una operación **del método**, no una comodidad: es
+    como se valida un modelo contra lo que vino después, y como se incorpora un
+    episodio nuevo sin rehacer la identificación. El convenio de ficheros lo
+    promete cuando dice que el `.pre` encadena modelos; y sin embargo la única
+    vía era **editar el `.inp` a mano** —el número de observaciones y el bloque
+    de datos—, con dos costes: equivocarse, y que lo editado a mano **no queda
+    en el guion**, así que el recorrido pierde el punto donde la muestra cambió.
+
+    Qué conserva: TODO. Deterministas con sus posiciones, ARMA regular y
+    estacional, operadores de frecuencia fija, `ifadf`, μ, Box-Cox y `refactor`.
+    Los valores estimados siguen siendo las semillas, que es lo que un `.pre` es.
+
+    **Qué NO hace: reestimar.** Extender la muestra y reestimar son dos
+    decisiones, y la segunda es del analista.
+
+    Las dos comprobaciones, y las dos son negativas:
+
+    * **La serie nueva tiene que EMPEZAR donde la vieja.** Si empieza antes, las
+      posiciones `at` de todas las intervenciones se desplazan y el modelo
+      resultante pone cada suceso en otra fecha — que es BUG-0172 por otra vía.
+    * **Y tiene que CONTENER a la vieja.** Si los valores del tramo común no
+      coinciden, no es la misma serie extendida: es otra serie, y heredar una
+      especificación ajustada sobre datos distintos no significa nada.
+
+    Devuelve `(ts_nueva, modelo, n_añadidas)`.
+    """
+    import fue
+    import numpy as np
+
+    ts_old, m = fue.load(pre_path)
+
+    if isinstance(datos_nuevos, fue.TimeSeries):
+        ts_new = datos_nuevos
+    else:
+        y = np.asarray(list(datos_nuevos), dtype=float)
+        ts_new = fue.TimeSeries(y.tolist(), freq=ts_old.freq,
+                                start=tuple(ts_old.start), name=ts_old.name)
+
+    if tuple(ts_new.start) != tuple(ts_old.start):
+        raise ErrorDeExtension(
+            f"La serie nueva empieza en {tuple(ts_new.start)} y la del modelo "
+            f"en {tuple(ts_old.start)}. Extender por el PRINCIPIO desplaza la "
+            f"posición de todas las intervenciones, así que cada suceso "
+            f"quedaría en otra fecha. Recorta la serie nueva para que empiece "
+            f"donde la del `.pre`.")
+    if int(ts_new.freq) != int(ts_old.freq):
+        raise ErrorDeExtension(
+            f"Frecuencias distintas: {ts_new.freq} contra {ts_old.freq}.")
+
+    n_old, n_new = int(ts_old.nobs), int(ts_new.nobs)
+    if n_new < n_old:
+        raise ErrorDeExtension(
+            f"La serie nueva tiene {n_new} observaciones y la del modelo "
+            f"{n_old}: eso no es extender, es recortar.")
+
+    a = np.asarray(ts_old.data, dtype=float)
+    b = np.asarray(ts_new.data, dtype=float)[:n_old]
+    d = np.abs(a - b)
+    mal = int(np.sum(d > tolerancia * np.maximum(1.0, np.abs(a))))
+    if mal:
+        i = int(np.argmax(d))
+        raise ErrorDeExtension(
+            f"El tramo común NO coincide: {mal} de {n_old} observaciones "
+            f"difieren (la mayor en la posición {i + 1}: {a[i]} contra "
+            f"{b[i]}). No es esta serie extendida, es otra — y heredar una "
+            f"especificación ajustada sobre otros datos no significa nada.")
+
+    _write_inp(ts_new, m, output_inp,
+               refactor=getattr(m, "refactor", None))
+    return ts_new, m, n_new - n_old
+
+
 def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> None:
     """
     Write a fue .inp file from a (ts, model) pair.

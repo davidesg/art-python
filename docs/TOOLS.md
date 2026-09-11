@@ -2,7 +2,7 @@
 
 *Generated from the docstrings by `tools/gen_tools_md.py`. Do not edit by hand — edit the docstring.*
 
-**46 tools.** In an MCP server the docstring is what the model reads, so this page and the instruction the model receives are the same text by construction.
+**47 tools.** In an MCP server the docstring is what the model reads, so this page and the instruction the model receives are the same text by construction.
 
 ---
 
@@ -17,6 +17,7 @@
 | [`create_inp`](#create-inp) | Create a .inp file from raw time series data. |
 | [`estimate_and_diagnose`](#estimate-and-diagnose) | Fit the model specified in an .inp file and run diagnosis. |
 | [`export_guion`](#export-guion) | Render guion.json to a self-contained, navigable HTML report. |
+| [`extend_sample`](#extend-sample) | EXTIENDE la muestra de un modelo: el mismo modelo, más observaciones. |
 | [`formal_tests`](#formal-tests) | Run formal hypothesis tests on a fitted model. |
 | [`full_report`](#full-report) | Generate a complete HTML report for a fitted model and save it to disk. |
 | [`generate_forecast`](#generate-forecast) | Generate L-step-ahead forecasts from a fitted model. |
@@ -543,6 +544,61 @@ Render guion.json to a self-contained, navigable HTML report.
     ----------
     guion_path  : path to guion.json
     output_html : path to write the .html file
+
+---
+
+## `extend_sample`
+
+**Arguments**
+
+| name | type | required | default |
+|---|---|---|---|
+| `pre_path` | string | yes | — |
+| `source_path` | string | yes | — |
+| `output_inp` | string | yes | — |
+| `column` | string | no | `` |
+| `sheet` | string | no | `` |
+| `guion_path` | string | no | `` |
+| `guion_name` | string | no | `` |
+| `guion_rationale` | string | no | `` |
+
+EXTIENDE la muestra de un modelo: el mismo modelo, más observaciones.
+
+    Es el paso que valida un modelo contra lo que vino después, y el que
+    incorpora un episodio nuevo —un covid, una crisis— **sin rehacer la
+    identificación**. Se parte del `.pre` del modelo y de la serie completa
+    (la vieja MÁS lo nuevo), y se escribe el `.inp` extendido.
+
+    CONSERVA TODO: deterministas con sus posiciones, ARMA regular y estacional,
+    operadores de frecuencia fija, `ifadf`, μ, Box-Cox y el factor de reescala.
+    Los valores estimados quedan como SEMILLAS, que es lo que un `.pre` es.
+
+    **NO reestima.** Extender la muestra y reestimar son dos decisiones, y la
+    segunda es tuya: después de esto, `confirm_and_estimate` sobre el `.inp` que
+    escribe, o el nodo de intervención si lo nuevo trae sucesos.
+
+    Se NIEGA en dos casos, y los dos son de método:
+
+    * si la serie nueva **no empieza donde la del modelo** — extender por el
+      principio desplaza la posición de todas las intervenciones y cada suceso
+      quedaría en otra fecha;
+    * si el **tramo común no coincide** — entonces no es esta serie extendida
+      sino otra, y heredar una especificación ajustada sobre otros datos no
+      significa nada.
+
+    Antes de esto la única vía era editar el `.inp` a mano —el número de
+    observaciones y el bloque de datos— con dos costes: equivocarse, y que lo
+    editado a mano **no queda en el guion**, así que el recorrido perdía el
+    punto donde la muestra cambió (BUG-0173).
+
+    Parameters
+    ----------
+    pre_path    : el `.pre` del modelo que se extiende
+    source_path : fichero con la serie COMPLETA (.csv/.xlsx), la vieja más lo nuevo
+    output_inp  : dónde escribir el `.inp` extendido
+    column      : columna a leer (vacío = la primera numérica)
+    sheet       : hoja, para Excel
+    guion_*     : registro del cambio de muestra, como en el resto de la suite
 
 ---
 
