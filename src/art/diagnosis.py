@@ -272,8 +272,8 @@ AVISO_COV_CASI_SEMILLA = (
     "que el optimizador apenas movió. No es prueba de que sean inválidos —una "
     "varianza puede valer eso legítimamente— pero conviene contrastarlos antes "
     "de apoyar una decisión en ellos: el `.out` del modelo trae la covarianza "
-    "completa, y para una media sin ARMA el error típico correcto es la "
-    "desviación típica residual dividida por √n."
+    "de aquella estimación, y para una media sin ARMA el error típico correcto "
+    "es σ̂/√n, que `se_exacta_de_la_media` calcula."
 )
 
 
@@ -319,6 +319,49 @@ def near_seed_variance_indices(result, tol: float = BANDA_CASI_SEMILLA) -> list[
     d = np.diag(cov)
     return [i for i in range(len(d))
             if i not in exactas and abs(d[i] - semilla) <= tol * semilla]
+
+
+def se_exacta_de_la_media(model) -> float | None:
+    """El error típico de μ cuando NO hay estructura ARMA — BUG-0168.
+
+    **Lo único que aquí se puede CALCULAR.** El resto de los avisos de esta
+    familia dicen que un error típico no sirve, y eso es todo lo que pueden
+    decir: cuánto se desvía la covarianza del BFGS depende del camino que siguió
+    el optimizador, no de una cantidad estimable.
+
+    Pero hay un caso con solución cerrada. Sin ARMA, el estimador de μ es la
+    media muestral de ∇^d y, y su error típico es **σ̂/√n** — sin optimizador,
+    sin hessiano y sin camino. Ahí no hay nada que estimar sobre el sesgo: hay
+    dos números, el que el paquete publica y el correcto, y se comparan.
+
+    Devuelve `None` cuando no procede: con ARMA el estimador ya no es la media
+    muestral y esta fórmula no vale.
+    """
+    try:
+        if not getattr(model, "estimate_mu", False):
+            return None
+        # LIBRES, no presentes. `_write_inp` deja `ar=[[0.0]]` con el
+        # coeficiente FIJO en cero, que no es estructura ARMA: es un hueco
+        # declarado. Contar la presencia apagaba esto en el caso más común —la
+        # media sola— que es justo para el que existe. (Misma confusión que
+        # BUG-0166: allí eran los grados de libertad.)
+        for fac, free in (("ar", "ar_free"), ("ma", "ma_free"),
+                          ("ar_s", "ar_s_free"), ("ma_s", "ma_s_free")):
+            factores = getattr(model, fac, None) or []
+            mascaras = getattr(model, free, None) or []
+            for k, f in enumerate(factores):
+                msk = (mascaras[k] if (k < len(mascaras)
+                                       and mascaras[k] is not None)
+                       else [True] * len(f))
+                if any(j >= len(msk) or msk[j] for j in range(len(f))):
+                    return None      # hay ARMA LIBRE: no hay forma cerrada
+        r = getattr(model, "_result", None)
+        res = np.asarray(getattr(r, "residuals", None), dtype=float)
+        if res.size < 2:
+            return None
+        return float(res.std(ddof=1) / np.sqrt(res.size))
+    except Exception:                                    # pragma: no cover
+        return None
 
 
 def near_seed_distances(result) -> dict[int, float]:

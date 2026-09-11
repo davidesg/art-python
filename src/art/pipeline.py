@@ -89,24 +89,46 @@ def _write_bare_inp(ts, path: str) -> None:
 #: quien la lee no sabe si es la suya.
 ATRIBUTO_ORIGEN = "_art_origen"
 
+# SIN FACTORES — BUG-0168.
+#
+# Este aviso publicaba cinco cifras con aspecto de magnitud —«al menos 4.23×»,
+# «desde 0.46× hasta 4.23×», «de 3.02 y 2.83 a 1.31 y 1.28»— y a continuación
+# decía que no hay corrección posible ni cota conocida. Las dos cosas a la vez
+# no se sostienen: un número que no se puede aplicar, pegado a una tabla de
+# errores típicos, SE APLICA.
+#
+# Y es lo que pasó. El analista, en la corrida de ES_CPI: «el LLM
+# sistemáticamente está observando los SE; aparentemente está calculando el
+# sesgo, pero ¿cómo lo hace? No tiene ningún algoritmo para calcular el sesgo de
+# los SE.» No lo tiene, y no hacía falta: repetía nuestras cifras.
+#
+# El proyecto ya rozó esta esquina una vez. La primera versión decía «entre
+# 0.46× y 3.47×», se leyó como una cota, y el arreglo fue añadir «al menos» — se
+# atacó la FORMA (rango contra cota) y no el fondo, que es publicar una magnitud
+# de sesgo que nadie ha calculado.
+#
+# Lo que el aviso puede afirmar es que el número no sirve, y por qué. Cuánto se
+# desvía no se sabe: no hay estimador de eso.
 AVISO_SE_DESDE_PRE = (
     "⚠ **Este modelo se estimó desde un `.pre`, así que estas desviaciones "
     "típicas NO son fiables.** Reestimar desde el óptimo hace que BFGS no itere "
-    "y la covarianza se quede en la semilla. Medido, la desviación llega **al "
-    "menos a 4.23×** del valor correcto y va **en las dos direcciones** (se han "
-    "observado desde 0.46× hasta 4.23× sobre modelos distintos), así que no hay "
-    "corrección posible ni cota conocida.\n\n"
-    "**Y cambia decisiones, no sólo números.** Sobre un modelo real, dos "
-    "armónicos pasan de |t| = 3.02 y 2.83 —se conservan— a 1.31 y 1.28 —se "
-    "podan—: es exactamente la decisión del nodo estacional. En ese modelo, 11 "
-    "de 13 parámetros son significativos según el `.out` y 9 de 13 según el "
-    "`.pre`.\n\n"
+    "y la covarianza se quede en la semilla, que es un valor arbitrario (2/n) y "
+    "no una medida de la curvatura.\n\n"
+    "**No hay forma de saber cuánto se desvían.** La covarianza del BFGS es un "
+    "subproducto del CAMINO del optimizador, así que la distancia al valor "
+    "correcto depende de por dónde se pasó — no de una cantidad estimable. No "
+    "es un sesgo con magnitud: es ruido sin cota. Cualquier cifra que se dé "
+    "aquí sería la de un caso, no la de éste.\n\n"
+    "**Y cambia decisiones, no sólo números.** Se han visto armónicos pasar de "
+    "conservarse a podarse según de dónde viniera la SE — que es exactamente la "
+    "decisión del nodo estacional.\n\n"
     "Los **valores** sí son exactos (la verosimilitud coincide a seis "
     "decimales), y por eso residuos, figuras y diagnosis no están afectados. "
     "Lo que está afectado es todo lo que lleve un error típico: razones t, "
     "Wald, intervalos.\n\n"
     "Para tenerlas bien: reestima desde el `.inp` correspondiente, o lee el "
-    "`.out` del modelo, que trae la covarianza exacta (BUG-0090)."
+    "`.out` del modelo, que trae la covarianza de aquella estimación "
+    "(BUG-0090). La raíz del problema está en `fue/bugs/BUG-0015`."
 )
 
 

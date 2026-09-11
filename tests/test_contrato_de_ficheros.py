@@ -267,20 +267,35 @@ def test_cada_una_pasa_por_la_puerta_que_le_toca(nombre, avisa):
         assert "_mirar(" in c or "mirar(" in c, nombre
 
 
-def test_el_aviso_no_publica_un_rango_como_si_fuera_una_cota():
-    """La primera versión decía «entre 0.46× y 3.47×», que era la muestra de un
-    caso. La revisión externa midió **4.23×** sobre otro modelo. Un rango
-    presentado sin «al menos» se lee como un límite que no existe."""
+def test_el_aviso_NO_PUBLICA_NINGUNA_MAGNITUD_DE_SESGO():
+    """Dos intentos y la lección — BUG-0168.
+
+    La primera versión decía «entre 0.46× y 3.47×» y se leía como una cota. El
+    arreglo de entonces fue añadir «al menos» y una tercera cifra (4.23×), o sea
+    **atacar la forma** —rango contra cota— dejando el fondo intacto: publicar
+    una magnitud de sesgo que nadie ha calculado.
+
+    Y se aplicó, como tenía que pasar. El analista, en la corrida de ES_CPI:
+    «el LLM aparentemente está calculando el sesgo, pero ¿cómo lo hace? No tiene
+    ningún algoritmo para calcular el sesgo de los SE». No lo tiene: repetía
+    estas cifras.
+
+    Lo que este aviso puede afirmar es que el número no sirve, y por qué. Cuánto
+    se desvía **no se sabe**, y no por falta de medirlo: la covarianza del BFGS
+    es un subproducto del camino del optimizador, así que no hay una cantidad
+    que estimar.
+    """
+    import re
     from art.pipeline import AVISO_SE_DESDE_PRE
-    assert "al menos" in AVISO_SE_DESDE_PRE
-    assert "4.23×" in AVISO_SE_DESDE_PRE
-    assert "ni cota conocida" in AVISO_SE_DESDE_PRE
+    assert not re.findall(r"\d+[.,]?\d*×", AVISO_SE_DESDE_PRE), "publica un factor"
+    assert not re.findall(r"\|t\|\s*=\s*\d", AVISO_SE_DESDE_PRE), "publica razones t"
+    assert "No hay forma de saber cuánto se desvían" in AVISO_SE_DESDE_PRE
 
 
 def test_el_aviso_dice_que_cambia_DECISIONES_no_solo_numeros():
-    """Es lo que convierte el aviso en accionable: dos armónicos pasan de
-    |t|=3.02 y 2.83 a 1.31 y 1.28 — de conservarse a podarse, que es la decisión
-    del nodo estacional."""
+    """Sigue siendo lo que lo hace accionable —que no es cosmética— pero sin
+    cifras: «se han visto armónicos pasar de conservarse a podarse» dice lo que
+    importa sin dar un factor que luego se aplica."""
     from art.pipeline import AVISO_SE_DESDE_PRE
     assert "cambia decisiones" in AVISO_SE_DESDE_PRE
-    assert "3.02" in AVISO_SE_DESDE_PRE and "1.31" in AVISO_SE_DESDE_PRE
+    assert "podarse" in AVISO_SE_DESDE_PRE

@@ -1080,6 +1080,46 @@ def _equation_for_prompt(ts, model) -> str:
         aviso += aviso_se_no_fiable(model)
     except Exception as _ae:
         _warn("aviso de origen del modelo", _ae)
+
+    # Y LO QUE SÍ SE PUEDE CALCULAR — BUG-0168.
+    #
+    # Todo lo de arriba dice que un error típico no sirve, que es lo único que
+    # se puede afirmar: cuánto se desvía la covarianza del BFGS depende del
+    # camino del optimizador, no de una cantidad estimable. Publicar un factor
+    # ahí es inventarse un sesgo, y el LLM lo repite como si fuera una medida.
+    #
+    # Pero sin ARMA el estimador de μ es la media muestral y su error típico es
+    # σ̂/√n, con solución cerrada. Ahí no hay sesgo que estimar: hay dos números
+    # y se comparan. Es la asimetría que había que corregir — se publicaba lo
+    # incalculable y se callaba lo calculable.
+    try:
+        from art.diagnosis import se_exacta_de_la_media
+        _se_mu = se_exacta_de_la_media(model)
+        if _se_mu is not None:
+            _r = getattr(model, "_result", None)
+            # μ es el ÚLTIMO parámetro en el orden de `fue` (ω/δ de cada
+            # intervención, AR, AR_s, MA, MA_s, AR_f, MA_f, μ). Se toma por la
+            # posición y no por la etiqueta: `_param_labels_safe` devuelve []
+            # justo en el caso que importa —la media sola— y la comparación se
+            # perdía, que es la mitad útil del aviso.
+            _pub = None
+            try:
+                import numpy as _np
+                _se = _np.asarray(_r.std_errors, dtype=float)
+                if _se.size:
+                    _pub = float(_se[-1])
+            except Exception:
+                pass
+            aviso += (
+                f"\n\nℹ **Sin ARMA, el error típico de μ tiene forma cerrada**: "
+                f"σ̂/√n = **{_se_mu:.6f}**"
+                + (f", frente a **{_pub:.6f}** publicado arriba."
+                   if _pub is not None else ".")
+                + " Es el único de esta familia que se puede calcular en vez de "
+                  "sospechar — el estimador de μ es la media muestral y no pasa "
+                  "por el optimizador. Úsalo.")
+    except Exception as _se:
+        _warn("error típico exacto de la media", _se)
     return (
         "_[Claude: muestra al analista el bloque siguiente TAL CUAL; NO construyas "
         "tu propia tabla/ecuación de parámetros]_\n\n"
