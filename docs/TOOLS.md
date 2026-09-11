@@ -549,6 +549,7 @@ Render guion.json to a self-contained, navigable HTML report.
 |---|---|---|---|
 | `inp_path` | string | yes | — |
 | `run_meg` | boolean | no | `True` |
+| `subdiferenciacion` | boolean | no | `False` |
 
 Run formal hypothesis tests on a fitted model.
 
@@ -626,6 +627,21 @@ Run formal hypothesis tests on a fitted model.
     ----------
     inp_path : path to .inp or .pre file
     run_meg  : whether to run MEG (slow, default True; EXPERIMENTAL, see above)
+    subdiferenciacion : contrastar además el lado **d−1** — ¿sobraba la última
+               diferencia? **Por defecto NO, y es deliberado.** El par
+               confirmatorio en f=0 lo forman Shin-Fuller sobre el AR y el DCD
+               con testigo de sobrediferenciación, complementarios como ADF y
+               KPSS en la especificación inicial; ése se corre siempre.
+
+               El lado d−1 **se pide, no se ofrece**: correr una batería de
+               contrastes que nadie pidió y presentar su ✓ es pre-testing, y el
+               veredicto no tiene el tamaño que aparenta. Pídelo cuando haya
+               MOTIVO: la serie parece estacionaria en nivel, es un precio
+               relativo, o se está en un estudio de cointegración.
+
+               Y cuando lo pidas, lee BUG-0167: con un AR de orden 1 el brazo
+               nulo gasta su única raíz en la unitaria y el LR mide dinámica
+               perdida, no frontera.
 
 ---
 

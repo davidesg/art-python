@@ -2022,8 +2022,39 @@ def describe_diagnosis(model) -> Description:
 BANDA_CUASI_CANCELACION = 0.10
 
 
-def describe_formal_tests(model, run_meg: bool = True) -> Description:
-    """Run Shin-Fuller, DCD, DCD_f, RV, MEG and summarize for the LLM."""
+def describe_formal_tests(model, run_meg: bool = True,
+                          subdiferenciacion: bool = False) -> Description:
+    """Run Shin-Fuller, DCD, DCD_f, RV, MEG and summarize for the LLM.
+
+    `subdiferenciacion` — EL CONTRASTE d−1 SE PIDE, NO SE OFRECE (BUG-0167).
+
+    Decisión del analista, 11-sep-2026:
+
+        «Es un contraste que se debe pedir, pero no ofrecer, por razones
+        conocidas en inferencia. Está bien tenerlo, pero sirve para casos
+        específicos que el analista debe pedir, o que la serie parece
+        estacionaria en nivel —como un precio relativo o en estudios de
+        cointegración.»
+
+    La razón es de INFERENCIA, no de implementación: una batería de contrastes
+    que nadie pidió, corrida sobre cada modelo y presentada con su ✓, es
+    pre-testing. El veredicto que sale de ahí no tiene el tamaño que dice tener.
+
+    El par confirmatorio en f=0 lo forman **Shin-Fuller sobre el AR** y el **DCD
+    con testigo de sobrediferenciación**, que son complementarios en el mismo
+    sentido en que lo son ADF y KPSS en la especificación inicial. Ése se corre
+    siempre. El lado d−1 es otra cosa: contesta una pregunta que sólo se hace
+    cuando hay motivo —la serie parece estacionaria en nivel, es un precio
+    relativo, o se está en un estudio de cointegración—.
+
+    El caso que lo motivó (BUG-0045, PGAS) era una petición legítima: se estaba
+    evaluando si la serie era d=0 desde el principio. Legítima **porque se
+    preguntó**, no porque el instrumento deba dispararse solo.
+
+    Y mientras se pide sin saber lo que trae, además está BUG-0167: con un AR de
+    orden 1 el brazo nulo gasta su única raíz en la unitaria y el LR mide
+    dinámica perdida, no frontera.
+    """
     if model._result is None:
         raise RuntimeError("Model has not been fitted — call model.fit() first.")
 
@@ -2096,7 +2127,10 @@ def describe_formal_tests(model, run_meg: bool = True) -> Description:
                 if (sf_res is None and "raíz REAL" in sf_motivo) else None)
     dcd_res   = _try(lambda: dcd(model),   [])
     od_res    = _try(lambda: dcd_overdiff_regular(model), None)
-    ud_res    = _try(lambda: dcd_underdiff_regular(model), None)
+    # SE PIDE, NO SE OFRECE — BUG-0167. Sin `subdiferenciacion=True` no se
+    # estima nada: son dos ajustes que además no se necesitan.
+    ud_res    = (_try(lambda: dcd_underdiff_regular(model), None)
+                 if subdiferenciacion else None)
     dcd_f_res = _try(lambda: dcd_f(model), [])
     rv_res    = _try(lambda: rv(model),    [])
     # BUG-0010: this was `_try(lambda: meg(model), [])`, which made "raised" and

@@ -3335,7 +3335,8 @@ def overparameterization_analysis(inp_path: str, threshold: float = 0.7) -> list
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def formal_tests(inp_path: str, run_meg: bool = True) -> list:
+def formal_tests(inp_path: str, run_meg: bool = True,
+                 subdiferenciacion: bool = False) -> list:
     """
     Run formal hypothesis tests on a fitted model.
 
@@ -3413,13 +3414,29 @@ def formal_tests(inp_path: str, run_meg: bool = True) -> list:
     ----------
     inp_path : path to .inp or .pre file
     run_meg  : whether to run MEG (slow, default True; EXPERIMENTAL, see above)
+    subdiferenciacion : contrastar además el lado **d−1** — ¿sobraba la última
+               diferencia? **Por defecto NO, y es deliberado.** El par
+               confirmatorio en f=0 lo forman Shin-Fuller sobre el AR y el DCD
+               con testigo de sobrediferenciación, complementarios como ADF y
+               KPSS en la especificación inicial; ése se corre siempre.
+
+               El lado d−1 **se pide, no se ofrece**: correr una batería de
+               contrastes que nadie pidió y presentar su ✓ es pre-testing, y el
+               veredicto no tiene el tamaño que aparenta. Pídelo cuando haya
+               MOTIVO: la serie parece estacionaria en nivel, es un precio
+               relativo, o se está en un estudio de cointegración.
+
+               Y cuando lo pidas, lee BUG-0167: con un AR de orden 1 el brazo
+               nulo gasta su única raíz en la unitaria y el LR mide dinámica
+               perdida, no frontera.
     """
     try:
         from mcp.types import TextContent
         from art.describe import describe_formal_tests
         from art.diagnosis import diagnose
         ts, m = _load_fitted(inp_path)
-        desc = describe_formal_tests(m, run_meg=run_meg)
+        desc = describe_formal_tests(m, run_meg=run_meg,
+                                     subdiferenciacion=subdiferenciacion)
 
         # Ésta es la etapa de CIERRE: el analista da aquí el vistazo final, y
         # tiene que dárselo AL MODELO, no sólo a los contrastes. La ecuación con
