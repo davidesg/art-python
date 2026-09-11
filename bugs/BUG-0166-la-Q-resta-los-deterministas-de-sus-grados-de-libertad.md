@@ -1,11 +1,11 @@
 ---
 id: BUG-0166
 title: La Q resta TODOS los parámetros de sus grados de libertad —armónicos e intervenciones incluidos— y declara no-ruido-blanco un ruido blanco; con df negativo, siempre
-status: open
+status: fixed
 severity: critical
 component: diagnosis
 found_in: 0.1.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: David — run 3 de SF_MEG, «hay un bug del Q»
 tags:

@@ -1,11 +1,11 @@
 ---
 id: BUG-0167
 title: El DCD de subdiferenciación colapsa el AR contra la raíz unitaria — de los 39,9 puntos de LR, 38,3 son dinámica perdida y no evidencia sobre la frontera
-status: open
+status: fixed
 severity: high
 component: formal-tests
 found_in: 0.1.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: David — run 3 de SF_MEG, «este contraste no tiene sentido, revisa la lógica»
 tags:
