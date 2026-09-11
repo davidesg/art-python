@@ -12,6 +12,14 @@ _PO3 = os.path.expanduser(
 )
 
 
+def _inp(pre):
+    """El hermano `.inp` de un `.pre`. Desde BUG-0159 no se estima desde un
+    `.pre`, así que las pruebas de herramientas que ESTIMAN —y sólo ésas—
+    entran por la especificación. Que el hermano exista siempre en el corpus
+    no es casualidad: el `.pre` lo escribe el propio pipeline a partir de él."""
+    return pre[:-4] + ".inp" if pre.lower().endswith(".pre") else pre
+
+
 def _skip_if_missing(path):
     if not os.path.exists(path):
         pytest.skip(f"test data not found: {path}")
@@ -63,9 +71,9 @@ def test_boxcox_analysis_returns_text_and_figure():
 # ---------------------------------------------------------------------------
 
 def test_estimate_and_diagnose_returns_text_and_figure():
-    _skip_if_missing(_RIPC1)
+    _skip_if_missing(_inp(_RIPC1))
     from art.mcp_server import estimate_and_diagnose
-    result = estimate_and_diagnose(_RIPC1)
+    result = estimate_and_diagnose(_inp(_RIPC1))
     # text + diagnosis figure (+ optional auto-scan figure)
     assert len(result) >= 2
     assert result[0].type == "text"
@@ -74,10 +82,10 @@ def test_estimate_and_diagnose_returns_text_and_figure():
 
 
 def test_estimate_and_diagnose_detects_extremes_po3():
-    _skip_if_missing(_PO3)
+    _skip_if_missing(_inp(_PO3))
     from art.mcp_server import estimate_and_diagnose
     # PO3 has the 1999 outlier — diagnosis should detect it
-    result = estimate_and_diagnose(_PO3)
+    result = estimate_and_diagnose(_inp(_PO3))
     text = result[0].text
     # Should mention intervention hints if extremes present, or clean pass
     assert "Diagnosis" in text
@@ -125,7 +133,7 @@ def test_identification_ambiguous_field():
 def test_formal_tests_no_applicable_ripc1():
     _skip_if_missing(_RIPC1)
     from art.mcp_server import formal_tests
-    result = formal_tests(_RIPC1, run_meg=False)
+    result = formal_tests(_inp(_RIPC1), run_meg=False)
     assert result[0].type == "text"
     assert "Ningún contraste aplicable" in result[0].text
 
@@ -133,7 +141,7 @@ def test_formal_tests_no_applicable_ripc1():
 def test_formal_tests_dcd_po3():
     _skip_if_missing(_PO3)
     from art.mcp_server import formal_tests
-    result = formal_tests(_PO3, run_meg=False)
+    result = formal_tests(_inp(_PO3), run_meg=False)
     assert result[0].type == "text"
     text = result[0].text
     assert "DCD" in text
@@ -149,7 +157,7 @@ def test_formal_tests_shin_fuller_ipc_es():
     """Shin-Fuller test runs and reports stationarity for IPC_ES_m02 (AR(1))."""
     _skip_if_missing(_IPC_ES_M02)
     from art.mcp_server import formal_tests
-    result = formal_tests(_IPC_ES_M02, run_meg=False)
+    result = formal_tests(_inp(_IPC_ES_M02), run_meg=False)
     assert result[0].type == "text"
     text = result[0].text
     assert "Shin-Fuller" in text
@@ -258,7 +266,7 @@ def test_full_report_creates_file(tmp_path):
     _skip_if_missing(_RIPC1)
     from art.mcp_server import full_report
     out = str(tmp_path / "report.html")
-    result = full_report(_RIPC1, out, run_meg=False)
+    result = full_report(_inp(_RIPC1), out, run_meg=False)
     assert isinstance(result, str)
     assert os.path.exists(out)
     assert os.path.getsize(out) > 10_000
@@ -401,9 +409,9 @@ def test_build_model_returns_figure_per_round(tmp_path):
 
 def test_estimate_and_diagnose_always_returns_image():
     """Block D rule: estimate_and_diagnose must always include ImageContent."""
-    _skip_if_missing(_RIPC1)
+    _skip_if_missing(_inp(_RIPC1))
     from art.mcp_server import estimate_and_diagnose
-    result = estimate_and_diagnose(_RIPC1)
+    result = estimate_and_diagnose(_inp(_RIPC1))
     types = [x.type for x in result]
     assert "text"  in types, "Missing text in estimate_and_diagnose"
     assert "image" in types, "Block D violation: estimate_and_diagnose returned no figure"

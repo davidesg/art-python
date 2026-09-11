@@ -3,7 +3,8 @@
 `_load_fitted` significaba dos cosas a la vez —«estima esto» y «déjame mirar
 esto»— y el contrato distingue tres:
 
-    estimar(inp)         exige `.inp`; promete desviaciones típicas válidas.
+    estimar(inp)         EXIGE `.inp` — un `.pre` se RECHAZA (BUG-0159);
+                         promete desviaciones típicas válidas.
     mirar(inp|pre)       acepta los dos; NO promete SE. Residuos, figuras,
                          diagnosis, previsión dependen de los VALORES, y en un
                          `.pre` los valores son exactos.
@@ -14,6 +15,13 @@ Que sean tres no es ceremonia: hace que **el sitio que llama declare lo que
 necesita**. Y de ahí sale lo que de verdad importa — `mirar` no avisa, porque no
 promete nada que un `.pre` estropee. Avisar ahí sería ruido, y el ruido cuesta
 tokens: el LLM tiene que parar a averiguar si el aviso le concierne.
+
+**Y desde BUG-0159 `estimar` no avisa: se NIEGA.** El convenio llevaba desde el
+principio dando problemas con un `RuntimeWarning` que ningún carril lee y un
+alias —`_load_fitted`— que no dice que estima. Una propiedad que sólo se
+sostiene si todo el mundo se acuerda no es una propiedad del sistema: es una
+costumbre. Lo que la convierte en propiedad es que la operación prohibida falle
+ruidosamente al intentarla — y que al fallar diga por dónde salir.
 """
 import os
 import re
@@ -69,9 +77,24 @@ def test_el_nombre_historico_sigue_valiendo():
     assert pipeline._load_fitted is estimar
 
 
-def test_estimar_avisa_sobre_un_pre(terna):
+def test_estimar_RECHAZA_un_pre(terna):
+    """El cambio de BUG-0159: de avisar a negarse."""
+    from art.pipeline import ErrorDeContrato
     _, f_pre, _ = terna
-    assert _n_avisos(estimar, f_pre) == 1
+    with pytest.raises(ErrorDeContrato):
+        estimar(f_pre)
+
+
+def test_y_el_rechazo_dice_por_donde_salir(terna):
+    """Negarse sin dar la salida convierte una regla en un muro."""
+    from art.pipeline import ErrorDeContrato
+    f_inp, f_pre, _ = terna
+    try:
+        estimar(f_pre); t = ""
+    except ErrorDeContrato as e:
+        t = str(e)
+    assert os.path.basename(f_inp) in t, "no nombra el `.inp` hermano"
+    assert "mirar()" in t and "`.out`" in t, "no da las dos salidas"
 
 
 def test_mirar_NO_avisa_sobre_un_pre(terna):
@@ -87,26 +110,25 @@ def test_ninguna_avisa_sobre_un_inp(terna):
     assert _n_avisos(mirar, f_inp) == 0
 
 
-def test_las_dos_sellan_el_origen(terna):
+def test_el_sello_sigue_puesto_por_la_via_viva(terna):
     """El sello no depende del contrato: quien imprima una SE lo necesita venga
-    por donde venga."""
+    por donde venga. Con `estimar` rechazando el `.pre`, la vía que queda es
+    `mirar`, y tiene que sellar igual."""
     f_inp, f_pre, _ = terna
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        assert viene_de_pre(estimar(f_pre)[1])
-        assert viene_de_pre(mirar(f_pre)[1])
-        assert not viene_de_pre(mirar(f_inp)[1])
+    assert viene_de_pre(mirar(f_pre)[1])
+    assert not viene_de_pre(mirar(f_inp)[1])
+    assert not viene_de_pre(estimar(f_inp)[1])
 
 
-def test_las_dos_dan_los_mismos_valores(terna):
-    """`mirar` no es una estimación peor: es la misma, sin la promesa sobre la
-    covarianza."""
-    _, f_pre, _ = terna
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        _, a = estimar(f_pre)
-        _, b = mirar(f_pre)
-    assert abs(a._result.loglik - b._result.loglik) < 1e-9
+def test_mirar_no_es_una_estimacion_PEOR(terna):
+    """`mirar` sobre el `.pre` da los mismos VALORES que estimar el `.inp`: es
+    la misma estimación, sin la promesa sobre la covarianza. Eso es lo que hace
+    legítimo mirar residuos, figuras y diagnosis desde un `.pre`, y saltar con
+    él a `drtran` o `drvec`."""
+    f_inp, f_pre, _ = terna
+    _, a = estimar(f_inp)
+    _, b = mirar(f_pre)
+    assert abs(a._result.loglik - b._result.loglik) < 1e-6
 
 
 def test_leer_no_toca_el_motor(terna):
@@ -154,10 +176,26 @@ def test_una_herramienta_de_mirar_calla_de_extremo_a_extremo(terna):
     assert _n_avisos(fn, f_pre) == 0
 
 
-def test_una_herramienta_de_estimar_avisa_de_extremo_a_extremo(terna):
+def test_una_herramienta_de_estimar_SE_NIEGA_de_extremo_a_extremo(terna):
+    """Lo que el analista tiene que ver por la superficie MCP no es un aviso
+    —que nadie lee— sino la negativa, **sin traceback**: el carril sólo enseña
+    el texto que le llega, así que una excepción cruda se le presenta como una
+    avería del programa en lugar de como una regla del método."""
     _, f_pre, _ = terna
     fn = getattr(srv.test_interventions, "fn", srv.test_interventions)
-    assert _n_avisos(fn, f_pre) == 1
+    t = "\n".join(getattr(x, "text", "") for x in fn(f_pre))
+    assert "Traceback" not in t, "la negativa llega como avería"
+    assert "`.pre`" in t and "RC.inp" in t, "no dice qué hay que usar"
+
+
+def test_y_el_que_solo_mira_sigue_pasando(terna):
+    """La otra mitad de la regla: negar el `.pre` a quien estima no puede
+    cerrarlo a quien sólo mira. Si lo cerrara, el `.pre` dejaría de servir para
+    lo único para lo que se guarda."""
+    _, f_pre, _ = terna
+    fn = getattr(srv.intervention_analysis, "fn", srv.intervention_analysis)
+    t = "\n".join(getattr(x, "text", "") for x in fn(f_pre))
+    assert "Traceback" not in t and "No se puede hacer eso" not in t
 
 
 # ═══════ La CUARTA puerta: cargar y ajustar a mano (revisión externa, #2) ═══════
@@ -198,7 +236,8 @@ def test_ninguna_herramienta_carga_y_ajusta_POR_SU_CUENTA():
     ("model_equation_display", True),     # su salida ENTERA son SE
     ("estimate_and_diagnose", True),
     ("incident_configurations", True),
-    ("intervention_ladder", True),
+    ("intervention_ladder", False),    # BUG-0159: pasó a `_mirar`
+    ("model_histogram", False),        # idem
     ("guided_intervention", True),
     ("residual_episodes", False),         # sólo residuos: avisar sería ruido
     ("residual_outlier_scan", False),

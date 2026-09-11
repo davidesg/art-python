@@ -15,8 +15,8 @@ import pytest
 
 _RIPC1 = os.path.expanduser(
     "~/Dropbox/SRC/atws/fue/fue/tests/real_cases/PRICES"
-    "/IPC/Mensual/sample_1.2002_12.2007/RIPC.1.pre"
-)
+    "/IPC/Mensual/sample_1.2002_12.2007/RIPC.1.inp"
+)   # `.inp`, no `.pre`: estimate_and_diagnose ESTIMA (BUG-0159)
 
 
 def _skip_if_missing(path):

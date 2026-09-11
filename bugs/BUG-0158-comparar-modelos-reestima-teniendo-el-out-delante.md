@@ -1,11 +1,11 @@
 ---
 id: BUG-0158
 title: `compare_versions` reestima los dos modelos teniendo el `.out` delante — 9× más lento para el mismo AIC, y publica los errores típicos de la semilla
-status: open
+status: fixed
 severity: high
 component: mcp-tools
 found_in: 0.2.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: David — estudio de campo del nodo de intervención
 tags:
@@ -84,6 +84,28 @@ VERIFICA que los parámetros no se mueven; para reestimar se usa el `.inp`.**
 `art.outfile` ya trae `loglik`, `npar`, `nobs` e `iteraciones`, así que el AIC y
 el BIC son dos líneas. Conviene exponerlos como propiedades de `OutFile` para
 que no vuelva a calcularlos cada llamador por su cuenta.
+
+## Coda: el arreglo nació muerto, y lo destapó su propia prueba
+
+La primera versión del arreglo leía el `.out` y **no se ejecutaba nunca**:
+
+```python
+ne = len(getattr(r, "residuals", []) or []) or (o.nobs - 1)
+```
+
+`residuals` es un array de numpy. `res or []` evalúa su verdad y levanta
+`ValueError: the truth value of an array … is ambiguous`, dentro de un
+`try/except Exception: pass`. La rama entera del `.out` se saltaba en silencio y
+la herramienta seguía recalculando.
+
+**Y ninguna prueba lo habría visto**, porque el número recalculado es el mismo
+hasta el cuarto decimal: leer y recalcular sólo se distinguen cuando el registro
+dice algo que la reestimación no puede producir. Por eso la prueba altera el
+`logelf` del `.out` a un centinela —`-424.242424`— y exige verlo en la salida.
+El dato tiene que VIAJAR; comprobar que coincide no comprueba nada.
+
+El `except` mudo era la otra mitad: ahora avisa. Un `.out` ilegible es una
+noticia, no un detalle.
 
 ## Validation
 

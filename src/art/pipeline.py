@@ -129,43 +129,65 @@ AVISO_SE_DESDE_PRE = (
 # que abrió esta línea de trabajo—. `estimar` sí avisa (BUG-0090).
 
 
+class ErrorDeContrato(ValueError):
+    """El sitio que llama pidió una operación que el convenio no permite.
+
+    No es un fallo del análisis ni un error de programación: es que se pidió
+    estimar desde un `.pre`, o algo equivalente. Lleva su propio tipo para que
+    la capa que presenta pueda enseñar EL MENSAJE y no un traceback — un
+    rechazo ilegible es peor que el aviso que sustituye (BUG-0159).
+    """
+
+
 def estimar(path: str):
-    """Carga y ESTIMA un modelo. Acepta `.inp` y `.pre`, y no son lo mismo.
+    """Carga y ESTIMA un modelo. **Exige `.inp`: un `.pre` se RECHAZA.**
 
-    El convenio es `.inp(t−1) → .pre(t−1) → .inp(t) → .pre(t)`: **sólo el `.inp`
-    se usa para estimar**; el `.pre` sirve para modificar y crear el `.inp`
-    siguiente.
+    El convenio es `.inp(t−1) → .pre(t−1) → .inp(t) → .pre(t)`: sólo el `.inp`
+    se usa para estimar; el `.pre` sirve para modificar y crear el `.inp`
+    siguiente, y para saltar a `drtran` o `drvec`.
 
-    Estimar desde un `.pre` arranca EN el óptimo, así que BFGS no itera y la
-    covarianza se queda en la semilla (2/n) — BUG-0027, BUG-0090. Los valores
-    salen exactos y las desviaciones típicas no, lo que hace el fallo invisible:
-    el fichero parece hacer round-trip.
+    **Por qué se rechaza y ya no se avisa — BUG-0159.** Estimar desde un `.pre`
+    arranca EN el óptimo: el BFGS no tiene adónde ir, apenas itera y la
+    covarianza se queda en la semilla. Los VALORES salen exactos y las
+    desviaciones típicas no, así que el fallo es invisible — el fichero parece
+    hacer round-trip.
 
-    Esta función **no lo prohíbe** —hay usos legítimos, como mirar residuos, y
-    para eso está `mirar()`— pero sella el modelo con `_art_origen` para que
-    quien imprima un error típico pueda decirlo. El aviso se emite donde se
-    IMPRIME la SE y no aquí, que es lo que hace que responda su propia pregunta:
-    si estás viendo una SE, te afecta.
+    Esto se avisaba desde BUG-0090 y **siguió dando problemas**, por dos razones
+    que se ven juntas: el aviso es un `RuntimeWarning` que ningún carril lee, y
+    la función era alcanzable bajo el alias `_load_fitted`, un nombre que se lee
+    como «carga el modelo ajustado» y no como «estima». Veinte herramientas la
+    llamaban así. **Una regla sostenida por disciplina no es una regla**: si el
+    convenio dice que nunca se estima desde un `.pre`, la función que estima
+    tiene que negarse.
+
+    Para lo demás está `mirar()`, que acepta los dos porque residuos, figuras,
+    diagnosis y previsión dependen de los VALORES, y en un `.pre` son exactos.
     """
     import fue
     path = os.path.expanduser(path)
     if not os.path.exists(path):
         raise FileNotFoundError(f"File not found: {path}")
+    if path.lower().endswith(".pre"):
+        hermano = path[:-4] + ".inp"
+        salida = (f"Usa `{os.path.basename(hermano)}`, que está al lado."
+                  if os.path.exists(hermano) else
+                  "Usa el `.inp` del que salió, o `mirar()` si no necesitas "
+                  "desviaciones típicas.")
+        raise ErrorDeContrato(
+            f"No se estima desde un `.pre` ({os.path.basename(path)}). Un "
+            f"`.pre` lleva los valores del ÓPTIMO como semilla: el optimizador "
+            f"arranca ahí, apenas itera y la covarianza se queda en la semilla "
+            f"del BFGS, así que las desviaciones típicas salen mal mientras los "
+            f"valores salen bien — el fallo es invisible. {salida} "
+            f"Si sólo vas a mirar residuos, figuras o diagnosis, usa `mirar()`; "
+            f"y si lo que quieres son las SE del modelo tal como se estimó, "
+            f"léelas del `.out` (art/bugs/BUG-0090, BUG-0159).")
     ts, m = fue.load(path)
     m.fit()
-    origen = "pre" if path.lower().endswith(".pre") else "inp"
     try:
-        setattr(m, ATRIBUTO_ORIGEN, origen)
+        setattr(m, ATRIBUTO_ORIGEN, "inp")
     except Exception:                                    # pragma: no cover
         pass
-    if origen == "pre":
-        import warnings
-        warnings.warn(
-            f"art: se estimó desde {os.path.basename(path)} (un `.pre`). Los "
-            "VALORES son exactos; las desviaciones típicas NO —la covarianza se "
-            "queda en la semilla del BFGS—. Para SE fiables usa el `.inp` o lee "
-            "el `.out` (art/bugs/BUG-0090).",
-            RuntimeWarning, stacklevel=2)
     return ts, m
 
 
@@ -202,6 +224,15 @@ def mirar(path: str):
 #: Nombre histórico de `estimar`. Se conserva porque lo usan 17 herramientas y
 #: renombrarlas todas de golpe mezclaría dos cambios en un commit; el contrato
 #: ya está declarado en los nombres nuevos.
+# El alias que hacía invisible la operación — BUG-0159.
+#
+# `_load_fitted` se lee como «carga el modelo ajustado». Lo que hace es ESTIMAR.
+# Veinte herramientas lo llamaban por ese nombre, y con él la regla «nunca se
+# estima desde un `.pre`» dependía de que quien escribiera una herramienta nueva
+# supiera que un nombre inocuo escondía una estimación.
+#
+# Se conserva para no romper llamadores externos, pero heredando el rechazo: lo
+# que cambia es que ahora la operación se declara en el sitio que llama.
 _load_fitted = estimar
 
 

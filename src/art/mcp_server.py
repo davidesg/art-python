@@ -16,6 +16,7 @@ Protocolo agnóstico al LLM: cualquier cliente MCP puede usar este servidor.
 from __future__ import annotations
 
 import os
+import re
 import traceback
 
 # El aviso `IncompleteFieldDefinitionWarning` sobre el campo `lifespan` lo emite
@@ -976,7 +977,22 @@ def _result(desc) -> list:
 
 
 def _err(msg: str) -> list:
+    """El error, presentado. Un incumplimiento del CONTRATO va sin traceback.
+
+    Las herramientas devuelven `_err(traceback.format_exc())`, que es lo
+    correcto para un fallo inesperado: la traza es la información. Pero para un
+    incumplimiento del convenio —estimar desde un `.pre`— la traza ENTIERRA el
+    mensaje, que es justo lo que el analista necesita leer: qué pasó, por qué, y
+    qué fichero usar en su lugar. Un rechazo ilegible es peor que el aviso que
+    vino a sustituir (BUG-0159).
+    """
     from mcp.types import TextContent
+    # El traceback prefija el nombre del módulo: «art.pipeline.ErrorDeContrato».
+    m = re.search(r"^(?:[\w.]+\.)?ErrorDeContrato:\s*(.+)\Z", msg, re.S | re.M)
+    if m:
+        return [TextContent(type="text",
+                            text="⛔ **No se puede hacer eso con este fichero.**"
+                                 f"\n\n{m.group(1).strip()}")]
     return [TextContent(type="text", text=f"❌ Error: {msg}")]
 
 
@@ -1039,8 +1055,8 @@ def _equation_for_prompt(ts, model) -> str:
                 aviso = (f"\n\nℹ **Errores típicos sospechosos** "
                          f"(niter={getattr(r, 'niter', '?')}): {detalle} "
                          + AVISO_COV_CASI_SEMILLA)
-    except Exception:
-        pass
+    except Exception as _e:               # BUG-0160: no se calla
+        _warn("no se pudo componer el aviso del método en _equation_for_prompt", _e)
     # Y el ORIGEN, que es la causa y no el síntoma. Lo de arriba detecta que la
     # covarianza se parece a la semilla —una heurística, y sobre FOOD_UEM m06 no
     # salta porque las SE sólo se mueven un 12%—; esto sabe de qué fichero vino
@@ -2233,7 +2249,7 @@ def intervention_ladder(inp_path: str,
         from art.episodes import describe_episodios
         from art.escalera import escalera_de_ockham, describe_escalera
         from art.policy import decide_episodios, decide_domain, THRESHOLDS
-        ts, m = _load_fitted(inp_path)
+        ts, m = _mirar(inp_path)
         # `_load_fitted` y no `_load_ts_model` + `fit()` a mano: esa vía no sella
         # el origen del fichero, y con ella el aviso de BUG-0090 es
         # inalcanzable — el contrato tenía tres puertas y una cuarta abierta.
@@ -2696,8 +2712,8 @@ def preliminary_outlier_scan(inp_path: str, d: int, D: int,
                     "dinámica lo que parece anómalo puede ser justo lo que el "
                     "modelo predice. (bugs/BUG-0028)"
                 )
-        except Exception:
-            pass
+        except Exception as _e:               # BUG-0160: no se calla
+            _warn("no se pudo componer el aviso del método en preliminary_outlier_scan", _e)
 
         next_opts = (
             aviso_modelo
@@ -2813,8 +2829,8 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER,
                         f"{_t}.** Un suceso que dura varios períodos modelizado "
                         "como atípicos sueltos se ajusta mal. Llama a "
                         "`residual_episodes` antes de decidir la forma.\n\n")
-        except Exception:
-            pass
+        except Exception as _e:               # BUG-0160: no se calla
+            _warn("no se pudo componer el aviso del método en residual_outlier_scan", _e)
         # LA CALIBRACIÓN DEL CORRELOGRAMA — las DOS funciones.
         # La PACF decide el orden AR y la ACF el orden MA; calibrar sólo una
         # deja media identificación a ciegas, y no porque una prediga a la otra
@@ -3085,7 +3101,7 @@ def model_histogram(inp_path: str) -> list:
     try:
         from mcp.types import ImageContent
         from art.describe import describe_diagnosis
-        ts, m = _load_fitted(inp_path)
+        ts, m = _mirar(inp_path)
         desc = describe_diagnosis(m)
         b64 = desc.data.get("hist_b64") or desc.figure_b64
         if b64 is None:
@@ -3174,8 +3190,8 @@ def overparameterization_analysis(inp_path: str, threshold: float = 0.7) -> list
                     "real**, que trae su propia matriz de correlación y su bloque "
                     "«Correlations greater than or equal to 0.7»."
                 )
-        except Exception:
-            pass
+        except Exception as _e:               # BUG-0160: no se calla
+            _warn("no se pudo componer el aviso del método en overparameterization_analysis", _e)
 
         if corr is None:
             return [TextContent(type="text",
@@ -3604,7 +3620,13 @@ def meg_reformulate(inp_path: str, freq: int, output_path: str,
         from art.formal_tests import reformulate_stochastic
         from art.describe import describe_diagnosis
         src = base_pre_path or inp_path
-        ts, m = _load_fitted(src)
+        # BUG-0159. `src` es casi siempre un `.pre` — es el convenio de
+        # encadenar, y `base_pre_path` lo dice en el nombre. De este modelo sólo
+        # se toma la ESTRUCTURA y la serie; el modelo REFORMULADO se estima aparte, y de
+        # ahí salen los errores típicos que se imprimen. Así que aquí toca
+        # `mirar`, no `estimar`. Mientras estimar desde un `.pre` sólo avisaba,
+        # la diferencia no se veía; cuando pasó a negarse, se vio.
+        ts, m = _mirar(src)
         s = int(getattr(ts, "freq", 12))
         f = int(freq)
         if not (1 <= f <= s // 2):
@@ -3751,7 +3773,13 @@ def meg_frequency(inp_path: str, freq: int, base_pre_path: str = "") -> list:
         from art.formal_tests import meg as _meg
         from art.describe import Description
         src = base_pre_path or inp_path
-        ts, m = _load_fitted(src)
+        # BUG-0159. `src` es casi siempre un `.pre` — es el convenio de
+        # encadenar, y `base_pre_path` lo dice en el nombre. De este modelo sólo
+        # se toma la ESTRUCTURA y la serie; los dos modelos del LR —libre y λ₂=−1— se estiman aparte, y de
+        # ahí salen los errores típicos que se imprimen. Así que aquí toca
+        # `mirar`, no `estimar`. Mientras estimar desde un `.pre` sólo avisaba,
+        # la diferencia no se veía; cuando pasó a negarse, se vio.
+        ts, m = _mirar(src)
         s = int(getattr(ts, "freq", 12))
         f = int(freq)
         if not (1 <= f <= s // 2):
@@ -6810,8 +6838,27 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
         import scipy.stats as sp_stats
         import matplotlib.pyplot as plt
 
-        _, ma = _load_fitted(inp_path_a)
-        _, mb = _load_fitted(inp_path_b)
+        # COMPARAR NO ES ESTIMAR — BUG-0158.
+        #
+        # Esto llamaba a `_load_fitted`, o sea que reestimaba los dos modelos
+        # teniendo el `.out` delante. Dos costes, y el segundo es el grave:
+        #
+        #   · 25,4 ms frente a 2,9 leyendo el `.out`, para el MISMO AIC al
+        #     cuarto decimal;
+        #   · y si lo que se compara es un `.pre` —o un `.inp` escrito por
+        #     `_write_inp` tras ajustar, que es el caso normal en una cadena de
+        #     versiones—, el optimizador arranca en el óptimo, apenas itera y la
+        #     covarianza se queda en la semilla. Medido sobre FOOD_UEM: SE de
+        #     0,0835 frente a los 0,2315 del `.out`, factor 2,8. La herramienta
+        #     cuyo trabajo es comparar dos modelos era la que más fácilmente
+        #     publicaba errores típicos inválidos, justo cuando el analista los
+        #     mira para decidir si poda un parámetro.
+        #
+        # `mirar` para lo que depende de los VALORES —residuos, diagnosis,
+        # figuras, que en un `.pre` son exactos— y el `.out` para lo que depende
+        # de la ESTIMACIÓN: ℓ, AIC, BIC y las desviaciones típicas.
+        _, ma = _mirar(inp_path_a)
+        _, mb = _mirar(inp_path_b)
 
         spec_a = _extract_spec(ma, lam=lam_a)
         spec_b = _extract_spec(mb, lam=lam_b)
@@ -6821,10 +6868,40 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
         diag_a = diagnose(ma)
         diag_b = diagnose(mb)
 
-        la, lb = ma._result.loglik, mb._result.loglik
-        aic_a, bic_a = ma._result.aic, ma._result.bic
-        aic_b, bic_b = mb._result.aic, mb._result.bic
-        npar_a, npar_b = ma._result.npar, mb._result.npar
+        # ℓ, AIC y BIC del REGISTRO cuando lo hay. El `.out` publica la
+        # verosimilitud con precisión completa —el campo se llama `logelf`: la
+        # calculada con `elf` en la última iteración— y `art.outfile` ya la
+        # parsea. Verificado contra `fue.aic`: coinciden al cuarto decimal.
+        def _criterios(m, ruta):
+            r = getattr(m, "_result", None)
+            try:
+                from art.outfile import hay_out, lee_out
+                if hay_out(ruta):
+                    o = lee_out(ruta)
+                    if o.loglik is not None and o.npar and o.nobs:
+                        import math as _m
+                        # `residuals` es un ARRAY. Escrito `res or []`, numpy
+                        # evalúa su verdad y levanta ValueError — que el
+                        # `except` de abajo se tragaba entero. El arreglo de
+                        # BUG-0158 quedó así de código MUERTO desde el primer
+                        # día: la herramienta seguía recalculando y ninguna
+                        # prueba lo veía, porque el número recalculado es el
+                        # mismo. Lo destapó la prueba del centinela.
+                        res = getattr(r, "residuals", None)
+                        ne = int(np.size(res)) if res is not None else 0
+                        ne = ne or (o.nobs - 1)
+                        return (o.loglik, -2 * o.loglik + 2 * o.npar,
+                                -2 * o.loglik + o.npar * _m.log(ne), o.npar,
+                                True)
+            except Exception as _e:
+                # Y no se calla: un `.out` ilegible es una noticia, no un
+                # detalle. Callarlo es lo que dejó el fallo de arriba invisible.
+                _warn(f"no se pudieron leer los criterios del `.out` de "
+                      f"{os.path.basename(ruta)}", _e)
+            return (r.loglik, r.aic, r.bic, r.npar, False)
+
+        la, aic_a, bic_a, npar_a, _reg_a = _criterios(ma, inp_path_a)
+        lb, aic_b, bic_b, npar_b, _reg_b = _criterios(mb, inp_path_b)
         import math
         sa = math.sqrt(ma._result.sigma2) if ma._result.sigma2 > 0 else 0.0
         sb = math.sqrt(mb._result.sigma2) if mb._result.sigma2 > 0 else 0.0
@@ -9128,8 +9205,8 @@ def get_out_report(inp_path: str) -> list:
         try:
             from art.pipeline import aviso_se_no_fiable
             aviso += aviso_se_no_fiable(m)
-        except Exception:
-            pass
+        except Exception as _e:               # BUG-0160: no se calla
+            _warn("no se pudo componer el aviso del método en get_out_report", _e)
         return [TextContent(type="text",
                             text=aviso + f"\n\n```\n{out_text}\n```")]
     except Exception:
