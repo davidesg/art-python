@@ -900,7 +900,9 @@ Sequential INTERVENTION — ONE decision node per call.
     evento_*      : lo extramuestral, que sólo sabe el analista. `evento_fuente`
                     es obligatoria si se declara `evento_naturaleza`: no se
                     afirma que un suceso fue permanente sin decir por qué se
-                    sabe.
+                    sabe. `evento_naturaleza` son TRES lecturas y no dos —
+                    `permanente`, `transitorio`, `recuperacion_parcial`— y la
+                    descripción del suceso va en `evento_fuente`, no ahí.
     guion_*       : registro del nodo, como en el resto de la suite
 
 ---
@@ -1205,8 +1207,14 @@ ACF/PACF identification listing + ARMA order suggestions — standalone use.
     umbral_activo     : |z| a partir del cual un residuo contiguo cuenta como
                         parte del suceso aunque no sea extremo (1,0)
     evento_desde      : fecha declarada de inicio, "QN/AAAA" — fija el arranque
-    evento_naturaleza : "permanente" | "transitorio" | "" — se contrasta contra
-                        la ganancia: la explicación debe explicar la FORMA
+    evento_naturaleza : LAS TRES LECTURAS de un suceso en el nivel (o "" para
+                        que decida el contraste):
+                          `permanente`           el nivel se queda desplazado
+                          `transitorio`          vuelve a la línea base
+                          `recuperacion_parcial` vuelve EN PARTE
+                        La explicación tiene que explicar la FORMA, no sólo la
+                        fecha. La tercera no la decide esta llamada: es la
+                        ganancia NETA de dos intervenciones (BUG-0155/0157)
     evento_fuente     : qué se está citando. Obligatorio si hay `naturaleza`
     aportada_por      : "analista" | "LLM"
 

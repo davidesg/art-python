@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import re
 import traceback
+from typing import Literal
 
 # El aviso `IncompleteFieldDefinitionWarning` sobre el campo `lifespan` lo emite
 # `pydantic_settings` al CONSTRUIR FastMCP --no al importarlo, que es donde lo
@@ -673,6 +674,19 @@ REGLAS GENERALES
 - confirm_and_estimate construye el INP del modelo — nunca busques ficheros .inp.
 - Las decisiones finales (λ, d, D, p, q) son del USUARIO, no del modelo.
 """
+
+# EL ENUM VIAJA EN EL ESQUEMA — BUG-0155.
+#
+# `evento_naturaleza` se publicaba como `{"type": "string"}` a secas: ni
+# descripción ni valores. El único sitio donde estaban era la prosa del
+# docstring, que el cliente puede recortar (BUG-0116), así que el valor válido
+# se aprendía POR EL MENSAJE DE ERROR — y en la corrida de ITCER el analista
+# metió la frase entera y se la rechazaron.
+#
+# Un `Literal` no es prosa: FastMCP lo convierte en `"enum": [...]` y el cliente
+# no puede ni construir la llamada mal. Es la diferencia entre documentar una
+# regla y que el sistema la tenga.
+_Naturaleza = Literal["", "permanente", "transitorio", "recuperacion_parcial"]
 
 mcp = FastMCP("ART — A Real-Time Time-Series Analysis", instructions=_INSTRUCTIONS)
 
@@ -2047,7 +2061,7 @@ def incident_configurations(inp_path: str,
                             threshold: float = 2.5,
                             umbral_activo: float = 1.0,
                             evento_desde: str = "",
-                            evento_naturaleza: str = "",
+                            evento_naturaleza: _Naturaleza = "",
                             evento_fuente: str = "",
                             aportada_por: str = "") -> list:
     """
@@ -2103,8 +2117,14 @@ def incident_configurations(inp_path: str,
     umbral_activo     : |z| a partir del cual un residuo contiguo cuenta como
                         parte del suceso aunque no sea extremo (1,0)
     evento_desde      : fecha declarada de inicio, "QN/AAAA" — fija el arranque
-    evento_naturaleza : "permanente" | "transitorio" | "" — se contrasta contra
-                        la ganancia: la explicación debe explicar la FORMA
+    evento_naturaleza : LAS TRES LECTURAS de un suceso en el nivel (o "" para
+                        que decida el contraste):
+                          `permanente`           el nivel se queda desplazado
+                          `transitorio`          vuelve a la línea base
+                          `recuperacion_parcial` vuelve EN PARTE
+                        La explicación tiene que explicar la FORMA, no sólo la
+                        fecha. La tercera no la decide esta llamada: es la
+                        ganancia NETA de dos intervenciones (BUG-0155/0157)
     evento_fuente     : qué se está citando. Obligatorio si hay `naturaleza`
     aportada_por      : "analista" | "LLM"
     """
@@ -7192,7 +7212,7 @@ def guided_intervention(inp_path: str,
                         umbral_vecino: float = 0.0,
                         dominio: str = "",
                         evento_desde: str = "",
-                        evento_naturaleza: str = "",
+                        evento_naturaleza: _Naturaleza = "",
                         evento_fuente: str = "",
                         aportada_por: str = "",
                         guion_path: str = "",
@@ -7275,7 +7295,9 @@ def guided_intervention(inp_path: str,
     evento_*      : lo extramuestral, que sólo sabe el analista. `evento_fuente`
                     es obligatoria si se declara `evento_naturaleza`: no se
                     afirma que un suceso fue permanente sin decir por qué se
-                    sabe.
+                    sabe. `evento_naturaleza` son TRES lecturas y no dos —
+                    `permanente`, `transitorio`, `recuperacion_parcial`— y la
+                    descripción del suceso va en `evento_fuente`, no ahí.
     guion_*       : registro del nodo, como en el resto de la suite
     """
     try:

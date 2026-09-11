@@ -77,7 +77,8 @@ import numpy as np
 
 __all__ = ["Candidato", "ConjuntoCandidatos", "InfoExtramuestral",
            "arranques_candidatos", "evalua_configuraciones",
-           "describe_configuraciones", "UMBRAL_ACTIVO", "BANDA_AIC"]
+           "describe_configuraciones", "normaliza_naturaleza",
+           "NATURALEZAS", "UMBRAL_ACTIVO", "BANDA_AIC"]
 
 
 # Un residuo cuenta como ACTIVO —parte del suceso aunque no sea extremo— a
@@ -93,6 +94,38 @@ BANDA_AIC = 2.0
 DOMINIOS_SIN_CAIDA_PERMANENTE = ("price_index",)
 
 
+# LAS TRES LECTURAS DE UN SUCESO EN EL NIVEL — BUG-0155.
+#
+# Eran dos, y el analista no tenía casilla. Sobre ITCER el suceso de 2008-09 es
+# una caída seguida de una RECUPERACIÓN PARCIAL: el nivel no vuelve —no es
+# transitorio— y tampoco se queda donde cayó —no es el permanente que el
+# contraste rotula—. Obligar a elegir entre dos respuestas equivocadas convierte
+# en ruido la única entrada de este nodo cuya evidencia no está en los datos.
+#
+# La tercera casilla existe ahora porque existe el instrumento que la mide: la
+# ganancia NETA de dos intervenciones (`interventions.net_gain`, BUG-0157). Una
+# casilla que nada puede contrastar sería peor que no tenerla.
+NATURALEZAS = ("permanente", "transitorio", "recuperacion_parcial")
+
+_ACENTOS = str.maketrans("áéíóúÁÉÍÓÚ", "aeiouAEIOU")
+
+
+def normaliza_naturaleza(v: str) -> str:
+    """La forma canónica de lo que el analista escribió.
+
+    El esquema publica un `enum`, así que un cliente conforme manda el valor
+    exacto. Esto es para los que no: «recuperación parcial», «Recuperacion-
+    Parcial» y `recuperacion_parcial` son la misma declaración, y rechazar las
+    dos primeras sería castigar al analista por una tilde.
+    """
+    t = (v or "").strip().lower().translate(_ACENTOS)
+    t = t.replace("-", "_").replace(" ", "_")
+    while "__" in t:
+        t = t.replace("__", "_")
+    return {"parcial": "recuperacion_parcial",
+            "recuperacion": "recuperacion_parcial"}.get(t, t)
+
+
 @dataclass
 class InfoExtramuestral:
     """Lo que el analista sabe del mundo y la herramienta no.
@@ -104,7 +137,7 @@ class InfoExtramuestral:
     """
 
     desde: str = ""              # fecha en que empezó el suceso, "QN/AAAA"
-    naturaleza: str = ""         # "permanente" | "transitorio" | ""
+    naturaleza: str = ""         # ver NATURALEZAS
     fuente: str = ""             # qué se está citando
     aportada_por: str = ""       # "analista" | "LLM" | ""
 
@@ -115,9 +148,19 @@ class InfoExtramuestral:
                 "suceso fue permanente o transitorio exige decir por qué se "
                 "sabe. Sin fuente, deja `naturaleza` vacía y que decida el "
                 "contraste de ganancia.")
-        if self.naturaleza and self.naturaleza not in ("permanente", "transitorio"):
-            raise ValueError(f"naturaleza={self.naturaleza!r}: "
-                             "'permanente', 'transitorio' o vacío.")
+        if self.naturaleza:
+            canon = normaliza_naturaleza(self.naturaleza)
+            if canon not in NATURALEZAS:
+                raise ValueError(
+                    f"naturaleza={self.naturaleza!r} no vale. Las tres lecturas "
+                    f"de un suceso en el NIVEL son:\n"
+                    f"  · `permanente`          el nivel se queda desplazado\n"
+                    f"  · `transitorio`         el nivel vuelve a la línea base\n"
+                    f"  · `recuperacion_parcial` vuelve EN PARTE — ni una cosa "
+                    f"ni la otra\n"
+                    f"O déjalo vacío y que decida el contraste de ganancia. "
+                    f"(La descripción del suceso va en `fuente`, no aquí.)")
+            self.naturaleza = canon
 
     @property
     def hay(self) -> bool:
@@ -349,6 +392,21 @@ class ConjuntoCandidatos:
         return ref is not None and ref.transitorio is False
 
     @property
+    def la_tercera_lectura_no_cabe_en_este_contraste(self) -> bool:
+        """Se declara `recuperacion_parcial` — BUG-0155.
+
+        El contraste de una sola intervención tiene DOS casillas: ω(1)=0 dice
+        que el nivel volvió, ω(1)≠0 que no volvió del todo. Y «no volvió del
+        todo» es compatible con la recuperación parcial **y** con el permanente
+        puro: no las separa.
+
+        Lo que las separa es la ganancia NETA de la caída y la vuelta, que es
+        otro instrumento y otro modelo —dos intervenciones—. Así que aquí no hay
+        concordancia que afirmar ni que negar: hay que mandar al sitio correcto.
+        """
+        return self.info.naturaleza == "recuperacion_parcial"
+
+    @property
     def concuerda_con_lo_extramuestral(self) -> bool | None:
         """¿La naturaleza declarada coincide con lo que dice el contraste?
 
@@ -359,6 +417,8 @@ class ConjuntoCandidatos:
         respuesta no está contrastando nada.
         """
         if not self.info.naturaleza:
+            return None
+        if self.la_tercera_lectura_no_cabe_en_este_contraste:
             return None
         ref = self.referencia
         if ref is None or ref.transitorio is None:
@@ -636,7 +696,25 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
                      "es otra.")
         conc = conj.concuerda_con_lo_extramuestral
         ref = conj.referencia
-        if conj.el_contraste_no_alcanza_la_vuelta:
+        if conj.la_tercera_lectura_no_cabe_en_este_contraste:
+            # BUG-0155. Antes esto ni siquiera se podía declarar: el analista
+            # tenía que elegir entre dos respuestas equivocadas, y el aviso de
+            # discrepancia se disparaba comparando lo que había dicho con un
+            # contraste que no tenía su casilla.
+            L.append(
+                "\nℹ **Declaras la tercera lectura, y este contraste tiene dos "
+                "casillas.** Con una sola intervención, ω(1)=0 dice «el nivel "
+                "volvió» y ω(1)≠0 dice «no volvió del todo» — y lo segundo es "
+                "compatible con la recuperación parcial **y** con el permanente "
+                "puro: no las separa. No hay aquí concordancia que afirmar ni "
+                "que negar.")
+            L.append(
+                "\nLo que las separa es la **ganancia NETA**: modeliza la caída "
+                "y la vuelta como **dos intervenciones** —encadenando por "
+                "`base_pre_path`— y contrasta H₀ Σᵢωᵢ(1)=0 con "
+                "`test_interventions(..., ganancia_neta=[i, j])`. Devuelve la "
+                "fracción recuperada, que es el número que tu lectura afirma.")
+        elif conj.el_contraste_no_alcanza_la_vuelta:
             # BUG-0157. Aquí el aviso decía «la explicación no concuerda con el
             # contraste», y era falso: el contraste no puede ver la vuelta que
             # el analista describe, así que «permanente» sale por construcción.
@@ -708,7 +786,13 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
     # transitorio. Que el contraste no alcance la vuelta no invalida la
     # configuración —sigue siendo la que mejor explica lo que se ve— pero sí
     # invalida leer «PERMANENTE» como si desmintiera al analista.
-    if conj.el_contraste_no_alcanza_la_vuelta:
+    if conj.la_tercera_lectura_no_cabe_en_este_contraste:
+        rec += ("\n\nℹ Y **lo que declaras no lo decide esta llamada**: una "
+                "recuperación parcial es la ganancia NETA de dos "
+                "intervenciones. Construye la caída con la forma de arriba, "
+                "encadena la vuelta desde su `.pre`, y contrasta "
+                "`test_interventions(..., ganancia_neta=[i, j])`.")
+    elif conj.el_contraste_no_alcanza_la_vuelta:
         _r = conj.referencia
         _d = (f" en **{_r.donde_situa_la_vuelta}**"
               if _r is not None and _r.puede_expresar_una_vuelta else "")
@@ -729,6 +813,7 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
             rango_ganancia=list(conj.rango_ganancia) if conj.rango_ganancia else None,
             discrepan=conj.discrepan_en_la_lectura,
             contraste_no_alcanza_la_vuelta=conj.el_contraste_no_alcanza_la_vuelta,
+            tercera_lectura=conj.la_tercera_lectura_no_cabe_en_este_contraste,
             vuelta_mas_tardia=conj.vuelta_mas_tardia or None,
             trampa_ventana_corta=conj.el_mas_estrecho_es_el_mas_corto,
             dominio=conj.dominio,
