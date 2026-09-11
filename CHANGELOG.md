@@ -4,6 +4,86 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.2.1 — 2026-09-11  ·  **CONGELADA**
+
+La 0.2.0 estaba en PyPI con defectos que la corrida guiada de ITCER destapó y sin
+funcionar en Windows. La decisión del analista fue **no subir de versión hasta
+depurar la que hay**: saltar a una 0.3 sobre una base que no funciona no tiene
+sentido. Ésta es esa depuración.
+
+**A partir de aquí sólo entran defectos MUY GRAVES que comprometan el uso de la
+herramienta.** Lo demás espera a la 0.3.
+
+### El nodo de intervención, depurado — 16 defectos
+
+Es la diferencia entre la 0.1 y la 0.2, y era lo que había que arreglar antes de
+seguir. Todos salieron de corridas guiadas reales —ITCER y FOOD de la UEM, que
+cubren el covid y Ucrania— y de un estudio de campo sobre 75 modelos guiados y
+173 intervenciones.
+
+**Lo que el nodo no sabía hacer, y ahora sabe**
+
+* **La ganancia NETA de un episodio repartido** (0157). Un suceso con vuelta
+  diferida —la caída y la recuperación separadas por períodos tranquilos— no cabe
+  en una sola intervención. `test_interventions(..., ganancia_neta=[i, j])`
+  contrasta H₀ Σᵢωᵢ(1)=0 y da TRES lecturas, no dos: vuelve, vuelve EN PARTE,
+  no vuelve. La del medio es la que el catálogo no sabía nombrar.
+* **Reformular** (0162). `rehacer=True` retira la intervención del suceso y pone
+  la nueva en su lugar. Antes había que volver a mano al `.pre` anterior, y
+  apuntar al fichero equivocado la dejaba dos veces sobre el mismo suceso.
+* **El denominador δ(B)** (0161, 0163). Estaba cableado de punta a punta y no
+  tenía grifo: 0 de 216 `.inp` del corpus llevaban un δ. `n_delta` abre la forma
+  racional ω₀/(1−δB) —dos parámetros donde N escalones gastan N— con la semilla
+  en 0.0 (medido: 0,9 da un óptimo espurio 248 puntos de AIC peor) y con δ
+  entrando en el control de admisibilidad, porque una raíz dentro del círculo es
+  una respuesta explosiva que la diagnosis no delata.
+* **Reducir, no sólo quitar** (0123). Un escalón con ganancia nula es un impulso
+  de un orden menos: la fórmula estaba escrita en un comentario y nunca llegó a
+  ser comportamiento. Medido, la reducción devuelve ΔAIC = −2,00 exactos.
+
+**Lo que el nodo afirmaba y no podía**
+
+* **0157** — el aviso «la explicación no concuerda con el contraste» se daba
+  sobre un contraste que **sitúa** la vuelta en vez de buscarla. Con
+  `transitorio` declarado, la discrepancia no se puede establecer nunca.
+* **0155** — `evento_naturaleza` admitía dos lecturas y el analista necesitaba
+  una tercera. Ahora son tres, el enum **viaja en el esquema** (un `Literal`, no
+  prosa que el cliente recorta) y declarar la tercera manda al instrumento que
+  la mide.
+* **0156** — la llamada 2 daba DOS recomendaciones sin jerarquía, y encima desde
+  fechas distintas. La escalera se alinea con el arranque del mecanismo, y cuando
+  discrepan se dice que el mecanismo acota la FORMA y la navaja la SOFISTICACIÓN.
+* **0152, 0153, 0154** — la misma pantalla: un rótulo que tomaba como sujeto la
+  banda cuando la decisión es del modelo; un pie de figura que contradecía al
+  veredicto; y el veredicto impreso tres veces.
+
+**El convenio de ficheros, que era una costumbre**
+
+* **0159** — «nunca se estima desde un `.pre`» se sostenía con un
+  `RuntimeWarning` que ningún carril lee y un alias que escondía la operación.
+  Ahora `estimar` se NIEGA, y dice por dónde salir.
+* **0158** — `compare_versions` reestimaba teniendo el `.out` delante. Y su
+  primer arreglo **nació muerto**, tragado por un `except` mudo; lo destapó una
+  prueba que altera el `logelf` a un centinela, porque el dato tiene que VIAJAR.
+* **0160** — cinco avisos del método vivían dentro de `except Exception: pass`.
+* **0164** — y al negar el `.pre` se cerraron las cuatro puertas del carril
+  guiado para el encadenado, que es su modo normal. La regla queda enunciada
+  bien: *quien imprime las SE **del modelo que carga** necesita `estimar`; quien
+  sólo toma de él estructura, serie o residuos necesita `mirar`.*
+
+**Lo demás**: 0149 (la superposición dibujaba en el nivel sobre residuos en ∇),
+0150 (las configuraciones tiraban las intervenciones del base).
+
+### Lo que queda dicho y NO hecho
+
+* art sabe **construir** la forma racional pero no **proponerla**: compite con el
+  peldaño 2 de la escalera y pide un peldaño nuevo con su criterio de subida.
+* `incident_configurations` no busca la vuelta **hacia delante**; encadenar dos
+  intervenciones y juntarlas con la ganancia neta ya funciona, pero a mano.
+* Abiertos: 0011, 0110, 0116, 0124, 0147, 0151.
+
+Suite: **1855 pasan**, 124 saltadas, 4 xfail, 0 fallos.
+
 ## art-tseries 0.2.0 — 2026-09-07
 
 El árbol pasó por `0.2.0.dev0` mientras el analista conducía los dos carriles a
