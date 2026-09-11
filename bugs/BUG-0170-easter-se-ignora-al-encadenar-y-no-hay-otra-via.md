@@ -1,11 +1,11 @@
 ---
 id: BUG-0170
 title: `easter` se ignora en silencio al encadenar con `base_pre_path`, y entonces NO queda ninguna vía para añadirlo a un modelo existente
-status: open
+status: fixed
 severity: high
 component: mcp-tools
 found_in: 0.1.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: David — run 3 de SF_MEG, incidencia C-6
 tags:
@@ -59,7 +59,7 @@ Contexto que lo agrava: **de los 84 `.inp` del corpus de SF_MEG, ninguno lleva
 easter** (BUG-0161 midió lo mismo con δ). El regresor existe desde BUG-0097 y la
 ruta desde BUG-0103, y sigue sin usarse nunca. Este defecto es una de las razones.
 
-## Fix propuesto
+## Fix propuesto (sustituido — ver §Fix)
 
 Dos partes, y la primera es obligatoria aunque no se haga la segunda:
 
@@ -70,6 +70,26 @@ Dos partes, y la primera es obligatoria aunque no se haga la segunda:
 2. **Que se pueda.** Añadir el regresor sobre los deterministas heredados —no
    sustituirlos— es lo que el analista pide cuando lo pasa. Lo mismo vale para
    `n_harmonics`, que está en la misma frase del docstring.
+
+
+## Fix
+
+`_build_arma_on_model(..., easter=False)`. Con `easter=True` el regresor **se
+añade** sobre los deterministas heredados del `.pre`; si el `.pre` ya lo trae, se
+hereda sin duplicarse. `confirm_and_estimate` se lo pasa.
+
+Medido sobre `ES_CPI_A_m03.pre` (11 deterministas, sin easter):
+
+    encadenado con easter=True   → easter=1, deterministas 12
+    reencadenado sobre uno que ya lo trae → easter=1 (no duplica)
+    sin pedirlo                  → easter=0
+
+Y el resto del modelo sobrevive —mismos cos/sin, mismas intervenciones—, que es
+lo que cierra el hueco: añadir un determinista ya no cuesta volver al `.inp`
+fresco.
+
+La descripción publicada deja de decir que se ignora, porque ahora sería mentira.
+`n_harmonics` sigue viniendo del `.pre`: ahí la frase era y sigue siendo cierta.
 
 ## Validation
 

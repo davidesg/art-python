@@ -1,11 +1,11 @@
 ---
 id: BUG-0169
 title: `load_data` lee un índice `YYYY-MM` como ANUAL y afirma «fechas inferidas del índice» — es la primera llamada de cualquier análisis
-status: open
+status: fixed
 severity: critical
 component: mcp-tools
 found_in: 0.1.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: David — run 3 de SF_MEG, incidencia C-1
 tags:
@@ -54,7 +54,7 @@ ld(source_path="data/ES_CPI.csv", output_inp=..., column="value")
 
 `data/ES_CPI.csv` es `date,value` con `date` = `2002-01`, `2002-02`, …
 
-## Fix propuesto
+## Fix propuesto (sustituido — ver §Fix)
 
 1. **Inferir de verdad.** Un índice `YYYY-MM` es mensual; `YYYY-QN` o `YYYYQN`,
    trimestral; `YYYY` a secas, anual. Es reconocimiento de formato, no adivinación.
@@ -63,6 +63,28 @@ ld(source_path="data/ES_CPI.csv", output_inp=..., column="value")
    afirmación falsa.
 3. La frase «Fechas inferidas del índice» sólo puede imprimirse cuando de verdad
    se hayan inferido.
+
+
+## Fix
+
+**Deducir de verdad, y negarse si no se puede.** `load_data` intenta primero
+`pd.infer_freq`; si el índice no es perfectamente regular —una serie real puede
+no serlo— cae al **espaciado MODAL en días**: 27-32 mensual, 88-93 trimestral,
+360-370 anual. Y si ninguna de las dos concluye, **se niega**:
+
+    El índice tiene fechas pero **no he sabido deducir la frecuencia** de su
+    espaciado. Decláralo: `freq`, `start_year` y `start_period`.
+    *No se supone anual: de `freq` cuelgan la estacionalidad, los armónicos y
+    las fechas de toda intervención, así que adivinar mal es peor que preguntar.*
+
+Y la nota final deja de afirmar lo que no hizo: «Fechas y frecuencia **DEDUCIDAS**
+del índice» cuando lo dedujo, «Fechas del índice; frecuencia **declarada**» cuando
+se la dieron. Lo declarado manda sobre lo deducido.
+
+**La raíz está en `fue`** y no se toca aquí: `TimeSeries.from_pandas` consulta
+sólo `idx.freqstr`, que pandas deja en `None` en cualquier índice PARSEADO, y cae
+a `freq=1` sin avisar. `art` pasa ahora la frecuencia explícita, así que no
+depende de esa inferencia. Queda anotado para el repo de `fue`.
 
 ## Validation
 

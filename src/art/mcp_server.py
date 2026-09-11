@@ -5894,9 +5894,14 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                       harmonics, NOT an intervention: it has no date and no form,
                       so it does not go through the intervention node. Add it when
                       the residuals show recurring April/March anomalies that move
-                      with the calendar. Like n_harmonics, it is ignored when
-                      base_pre_path is given — the deterministics come from the
-                      .pre, and if the .pre already carries it, it is inherited.
+                      with the calendar.
+                      **Funciona TAMBIÉN con `base_pre_path`** (BUG-0170): se
+                      AÑADE sobre los deterministas heredados del `.pre`, y si el
+                      `.pre` ya lo trae se hereda sin duplicarse. Antes se
+                      aceptaba el argumento y se descartaba en silencio, con lo
+                      que no quedaba NINGUNA vía para añadirlo a un modelo ya
+                      construido sin volver al `.inp` fresco y perder todas las
+                      intervenciones. `n_harmonics` sigue viniendo del `.pre`.
     seasonal        : on/off switch for the whole deterministic seasonal package
                       (cos/sin pairs + Nyquist alter). None (default) => derive from
                       n_harmonics>0, correct for freq>=4. Pass False for a
@@ -5988,8 +5993,10 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             _, m_base = _load_ts_model(base_pre_path)
             ts_b = m_base.series
             _exige_la_misma_serie(ts, ts_b, inp_path, base_pre_path)
+            # BUG-0170: `easter` llega hasta aquí. Antes se aceptaba el
+            # argumento y se descartaba en silencio al encadenar.
             m = _build_arma_on_model(m_base, p=p, q=q, P=P, Q=Q,
-                                     estimate_mu=estimate_mu)
+                                     estimate_mu=estimate_mu, easter=easter)
             _write_inp(ts, m, output_path)
         else:
             m_fresh = _make_model(ts, lam=lam, d=d, D=D, p=p, q=q,
@@ -9461,12 +9468,59 @@ def load_data(
         has_dates = isinstance(idx, (pd.DatetimeIndex, pd.PeriodIndex))
 
         if has_dates:
-            ts = fue.TimeSeries.from_pandas(series.rename(name),
-                                            freq=freq if freq > 0 else None)
-            if freq > 0:
-                ts = fue.TimeSeries(ts.data, freq=freq,
-                                    start=ts.start, name=name)
-            date_note = f"Fechas inferidas del índice."
+            # INFERIR DE VERDAD, O DECIR QUE NO SE PUDO — BUG-0169.
+            #
+            # `fue.TimeSeries.from_pandas` mira `idx.freqstr`, que es **None**
+            # en cualquier índice PARSEADO (pandas sólo lo rellena cuando el
+            # índice se construye con una frecuencia, p. ej. `date_range`). Sin
+            # él caía a `freq = 1`, ANUAL, en silencio — y esta función remataba
+            # afirmando «Fechas inferidas del índice», que era falso: no las
+            # había mirado.
+            #
+            # Medido sobre `ES_CPI.csv`, con índice 2002-01, 2002-02, …:
+            #     «Período: 2002 → 2294  (n=293, anual)»
+            #
+            # Es la PRIMERA llamada de cualquier análisis, y de `freq` cuelga
+            # todo: la estacionalidad, los armónicos, los retardos de la Q, el
+            # MEG, las fechas de toda intervención. No es un análisis peor: es
+            # otro, sobre una serie que no existe.
+            _inf = 0
+            if freq <= 0:
+                try:
+                    _fs = pd.infer_freq(idx)
+                except Exception:
+                    _fs = None
+                if _fs:
+                    _u = str(_fs).upper()
+                    _inf = (12 if _u.startswith(("M", "MS", "BM")) else
+                            4 if _u.startswith(("Q", "BQ")) else
+                            1 if _u.startswith(("A", "Y", "BA", "BY")) else 0)
+                if not _inf and len(idx) > 2:
+                    # el espaciado MODAL en días: 28-31 mensual, 89-92
+                    # trimestral, 365-366 anual. `infer_freq` exige regularidad
+                    # perfecta y una serie real puede no tenerla.
+                    import numpy as _np
+                    _d = _np.diff(_np.asarray(idx.view("int64"))) / 86_400_000_000_000
+                    _md = float(_np.median(_d))
+                    _inf = (12 if 27.0 <= _md <= 32.0 else
+                            4 if 88.0 <= _md <= 93.0 else
+                            1 if 360.0 <= _md <= 370.0 else 0)
+                if not _inf:
+                    return _err(
+                        "El índice tiene fechas pero **no he sabido deducir la "
+                        "frecuencia** de su espaciado.\n\n"
+                        "Decláralo: `freq` (1 anual / 4 trimestral / 12 "
+                        "mensual), `start_year` y `start_period`.\n\n"
+                        "*No se supone anual: de `freq` cuelgan la "
+                        "estacionalidad, los armónicos y las fechas de toda "
+                        "intervención, así que adivinar mal es peor que "
+                        "preguntar (BUG-0169).*")
+            _f_usar = freq if freq > 0 else _inf
+            ts = fue.TimeSeries.from_pandas(series.rename(name), freq=_f_usar)
+            ts = fue.TimeSeries(ts.data, freq=_f_usar, start=ts.start, name=name)
+            date_note = ("Fechas y frecuencia DEDUCIDAS del índice."
+                         if freq <= 0 else
+                         "Fechas del índice; frecuencia declarada.")
         else:
             if freq <= 0 or start_year <= 0:
                 return _err(

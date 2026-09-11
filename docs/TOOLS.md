@@ -348,9 +348,14 @@ Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
                       harmonics, NOT an intervention: it has no date and no form,
                       so it does not go through the intervention node. Add it when
                       the residuals show recurring April/March anomalies that move
-                      with the calendar. Like n_harmonics, it is ignored when
-                      base_pre_path is given — the deterministics come from the
-                      .pre, and if the .pre already carries it, it is inherited.
+                      with the calendar.
+                      **Funciona TAMBIÉN con `base_pre_path`** (BUG-0170): se
+                      AÑADE sobre los deterministas heredados del `.pre`, y si el
+                      `.pre` ya lo trae se hereda sin duplicarse. Antes se
+                      aceptaba el argumento y se descartaba en silencio, con lo
+                      que no quedaba NINGUNA vía para añadirlo a un modelo ya
+                      construido sin volver al `.inp` fresco y perder todas las
+                      intervenciones. `n_harmonics` sigue viniendo del `.pre`.
     seasonal        : on/off switch for the whole deterministic seasonal package
                       (cos/sin pairs + Nyquist alter). None (default) => derive from
                       n_harmonics>0, correct for freq>=4. Pass False for a

@@ -671,7 +671,7 @@ def _mu_seed(ts, lam, d, D, estimate_mu, refactor=_RESCALE_FACTOR):
 
 def _build_arma_on_model(m_base, p: int, q: int,
                          P: int = 0, Q: int = 0,
-                         estimate_mu=None):
+                         estimate_mu=None, easter: bool = False):
     """
     Return a new unfitted fue.Model that keeps all interventions and harmonics
     from m_base but replaces the ARMA specification with (p, q, P, Q).
@@ -717,6 +717,23 @@ def _build_arma_on_model(m_base, p: int, q: int,
     No llevan interruptor porque no son un orden que el llamador especifique:
     `(p, q, P, Q)` nombran los operadores regulares y de retardo estacional, y
     los de frecuencia fija son estructura, como las intervenciones.
+
+    **`easter` SÍ lleva interruptor — BUG-0170.** Es el único determinista que
+    el analista puede querer AÑADIR a un modelo ya construido, y no había forma:
+    `confirm_and_estimate` aceptaba `easter=True` junto a `base_pre_path`, esta
+    función no lo recibía, y el modelo salía sin él **en silencio** —ℓ y AIC
+    idénticos al anterior, que es la firma de que no se añadió nada—. El
+    docstring lo declaraba («ignored when base_pre_path is given»), y una
+    limitación escrita en la prosa que la herramienta no menciona al ejecutarse
+    es exactamente lo que esta sesión lleva arreglando en otros cinco sitios.
+
+    Y el daño real era de segundo orden: si se ignora al encadenar, la única vía
+    para añadirlo es volver al `.inp` fresco —perdiendo todas las intervenciones
+    y todas las decisiones tomadas desde entonces—, que es justo lo que el
+    convenio de ficheros existe para conservar.
+
+    Se AÑADE, no se sustituye: si el base ya lo trae, se hereda como todo lo
+    demás y no se duplica.
     """
     import fue
     import numpy as np
@@ -774,6 +791,13 @@ def _build_arma_on_model(m_base, p: int, q: int,
     else:
         mu_val = 0.0
 
+    # EL REGRESOR DE SEMANA SANTA — BUG-0170. Se añade sobre los deterministas
+    # heredados; si el base ya lo lleva, no se duplica.
+    itvs = list(m_base.interventions or [])
+    if easter and not any(getattr(i, "type", "") == "easter" for i in itvs):
+        itvs.append(fue.Intervention("easter", at=0, omega=[0.0],
+                                     omega_free=[True]))
+
     return fue.Model(
         m_base.series,
         d=m_base.d, D=m_base.D, boxlam=m_base.boxlam,
@@ -783,7 +807,7 @@ def _build_arma_on_model(m_base, p: int, q: int,
         ma_s=ma_s_val,  ma_s_free=ma_sf_val if ma_s_val  else None,
         ar_f=ar_f_val or None,
         ma_f=ma_f_val or None,
-        interventions=list(m_base.interventions or []),
+        interventions=itvs,
         ifadf=list(m_base.ifadf or []),
         mu=mu_val,
         estimate_mu=est_mu,
