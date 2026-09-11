@@ -811,6 +811,8 @@ Sequential identification — ONE decision node per call.
 | `date` | string | no | `` |
 | `form` | string | no | `` |
 | `n_omega` | integer | no | `0` |
+| `n_delta` | integer | no | `0` |
+| `rehacer` | boolean | no | `False` |
 | `output_path` | string | no | `` |
 | `threshold` | number | no | `3.0` |
 | `umbral_activo` | number | no | `1.0` |
@@ -872,6 +874,13 @@ Sequential INTERVENTION — ONE decision node per call.
     inp_path      : .inp del modelo estimado **SIN** la intervención
     date          : "" → Call 1. "MM/YYYY", "QN/YYYY" o "YYYY" → Call 2 ó 3
     form          : "" → Call 2. "step"|"pulse"|"impulse"|"ramp" → Call 3
+    n_delta       : nº de coeficientes δ del denominador. 0 = sin denominador.
+                    Con `form="impulse"` y `n_delta=1` es la FORMA RACIONAL
+                    ω₀/(1−δB) — salta y decae, dos parámetros (BUG-0161).
+    rehacer       : REFORMULAR la intervención de este suceso en vez de añadir
+                    otra. Retira la que cae cerca de `date` y pone la nueva en
+                    su lugar — cambiar la forma, bajar el orden de ω o mover la
+                    fecha. Es la operación central del ciclo (BUG-0162).
     n_omega       : **cuántos ω**, que es lo mismo que cuántos ESCALONES en el
                     nivel — la lengua en la que habla todo este nodo:
                     `incident_configurations` dice «N escalones», la escalera
@@ -1949,6 +1958,8 @@ Generate a sequential prediction (SPS) dashboard for all series in a directory.
 | `date` | string | no | `` |
 | `form` | string | no | `auto` |
 | `n_omega` | integer | no | `0` |
+| `n_delta` | integer | no | `0` |
+| `rehacer` | boolean | no | `False` |
 | `context_hint` | string | no | `` |
 | `include_histogram` | boolean | no | `False` |
 | `guion_path` | string | no | `` |
@@ -1970,6 +1981,27 @@ Add an intervention to the .inp, re-estimate and show updated diagnosis.
     output_path       : path to write the updated .inp
     date              : observation date "MM/YYYY" or "QN/YYYY" or "YYYY".
                         Leave empty ("") to auto-select the most extreme residual.
+    n_delta           : nº de coeficientes δ del DENOMINADOR. **0 = sin
+                        denominador** (el comportamiento de siempre).
+                        `n_delta=1` con `form="impulse"` da la **forma
+                        racional** ω₀/(1−δB): una respuesta que salta y DECAE,
+                        en DOS parámetros donde N escalones gastan N. δ es la
+                        tasa de decaimiento y tiene lectura sustantiva —«el
+                        efecto se disipa a un 57 % por período»— que ω₀ no
+                        tiene. La semilla va en 0.0: medido, una semilla cerca
+                        de la raíz unidad manda el ajuste a un óptimo espurio
+                        248 puntos de AIC peor (BUG-0161). Si δ sale con raíz
+                        dentro del círculo unidad la respuesta es EXPLOSIVA y
+                        la diagnosis lo dice.
+    rehacer           : **REFORMULAR en vez de añadir.** Retira la intervención
+                        de suceso que caiga a ±`n_omega` períodos de `date` y
+                        pone ésta en su lugar; el resto del modelo se hereda
+                        intacto. Sin esto, reformular obligaba a volver a mano
+                        al `.pre` anterior a esa intervención, y apuntar al
+                        fichero equivocado la dejaba DOS VECES sobre el mismo
+                        suceso — con un ω no significativo por síntoma, no un
+                        error (BUG-0162). Si no se pide y ya había una
+                        intervención ahí, se avisa.
     n_omega           : nº de coeficientes ω del numerador. **0 = automático**
                         (1 con forma explícita; lo que decida la escalera con
                         `form="auto"`). Con `form="step"` y `n_omega=N` se

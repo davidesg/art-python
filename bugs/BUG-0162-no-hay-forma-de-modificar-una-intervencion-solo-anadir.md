@@ -1,11 +1,11 @@
 ---
 id: BUG-0162
 title: No hay forma de MODIFICAR una intervención — todos los constructores hacen append, y reformular depende de que el analista se acuerde de volver al `.pre` anterior
-status: open
+status: fixed
 severity: high
 component: interventions
 found_in: 0.1.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: David — «no tengo claro cómo funciona cuando hay que reformular la intervención»
 tags:
@@ -17,6 +17,7 @@ references:
   - BUG-0150
   - BUG-0159
   - BUG-0161
+  - BUG-0164
 ---
 
 ## Summary
@@ -99,24 +100,57 @@ assert "hereda_del_base" in src, "la superficie no usa la pieza que retira"
 
 Falla: `hereda_del_base` sólo aparece en `escalera.py` y `configuracion.py`.
 
-## Fix propuesto
+## Fix
 
-`guided_intervention` acepta `rehacer: bool = False` (o `reformular=`). Con él:
+**`rehacer: bool = False`** en `suggest_intervention_form` y en
+`guided_intervention`. Con él se llama a `hereda_del_base(m_src,
+at_estudiado=at_0, ventana=max(1, n_omega))`, se construye la forma nueva sobre
+las heredadas, y **se dice cuál se retiró**:
 
-1. `hereda_del_base(m_src, at_estudiado=at_0, ventana=…)` para obtener
-   `(heredadas, retiradas)`;
-2. construir la forma nueva sobre `heredadas`;
-3. **decir en la salida cuál se retiró** — el propio docstring de
-   `hereda_del_base` dice por qué: retirar una intervención en silencio es
-   cambiar el modelo base sin avisar.
+    ♻ **Se ha REHECHO la intervención de este suceso.** Retirada:
+    `step[obs 71]` (1 ω). En su lugar va `step` con 3 ω en obs 71. El resto del
+    modelo —las demás intervenciones, la estructura y μ— se hereda intacto.
 
-El `.pre` anterior sigue siendo válido y sigue siendo la vía canónica; esto lo
-hace alcanzable sin depender de la memoria, y deja el rastro en el guion como
-corrección y no como rama.
+El docstring de `hereda_del_base` ya decía por qué hace falta esa frase: retirar
+una intervención en silencio es cambiar el modelo base sin avisar.
+
+**Y no retirar cuando se pidió también se dice.** Si `rehacer=True` no encuentra
+nada en la ventana, se ha AÑADIDO, no sustituido, y callarlo es el mismo defecto
+por el otro lado.
+
+**La otra mitad, que es la que evita el fallo silencioso.** Sin `rehacer`, si ya
+hay una intervención de suceso en la ventana, se avisa:
+
+    ⚠ **Ya había una intervención en este suceso** (`step[obs 71]`) y ésta se ha
+    AÑADIDO encima. Dos intervenciones sobre el mismo suceso se reparten el
+    efecto: el síntoma es un ω que deja de ser significativo, no un error.
+
+    Si lo que querías era **reformular**, repite con `rehacer=True` […]. Si de
+    verdad son **dos sucesos distintos** tan juntos, esto está bien: sigue.
+
+No se prohíbe —puede que de verdad sean dos sucesos— pero deja de ser mudo. El
+`.pre` anterior sigue siendo la vía canónica; esto la hace alcanzable sin
+depender de la memoria.
+
+## Lo que salió al probarlo: BUG-0164
+
+Ejercitar la cadena real `m00.pre → m10 → rehacer` destapó que **las puertas del
+nodo rechazaban un `.pre`** desde el arreglo de BUG-0159. Está levantado aparte y
+arreglado; sin él nada de esto era alcanzable.
 
 ## Validation
 
-Reformular una intervención sobre el modelo que ya la lleva da el MISMO modelo
-que construirla desde el `.pre` anterior —mismo ℓ, mismo AIC, mismo número de
-parámetros— y la salida nombra la que retiró. Y sin `rehacer`, el
-comportamiento no cambia: añadir sigue siendo añadir.
+`tests/test_bug_0162_rehacer_no_solo_anadir.py`. Los cuatro estados —añadir con
+aviso, rehacer, rehacer sin nada que rehacer, y que el resto del modelo
+sobreviva— y dos que son el argumento:
+
+* **rehacer conserva las demás intervenciones.** Con una segunda intervención
+  lejos del suceso, rehacer la de cerca no la toca. Es lo que hace legítimo el
+  atajo frente a volver al `.pre` anterior, que las perdería todas las
+  posteriores.
+* **rehacer ≡ volver al `.pre` de antes.** Las dos rutas dan el mismo modelo.
+  La comparación de los ω es **relativa y no absoluta**: arrancan de semillas
+  distintas —una del óptimo de `m10`, otra del base— así que convergen al mismo
+  óptimo, no a los mismos bits. Medido, 1,3e-4 sobre un ω de −606,7, o sea 2e-7
+  relativo. Exigir bits idénticos habría convertido la prueba en una medida de
+  la tolerancia del optimizador.

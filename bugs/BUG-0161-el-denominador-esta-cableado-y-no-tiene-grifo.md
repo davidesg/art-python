@@ -1,11 +1,11 @@
 ---
 id: BUG-0161
 title: El denominador δ(B) está cableado de punta a punta —se escribe, se lee, se estima, se dibuja— y no hay ninguna superficie que lo construya
-status: open
+status: fixed
 severity: high
 component: interventions
 found_in: 0.2.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: David — «¿tenemos una función que crea/modifica las intervenciones en forma de FLT?»
 tags:
@@ -110,25 +110,49 @@ grep -rn "delta=\[" src/art/          # 0 resultados
 grep -rn "\.delta\b\|delta_free" src/art/ | wc -l   # 18
 ```
 
-## Fix propuesto
+## Fix
 
-Abrir `n_delta` en las dos puertas que construyen, y pasarlo a
-`fue.Intervention(delta=[0.0]*n_delta, delta_free=[True]*n_delta)`. El resto del
-camino ya funciona, medido arriba.
+**1 · `n_delta` en las dos puertas.** `suggest_intervention_form` y
+`guided_intervention`; `n_delta=0` es el comportamiento de siempre. Con
+`form="impulse", n_omega=1, n_delta=1` sale la forma racional ω₀/(1−δB): salta y
+decae, en **dos parámetros** donde N escalones gastan N.
 
-Lo que hay que decidir con criterio —y lo que hace que esto no sea un parámetro
-más— es **cuándo proponerla**. La forma racional cuesta un parámetro y compra
-una cola infinita, así que compite directamente con el peldaño 2 de la escalera
-(N escalones). La comparación es legítima: no están anidadas y cuestan distinto,
-así que decide el AIC más la firma en los residuos, no el AIC solo. Eso pide un
-peldaño nuevo en `escalera_de_ockham`, no sólo un argumento.
+**2 · La semilla va en 0.0, y eso está MEDIDO.** Sobre el testigo con δ=0,6:
+
+    semilla  0,0 / 0,5 / −0,5   →   δ̂ = 0,5692   AIC 1616,41   ~14 iteraciones
+    semilla  0,9                →   δ̂ = 0,7070   AIC 1864,56   500 iteraciones,
+                                                  gradiente sin anular
+
+Una semilla cerca de la raíz unidad manda el ajuste a un óptimo espurio **248
+puntos de AIC peor**, y llega con números de aspecto normal. Hay una prueba que
+fija la semilla y otra que comprueba que el testigo sigue separando las dos.
+
+**3 · Y δ entra en `admissibility_problems`.** No estaba, y hasta ahora daba
+igual porque no podía haber ninguno. Al abrir el grifo pasa a importar mucho:
+**es el operador con la lectura más brutal si se va.** Una raíz de δ dentro del
+círculo unidad es una respuesta **explosiva** —el efecto crece sin límite en vez
+de decaer— y, a diferencia de un MA no invertible, **la diagnosis no lo delata**:
+los residuos pueden salir perfectos mientras la respuesta que el modelo AFIRMA es
+imposible. Se distingue «dentro» de «frontera», como en los demás operadores.
+
+`fue` guarda δ(B) = 1 − δ₁B − δ₂B², la MISMA convención que el AR, así que los
+coeficientes van tal cual a `_raices_factor`; que `test_intervention` calcule
+δ(1) = 1 − Σδᵢ es la comprobación de que ésa es la lectura.
+
+## Lo que NO se ha hecho, y es una decisión
+
+**Proponerla.** La forma racional compite con el peldaño 2 de la escalera —N
+escalones— y no están anidadas ni cuestan lo mismo, así que la comparación no la
+arbitra el AIC solo: pide un peldaño nuevo en `escalera_de_ockham` con su propio
+criterio de subida, y eso es diseño del método, no un argumento más. Se abre el
+grifo y se deja la propuesta para cuando el criterio esté pensado. Ofrecer una
+forma sin saber cuándo recomendarla sería repetir lo que BUG-0156 acaba de
+arreglar: dos instrumentos sin jerarquía.
 
 ## Validation
 
-Que `guided_intervention(form="impulse", n_delta=1)` produzca un `.inp` con δ,
-que se estime, y que `test_interventions` publique δ̂ y la ganancia — esto último
-es **BUG-0163**, que hoy no lo hace ni con un δ construido a mano.
-
-Y sobre el testigo sintético de decaimiento: recuperar δ=0,6 dentro del error
-típico, y que el AIC de la forma racional (2 parámetros) gane al de los N
-escalones que hoy haría falta.
+`tests/test_bugs_0161_0163_el_denominador.py`. Sobre un testigo con respuesta
+que decae —ω₀·δᵏ con δ=0,6— construido **por la superficie**, que es lo que el
+defecto decía imposible: se construye el δ, se recupera 0,5692 contra la verdad
+0,6, y sin `n_delta` nada cambia. Más el guardián: un δ=1,2 se anuncia con su
+raíz en 0,833 «dentro», un δ=1,0 como «frontera» y un δ=−0,8 como admisible.

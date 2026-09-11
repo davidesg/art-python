@@ -1,11 +1,11 @@
 ---
 id: BUG-0163
 title: Una intervención con δ no publica ni δ̂ ni la ganancia — la línea que las lleva sólo se imprime cuando hay Wald, y con forma racional lo normal es que no lo haya
-status: open
+status: fixed
 severity: medium
 component: interventions
 found_in: 0.1.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: Claude (al medir BUG-0161)
 tags:
@@ -64,27 +64,37 @@ assert tr.gain is not None            # pasa: −1803,63
 assert f"{tr.gain:.2f}" in tr.summary()   # FALLA: no está en el texto
 ```
 
-## Fix propuesto
+## Fix
 
-Separar las dos condiciones, que hoy están fundidas en una:
+**1 · Las dos condiciones se separan**, que era el defecto:
 
-* **la ganancia y δ(1) se imprimen siempre que haya δ o más de un ω** — son
-  descriptivos, no un contraste;
-* **el Wald se imprime cuando existe** (k>1), que es lo que hoy decide las dos
-  cosas a la vez.
+* **ν(1) y δ(1) DESCRIBEN** — se imprimen si hay δ o más de un ω;
+* **el Wald CONTRASTA** — se imprime cuando existe, y ahora con su H₀ en la
+  etiqueta (`H₀: ω(1)=0`), que antes se leía sólo en la línea de abajo.
 
-Y con δ presente, imprimir también δ̂ con su error típico y la tasa de
-decaimiento en palabras: `art.ltf.operador_en_palabras(omega, delta, b)` ya la
-sabe decir, y esta salida ya lo llama para las de más de un ω. Es el mismo
-remedio de BUG-0066 —calcular la lectura en vez de pedir la resta mental— sin
-aplicar al denominador.
+**2 · El resultado LLEVA el denominador.** `delta`, `delta_se` y `delta_1` son
+campos de `InterventionTestResult`. Antes `delta_1` se calculaba para dividir y
+se tiraba, y los δ ni se miraban — así que ningún consumidor podía publicarlos
+aunque quisiera.
 
-Ojo con la lectura, que depende de la entrada (BUG-0076): con impulso ν(1) es el
-ÁREA acumulada y el efecto permanente es cero por construcción; con escalón es
-el desplazamiento permanente. `lectura_de_ganancia` ya lo distingue y basta con
-usarla.
+**3 · Y la tasa de decaimiento va en palabras**, que es la lectura que ω₀ no
+tiene:
+
+    δ[1]=+0.5692  SE=0.0568
+    δ(1)=+0.4308   respuesta que DECAE a un 57 % por período
+    ω(1)=-777.0858   ν(1)=ω(1)/δ(1)=-1803.6225   [área acumulada de la respuesta]
+
+La etiqueta de ν(1) sale de `lectura_de_ganancia`, que ya distinguía impulso de
+escalón (BUG-0076): con impulso es el ÁREA y el efecto permanente es cero por
+construcción.
+
+**4 · Y δ(1)→0 se avisa.** Es la ganancia sin acotar: el modelo es inadmisible y
+el número que se publicaría no significa nada.
 
 ## Validation
 
-Sobre el testigo de decaimiento: la salida trae δ̂ ≈ 0,57, ν(1) ≈ −1803 y dice
-qué es cada uno. Y no cambia nada de lo que hoy sale para las formas sin δ.
+`tests/test_bugs_0161_0163_el_denominador.py`. Sobre el testigo de decaimiento,
+construido por la superficie: δ̂ con su SE, ν(1) **con el Wald ausente** —que es
+el defecto entero, porque con un ω no hay Wald—, la tasa en palabras, y el aviso
+de δ(1)≈0. Más dos de lo que no puede cambiar: una intervención SIN δ no cambia
+de aspecto, y el Wald sigue diciendo su H₀.

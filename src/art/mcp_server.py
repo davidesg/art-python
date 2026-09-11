@@ -2135,7 +2135,13 @@ def incident_configurations(inp_path: str,
                                        describe_configuraciones,
                                        InfoExtramuestral)
         from art.policy import decide_domain
-        ts, m = _load_fitted(inp_path)
+        # BUG-0164. De este modelo sólo se toman la ESTRUCTURA, la serie y
+        # los RESIDUOS; las SE de la tabla son las de cada configuración,
+        # estimada aparte sobre este base. Así que le toca
+        # `mirar`, no `estimar` — y con `estimar` rechazando el `.pre`
+        # (BUG-0159) esta puerta se quedó cerrada para el encadenado, que
+        # es el modo NORMAL de usarla.
+        ts, m = _mirar(inp_path)
         # `_load_fitted` y no `_load_ts_model` + `fit()` a mano: esa vía no sella
         # el origen del fichero, y con ella el aviso de BUG-0090 es
         # inalcanzable — el contrato tenía tres puertas y una cuarta abierta.
@@ -4803,7 +4809,13 @@ def guided_identification(inp_path: str, lam: float = -1.0,
         if pre_path:
             import fue as _fue
             from art.describe import _resid_start as _rs
-            _, m_pre = _load_fitted(pre_path)
+            # BUG-0164. De este modelo sólo se toman la ESTRUCTURA, la serie y
+            # los RESIDUOS; de él salen residuos, μ y los órdenes del base,
+            # y ninguna razón t. Así que le toca
+            # `mirar`, no `estimar` — y con `estimar` rechazando el `.pre`
+            # (BUG-0159) esta puerta se quedó cerrada para el encadenado, que
+            # es el modo NORMAL de usarla.
+            _, m_pre = _mirar(pre_path)
             res_start = _rs(m_pre)
             res_ts = _fue.TimeSeries(
                 m_pre.residuals.data, freq=ts.freq,
@@ -7206,6 +7218,8 @@ def guided_intervention(inp_path: str,
                         date: str = "",
                         form: str = "",
                         n_omega: int = 0,
+                        n_delta: int = 0,
+                        rehacer: bool = False,
                         output_path: str = "",
                         threshold: float = 3.0,
                         umbral_activo: float = 1.0,
@@ -7267,6 +7281,13 @@ def guided_intervention(inp_path: str,
     inp_path      : .inp del modelo estimado **SIN** la intervención
     date          : "" → Call 1. "MM/YYYY", "QN/YYYY" o "YYYY" → Call 2 ó 3
     form          : "" → Call 2. "step"|"pulse"|"impulse"|"ramp" → Call 3
+    n_delta       : nº de coeficientes δ del denominador. 0 = sin denominador.
+                    Con `form="impulse"` y `n_delta=1` es la FORMA RACIONAL
+                    ω₀/(1−δB) — salta y decae, dos parámetros (BUG-0161).
+    rehacer       : REFORMULAR la intervención de este suceso en vez de añadir
+                    otra. Retira la que cae cerca de `date` y pone la nueva en
+                    su lugar — cambiar la forma, bajar el orden de ω o mover la
+                    fecha. Es la operación central del ciclo (BUG-0162).
     n_omega       : **cuántos ω**, que es lo mismo que cuántos ESCALONES en el
                     nivel — la lengua en la que habla todo este nodo:
                     `incident_configurations` dice «N escalones», la escalera
@@ -7304,7 +7325,13 @@ def guided_intervention(inp_path: str,
         import numpy as np
         from art.policy import THRESHOLDS, decide_domain, decide_episodios
 
-        ts, m = _load_fitted(inp_path)
+        # BUG-0164. De este modelo sólo se toman la ESTRUCTURA, la serie y
+        # los RESIDUOS; las desviaciones típicas que se publican son las de
+        # los candidatos, estimados cada uno aparte. Así que le toca
+        # `mirar`, no `estimar` — y con `estimar` rechazando el `.pre`
+        # (BUG-0159) esta puerta se quedó cerrada para el encadenado, que
+        # es el modo NORMAL de usarla.
+        ts, m = _mirar(inp_path)
         # `_load_fitted` y no `_load_ts_model` + `fit()` a mano: esa vía no sella
         # el origen del fichero, y con ella el aviso de BUG-0090 es
         # inalcanzable — el contrato tenía tres puertas y una cuarta abierta.
@@ -7373,7 +7400,8 @@ def guided_intervention(inp_path: str,
             _sif = getattr(suggest_intervention_form, "fn",
                            suggest_intervention_form)
             partes = _sif(inp_path, output_path, date=date, form=form,
-                          n_omega=n_omega,
+                          rehacer=rehacer,
+                          n_omega=n_omega, n_delta=n_delta,
                           guion_path=guion_path, guion_name=guion_name,
                           guion_decision=guion_decision,
                           guion_rationale=guion_rationale,
@@ -7770,6 +7798,8 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                                date: str = "",
                                form: str = "auto",
                                n_omega: int = 0,
+                               n_delta: int = 0,
+                               rehacer: bool = False,
                                context_hint: str = "",
                                include_histogram: bool = False,
                                guion_path: str = "",
@@ -7791,6 +7821,27 @@ def suggest_intervention_form(inp_path: str, output_path: str,
     output_path       : path to write the updated .inp
     date              : observation date "MM/YYYY" or "QN/YYYY" or "YYYY".
                         Leave empty ("") to auto-select the most extreme residual.
+    n_delta           : nº de coeficientes δ del DENOMINADOR. **0 = sin
+                        denominador** (el comportamiento de siempre).
+                        `n_delta=1` con `form="impulse"` da la **forma
+                        racional** ω₀/(1−δB): una respuesta que salta y DECAE,
+                        en DOS parámetros donde N escalones gastan N. δ es la
+                        tasa de decaimiento y tiene lectura sustantiva —«el
+                        efecto se disipa a un 57 % por período»— que ω₀ no
+                        tiene. La semilla va en 0.0: medido, una semilla cerca
+                        de la raíz unidad manda el ajuste a un óptimo espurio
+                        248 puntos de AIC peor (BUG-0161). Si δ sale con raíz
+                        dentro del círculo unidad la respuesta es EXPLOSIVA y
+                        la diagnosis lo dice.
+    rehacer           : **REFORMULAR en vez de añadir.** Retira la intervención
+                        de suceso que caiga a ±`n_omega` períodos de `date` y
+                        pone ésta en su lugar; el resto del modelo se hereda
+                        intacto. Sin esto, reformular obligaba a volver a mano
+                        al `.pre` anterior a esa intervención, y apuntar al
+                        fichero equivocado la dejaba DOS VECES sobre el mismo
+                        suceso — con un ω no significativo por síntoma, no un
+                        error (BUG-0162). Si no se pide y ya había una
+                        intervención ahí, se avisa.
     n_omega           : nº de coeficientes ω del numerador. **0 = automático**
                         (1 con forma explícita; lo que decida la escalera con
                         `form="auto"`). Con `form="step"` y `n_omega=N` se
@@ -7841,7 +7892,13 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             raise ValueError(f"Unrecognised date format: {d!r}. Use MM/YYYY, QN/YYYY or YYYY.")
 
         # Load current model to inspect residuals and build the new spec
-        ts, m_src = _load_fitted(inp_path)
+        # BUG-0164. De este modelo sólo se toman la ESTRUCTURA, la serie y
+        # los RESIDUOS; las SE que se imprimen son las del modelo NUEVO,
+        # reestimado abajo desde su propio `.inp`. Así que le toca
+        # `mirar`, no `estimar` — y con `estimar` rechazando el `.pre`
+        # (BUG-0159) esta puerta se quedó cerrada para el encadenado, que
+        # es el modo NORMAL de usarla.
+        ts, m_src = _mirar(inp_path)
 
         freq  = ts.freq
         start = list(ts.start)
@@ -8004,16 +8061,97 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         if _n_omega_pedido:
             n_omega = _n_omega_pedido
 
+        # EL DENOMINADOR — BUG-0161.
+        #
+        # δ(B) estaba cableado de punta a punta —`_write_inp` lo escribe,
+        # `art.outfile` lo lee, `test_intervention` calcula δ(1) y la ganancia,
+        # `art.ltf` lo dibuja— y NADIE lo construía: cero sitios en todo
+        # `src/art/`, y 0 de 216 `.inp` del corpus con un δ. La tubería estaba
+        # puesta y no tenía grifo, así que la respuesta que DECAE —la forma
+        # racional, dos parámetros donde N escalones gastan N— quedaba fuera del
+        # catálogo no por haberse evaluado sino por no saberse montar.
+        #
+        # LA SEMILLA VA EN 0.0, Y ESO ESTÁ MEDIDO. Sobre un testigo con δ=0,6:
+        #
+        #     semilla 0,0 / 0,5 / −0,5  →  δ̂=0,5692  AIC 1616,41  ~14 iter.
+        #     semilla 0,9               →  δ̂=0,7070  AIC 1864,56  500 iter.,
+        #                                  gradiente sin anular
+        #
+        # Una semilla cerca de la raíz unidad manda al optimizador a un óptimo
+        # espurio 248 puntos de AIC peor, y llega con el aviso de fue pero con
+        # números de aspecto normal.
+        _nd = max(0, int(n_delta))
+        _kw_itv = {}
+        if _nd:
+            _kw_itv = dict(delta=[0.0] * _nd, delta_free=[True] * _nd)
+
         # Create new Intervention with correct at= (0-based index)
         itv = fue.Intervention(
             type=form,
             at=at_0,
             omega=[0.0] * n_omega,
             omega_free=[True] * n_omega,
+            **_kw_itv,
         )
 
-        # Build updated model with the new intervention appended
-        new_itvs = list(m_src.interventions or []) + [itv]
+        # REHACER, NO SÓLO AÑADIR — BUG-0162.
+        #
+        # Todos los constructores hacían `list(interventions) + [itv]`. Append.
+        # Y reformular —cambiar la forma, bajar el orden, mover la fecha— es la
+        # operación CENTRAL del método iterativo: es lo que hace Box-Jenkins.
+        # Se hacía volviendo al `.pre` anterior a la intervención, que es
+        # correcto y es IMPLÍCITO: ninguna herramienta lo decía, y dependía de
+        # que ese fichero existiera y de que se supiera cuál era. Apuntar al
+        # equivocado deja la intervención DOS VECES sobre el mismo suceso, y el
+        # síntoma es un ω no significativo, no un error.
+        #
+        # Y la pieza que retira ya estaba escrita: `hereda_del_base` (BUG-0150)
+        # quita la que cae sobre el suceso estudiado, y su docstring dice
+        # literalmente «que es el caso de rehacer la forma de un suceso ya
+        # intervenido». La usaban la escalera y las configuraciones por dentro;
+        # la superficie no la ofrecía. Tercera cara de BUG-0090: la capacidad
+        # está abajo y el nodo no la nombra.
+        from art.escalera import hereda_del_base
+        _ventana = max(1, int(n_omega))
+        _previas = [i for i in (m_src.interventions or [])
+                    if i.type not in ("cos", "sin", "alter")
+                    and abs(int(getattr(i, "at", -10**9)) - at_0) <= _ventana]
+        _nota_rehacer = ""
+        if rehacer:
+            _base_itvs, _retiradas = hereda_del_base(
+                m_src, at_estudiado=at_0, ventana=_ventana)
+            new_itvs = _base_itvs + [itv]
+            if _retiradas:
+                _q = ", ".join(f"`{i.type}[obs {int(i.at) + 1}]` "
+                               f"({len(i.omega or [])} ω)" for i in _retiradas)
+                _nota_rehacer = (
+                    f"\n\n♻ **Se ha REHECHO la intervención de este suceso.** "
+                    f"Retirada: {_q}. En su lugar va `{form}` con {n_omega} ω "
+                    f"en obs {at_0 + 1}. El resto del modelo —las demás "
+                    f"intervenciones, la estructura y μ— se hereda intacto.")
+            else:
+                # Retirar en silencio es cambiar el modelo base sin avisar; no
+                # retirar cuando se pidió, también.
+                _nota_rehacer = (
+                    f"\n\n⚠ **`rehacer=True` pero no había nada que rehacer**: "
+                    f"ninguna intervención de suceso cae a ±{_ventana} período(s) "
+                    f"de obs {at_0 + 1}. Se ha AÑADIDO, no sustituido. Si querías "
+                    f"rehacer otra, mira su fecha en la ecuación del modelo.")
+        else:
+            new_itvs = list(m_src.interventions or []) + [itv]
+            if _previas:
+                _q = ", ".join(f"`{i.type}[obs {int(i.at) + 1}]`"
+                               for i in _previas)
+                _nota_rehacer = (
+                    f"\n\n⚠ **Ya había una intervención en este suceso** "
+                    f"({_q}) y ésta se ha AÑADIDO encima. Dos intervenciones "
+                    f"sobre el mismo suceso se reparten el efecto: el síntoma "
+                    f"es un ω que deja de ser significativo, no un error.\n\n"
+                    f"Si lo que querías era **reformular**, repite con "
+                    f"`rehacer=True` —retira la anterior y pone ésta en su "
+                    f"lugar— o parte del `.pre` de antes de aquella "
+                    f"intervención. Si de verdad son **dos sucesos distintos** "
+                    f"tan juntos, esto está bien: sigue.")
         m_new = fue.Model(
             ts,
             ar=m_src.ar, ar_free=m_src.ar_free,
@@ -8162,8 +8300,9 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             # y lo que la justifica: la escalera de Ockham y el operador leído
             # en el nivel.
             especificacion=(
-                f"**Intervención añadida:** {_forma_txt}  {date_note}"
-                f"{context_str}" + conv_txt + escalera_txt),
+                f"**Intervención {'REHECHA' if rehacer else 'añadida'}:** "
+                f"{_forma_txt}  {date_note}"
+                f"{context_str}" + _nota_rehacer + conv_txt + escalera_txt),
             ecuacion=eq_text,
             diagnosis=(diag.summary + "\n\n---\n" + diag.recommendation
                        + scan_section),

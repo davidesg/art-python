@@ -281,6 +281,13 @@ class InterventionTestResult:
     # TODOS los ω, libres y fijos. `omega` lleva sólo los libres, y la forma
     # reducida de BUG-0123 se cuenta sobre el operador ENTERO.
     n_omega_total: int = 0
+    # EL DENOMINADOR — BUG-0163. `delta_1` se calculaba para dividir y se
+    # tiraba; los δ ni se miraban. Con forma racional son LA lectura: δ es la
+    # tasa de decaimiento y tiene sentido sustantivo —«el efecto se disipa a un
+    # 57 % por período»— que ω₀ no tiene.
+    delta: list = field(default_factory=list)
+    delta_se: list = field(default_factory=list)
+    delta_1: float | None = None
     omega_1: float | None = None   # ω(1) = ω₀ − ω₁ − ⋯ − ω_s (the numerator)
     # Error típico de ω(1). Se publica en vez de dejar que el consumidor lo
     # despeje del Wald como |g|/√χ², que revienta justo cuando la ganancia es
@@ -382,13 +389,45 @@ class InterventionTestResult:
                 zip(self.omega, self.omega_se, self.omega_t, self.omega_p)):
             star = "**" if pv < alpha else "  "
             lines.append(f"       ω[{i}]={v:+.4f}  SE={se:.4f}  t={tval:+.3f}  p={pv:.4f} {star}")
+        # EL DENOMINADOR, SI LO HAY — BUG-0163.
+        #
+        # Va antes de la ganancia porque es lo que la explica: ν(1) = ω(1)/δ(1),
+        # y sin δ el lector no puede reconstruir de dónde sale el número.
+        for i, v in enumerate(self.delta):
+            se = self.delta_se[i] if i < len(self.delta_se) else None
+            lines.append(f"       δ[{i + 1}]={v:+.4f}"
+                         + (f"  SE={se:.4f}" if se else ""))
+        if self.delta:
+            d1 = self.delta_1
+            lines.append(
+                f"       δ(1)={d1:+.4f}" + (
+                    "   ⚠ **casi cero: la ganancia no está acotada** y el "
+                    "modelo es inadmisible" if d1 is not None and abs(d1) < 1e-3
+                    else f"   respuesta que DECAE a un "
+                         f"{abs(float(self.delta[0])) * 100:.0f} % por período"
+                         if len(self.delta) == 1 else ""))
+
+        # LA GANANCIA SE IMPRIME AUNQUE NO HAYA WALD — BUG-0163.
+        #
+        # Esta línea vivía dentro de `if self.wald_stat is not None`, y el Wald
+        # sólo existe con MÁS DE UN ω. Con forma racional lo típico es un ω y un
+        # δ, así que la ganancia —que es PARA LO QUE existe la forma racional—
+        # no se imprimía nunca. Son dos cosas distintas: ν(1) y δ(1) son
+        # DESCRIPTIVOS y el Wald es un CONTRASTE.
+        if self.omega_1 is not None and (self.wald_stat is not None
+                                         or self.delta):
+            _g = self.gain
+            lines.append(
+                f"       ω(1)={self.omega_1:+.4f}"
+                + (f"   ν(1)=ω(1)/δ(1)={_g:+.4f}" if self.delta
+                   and _g is not None and _g == _g else "")
+                + f"   [{self.lectura_de_ganancia}]")
         if self.wald_stat is not None:
             wstar = "**" if (self.wald_p or 1) < alpha else "  "
             # BUG-0073: el rótulo decía χ²(k) mientras el cálculo usaba df=1.
             # Es UNA restricción lineal —ω(1)=0—, así que es χ²(1), y decir k
             # invitaba a leer el p-valor contra la tabla equivocada.
-            lines.append(f"       ω(1)={self.omega_1:+.4f} "
-                         f"[{self.lectura_de_ganancia}]   "
+            lines.append(f"       H₀: ω(1)=0   "
                          f"Wald χ²(1)={self.wald_stat:.3f}  p={self.wald_p:.4f} {wstar}")
             if self.contrasta_permanencia:
                 lines.append(f"       H₀: ganancia nula ⇒ efecto TRANSITORIO"
@@ -509,6 +548,16 @@ def test_intervention(model, itv_idx: int,
         else:
             fixed_om_1 += signo * float(v)
 
+    # los δ, con su error típico — BUG-0163
+    free_dl_idx, dl_val = [], []
+    _loc = start + len(free_om_idx)
+    for v, f in zip(dl, dlf):
+        if f:
+            free_dl_idx.append(_loc); dl_val.append(float(params[_loc])); _loc += 1
+        else:
+            dl_val.append(float(v))
+    dl_se = [float(np.sqrt(max(cov[i, i], 0.0))) for i in free_dl_idx]
+
     omega_est  = [float(params[i]) for i in free_om_idx]
     omega_se   = [float(np.sqrt(max(cov[i, i], 0.0))) for i in free_om_idx]
     omega_t    = [v / s if s > 0 else float("nan")
@@ -557,6 +606,9 @@ def test_intervention(model, itv_idx: int,
         itv_type   = itv.type,
         entrada    = entrada,
         n_omega_total = len(om),
+        delta      = dl_val,
+        delta_se   = dl_se,
+        delta_1    = (1.0 - sum(dl_val)) if dl_val else None,
         itv_at     = int(itv.at),
         harmonic   = float(itv.harmonic) if hasattr(itv, "harmonic") else None,
         omega      = omega_est,

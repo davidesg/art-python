@@ -16,6 +16,13 @@ necesita**. Y de ahí sale lo que de verdad importa — `mirar` no avisa, porque
 promete nada que un `.pre` estropee. Avisar ahí sería ruido, y el ruido cuesta
 tokens: el LLM tiene que parar a averiguar si el aviso le concierne.
 
+**La regla, en su forma operativa** (BUG-0164): quien imprime **las
+desviaciones típicas DEL MODELO QUE CARGA** necesita `estimar`. Quien sólo toma
+de él la estructura, la serie o los residuos —porque las SE que publica son de
+**otro** modelo, estimado después— necesita `mirar`. La primera versión de esa
+frase decía «quien imprima una SE», y con ella cuatro herramientas que estiman
+algo distinto de lo que cargan se quedaron sin poder aceptar un `.pre`.
+
 **Y desde BUG-0159 `estimar` no avisa: se NIEGA.** El convenio llevaba desde el
 principio dando problemas con un `RuntimeWarning` que ningún carril lee y un
 alias —`_load_fitted`— que no dice que estima. Una propiedad que sólo se
@@ -235,10 +242,14 @@ def test_ninguna_herramienta_carga_y_ajusta_POR_SU_CUENTA():
 @pytest.mark.parametrize("nombre,avisa", [
     ("model_equation_display", True),     # su salida ENTERA son SE
     ("estimate_and_diagnose", True),
-    ("incident_configurations", True),
+    # BUG-0164: las SE que publican NO son las del modelo que cargan —son las
+    # de cada configuración, estimada aparte sobre ese base— así que les toca
+    # `mirar`. Con `estimar` negándose al `.pre` (BUG-0159) estas dos puertas se
+    # quedaron cerradas para el encadenado, que es el modo normal del nodo.
+    ("incident_configurations", False),
+    ("guided_intervention", False),
     ("intervention_ladder", False),    # BUG-0159: pasó a `_mirar`
     ("model_histogram", False),        # idem
-    ("guided_intervention", True),
     ("residual_episodes", False),         # sólo residuos: avisar sería ruido
     ("residual_outlier_scan", False),
     ("intervention_plot", False),

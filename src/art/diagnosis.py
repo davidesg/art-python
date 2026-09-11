@@ -897,6 +897,31 @@ def admissibility_problems(model, tol: float = 1e-6) -> list[tuple[str, float]]:
     # analista compara con 1 al leer la ecuación en B.
     s_freq = getattr(getattr(model, "series", None), "freq", 1) or 1
     problemas = []
+    # EL DENOMINADOR DE UNA INTERVENCIÓN TAMBIÉN — BUG-0161.
+    #
+    # δ(B) no se miraba, y hasta ahora daba igual: no había forma de construir
+    # uno. Al abrir el grifo pasa a importar mucho, porque es el operador con la
+    # lectura más brutal si se va — una raíz de δ dentro del círculo es una
+    # respuesta EXPLOSIVA: el efecto de la intervención crece sin límite en vez
+    # de decaer. Y a diferencia de un MA no invertible, eso no lo delata la
+    # diagnosis: los residuos pueden salir perfectos mientras la respuesta que
+    # el modelo AFIRMA es imposible.
+    for j, itv in enumerate(getattr(model, "interventions", None) or []):
+        dl = list(getattr(itv, "delta", None) or [])
+        if not dl:
+            continue
+        # `fue` guarda δ(B) = 1 − δ₁B − δ₂B² — la MISMA convención que el AR—,
+        # así que los coeficientes van tal cual: `test_intervention` calcula
+        # δ(1) = 1 − Σδᵢ, que es la comprobación de que ésta es la lectura.
+        mods = _raices_factor(dl)
+        if not mods:
+            continue
+        m = min(mods)
+        if m <= 1.0 + tol:
+            donde = "frontera" if abs(m - 1.0) <= 1e-4 else "dentro"
+            problemas.append((f"δ de `{itv.type}[obs {int(itv.at) + 1}]`",
+                              m, donde))
+
     for attr, etq, estacional in (("ar", "AR", False), ("ma", "MA", False),
                                   ("ar_s", "AR estacional", True),
                                   ("ma_s", "MA estacional", True)):
