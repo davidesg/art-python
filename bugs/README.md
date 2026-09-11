@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**154 report(s), 13 open.**
+**155 report(s), 14 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -20,6 +20,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0155](BUG-0155-evento-naturaleza-no-dice-que-admite.md) | open | medium | mcp-tools | `evento_naturaleza` sólo admite permanente|transitorio y no lo dice — se aprende por el error, y le falta «recuperación parcial» | — |
 | [BUG-0156](BUG-0156-dos-recomendaciones-distintas-en-la-misma-salida.md) | open | high | interventions | La llamada 2 con escalera da DOS recomendaciones distintas en la misma salida — la escalera dice 1a y el veredicto Q2/2008×3 | — |
 | [BUG-0157](BUG-0157-el-aviso-de-discrepancia-usa-un-contraste-que-no-ve-el-suceso.md) | open | high | interventions | El aviso «la explicación no concuerda con el contraste» se da sobre un episodio que EXCLUYE la vuelta, así que «permanente» sale por construcción | — |
+| [BUG-0158](BUG-0158-comparar-modelos-reestima-teniendo-el-out-delante.md) | open | high | mcp-tools | `compare_versions` reestima los dos modelos teniendo el `.out` delante — 9× más lento para el mismo AIC, y publica los errores típicos de la semilla | — |
 | [BUG-0011](BUG-0011-dcd-overdiff-recommends-d2-on-seasonal-price-index.md) | in-progress | medium | formal-tests | dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
