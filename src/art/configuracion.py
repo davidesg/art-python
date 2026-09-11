@@ -70,6 +70,7 @@ Son las dos cosas que sí identifican, y entran de forma distinta:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
@@ -78,6 +79,7 @@ import numpy as np
 __all__ = ["Candidato", "ConjuntoCandidatos", "InfoExtramuestral",
            "arranques_candidatos", "evalua_configuraciones",
            "describe_configuraciones", "normaliza_naturaleza",
+           "normaliza_fecha",
            "NATURALEZAS", "UMBRAL_ACTIVO", "BANDA_AIC"]
 
 
@@ -124,6 +126,52 @@ def normaliza_naturaleza(v: str) -> str:
         t = t.replace("__", "_")
     return {"parcial": "recuperacion_parcial",
             "recuperacion": "recuperacion_parcial"}.get(t, t)
+
+
+_MESES_Q = {1: 1, 4: 2, 7: 3, 10: 4}
+
+
+def normaliza_fecha(v: str) -> "tuple[int, int] | None":
+    """`(período, año)` a partir de lo que el analista haya escrito — BUG-0171.
+
+    La fecha declarada se comparaba con `==` contra la etiqueta del candidato, y
+    las etiquetas se construyen **sin cero a la izquierda** (`3/2022`) mientras
+    la llamada 1 del nodo imprime las fechas **con** cero (`03/2022`). O sea que
+    **el uso normal fallaba**: el analista copiaba la fecha de la salida anterior
+    y no se la aceptaban. La información extramuestral —lo único que identifica
+    la configuración cuando el dato no identifica— se perdía en silencio, y el
+    aviso decía «no coincide con ningún arranque candidato», que sugiere que el
+    analista se equivocó de fecha cuando la fecha era la que la propia
+    herramienta había impreso.
+
+    Se aceptan las formas que aparecen en el sistema y las que un analista
+    escribe sin pensar:
+
+        Q3/2008   3/2008   03/2008   2008-03   2008/03   2008
+        q3/2008   T3/2008  (trimestre en castellano)
+
+    Devuelve `None` si no se reconoce — y entonces sí hay algo que avisar.
+    """
+    t = (v or "").strip().upper().replace(" ", "")
+    if not t:
+        return None
+    # QN/AAAA  ·  TN/AAAA
+    m = re.fullmatch(r"[QT](\d{1,2})[/-](\d{4})", t)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    # N/AAAA  ·  NN/AAAA
+    m = re.fullmatch(r"(\d{1,2})[/-](\d{4})", t)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    # AAAA-MM  ·  AAAA/MM
+    m = re.fullmatch(r"(\d{4})[/-](\d{1,2})", t)
+    if m:
+        return int(m.group(2)), int(m.group(1))
+    # AAAA
+    m = re.fullmatch(r"(\d{4})", t)
+    if m:
+        return 1, int(m.group(1))
+    return None
 
 
 @dataclass
@@ -435,7 +483,15 @@ class ConjuntoCandidatos:
         # Se empareja por FECHA y no por prefijo de la etiqueta: la etiqueta es
         # un código compuesto («Q3/2008×4») y un `startswith` sobre ella ata la
         # lógica al formato de presentación, que es justo lo que se ha cambiado.
-        return next((c for c in self.vivos if c.fecha == self.info.desde), None)
+        #
+        # Y se comparan FECHAS, no cadenas — BUG-0171. Con `==` sobre el texto,
+        # `03/2022` no encontraba `3/2022`: el cero a la izquierda decidía si la
+        # información del analista entraba o se perdía.
+        obj = normaliza_fecha(self.info.desde)
+        if obj is None:
+            return None
+        return next((c for c in self.vivos
+                     if normaliza_fecha(c.fecha) == obj), None)
 
 
 def arranques_candidatos(z: Sequence[float], extremos_idx: Sequence[int],
@@ -710,10 +766,14 @@ def describe_configuraciones(conj: "ConjuntoCandidatos",
             L.append(f"\nLa fecha declarada fija la configuración en "
                      f"**{fij.etiqueta}**.")
         elif conj.info.desde:
+            # BUG-0171: decir CUÁLES hay. «No coincide» a secas sugiere que el
+            # analista se equivocó, y la mitad de las veces la fecha que escribió
+            # es la que esta misma herramienta imprimió dos llamadas antes.
+            _disp = ", ".join(f"`{c.fecha}`" for c in conj.vivos) or "ninguno"
             L.append(f"\n⚠ La fecha declarada (**{conj.info.desde}**) no "
-                     "coincide con ningún arranque candidato. O el suceso "
-                     "empezó antes de lo que el mecanismo admite, o la fecha "
-                     "es otra.")
+                     f"coincide con ningún arranque candidato. Los que hay son "
+                     f"{_disp}. O el suceso empezó antes de lo que el mecanismo "
+                     f"admite, o la fecha es otra.")
         conc = conj.concuerda_con_lo_extramuestral
         ref = conj.referencia
         if conj.la_tercera_lectura_no_cabe_en_este_contraste:

@@ -1,11 +1,11 @@
 ---
 id: BUG-0171
 title: La fecha extramuestral se compara como TEXTO — `03/2022` no encuentra `3/2022`, y la información del analista se pierde en silencio
-status: open
+status: fixed
 severity: high
 component: interventions
 found_in: 0.2.0
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-11
 reporter: David — run 3 de SF_MEG, incidencia C-15
 tags:
@@ -58,14 +58,34 @@ Y el aviso que sale es **engañoso**: «no coincide con ningún arranque candida
 sugiere que el analista se equivocó de fecha, cuando la fecha es exactamente la
 que la herramienta imprimió.
 
-## Fix propuesto
+## Fix
 
-Comparar **fechas**, no cadenas: normalizar las dos partes a `(período, año)`
-antes de comparar. Un `03/2022`, `3/2022` y `Q1/2022` mal escrito son problemas
-distintos y sólo el último merece un aviso.
+**`normaliza_fecha(v)` → `(período, año)`**, al lado de `normaliza_naturaleza`
+(BUG-0155), y el emparejamiento compara las tuplas. Se aceptan las formas que el
+sistema usa y las que un analista escribe sin pensar:
 
-Y el aviso, cuando de verdad no haya coincidencia, debe **listar los arranques
-disponibles** en vez de dejar al analista adivinando cuál esperaba la herramienta.
+    Q3/2008   3/2008   03/2008   2008-03   2008/03   T3/2008   q3/2008   2008
+
+Sobre el caso del run 3 —candidatos `2/2022` y `3/2022`:
+
+    evento_desde='03/2022'  → 3/2022×4      ← el que fallaba
+    evento_desde='3/2022'   → 3/2022×4
+    evento_desde='2022-03'  → 3/2022×4
+    evento_desde='Q3/2022'  → 3/2022×4
+    evento_desde='07/2022'  → no encaja     ← y eso sigue sin encajar
+
+Normalizar **no lo vuelve permisivo**: lo que no es una fecha devuelve `None`, y
+una fecha que de verdad no está entre los candidatos sigue sin fijar nada.
+
+**Y el aviso dice cuáles hay:**
+
+    ⚠ La fecha declarada (**07/2022**) no coincide con ningún arranque
+    candidato. Los que hay son `2/2022`, `3/2022`. O el suceso empezó antes de
+    lo que el mecanismo admite, o la fecha es otra.
+
+«No coincide» a secas sugería que el analista se había equivocado — y la mitad de
+las veces la fecha que escribió es la que esta misma herramienta imprimió dos
+llamadas antes.
 
 ## Validation
 
