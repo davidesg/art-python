@@ -1,11 +1,11 @@
 ---
 id: BUG-0149
 title: La superposición de la llamada 2 dibuja la hipótesis en el NIVEL sobre residuos en ∇ y en la fecha del episodio, no en la de la configuración
-status: open
+status: fixed
 severity: high
 component: figuras
 found_in: 0.2.2
-fixed_in: 
+fixed_in: 0.2.1
 reported: 2026-09-10
 reporter: David — corrida guiada fase 1, ITCER
 tags:
@@ -116,6 +116,40 @@ Y en `superpone`, cinturón: si `observado` son residuos de un modelo
 diferenciado y llega `d=0`, que lo diga; el soporte para la sombra es el de la
 hipótesis en el espacio de lo observado, no «hasta que la respuesta sea cero»,
 que en el nivel es infinito.
+
+## Fix aplicado (11-sep-2026), y una corrección al diagnóstico
+
+**De las dos causas, sólo una explica el síntoma.** Al arreglarlo se midió:
+con el soporte acotado al operador, pasar `d=0` sobre datos en ∇ da escala
+0,979 frente a 0,979/1,029 con `d=1`. **El desplome a ×−0,0219 lo producía
+enteramente el soporte**, no el `d` que faltaba. Contar mal la causa es cómo se
+arregla el síntoma y se deja el mecanismo, así que queda dicho.
+
+El arreglo de fondo, en `superpone`:
+
+```python
+fin_sop = min(_fin_resp, max(0, len(omega) - 1 + int(b)))
+```
+
+El soporte de una intervención es el de su OPERADOR —tantos períodos como
+coeficientes ω—, que vale en los dos espacios y no depende de que la respuesta
+decaiga. El criterio anterior, «hasta que la respuesta sea cero», sólo funciona
+en ∇.
+
+Los dos argumentos que faltaban se pasan igual, porque son defectos reales: `d`
+gobierna el rótulo del eje y la forma simulada, y `at` desplazaba la hipótesis
+dos períodos sobre datos que no le corresponden. Y `superpone` rechaza ahora
+`d=2` diciéndolo, en vez de dibujar una rampa como si fuera un escalón.
+
+Verificado sobre el caso del analista:
+
+```
+                    antes            ahora
+sombra              17 trimestres    3
+escala              ×−0,0219         ×0,979
+R² en el soporte    —                0,980
+eje                 level            ∇
+```
 
 ## Validation
 

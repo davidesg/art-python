@@ -499,6 +499,13 @@ def superpone(observado: Sequence[float],
     n = len(y)
     if not (1 <= at <= n):
         raise ValueError(f"at={at} fuera de la serie observada (1..{n}).")
+    if d not in (0, 1):
+        # `respuesta_flt` sólo cubre d ∈ {0,1}; con d=2 un impulso en la serie
+        # transformada es una RAMPA en el nivel y el diccionario de formas es
+        # otro. Decirlo es mejor que dibujar algo que no es (BUG-0149).
+        raise ValueError(
+            f"d={d}: la superposición cubre d=0 (nivel) y d=1 (∇). Con d=2 la "
+            "lectura de la forma es otra y dibujarla aquí engañaría.")
 
     s = len(omega) - 1
     K = max(s + ventana, 2 * ventana)
@@ -507,9 +514,24 @@ def superpone(observado: Sequence[float],
     if entrada not in ("escalon", "impulso"):
         raise ValueError(f"entrada={entrada!r}: 'escalon' o 'impulso'.")
 
-    # soporte efectivo: hasta donde la respuesta deja de moverse
+    # EL SOPORTE, y por qué no puede ser «hasta que la respuesta sea cero»
+    # — BUG-0149.
+    #
+    # Ese criterio funciona en ∇, donde un escalón permanente aparece como un
+    # impulso y vuelve a cero. En el NIVEL no vuelve nunca: `nz[-1]` es el
+    # último índice simulado y el soporte sale igual a la ventana entera. Sobre
+    # ITCER eso daban 17 trimestres de sombra, y la escala por mínimos cuadrados
+    # —que divide por la suma de 17 residuos ≈0— se iba a cero: una línea plana
+    # presentada como «la hipótesis».
+    #
+    # El soporte de una intervención es el de su OPERADOR: tantos períodos como
+    # coeficientes ω tiene. Eso vale en los dos espacios y no depende de que la
+    # respuesta decaiga. El criterio de la respuesta se conserva sólo para
+    # acotarlo cuando la respuesta SÍ muere antes (un impulso con menos soporte
+    # efectivo que coeficientes).
     nz = np.nonzero(np.abs(base) > 1e-12)[0]
-    fin_sop = int(nz[-1]) if len(nz) else 0
+    _fin_resp = int(nz[-1]) if len(nz) else 0
+    fin_sop = min(_fin_resp, max(0, len(omega) - 1 + int(b)))
 
     ini = max(1, at - ventana)
     fin = min(n, at + fin_sop + ventana)

@@ -7409,9 +7409,27 @@ def guided_intervention(inp_path: str,
                                 ("pulse", "impulse", "compimp") else "escalon")
                         # el calendario, con el desfase de los residuos — BUG-0140
                         _f = int(getattr(ts, "freq", 1) or 1)
+                        # BUG-0149. Dos datos que esta llamada no pasaba:
+                        #
+                        # `d` — lo observado son RESIDUOS EN ∇ y `superpone`
+                        # tomaba d=0, así que simulaba la respuesta en el NIVEL.
+                        # Un escalón permanente en el nivel no vuelve nunca a
+                        # cero, y el soporte se define como el último índice con
+                        # respuesta ≠ 0: salían 17 trimestres de sombra y la
+                        # escala por mínimos cuadrados se iba a ≈0 —la línea
+                        # plana que el analista vio—.
+                        #
+                        # `at` — se pasaba `ep.inicio`, la fecha del extremo que
+                        # ABRIÓ el episodio, no el arranque de la configuración
+                        # que se dibuja. Para `Q2/2008×3` son dos períodos: la
+                        # hipótesis caía sobre datos que no le corresponden.
+                        # `Candidato.arranque_resid` ya trae la posición buena,
+                        # 1-based en residuos, que es el índice de `at`.
                         _fig2 = describe_superposicion(
-                            m._result.residuals, at=int(ep.inicio),
+                            m._result.residuals,
+                            at=int(getattr(mejor, "arranque_resid", ep.inicio)),
                             omega=_om, entrada=_ent,
+                            d=int(getattr(m, "d", 0)),
                             freq=_f, start=getattr(ts, "start", ()),
                             desfase=(int(getattr(m, "d", 0))
                                      + int(getattr(m, "D", 0)) * _f),

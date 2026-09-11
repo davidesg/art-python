@@ -5,7 +5,7 @@ status: fixed
 severity: high
 component: interventions
 found_in: 0.2.2
-fixed_in: 
+fixed_in: 0.2.1
 reported: 2026-09-10
 reporter: David — corrida guiada fase 1, ITCER
 tags:

@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**148 report(s), 8 open.**
+**154 report(s), 13 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -13,8 +13,13 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0123](BUG-0123-la-simplificacion-que-el-codigo-sabe-y-no-propone.md) | open | medium | interventions | test_interventions declara «no hay simplificación posible» cuando la hay — un escalón con ganancia nula es un impulso de un orden menos, y el código lo sabe pero no lo propone | — |
 | [BUG-0124](BUG-0124-los-dos-detectores-de-covarianza-semilla-se-excluye.md) | open | high | diagnosis | Los dos detectores de covarianza-semilla se excluyen mutuamente — con degeneración PARCIAL el aviso cuenta sólo las coincidencias exactas y calla las que están a 0,02 % de la semilla | — |
 | [BUG-0147](BUG-0147-la-figura-se-escribe-y-no-se-dice-donde.md) | open | medium | mcp-tools | Seis herramientas escriben su figura y no dicen dónde — el otro medio BUG-0122, y sólo se ve cruzando la frontera | — |
-| [BUG-0149](BUG-0149-la-superposicion-dibuja-el-nivel-sobre-diferencias.md) | open | high | figuras | La superposición de la llamada 2 dibuja la hipótesis en el NIVEL sobre residuos en ∇ y en la fecha del episodio, no en la de la configuración | — |
 | [BUG-0151](BUG-0151-la-covarianza-del-out-conserva-la-semilla-del-bf.md) | open | high | estimation | La covarianza del .out conserva la semilla del BFGS en direcciones ROTADAS — ningún detector por parámetro la ve | — |
+| [BUG-0152](BUG-0152-entra-y-sale-hablan-de-la-banda-y-la-decision-es-del-modelo.md) | open | medium | calibracion | «ENTRA» y «SALE» hablan de la BANDA mientras la decisión es sobre el MODELO, y se leen al revés | — |
+| [BUG-0153](BUG-0153-el-pie-de-la-figura-contradice-al-veredicto.md) | open | medium | describe | El pie de la figura de calibración dice «falta estructura» mientras el veredicto dice que el anómalo fabricaba la señal | — |
+| [BUG-0154](BUG-0154-el-veredicto-se-repite-tres-veces.md) | open | low | mcp-tools | El veredicto de la llamada 2 se imprime tres veces casi literal — bloque, «Veredicto» y pie | — |
+| [BUG-0155](BUG-0155-evento-naturaleza-no-dice-que-admite.md) | open | medium | mcp-tools | `evento_naturaleza` sólo admite permanente|transitorio y no lo dice — se aprende por el error, y le falta «recuperación parcial» | — |
+| [BUG-0156](BUG-0156-dos-recomendaciones-distintas-en-la-misma-salida.md) | open | high | interventions | La llamada 2 con escalera da DOS recomendaciones distintas en la misma salida — la escalera dice 1a y el veredicto Q2/2008×3 | — |
+| [BUG-0157](BUG-0157-el-aviso-de-discrepancia-usa-un-contraste-que-no-ve-el-suceso.md) | open | high | interventions | El aviso «la explicación no concuerda con el contraste» se da sobre un episodio que EXCLUYE la vuelta, así que «permanente» sale por construcción | — |
 | [BUG-0011](BUG-0011-dcd-overdiff-recommends-d2-on-seasonal-price-index.md) | in-progress | medium | formal-tests | dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
@@ -153,7 +158,8 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0143](BUG-0143-el-panel-de-la-acf-no-ve-el-canal-de-la-varianza.md) | fixed | medium | figuras | El panel de la ACF mide sólo medio anómalo — le falta el canal de la varianza, que aquí vale el 20% | 0.2.2 |
 | [BUG-0144](BUG-0144-la-calibracion-no-decia-que-fechas.md) | fixed | medium | calibracion | La calibración decía «retardo 4, +0,067» y no decía qué fechas — el `.out` lo lleva desde siempre y art no lo referenciaba | 0.2.2 |
 | [BUG-0146](BUG-0146-el-registro-de-defectos-no-salia-de-art.md) | fixed | medium | bugs | El registro de defectos no salía de art — la biblioteca aceptaba cualquier directorio, el CLI no, y el índice se firmaba como ART fuera donde fuera | 0.2.2 |
-| [BUG-0150](BUG-0150-las-configuraciones-y-la-escalera-se-estiman-sin.md) | fixed | high | interventions | Las configuraciones y la escalera se estiman SIN las intervenciones que ya lleva el modelo base | — |
+| [BUG-0149](BUG-0149-la-superposicion-dibuja-el-nivel-sobre-diferencias.md) | fixed | high | figuras | La superposición de la llamada 2 dibuja la hipótesis en el NIVEL sobre residuos en ∇ y en la fecha del episodio, no en la de la configuración | 0.2.1 |
+| [BUG-0150](BUG-0150-las-configuraciones-y-la-escalera-se-estiman-sin.md) | fixed | high | interventions | Las configuraciones y la escalera se estiman SIN las intervenciones que ya lleva el modelo base | 0.2.1 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 
