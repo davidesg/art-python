@@ -132,6 +132,7 @@ class Candidato:
     n_escalones: int
     etiqueta: str = ""           # código corto para tablas: "Q2/2008×5"
     fecha: str = ""              # la fecha sola: "Q2/2008"
+    fecha_fin: str = ""          # el ÚLTIMO período que cubre: "Q4/2008"
     model: Any = None
     aic: float = float("nan")
     omega_1: float | None = None
@@ -164,11 +165,46 @@ class Candidato:
         if self.transitorio is None:
             return base
         if self.transitorio:
+            if n == 1:
+                # BUG-0157: «vuelve tras 0 período(s)» no es una vuelta, es que
+                # no pasó nada. Con un solo ω no hay transitorio que decir.
+                return (base + ", y la ganancia no se distingue de cero — con "
+                        "un solo ω eso no es una vuelta: es que **el suceso no "
+                        "deja efecto medible**")
             return (base + f", y como la ganancia no se distingue de cero, el "
-                    f"nivel **vuelve a la línea base** tras {n-1} período(s): "
-                    f"efecto TRANSITORIO")
+                    f"nivel **vuelve a la línea base** en **{self.fecha_fin}**, "
+                    f"tras {n-1} período(s): efecto TRANSITORIO")
         return (base + f", con ganancia ω(1)={self.omega_1:+.4f}: el nivel "
                 f"**se queda desplazado** — efecto PERMANENTE")
+
+    @property
+    def fin_resid(self) -> int:
+        """La última observación que la especificación cubre (1-based)."""
+        return self.arranque_resid + self.n_escalones - 1
+
+    @property
+    def puede_expresar_una_vuelta(self) -> bool:
+        """¿Admite esta especificación la lectura «el nivel VUELVE»? — BUG-0157.
+
+        Con un solo ω, ω(1) = ω₀: las dos únicas lecturas posibles son «el
+        nivel se desplaza» y «no pasó nada». La vuelta necesita un segundo ω
+        que cancele al primero. Así que sobre una configuración de un escalón
+        **«permanente» sale por CONSTRUCCIÓN**, y decir que contradice al
+        analista es atribuirle una discrepancia que produce la propia forma.
+        """
+        return self.n_escalones >= 2
+
+    @property
+    def donde_situa_la_vuelta(self) -> str:
+        """Y con n ω tampoco la BUSCA: la SITÚA — BUG-0157.
+
+        ω(1)=0 significa que el nivel vuelve a la base en el último período que
+        la especificación cubre, y en ningún otro. La forma no tiene libertad
+        sobre CUÁNDO: contrastar «transitorio» aquí es contrastar «transitorio
+        **con vuelta en esta fecha**». Si la vuelta real es posterior, el
+        contraste no puede verla y el rechazo no significa lo que parece.
+        """
+        return self.fecha_fin or ""
 
     @property
     def ic95(self) -> tuple[float, float] | None:
@@ -262,16 +298,72 @@ class ConjuntoCandidatos:
                 if c.transitorio is False and (c.omega_1 or 0) < 0]
 
     @property
+    def referencia(self) -> "Candidato | None":
+        """El candidato contra el que se juzga la información extramuestral.
+
+        Si el analista dio la fecha, el suyo. Si no, **el que mejor AIC tiene**
+        — y eso hay que decirlo, porque entonces la comparación no es con una
+        configuración que el analista haya nombrado (BUG-0157).
+        """
+        return self.fijado_por_lo_extramuestral or self.mejor
+
+    @property
+    def vuelta_mas_tardia(self) -> str:
+        """La vuelta más tardía que ALGUNA configuración construida admite.
+
+        La marcha hacia delante para en el primer residuo tranquilo, así que el
+        conjunto entero tiene un techo. Si la vuelta que el analista describe
+        cae después, **ninguna** de las configuraciones puede expresarla: no es
+        que el dato la desmienta, es que no se ha contrastado.
+        """
+        con_vuelta = [c for c in self.vivos if c.puede_expresar_una_vuelta]
+        if not con_vuelta:
+            return ""
+        return max(con_vuelta, key=lambda c: c.fin_resid).fecha_fin
+
+    @property
+    def el_contraste_no_alcanza_la_vuelta(self) -> bool:
+        """Se declara `transitorio` y el contraste lo RECHAZA — BUG-0157.
+
+        Parece una discrepancia y no lo es. ω(1)=0 dice «el nivel vuelve **en
+        el último período que la especificación cubre**», y en ningún otro: la
+        forma no tiene libertad sobre CUÁNDO. Rechazarlo descarta *esa* vuelta,
+        no cualquier vuelta. Una recuperación posterior al tramo le es
+        sencillamente invisible.
+
+        Y como `naturaleza` no lleva fecha de vuelta, **la discrepancia nunca se
+        puede establecer**: el analista dice «transitorio», el contraste
+        responde sobre «transitorio con vuelta en tal fecha», y son dos
+        afirmaciones distintas.
+
+        Sobre ITCER: referencia `Q2/2008×3`, que cubre hasta Q4/2008, contra un
+        analista que describía una recuperación desde 2009Q2 — dos trimestres
+        fuera del tramo. «Permanente» salía por construcción.
+
+        El caso extremo lo da `puede_expresar_una_vuelta`: con un solo ω no hay
+        vuelta posible en NINGUNA fecha.
+        """
+        if self.info.naturaleza != "transitorio":
+            return False
+        ref = self.referencia
+        return ref is not None and ref.transitorio is False
+
+    @property
     def concuerda_con_lo_extramuestral(self) -> bool | None:
         """¿La naturaleza declarada coincide con lo que dice el contraste?
 
         La explicación tiene que explicar la FORMA, no sólo la fecha.
-        `None` si no hay información o no hay candidato con el que comparar.
+        `None` si no hay información, si no hay candidato con el que comparar,
+        **o si la forma contrastada no admite la lectura declarada** — que es
+        el caso que BUG-0157 arregla: un contraste que sólo puede dar una
+        respuesta no está contrastando nada.
         """
         if not self.info.naturaleza:
             return None
-        ref = self.fijado_por_lo_extramuestral or self.mejor
+        ref = self.referencia
         if ref is None or ref.transitorio is None:
+            return None
+        if self.el_contraste_no_alcanza_la_vuelta:
             return None
         return ref.transitorio == (self.info.naturaleza == "transitorio")
 
@@ -392,6 +484,7 @@ def evalua_configuraciones(model_base, candidatos: Sequence[tuple[int, int]],
     for at_r, n_om in candidatos:
         c = Candidato(arranque_resid=at_r + 1, n_escalones=n_om,
                       fecha=etiqueta(at_r),
+                      fecha_fin=etiqueta(at_r + n_om - 1),
                       etiqueta=f"{etiqueta(at_r)}×{n_om}")
         try:
             itv = fue.Intervention("step", at=at_r + desfase,
@@ -542,7 +635,49 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
                      "empezó antes de lo que el mecanismo admite, o la fecha "
                      "es otra.")
         conc = conj.concuerda_con_lo_extramuestral
-        if conc is False:
+        ref = conj.referencia
+        if conj.el_contraste_no_alcanza_la_vuelta:
+            # BUG-0157. Aquí el aviso decía «la explicación no concuerda con el
+            # contraste», y era falso: el contraste no puede ver la vuelta que
+            # el analista describe, así que «permanente» sale por construcción.
+            # Desautorizar la información extramuestral con un contraste que no
+            # alcanza el suceso enseña al analista a desconfiar de lo único que
+            # este nodo existe para incorporar.
+            de_quien = ("" if conj.fijado_por_lo_extramuestral is not None else
+                        " — la de **mejor AIC**, no una que hayas nombrado: no "
+                        "diste `evento_desde`")
+            if not ref.puede_expresar_una_vuelta:
+                L.append(
+                    f"\n⚠ **El contraste no puede ver la vuelta.** Se declara "
+                    f"*transitorio*, y la configuración con la que se compara "
+                    f"—**{ref.etiqueta}**{de_quien}— tiene **un solo ω**, así que "
+                    f"ω(1)=ω₀: sus dos únicas lecturas son «el nivel se "
+                    f"desplaza» y «no pasó nada». La vuelta necesita un segundo "
+                    f"ω que cancele al primero. **«Permanente» sale aquí por "
+                    f"construcción, no del dato.**")
+            else:
+                L.append(
+                    f"\n⚠ **El contraste SITÚA la vuelta, no la busca.** Se "
+                    f"declara *transitorio*, y la configuración con la que se "
+                    f"compara —**{ref.etiqueta}**{de_quien}— sólo admite una "
+                    f"lectura transitoria: que el nivel vuelva en "
+                    f"**{ref.donde_situa_la_vuelta}**, el último período que "
+                    f"cubre. Rechazar ω(1)=0 descarta *esa* vuelta, **no "
+                    f"cualquier vuelta**. Si la recuperación que describes es "
+                    f"posterior, el contraste no la ve y «permanente» sale por "
+                    f"construcción.")
+            tope = conj.vuelta_mas_tardia
+            if tope:
+                L.append(
+                    f"\nY **ninguna** de las {len(conj.vivos)} configuraciones "
+                    f"construidas sitúa la vuelta más allá de **{tope}**: la "
+                    f"marcha hacia delante para en el primer residuo tranquilo, "
+                    f"así que el conjunto no alcanza una recuperación diferida. "
+                    f"Para un suceso con vuelta tardía hacen falta **dos "
+                    f"intervenciones** —la caída y la vuelta— y el contraste de "
+                    f"su ganancia **NETA** "
+                    f"(`test_interventions(..., ganancia_neta=[i, j])`).")
+        elif conc is False:
             L.append("\n⚠ **La explicación no concuerda con el contraste.** Se "
                      f"declara *{conj.info.naturaleza}* y la ganancia dice lo "
                      "contrario. La explicación tiene que explicar la FORMA, no "
@@ -568,6 +703,22 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
                "inicio del suceso, o publica el rango de la ganancia en vez de "
                "un número.")
 
+    # BUG-0157. La recomendación decía «el dato identifica la configuración:
+    # … PERMANENTE» sin matiz, mientras el analista acababa de declarar
+    # transitorio. Que el contraste no alcance la vuelta no invalida la
+    # configuración —sigue siendo la que mejor explica lo que se ve— pero sí
+    # invalida leer «PERMANENTE» como si desmintiera al analista.
+    if conj.el_contraste_no_alcanza_la_vuelta:
+        _r = conj.referencia
+        _d = (f" en **{_r.donde_situa_la_vuelta}**"
+              if _r is not None and _r.puede_expresar_una_vuelta else "")
+        rec += ("\n\n⚠ Y **«permanente» aquí no desmiente tu «transitorio»**: "
+                f"esta forma sólo sabe contrastar la vuelta{_d}. Si la "
+                "recuperación que describes es posterior, modeliza el suceso "
+                "como **dos intervenciones** —la caída y la vuelta— y contrasta "
+                "su ganancia NETA; o declara `permanente` sólo si de verdad "
+                "sostienes que el nivel no volvió.")
+
     return Description(
         summary="\n".join(L), figure_b64=None, recommendation=rec,
         data=dict(
@@ -577,6 +728,8 @@ def describe_configuraciones(conj: "ConjuntoCandidatos"):
             n_empatados=len(emp),
             rango_ganancia=list(conj.rango_ganancia) if conj.rango_ganancia else None,
             discrepan=conj.discrepan_en_la_lectura,
+            contraste_no_alcanza_la_vuelta=conj.el_contraste_no_alcanza_la_vuelta,
+            vuelta_mas_tardia=conj.vuelta_mas_tardia or None,
             trampa_ventana_corta=conj.el_mas_estrecho_es_el_mas_corto,
             dominio=conj.dominio,
             implausibles=[c.etiqueta for c in impl],

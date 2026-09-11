@@ -3999,7 +3999,8 @@ def intervention_analysis(inp_path: str, threshold: float = _Z_USER) -> list:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
+def test_interventions(inp_path: str, alpha: float = 0.05,
+                      ganancia_neta: list = []) -> list:
     """
     
     **Instrumento suelto del nodo de intervención.** La secuencia completa
@@ -4024,10 +4025,32 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
     lecturas, las dos errores de representación: la FORMA se queda corta (hay
     episodio) o la FECHA está desplazada.
 
+    LA GANANCIA NETA DE UN EPISODIO REPARTIDO (`ganancia_neta`). Un suceso con
+    VUELTA DIFERIDA no cabe en una sola intervención: entre la caída y el rebote
+    hay períodos tranquilos, así que `residual_episodes` los separa y ninguna
+    forma del catálogo abarca los dos. La forma que sí lo hace son dos escalones
+    —uno por tramo— y entonces la pregunta ya no es la ganancia de cada uno sino
+    la SUMA: H₀ Σᵢ ωᵢ(1) = 0, un Wald χ²(1) exacto sobre la covarianza conjunta.
+    Pasa los índices 0-based: `ganancia_neta=[0, 1]`.
+
+    Da TRES lecturas, no dos — la del medio es la que el catálogo no sabía
+    nombrar, y es la que los episodios reales suelen tener:
+
+        no se rechaza                  el nivel VOLVIÓ        transitorio
+        se rechaza, |neta| < |caída|   volvió EN PARTE        recuperación PARCIAL
+        se rechaza, neta ≈ caída       no volvió              permanente
+
+    Sin esto la caída sale rotulada «PERMANENTE» sin haber mirado el rebote, y
+    ése es un veredicto sobre su propio tramo que se lee como el del suceso
+    (BUG-0157). Un impulso pesa 0 en la suma: su efecto en el nivel es cero por
+    construcción, no por estimación (BUG-0076).
+
     Parameters
     ----------
-    inp_path : path to a fitted .inp or .pre file
-    alpha    : significance level for classification (default 0.05)
+    inp_path      : path to a fitted .inp or .pre file
+    alpha         : significance level for classification (default 0.05)
+    ganancia_neta : índices 0-based de dos o más intervenciones del MISMO
+                    suceso, para contrastar su ganancia neta. Vacío = no se hace.
     """
     try:
         from mcp.types import TextContent
@@ -4133,6 +4156,30 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
             origen_txt = aviso_se_no_fiable(m)
         except Exception:
             origen_txt = ""
+        # BUG-0157 — el contraste del EPISODIO, cuando el analista lo pide.
+        neta_txt = ""
+        if ganancia_neta:
+            try:
+                from art.interventions import net_gain
+                g = net_gain(m, [int(i) for i in ganancia_neta], alpha=alpha)
+                neta_txt = (
+                    "\n\n---\n\n### Ganancia NETA del episodio\n\n"
+                    "*El suceso repartido en varias intervenciones se juzga por "
+                    "la SUMA de sus ganancias: H₀ Σᵢ ωᵢ(1) = 0. La ganancia de "
+                    "cada tramo por separado es un veredicto sobre ese tramo, "
+                    "no sobre el suceso.*\n\n```\n" + g.summary(alpha) + "\n```\n")
+                if g.recuperado is not None and 0.10 < g.recuperado < 0.90:
+                    neta_txt += (
+                        f"\n**Recuperación PARCIAL.** No es «transitorio» ni "
+                        f"«permanente»: el nivel devuelve el "
+                        f"{g.recuperado*100:.0f} % y se queda "
+                        f"{g.neta:+.4f} por debajo de la línea base. Es la "
+                        f"lectura que hay que declarar, y la que el catálogo de "
+                        f"formas de una sola fecha no sabe expresar.\n")
+            except Exception as _ng:
+                neta_txt = (f"\n\n⚠ *No se pudo contrastar la ganancia neta de "
+                            f"{list(ganancia_neta)}: {_ng}*\n")
+
         text = (
             f"### Contraste de intervenciones — {m.series.name or 'modelo'}\n\n"
             + f"**{n_sig} significativas**, **{n_nosig} prescindibles**"
@@ -4143,6 +4190,7 @@ def test_interventions(inp_path: str, alpha: float = 0.05) -> list:
             + "\n\n"
             + eq_text
             + "\n\n---\n\n" + summary
+            + neta_txt
             + convenio
             + treadway
         )
@@ -5342,7 +5390,16 @@ def _texto_escalera(esc, rec: str) -> str:
               "esta escalera resuelve el suceso**. Lo recomendado es el menos "
               "malo. Antes de fijarlo, mira si el episodio está bien delimitado "
               "(`incident_configurations`) o si lo que queda no es un suceso "
-              "sino estructura sin modelizar."]
+              "sino estructura sin modelizar."
+              " Y hay una **tercera** lectura, que el catálogo de formas de "
+              "una sola fecha no "
+              "sabe nombrar: un suceso con **vuelta DIFERIDA** —la caída y la "
+              "recuperación separadas por períodos tranquilos— no cabe en "
+              "ninguna de estas formas, porque `1b` obliga a que el nivel vuelva "
+              "en T+1. Si el vecino queda a los DOS lados, es la lectura "
+              "que toca: dos intervenciones, y el contraste de su ganancia "
+              "**NETA** (`test_interventions(..., ganancia_neta=[i, j])`, "
+              "BUG-0157)."]
     else:
         L += ["", "**No hubo razón para subir**: la lectura simple absorbe su "
               "fecha, no deja vecino y el modelo es adecuado. El AIC no arbitra "

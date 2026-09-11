@@ -1997,6 +1997,7 @@ Add an intervention to the .inp, re-estimate and show updated diagnosis.
 |---|---|---|---|
 | `inp_path` | string | yes | — |
 | `alpha` | number | no | `0.05` |
+| `ganancia_neta` | array | no | `[]` |
 
 **Instrumento suelto del nodo de intervención.** La secuencia completa
     —¿hay que intervenir? → ¿qué forma admite el dato? → construir y
@@ -2020,10 +2021,32 @@ Add an intervention to the .inp, re-estimate and show updated diagnosis.
     lecturas, las dos errores de representación: la FORMA se queda corta (hay
     episodio) o la FECHA está desplazada.
 
+    LA GANANCIA NETA DE UN EPISODIO REPARTIDO (`ganancia_neta`). Un suceso con
+    VUELTA DIFERIDA no cabe en una sola intervención: entre la caída y el rebote
+    hay períodos tranquilos, así que `residual_episodes` los separa y ninguna
+    forma del catálogo abarca los dos. La forma que sí lo hace son dos escalones
+    —uno por tramo— y entonces la pregunta ya no es la ganancia de cada uno sino
+    la SUMA: H₀ Σᵢ ωᵢ(1) = 0, un Wald χ²(1) exacto sobre la covarianza conjunta.
+    Pasa los índices 0-based: `ganancia_neta=[0, 1]`.
+
+    Da TRES lecturas, no dos — la del medio es la que el catálogo no sabía
+    nombrar, y es la que los episodios reales suelen tener:
+
+        no se rechaza                  el nivel VOLVIÓ        transitorio
+        se rechaza, |neta| < |caída|   volvió EN PARTE        recuperación PARCIAL
+        se rechaza, neta ≈ caída       no volvió              permanente
+
+    Sin esto la caída sale rotulada «PERMANENTE» sin haber mirado el rebote, y
+    ése es un veredicto sobre su propio tramo que se lee como el del suceso
+    (BUG-0157). Un impulso pesa 0 en la suma: su efecto en el nivel es cero por
+    construcción, no por estimación (BUG-0076).
+
     Parameters
     ----------
-    inp_path : path to a fitted .inp or .pre file
-    alpha    : significance level for classification (default 0.05)
+    inp_path      : path to a fitted .inp or .pre file
+    alpha         : significance level for classification (default 0.05)
+    ganancia_neta : índices 0-based de dos o más intervenciones del MISMO
+                    suceso, para contrastar su ganancia neta. Vacío = no se hace.
 
 ---
 

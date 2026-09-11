@@ -580,7 +580,16 @@ def describe_escalera(escalera: "Escalera"):
                   "que se recomienda es el menos malo, no uno que se sostenga. "
                   "Mira si el episodio está bien delimitado "
                   "(`incident_configurations`) o si lo que queda no es un "
-                  "suceso sino estructura sin modelizar."]
+                  "suceso sino estructura sin modelizar."
+                  " Y hay una **tercera** lectura, que el catálogo de formas de "
+                  "una sola fecha no "
+                  "sabe nombrar: un suceso con **vuelta DIFERIDA** —la caída y la "
+                  "recuperación separadas por períodos tranquilos— no cabe en "
+                  "ninguna de estas formas, porque `1b` obliga a que el nivel vuelva "
+                  "en T+1. Si el vecino queda a los DOS lados, es la lectura "
+                  "que toca: dos intervenciones, y el contraste de su ganancia "
+                  "**NETA** (`test_interventions(..., ganancia_neta=[i, j])`, "
+                  "BUG-0157)."]
         L += ["", "#### Peldaño 2 — el episodio", "",
               "| | forma | AIC | ω(1) — ganancia | vecino anómalo | adecuado |",
               "|---|---|---|---|---|---|", fila(p2), ""]

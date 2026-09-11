@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import Sequence
 
 import numpy as np
 
@@ -515,6 +516,177 @@ def test_intervention(model, itv_idx: int,
         df         = df,
         significant = significant,
     )
+
+
+@dataclass
+class GananciaNeta:
+    """El efecto PERMANENTE conjunto de varias intervenciones del mismo suceso.
+
+    Existe porque un suceso con **vuelta diferida** no cabe en una sola
+    intervención (BUG-0157). La caída de ITCER es Q4/2008 y la recuperación
+    empieza en 2009Q2: entre medias hay trimestres tranquilos, así que
+    `decide_episodios` las separa y ninguna configuración del catálogo abarca
+    las dos. La forma que sí lo hace son **dos escalones**, uno por tramo — y
+    entonces la pregunta del método ya no es la ganancia de cada uno sino la
+    **suma**:
+
+        H₀:  Σᵢ ωᵢ(1) = 0        ⇔  el nivel acabó donde empezó
+
+    Es una única restricción lineal sobre el vector completo de parámetros, así
+    que sigue siendo un Wald χ²(1) exacto — el mismo de `test_intervention`,
+    con α extendido sobre los bloques de las intervenciones elegidas. No hace
+    falta método delta: un cociente es cero exactamente cuando lo es su
+    numerador.
+
+    Las tres lecturas, y son tres y no dos:
+
+        no se rechaza          el nivel VOLVIÓ            episodio transitorio
+        se rechaza, |neta| < |caída|   volvió EN PARTE    recuperación PARCIAL
+        se rechaza, neta ≈ caída      no volvió           efecto permanente
+
+    La del medio es la que el catálogo no sabía nombrar, y es la que el analista
+    describía en ITCER: «recuperación parcial desde 2009Q2».
+    """
+
+    idx: list[int]                  # las intervenciones sumadas, 0-based
+    omega_1: list[float]            # ω(1) de cada una
+    neta: float                     # Σ ωᵢ(1)
+    se_neta: float | None
+    wald_stat: float | None
+    wald_p: float | None
+    df: int
+    entradas: list[str]             # "escalon" | "impulso" | …
+    tipos: list[str]
+
+    @property
+    def vuelve(self) -> bool | None:
+        """¿Vuelve el nivel a la línea base? `None` si no hay contraste."""
+        return None if self.wald_p is None else self.wald_p >= 0.05
+
+    @property
+    def recuperado(self) -> float | None:
+        """Qué fracción del primer tramo devuelven los demás.
+
+        1.0 = vuelta completa · 0.0 = nada · entre medias, parcial. Es el número
+        que separa «recuperación parcial» de las dos lecturas extremas, y sale
+        de los mismos ω que el Wald.
+        """
+        if not self.omega_1 or self.omega_1[0] == 0:
+            return None
+        return 1.0 - self.neta / self.omega_1[0]
+
+    @property
+    def lectura(self) -> str:
+        if self.vuelve is None:
+            return "sin contraste (covarianza no disponible)"
+        if self.vuelve:
+            return "el nivel VUELVE a la línea base — episodio TRANSITORIO"
+        f = self.recuperado
+        if f is not None and 0.10 < f < 0.90:
+            return (f"recuperación PARCIAL: se devuelve el {f*100:.0f} % del "
+                    f"desplazamiento inicial, y queda {self.neta:+.4f}")
+        return "el nivel NO vuelve — efecto PERMANENTE"
+
+    def summary(self, alpha: float = 0.05) -> str:
+        L = [f"  ganancia NETA de las intervenciones {self.idx}: "
+             f"{self.neta:+.4f}"
+             + (f"  SE={self.se_neta:.4f}" if self.se_neta else "")]
+        for i, (k, g, e) in enumerate(zip(self.idx, self.omega_1, self.entradas)):
+            L.append(f"       [{k:2d}] ω(1)={g:+.4f}  ({e})")
+        if self.wald_stat is not None:
+            star = "**" if (self.wald_p or 1) < alpha else "  "
+            L.append(f"       H₀: Σω(1)=0   Wald χ²(1)={self.wald_stat:.3f}  "
+                     f"p={self.wald_p:.4f} {star}")
+        L.append(f"       ⇒ {self.lectura}")
+        return "\n".join(L)
+
+
+def net_gain(model, itv_idxs: "Sequence[int]",
+             alpha: float = 0.05) -> GananciaNeta:
+    """Contrasta H₀: Σ ωᵢ(1) = 0 sobre VARIAS intervenciones a la vez.
+
+    El contraste de la ganancia neta de un EPISODIO repartido en más de una
+    intervención — BUG-0157. `test_intervention` contrasta cada ganancia por
+    separado, y sobre un suceso con vuelta diferida eso rotula la caída
+    «PERMANENTE» sin haber mirado nunca el rebote.
+
+    Sólo cuentan las entradas que dejan efecto en el NIVEL. Un impulso no
+    persiste: su aportación permanente es **cero por construcción**, así que
+    entra en la lista con ω(1) informativo pero con peso 0 en la suma — meterlo
+    con peso 1 contrastaría otra cosa (BUG-0076).
+    """
+    import scipy.stats as sp_stats
+
+    if model._result is None:
+        raise ValueError("Model is not fitted — call model.fit() first.")
+    idx = [int(i) for i in itv_idxs]
+    if len(idx) < 2:
+        raise ValueError(
+            "la ganancia neta necesita AL MENOS DOS intervenciones: con una "
+            "sola es la ganancia de siempre, y para eso está `test_intervention`.")
+    if len(set(idx)) != len(idx):
+        raise ValueError(f"intervenciones repetidas en {idx}")
+
+    r = model._result
+    from art.diagnosis import covariance_is_degenerate, AVISO_COV_DEGENERADA
+    if covariance_is_degenerate(r):
+        raise ValueError("BUG-0027: " + AVISO_COV_DEGENERADA)
+
+    params = np.asarray(r.params)
+    cov    = np.asarray(r.cov_matrix)
+    n_obs  = model.series.nobs if model.series else len(r.residuals)
+    df     = max(n_obs - int(r.npar), 1)
+    itvs   = model.interventions or []
+
+    _ENTRADA = {"pulse": "impulso", "impulse": "impulso", "compimp": "impulso",
+                "step": "escalon", "ramp": "rampa"}
+    filas, pesos, g_i, entradas, tipos = [], [], [], [], []
+    for k in idx:
+        if k < 0 or k >= len(itvs):
+            raise IndexError(f"itv_idx={k} fuera de rango (0..{len(itvs)-1})")
+        itv = itvs[k]
+        entrada = _ENTRADA.get(itv.type, "otro")
+        # el impulso no persiste: aporta 0 al NIVEL, así que pesa 0 en la suma
+        peso = 0.0 if entrada == "impulso" else 1.0
+        start = _intervention_param_start(model, k)
+        om  = list(itv.omega or [])
+        omf = list(itv.omega_free or [True] * len(om))
+        local, g, loc_idx, loc_sig = start, 0.0, [], []
+        for pos, (v, f) in enumerate(zip(om, omf)):
+            signo = 1.0 if pos == 0 else -1.0
+            if f:
+                loc_idx.append(local); loc_sig.append(signo)
+                g += signo * float(params[local])
+                local += 1
+            else:
+                g += signo * float(v)
+        filas.append((loc_idx, loc_sig))
+        pesos.append(peso)
+        g_i.append(g)
+        entradas.append(entrada)
+        tipos.append(itv.type)
+
+    neta = float(sum(p * g for p, g in zip(pesos, g_i)))
+
+    # α sobre el vector COMPLETO de parámetros: un parámetro puede aparecer una
+    # sola vez, y el vector global es lo que hace que se sumen bien si dos
+    # intervenciones compartieran alguno.
+    a = np.zeros(len(params))
+    for (loc_idx, loc_sig), peso in zip(filas, pesos):
+        for j, sg in zip(loc_idx, loc_sig):
+            a[j] += peso * sg
+
+    wald_stat = wald_p = se_neta = None
+    if np.any(a != 0.0):
+        V = float(a @ cov @ a)
+        if V > 0:
+            se_neta   = float(np.sqrt(V))
+            wald_stat = neta ** 2 / V
+            wald_p    = float(sp_stats.chi2.sf(wald_stat, df=1))
+
+    return GananciaNeta(idx=idx, omega_1=g_i, neta=neta, se_neta=se_neta,
+                        wald_stat=wald_stat, wald_p=wald_p, df=df,
+                        entradas=entradas, tipos=tipos)
 
 
 def simplify_interventions(model,
