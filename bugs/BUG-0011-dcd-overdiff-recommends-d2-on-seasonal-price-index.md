@@ -68,6 +68,36 @@ varying only what the candidate carries:
 is 0.015 — the witness sits on its boundary, exactly as the test intends. The
 cos/sin pairs alone push it hardest (14.96).
 
+### ⚠ Y ESO NO ES EL ARREGLO — corrección del analista, 11-sep-2026
+
+La tabla de arriba explica el MECANISMO y se ha leído dos veces como si dijera
+qué hay que hacer. No lo dice.
+
+> *«No se pueden quitar los deterministas del modelo porque el resultante tiene
+> estacionalidad, y el resultante no sólo pierde potencia sino que se efectúa
+> sobre un modelo NO VÁLIDO. No error.»*
+
+La serie **es** estacional. Un candidato sin los armónicos no es una versión más
+limpia del modelo: es un modelo mal especificado, con estacionalidad sin
+modelizar en los residuos. El LR de 0,015 que sale ahí no es el veredicto
+correcto rescatado de una interferencia — es un número calculado sobre algo que
+no representa la serie.
+
+**Y el docstring NO está invertido.** Dice que el contraste se corre sobre la
+línea base determinista/estacional, y eso es lo correcto: es el único modelo
+válido que hay. (Lo di por invertido el 11-sep al medir el caso del run 3, y me
+corrigió el analista antes de tocar nada.)
+
+**Lo que falta, entonces, no es un arreglo de programación.** Es que la ley nula
+del DCD de frontera en f=0 está calculada **sin estacionalidad determinista**, y
+aquí se aplica con once regresores deterministas delante. Hasta que SF_MEG dé
+los valores críticos para ese caso, **esto es lo que hay**: el contraste se
+publica y su veredicto en f=0 sobre una serie con estacionalidad determinista no
+es concluyente.
+
+Lo que sí procede mientras tanto es **decirlo en la salida**, no cambiar el
+cálculo ni el modelo.
+
 The ARMA, which the docstring warns about, barely matters. Varying only the AR
 order of the candidate:
 
@@ -399,7 +429,19 @@ non-seasonal series *with* a significant drift.
 
 ## Fix
 
-None proposed — diagnosis required first.
+**Ninguno de programación, y no por falta de diagnóstico.** La causa está
+establecida (§Root cause) y la corrección del analista (11-sep-2026) cierra la
+pregunta de qué hacer con ella: el modelo con deterministas es el único válido,
+así que no hay nada que quitar ni que reordenar en el código.
+
+Lo que falta es **teoría**: los valores críticos del DCD de frontera en f=0 con
+estacionalidad determinista. Eso es trabajo del artículo, no del programa.
+
+Lo único accionable en `art` es de PRESENTACIÓN: que el veredicto en f=0 salga
+con su salvedad cuando el modelo lleva armónicos deterministas, en vez de
+publicar «considerar d+1» a secas sobre un índice de precios que es I(1) por
+todos los demás contrastes. Es la misma disciplina que el cancerbero de la Q
+(BUG-0166): se sigue, pero de forma consciente.
 
 ## Validation
 

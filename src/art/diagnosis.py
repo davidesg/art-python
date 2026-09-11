@@ -70,10 +70,51 @@ class DiagnosisResult:
     mean: float = 0.0
     mean_t: float = 0.0
 
+    # EL CANCERBERO — decisión del analista, 11-sep-2026.
+    #
+    # El número de retardos de un Portmanteau es hasta cierto punto ARBITRARIO,
+    # y mirarlos todos siempre es bueno. Lo que no puede ser es que el punto
+    # donde se DECIDE tenga un grado de libertad. La convención del motor es
+    # `3f+3` —la longitud del correlograma de `diagnose.c`— y ése es el que
+    # decide si un modelo pasa a los contrastes formales.
+    #
+    # Los demás no se tiran: se publican como SALVEDAD. Un rechazo en el
+    # retardo 12 con el 39 pasando es información —dice dónde está la
+    # autocorrelación— pero no es el veredicto. Antes `all()` los trataba a los
+    # cuatro como cancerberos, que es una regla más estricta que la del método
+    # y sin que nadie la hubiera decidido.
+
+    @property
+    def q_lag_cancerbero(self) -> int | None:
+        """El retardo que DECIDE: `3f+3`, el último del conjunto."""
+        return self.q_lags[-1] if self.q_lags else None
+
+    @property
+    def q_p_cancerbero(self) -> float | None:
+        return self.q_pvalues[-1] if self.q_pvalues else None
+
     @property
     def white_noise(self) -> bool:
-        """True if all Q p-values > 0.05."""
-        return all(p > 0.05 for p in self.q_pvalues)
+        """El veredicto, y lo da el cancerbero — `3f+3`.
+
+        Los otros retardos se leen en `salvedades_q`, que es lo que hace que
+        pasar «con salvedad» sea consciente y no un descuido.
+        """
+        p = self.q_p_cancerbero
+        return True if p is None else p > 0.05
+
+    @property
+    def salvedades_q(self) -> list[tuple[int, float]]:
+        """Retardos NO cancerberos que rechazan. Vacío si no hay ninguno.
+
+        No bloquean —el veredicto es del `3f+3`— pero dicen dónde está la
+        autocorrelación, y eso es justo lo que hace falta para decidir qué
+        orden añadir si se decide añadirlo.
+        """
+        if not self.q_lags:
+            return []
+        return [(l, p) for l, p in zip(self.q_lags[:-1], self.q_pvalues[:-1])
+                if p <= 0.05]
 
     @property
     def normal(self) -> bool:
@@ -130,8 +171,21 @@ class DiagnosisResult:
                  f"  n={self.nobs}, npar={self.npar}",
                  "  Ljung-Box Q:"]
         for l, q, p in zip(self.q_lags, self.q_stats, self.q_pvalues):
-            flag = "" if p > 0.05 else "  *** SIGNIFICANT"
+            # Quién DECIDE y quién es salvedad, dicho en la propia tabla: si no
+            # se marca, los cuatro se leen como cuatro veredictos.
+            if l == self.q_lag_cancerbero:
+                flag = "  <- DECIDE (3f+3)" + ("" if p > 0.05 else "  *** RECHAZA")
+            else:
+                flag = "" if p > 0.05 else "  (salvedad)"
             lines.append(f"    lag={l:3d}  Q={q:6.2f}  p={p:.4f}{flag}")
+        if self.salvedades_q:
+            _s = ", ".join(f"lag {l} (p={p:.4f})" for l, p in self.salvedades_q)
+            lines.append(
+                f"  Salvedad: el veredicto lo da el retardo "
+                f"{self.q_lag_cancerbero}, y pasa; pero {_s} rechaza. No "
+                f"bloquea — dice DONDE esta la autocorrelacion."
+                if self.white_noise else
+                f"  Ademas de {self.q_lag_cancerbero}, rechazan: {_s}.")
         lines.append(f"  Jarque-Bera:  stat={self.jb_stat:.3f}  p={self.jb_pvalue:.4f}"
                      f"  skew={self.skewness:.3f}  kurt={self.excess_kurtosis:.3f}")
         if self.extreme:
@@ -593,7 +647,47 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
     if not q_check_lags:                       # serie muy corta
         q_check_lags = [max(1, min(lags, npar + 1))]
 
-    lb = ljung_box(r, q_check_lags, df_correction=npar)
+    # LOS GRADOS DE LIBERTAD SON m − p − q, NO m − npar — BUG-0166.
+    #
+    # Ljung-Box corrige restando los parámetros **ARMA**, que son los que se
+    # estiman a partir de la autocorrelación de los residuos. Los DETERMINISTAS
+    # —armónicos, intervenciones, media— no entran: no se estiman de ahí.
+    #
+    # Restar `npar` resta también ésos, y el daño crece con el modelo. Medido
+    # sobre ruido blanco puro (n=292, 39 retardos, Q=39,27, p=0,458):
+    #
+    #     npar=11  df=28  p=0,077    pasa
+    #     npar=13  df=26  p=0,046    RECHAZA      ← ruido blanco «no adecuado»
+    #     npar=39  df= 0  p=3,7e-10  RECHAZA
+    #     npar=45  df=−6  p=3,7e-10  RECHAZA      ← y no da error: da un p-valor
+    #
+    # Y sobre `ES_CPI_m10` —n=215, npar=13, ARMA real 1— el retardo 12 daba
+    # df=−1 y p=0,0033 contra el 0,658 correcto: un modelo adecuado declarado
+    # inadecuado por un grado de libertad negativo.
+    #
+    # El daño se COMPONE, que es lo peor: el analista lee «no es ruido blanco»,
+    # añade una intervención, `npar` sube, el df baja y el rechazo se refuerza.
+    # Empuja exactamente hacia la sobreparametrización que el método evita.
+    def _libres(fac, free):
+        if not fac:
+            return 0
+        n = 0
+        for k, f in enumerate(fac):
+            msk = (free[k] if (free and k < len(free) and free[k] is not None)
+                   else [True] * len(f))
+            n += sum(1 for j in range(len(f)) if j >= len(msk) or msk[j])
+        return n
+
+    n_arma = (_libres(getattr(model, "ar", None), getattr(model, "ar_free", None))
+              + _libres(getattr(model, "ma", None), getattr(model, "ma_free", None))
+              + _libres(getattr(model, "ar_s", None), getattr(model, "ar_s_free", None))
+              + _libres(getattr(model, "ma_s", None), getattr(model, "ma_s_free", None)))
+
+    # Y un df ≤ 0 NO es un contraste: es que no hay contraste. Publicar un
+    # p-valor ahí es peor que no publicarlo — se lee, y manda.
+    q_check_lags = [l for l in q_check_lags if l - n_arma >= 1] or q_check_lags[-1:]
+
+    lb = ljung_box(r, q_check_lags, df_correction=n_arma)
     q_stats   = [float(x) for x in lb['statistic']]
     q_pvalues = [float(x) for x in lb['pvalue']]
 

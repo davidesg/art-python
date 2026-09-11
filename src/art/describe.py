@@ -1707,10 +1707,28 @@ def describe_diagnosis(model) -> Description:
         f"- Veredicto: {verdict}",
         f"- Media residual: {'✓' if result.centred else '✗'}  "
         f"media={result.mean:+.4f}, t={result.mean_t:+.2f}",
-        f"- Ruido blanco (Q): {wn}  {'OK' if result.white_noise else ', '.join(q_fails)}",
+        # QUIÉN DECIDE, DICHO — BUG-0166. El veredicto lo da `3f+3`, la
+        # convención del motor; los otros retardos se publican como SALVEDAD.
+        # Sin distinguirlos, los cuatro se leían como cuatro veredictos y
+        # cualquiera bloqueaba.
+        (f"- Ruido blanco (Q): {wn}  "
+         + (f"Q({result.q_lag_cancerbero})={result.q_stats[-1]:.2f}, "
+            f"p={result.q_p_cancerbero:.4f} — **decide 3f+3**"
+            if result.q_lags else "sin contraste")),
         f"- Normalidad (JB): {nm}  JB={result.jb_stat:.3f}, p={result.jb_pvalue:.4f}",
         f"- Asimetría={result.skewness:.3f}, curtosis exceso={result.excess_kurtosis:.3f}",
     ]
+
+    if result.salvedades_q:
+        _s = ", ".join(f"**lag {l}** (p={p:.4f})" for l, p in result.salvedades_q)
+        lines.append(
+            f"- ⚠ **Salvedad**: el veredicto lo da el retardo "
+            f"{result.q_lag_cancerbero} y **pasa**, pero {_s} rechaza. No "
+            f"bloquea el paso a los contrastes formales — dice **dónde** está "
+            f"la autocorrelación, que es lo que hace falta si se decide añadir "
+            f"un orden. Seguir es legítimo; seguir sin saberlo, no."
+            if result.white_noise else
+            f"- Y además del retardo que decide, rechazan: {_s}.")
 
     if not result.centred:
         lines += [
