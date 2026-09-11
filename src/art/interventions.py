@@ -278,6 +278,9 @@ class InterventionTestResult:
     # s son el mismo modelo con y sin esa restricción, y la comparación entre
     # ellos es un LR de un grado de libertad.
     entrada: str = "escalon"       # "impulso" | "escalon" | "rampa" | "otro"
+    # TODOS los ω, libres y fijos. `omega` lleva sólo los libres, y la forma
+    # reducida de BUG-0123 se cuenta sobre el operador ENTERO.
+    n_omega_total: int = 0
     omega_1: float | None = None   # ω(1) = ω₀ − ω₁ − ⋯ − ω_s (the numerator)
     # Error típico de ω(1). Se publica en vez de dejar que el consumidor lo
     # despeje del Wald como |g|/√χ², que revienta justo cuando la ganancia es
@@ -304,6 +307,57 @@ class InterventionTestResult:
         if self.entrada == "escalon":
             return "desplazamiento permanente del nivel"
         return "ν(1)"
+
+    # ── LA OTRA SIMPLIFICACIÓN: REDUCIR, NO QUITAR — BUG-0123 ──────────────
+    #
+    # El módulo conocía UN solo tipo de simplificación —quitar una intervención
+    # no significativa— y cuando todas lo eran cerraba con «no hay
+    # simplificación posible». Es falso siempre que un ESCALÓN con dos o más ω
+    # tenga la ganancia nula sin rechazar.
+    #
+    # Y la fórmula estaba escrita treinta líneas más arriba, en el comentario de
+    # `entrada`: «elegir input impulso ES imponer la restricción de ganancia
+    # nula». Es álgebra elemental — si ω(1)=0 entonces (1−B) divide a ω(B), o
+    # sea ω(B) = (1−B)·ψ(B) con ψ de un orden menos, y como I_t = (1−B)S_t:
+    #
+    #     ω(B)·S_t = ψ(B)·(1−B)·S_t = ψ(B)·I_t
+    #
+    # El programa CALCULA el contraste, lo imprime con su Wald y su veredicto
+    # TRANSITORIO, y después declaraba que no había nada que hacer con él. El
+    # conocimiento estaba en un comentario y no llegaba a ser comportamiento.
+    #
+    # Vive aquí, en el resultado, y no en el formateador: un sitio que presente
+    # esto tiene que poder preguntarlo, no volver a deducirlo.
+
+    def es_reducible(self, alpha: float = 0.05) -> bool:
+        """¿Es esta intervención un impulso de un orden menos?
+
+        Hace falta que la entrada sea ESCALÓN —con impulso la restricción ya
+        está impuesta—, que haya al menos dos ω —con uno solo no hay orden que
+        bajar— y que el Wald de ganancia nula no se rechace.
+        """
+        return (self.entrada == "escalon"
+                and self.n_omega_total >= 2
+                and self.wald_p is not None
+                and self.wald_p >= alpha)
+
+    @property
+    def forma_reducida(self) -> "tuple[str, int] | None":
+        """La forma equivalente: `("impulse", s)` con un ω menos."""
+        if self.entrada != "escalon" or self.n_omega_total < 2:
+            return None
+        return ("impulse", self.n_omega_total - 1)
+
+    @property
+    def restriccion_impuesta_sin_contrastar(self) -> bool:
+        """Con entrada IMPULSO la ganancia nula está impuesta por construcción.
+
+        Y no se puede contrastar desde aquí: el Wald de un impulso mira si el
+        ÁREA es nula, que es otra pregunta (BUG-0076). Para saber si la
+        restricción se sostiene hay que estimar el ESCALÓN con un ω más y
+        comparar por LR de 1 g.l. — que es la ida del mismo camino.
+        """
+        return self.entrada == "impulso" and self.n_omega_total >= 1
 
     @property
     def contrasta_permanencia(self) -> bool:
@@ -502,6 +556,7 @@ def test_intervention(model, itv_idx: int,
         itv_index  = itv_idx,
         itv_type   = itv.type,
         entrada    = entrada,
+        n_omega_total = len(om),
         itv_at     = int(itv.at),
         harmonic   = float(itv.harmonic) if hasattr(itv, "harmonic") else None,
         omega      = omega_est,
@@ -782,8 +837,64 @@ def simplify_summary(results: list[InterventionTestResult],
             f"**Sugerencia:** elimina las intervenciones [{idx_str}] y re-estima.",
             "Si el modelo mejora (AIC/BIC menores o diagnosis más limpia), confirma la simplificación.",
         ]
-    else:
-        lines.append("\n*Todas las intervenciones son significativas — no hay simplificación posible.*")
+
+    # QUITAR NO ES LA ÚNICA SIMPLIFICACIÓN — BUG-0123.
+    #
+    # Aquí había una sola rama: o sobra una intervención, o «no hay
+    # simplificación posible». Un escalón con ganancia nula no sobra: se
+    # REDUCE. Y eso se perdía sistemáticamente — un grado de libertad cada vez—
+    # porque sólo lo encontraba quien ya sabía la fórmula, y éste es justo el
+    # sitio donde el programa tenía que decírsela al que no.
+    red = [r for r in results if r.es_reducible(alpha)]
+    if red:
+        lines.append("\n### Reducibles — imponer la restricción, no quitar")
+        lines.append(
+            "\nUn **escalón** con ganancia nula es un **impulso de un orden "
+            "menos**: si ω(1)=0 entonces (1−B) divide a ω(B), y como "
+            "I_t = (1−B)S_t, ω(B)·S_t = ψ(B)·I_t. **Elegir input impulso ES "
+            "imponer la restricción**, así que las dos formas son el mismo "
+            "modelo con y sin ella y su comparación es un **LR de 1 g.l.**")
+        for r in red:
+            forma, n = r.forma_reducida
+            lines.append(
+                f"\n- **[{r.itv_index}] `{r.itv_type}[obs {r.itv_at + 1}]` con "
+                f"{r.n_omega_total} ω** — ω(1)={r.omega_1:+.4f}, "
+                f"p={r.wald_p:.4f}: la ganancia no se distingue de cero.\n"
+                f"  Equivale a **`{forma}` con {n} ω en la misma fecha**, un "
+                f"parámetro menos:\n"
+                f"  ```\n"
+                f"  guided_intervention(inp_path=\"<el .pre de ANTES de esta "
+                f"intervención>\",\n"
+                f"                      date=\"<obs {r.itv_at + 1}>\", "
+                f"form=\"{forma}\", n_omega={n},\n"
+                f"                      output_path=\"<...>.inp\")\n"
+                f"  ```")
+        lines.append(
+            "\nY no es sólo un parámetro: la forma reducida **afirma lo que el "
+            "analista cree**. El escalón sostiene un desplazamiento permanente "
+            "del nivel que la propia ganancia dice que no existe, y ese ω "
+            "libre tiene que ir a alguna parte — de ahí las correlaciones de "
+            "±0,99 entre los ω. En la forma de impulso la vuelta a la línea "
+            "base es **exacta por construcción**.")
+
+    if not nosig and not red:
+        lines.append("\n*Todas las intervenciones son significativas y ninguna "
+                     "es reducible — no hay simplificación posible.*")
+
+    # LA IDA DEL MISMO CAMINO. Con entrada de impulso la restricción de ganancia
+    # nula está IMPUESTA, y no se puede contrastar desde este modelo: el Wald de
+    # un impulso mira si el ÁREA es nula, que es otra pregunta (BUG-0076). Se
+    # dice cómo se contrasta, no se afirma que falle.
+    imp = [r for r in results if r.restriccion_impuesta_sin_contrastar]
+    if imp:
+        idx = ", ".join(f"[{r.itv_index}]" for r in imp)
+        lines.append(
+            f"\n*Las de entrada **impulso** ({idx}) llevan la ganancia nula "
+            "**impuesta por construcción**, y este modelo no la contrasta — su "
+            "Wald mira si el ÁREA es nula, que es otra pregunta. Para saber si "
+            "la restricción se sostiene, estima el **escalón con un ω más** y "
+            "compara por LR de 1 g.l. Es la ida del mismo camino, y se puede "
+            "recorrer en los dos sentidos.*")
 
     return "\n".join(lines)
 

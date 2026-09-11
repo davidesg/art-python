@@ -1,11 +1,11 @@
 ---
 id: BUG-0123
 title: test_interventions declara «no hay simplificación posible» cuando la hay — un escalón con ganancia nula es un impulso de un orden menos, y el código lo sabe pero no lo propone
-status: open
+status: fixed
 severity: medium
 component: interventions
 found_in: 0.2.1
-fixed_in:
+fixed_in: 0.2.1
 reported: 2026-09-08
 reporter: David
 tags:
@@ -97,21 +97,61 @@ usarlo.
 
 ## Fix
 
-*(propuesto, no aplicado)*
+**1 · La condición vive en el RESULTADO, no en el formateador.** `es_reducible(
+alpha)` y `forma_reducida` son propiedades de `InterventionTestResult`, junto al
+comentario que ya llevaba el álgebra. Es lo que falló: la regla estaba escrita
+—bien— en prosa, y la función que tenía que usarla no la conocía. Ahora un sitio
+que presente esto la **pregunta**; no la vuelve a deducir. Hay una prueba que lo
+fija: si `simplify_summary` vuelve a comparar `entrada == "escalon"` por su
+cuenta, falla.
 
-1. En `simplify_summary`, sección nueva **«Reducibles — imponer la
-   restricción»** para cada resultado con entrada escalón, ≥2 ω libres y
-   ganancia nula no rechazada. Con la forma equivalente concreta —«impulso con
-   s ω en la misma fecha»—, la llamada que la construye, y el aviso de que el
-   LR de la restricción es de 1 g.l.
-2. Corregir la frase final: «no hay simplificación posible» sólo puede
-   imprimirse cuando tampoco hay reducibles.
-3. Simétricamente, con entrada de impulso y ganancia **rechazada**, el aviso
-   inverso: la restricción no se sostiene y la entrada correcta es el escalón.
+Hizo falta un campo nuevo, `n_omega_total`: `omega` lleva sólo los **libres**, y
+la forma reducida se cuenta sobre el operador entero.
+
+**2 · Sección «Reducibles — imponer la restricción, no quitar»**, con el álgebra
+en una línea, la forma equivalente concreta y la llamada que la construye. Y la
+frase final sólo se imprime cuando **tampoco** hay reducibles.
+
+**3 · El punto 3 del plan estaba MAL, y no se ha hecho.** Decía: con entrada de
+impulso y ganancia **rechazada**, avisar de que la restricción no se sostiene.
+No se puede. El Wald de un impulso contrasta si el **ÁREA** es nula, que es otra
+pregunta (BUG-0076); rechazarla sólo dice que la intervención vale algo. Desde
+el impulso la restricción de ganancia nula **no es contrastable** — está impuesta
+por construcción y para juzgarla hay que estimar el escalón con un ω más y
+comparar por LR.
+
+Lo que se hace, entonces, es decirlo:
+
+    *Las de entrada **impulso** llevan la ganancia nula **impuesta por
+    construcción**, y este modelo no la contrasta — su Wald mira si el ÁREA es
+    nula, que es otra pregunta. Para saber si la restricción se sostiene, estima
+    el **escalón con un ω más** y compara por LR de 1 g.l. Es la ida del mismo
+    camino, y se puede recorrer en los dos sentidos.*
+
+Eso es lo que el analista pedía —«se puede ir hacia atrás y hacia adelante»— y
+afirmar lo otro habría sido publicar un veredicto que el contraste no da.
+
+**4 · Y se dice por qué importa más que un parámetro.** El escalón sostiene un
+desplazamiento permanente del nivel que su propia ganancia dice que no existe, y
+ese ω libre tiene que ir a alguna parte: de ahí las correlaciones de ±0,99 entre
+los ω. En la forma de impulso la vuelta a la línea base es exacta **por
+construcción**.
 
 ## Validation
 
-*(pendiente)* Repro sintético con dos `InterventionTestResult` fabricados —uno
-reducible y uno no— comprobando qué dice el resumen en cada caso; y una prueba
-de regresión sobre el caso medido, que la frase «no hay simplificación posible»
-no aparezca cuando hay un escalón con ganancia nula.
+`tests/test_bug_0123_reducir_no_es_quitar.py`.
+
+Además de los casos fabricados —reducible, y las cuatro formas de no serlo: un
+solo ω, ganancia rechazada, ya es impulso, sin Wald—, la prueba que de verdad
+cierra esto **estima las dos formas** del mismo suceso sintético y comprueba el
+álgebra:
+
+    ESCALÓN ×3 :  ℓ = −850,4418   AIC = 1708,88   npar = 4   ω(1) = +2,80  p = 0,98
+    IMPULSO ×2 :  ℓ = −850,4421   AIC = 1706,88   npar = 3
+
+    LR = 0,0005  (1 g.l.)  p = 0,98      ΔAIC = −2,00
+
+Un parámetro menos con la misma ℓ es ΔAIC = −2 **por definición**, y que salga
+el número exacto es lo que distingue una equivalencia algebraica de una
+coincidencia del ajuste. Es la misma forma que el analista midió a mano sobre
+RATIO —LR = 0,04, ΔAIC = −1,95—, ahora reproducible.
