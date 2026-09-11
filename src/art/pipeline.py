@@ -18,6 +18,7 @@ duplication that used to live, copied, inside build_model and batch_build.
 """
 from __future__ import annotations
 
+import copy
 import os
 from dataclasses import dataclass, field, replace
 
@@ -272,6 +273,152 @@ def _obs_to_date(begyear, begtime, freq, at_0based):
     """Convert 0-based obs index to (period, year) for writing .inp files."""
     offset = begtime - 1 + at_0based
     return offset % freq + 1, begyear + offset // freq
+
+
+class OptimoSeMovio(ValueError):
+    """La reestimación en frío no llegó al mismo óptimo."""
+
+
+def reestima_en_frio(pre_path: str, output_inp: str, k: float = 1.0,
+                     tol: float = 1e-5):
+    """Verifica el óptimo de un `.pre` y saca SE de un camino de verdad — BUG-0174.
+
+    **El problema.** Un modelo que converge en pocas iteraciones —porque arrancó
+    cerca del óptimo, que es lo que el encadenado por `.pre` hace a propósito—
+    deja la covarianza en la semilla del BFGS, √(2/n). Las SE salen mal y los
+    valores bien, así que el fallo es invisible (BUG-0027, fue/BUG-0015).
+
+    **La tentación, y por qué es mala.** Reestimar con las semillas a CERO fuerza
+    iteraciones y arregla las SE. En el run 4 funcionó — ℓ coincidió a 1,3e-09.
+    Pero:
+
+    * con las semillas a 0 el optimizador arranca **fuera de la cuenca** y puede
+      caer en otra. Un óptimo distinto con ℓ mejor sería **otro modelo**, no el
+      mismo mejor estimado — y se adoptaría creyendo haber «verificado» el
+      anterior;
+    * y si eso se vuelve práctica, **el `.pre` deja de ser lo que es**. Su
+      invariante —reejecutarlo no mueve los números— y la cadena
+      `.inp(t−1) → .pre(t−1) → .inp(t)` sólo significan algo si cada eslabón
+      arranca donde acabó el anterior.
+
+    **Lo que hace esto.** Perturba cada parámetro libre **una desviación típica**
+    —`v ± k·SE`, con signos alternos— reestima, y **compara ℓ**. Una SE es la
+    escala natural: lejos para que el optimizador tenga que trabajar, cerca para
+    no cambiar de cuenca. Cuando no hay SE utilizable se cae a un 10 % relativo.
+
+    Devuelve `(modelo, informe)` con `informe["veredicto"]` en:
+
+        "verificado"   |Δℓ| ≤ tol — mismo óptimo; las SE nuevas son las buenas
+        "mejora"       ℓ sube: el `.pre` NO era el óptimo. Hallazgo, no éxito
+        "no_llego"     ℓ baja: la corrida en frío no alcanzó; sus SE no valen
+
+    **Sólo el primero autoriza a usar las SE nuevas**, y por eso el veredicto va
+    en el resultado y no en un comentario: la corrida del run 4 acertó y nadie lo
+    comprobó, que es la diferencia entre evidencia y suerte.
+
+    **QUÉ verifica exactamente**, que no es lo que parece a primera vista: que el
+    arranque PERTURBADO llega al mismo óptimo que el arranque en caliente. NO
+    verifica que los valores guardados en el `.pre` sean óptimos — `fue` los
+    reajusta al cargarlos, así que si el `.pre` mentía, `ℓ₀` ya es el óptimo
+    corregido y la comparación sale «verificado» igualmente. Para lo otro está el
+    invariante del convenio: reejecutar un `.pre` no mueve los números.
+
+    Es la pregunta que importa aquí —¿me he cambiado de cuenca?— y conviene no
+    confundirla con la otra.
+
+    La perturbación es **determinista** —signos alternos, sin azar— para que dos
+    ejecuciones den lo mismo: un instrumento de verificación que no se puede
+    repetir no verifica.
+    """
+    import fue
+    import numpy as np
+
+    ts, m0 = fue.load(pre_path)
+    if getattr(m0, "_result", None) is None:
+        m0.fit()
+    l0 = float(m0._result.loglik)
+    # `res or []` sobre un ARRAY levanta ValueError: es la trampa de BUG-0158,
+    # que allí mató un arreglo entero dentro de un `except` mudo. Aquí no hay
+    # `except` que la tape, así que revienta a la cara — que es mejor.
+    _se_raw = getattr(m0._result, "std_errors", None)
+    se0 = (np.asarray(_se_raw, dtype=float) if _se_raw is not None
+           else np.array([], dtype=float))
+
+    m = copy.deepcopy(m0)
+    m._result = None
+
+    # Recorrido de los parámetros LIBRES en el orden de `fue`: ω/δ de cada
+    # intervención, AR, AR_s, MA, MA_s, μ. El mismo orden que `std_errors`.
+    j = 0
+    signo = 1.0
+
+    def _tocar(v):
+        nonlocal j, signo
+        paso = (float(se0[j]) * k if j < len(se0) and se0[j] > 0
+                else abs(float(v)) * 0.10)
+        if paso <= 0:
+            paso = 0.01
+        j += 1
+        signo = -signo
+        return float(v) + signo * paso
+
+    for itv in (m.interventions or []):
+        for lst, free in (("omega", "omega_free"), ("delta", "delta_free")):
+            vals = list(getattr(itv, lst, None) or [])
+            msk = list(getattr(itv, free, None) or [True] * len(vals))
+            for i in range(len(vals)):
+                if i >= len(msk) or msk[i]:
+                    vals[i] = _tocar(vals[i])
+            if vals:
+                setattr(itv, lst, vals)
+
+    for fac, free in (("ar", "ar_free"), ("ar_s", "ar_s_free"),
+                      ("ma", "ma_free"), ("ma_s", "ma_s_free")):
+        factores = [list(f) for f in (getattr(m, fac, None) or [])]
+        mascaras = list(getattr(m, free, None) or [])
+        for kk, f in enumerate(factores):
+            msk = (mascaras[kk] if (kk < len(mascaras) and mascaras[kk] is not None)
+                   else [True] * len(f))
+            for i in range(len(f)):
+                if i >= len(msk) or msk[i]:
+                    # los operadores viven dentro del círculo: se acota para no
+                    # salir de la región admisible al perturbar
+                    f[i] = max(-0.98, min(0.98, _tocar(f[i])))
+        if factores:
+            setattr(m, fac, factores)
+
+    if getattr(m, "estimate_mu", False):
+        m.mu0 = _tocar(getattr(m, "mu0", 0.0) or 0.0)
+
+    m.fit()
+    l1 = float(m._result.loglik)
+    d = l1 - l0
+    veredicto = ("verificado" if abs(d) <= tol else
+                 "mejora" if d > 0 else "no_llego")
+
+    _write_inp(ts, m, output_inp, refactor=getattr(m, "refactor", None))
+
+    from art.diagnosis import bfgs_seed_var
+    sem = bfgs_seed_var(m0._result)
+    def _en_la_semilla(r):
+        _raw = getattr(r, "std_errors", None)
+        se = (np.asarray(_raw, dtype=float) if _raw is not None
+              else np.array([], dtype=float))
+        if sem is None or sem <= 0 or not se.size:
+            return 0
+        raiz = float(np.sqrt(sem))
+        return int(np.sum(np.abs(se - raiz) / raiz < 0.05))
+
+    return m, {
+        "veredicto": veredicto,
+        "loglik_pre": l0, "loglik_frio": l1, "delta": d, "tol": tol,
+        "niter_pre": int(getattr(m0._result, "niter", 0) or 0),
+        "niter_frio": int(getattr(m._result, "niter", 0) or 0),
+        "en_la_semilla_antes": _en_la_semilla(m0._result),
+        "en_la_semilla_despues": _en_la_semilla(m._result),
+        "npar": int(m._result.npar),
+        "k": k,
+    }
 
 
 class ErrorDeExtension(ValueError):

@@ -649,6 +649,10 @@ INSTRUMENTOS DE APOYO — no avanzan el flujo
 Se usan para mirar algo concreto. Ninguno sustituye a un nodo del protocolo.
 
   DATOS      load_data · preview_data · series_info · create_inp
+             verify_optimum — VERIFICA el óptimo de un `.pre` perturbando UNA
+             desviación típica y comparando ℓ; saca las SE de la semilla del
+             BFGS sin salir de la cuenca. **Nunca pongas las semillas a 0 para
+             esto: puede caer en otro óptimo y destruye el convenio del `.pre`.**
              extend_sample — MÁS observaciones sobre el MISMO modelo, para
              validarlo contra lo que vino después o incorporar un episodio
              nuevo sin rehacer la identificación. No reestima.
@@ -9400,6 +9404,92 @@ def preview_data(source_path: str, sheet: str = "") -> list:
         )
         return [TextContent(type="text", text=text)]
 
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+@mcp.tool()
+def verify_optimum(pre_path: str, output_inp: str, k: float = 1.0,
+                   tol: float = 1e-5) -> list:
+    """
+    VERIFICA el óptimo de un `.pre` y saca errores típicos de un camino de verdad.
+
+    Para cuando un modelo convergió en pocas iteraciones —porque arrancó cerca
+    del óptimo, que es lo que el encadenado por `.pre` hace a propósito— y sus
+    errores típicos se quedaron en la semilla del BFGS, √(2/n). Los valores salen
+    bien y las SE mal, así que el fallo es invisible.
+
+    **NO pongas las semillas a cero para arreglarlo.** Es la tentación evidente y
+    es peligrosa por dos razones (BUG-0174):
+
+    * desde cero el optimizador arranca **fuera de la cuenca** del óptimo
+      conocido y puede caer en otra. Un óptimo distinto con ℓ mejor sería OTRO
+      MODELO, no el mismo mejor estimado — y se adoptaría creyendo haberlo
+      «verificado»;
+    * y si se vuelve práctica, **destruye el convenio del `.pre`**: la cadena
+      `.inp → .pre → .inp` sólo significa algo si cada eslabón arranca donde
+      acabó el anterior.
+
+    Esto perturba cada parámetro libre **una desviación típica** —`v ± k·SE`, con
+    signos alternos— reestima, y **compara ℓ**. Tres desenlaces, y sólo uno
+    autoriza a usar las SE nuevas:
+
+        verificado   |Δℓ| ≤ tol — mismo óptimo; úsalas
+        mejora       ℓ sube: el `.pre` NO era el óptimo. Hallazgo, no éxito
+        no llegó     ℓ baja: la corrida en frío no alcanzó; no valen
+
+    La perturbación es determinista: dos ejecuciones dan lo mismo. Un instrumento
+    de verificación que no se puede repetir no verifica.
+
+    Parameters
+    ----------
+    pre_path   : el `.pre` del modelo a verificar
+    output_inp : dónde escribir el `.inp` reestimado en frío
+    k          : tamaño de la perturbación, en desviaciones típicas (1.0)
+    tol        : cuánto puede moverse ℓ y seguir siendo el mismo óptimo (1e-5)
+    """
+    try:
+        from mcp.types import TextContent
+        from art.pipeline import reestima_en_frio
+
+        if not os.path.exists(pre_path):
+            return _err(f"No existe el `.pre`: {pre_path}")
+        m, inf = reestima_en_frio(pre_path, output_inp, k=k, tol=tol)
+
+        v = inf["veredicto"]
+        cab = {"verificado": "✓ **Mismo óptimo — las SE nuevas son las buenas**",
+               "mejora": "⚠ **El `.pre` NO era el óptimo**",
+               "no_llego": "⚠ **La corrida en frío no llegó al óptimo**"}[v]
+        cola = {
+            "verificado":
+                "La reestimación perturbada converge al mismo punto, así que la "
+                "covarianza sale de un camino de verdad y no de la semilla del "
+                "BFGS. **Usa estas SE**, y el `.inp` escrito para reestimarlas "
+                "cuando haga falta.",
+            "mejora":
+                "La corrida en frío encontró una verosimilitud MEJOR. Eso no "
+                "valida nada: dice que el modelo guardado no estaba en su "
+                "óptimo. Míralo antes de seguir — y no uses ninguna de las dos "
+                "tablas de SE como si la cuestión estuviera zanjada.",
+            "no_llego":
+                "La corrida en frío se quedó por debajo. Sus SE no valen, y "
+                "tampoco invalidan las del `.pre`: sólo dice que desde ahí no "
+                "se alcanzó. Prueba con una perturbación menor (`k` más "
+                "pequeño).",
+        }[v]
+        txt = (
+            f"## Verificación del óptimo — {os.path.basename(pre_path)}\n\n"
+            f"{cab}\n\n"
+            f"| | `.pre` | en frío |\n|---|---|---|\n"
+            f"| ℓ | {inf['loglik_pre']:.10f} | {inf['loglik_frio']:.10f} |\n"
+            f"| iteraciones | {inf['niter_pre']} | {inf['niter_frio']} |\n"
+            f"| SE en la semilla del BFGS | {inf['en_la_semilla_antes']} de "
+            f"{inf['npar']} | {inf['en_la_semilla_despues']} de {inf['npar']} |\n\n"
+            f"Δℓ = {inf['delta']:+.3e}  (tolerancia {inf['tol']:.0e}) · "
+            f"perturbación de {inf['k']:g} desviación(es) típica(s)\n\n"
+            f"{cola}\n\n"
+            f"*Escrito en `{output_inp}`.*")
+        return [TextContent(type="text", text=txt)]
     except Exception:
         return _err(traceback.format_exc())
 

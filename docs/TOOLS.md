@@ -2,7 +2,7 @@
 
 *Generated from the docstrings by `tools/gen_tools_md.py`. Do not edit by hand — edit the docstring.*
 
-**47 tools.** In an MCP server the docstring is what the model reads, so this page and the instruction the model receives are the same text by construction.
+**48 tools.** In an MCP server the docstring is what the model reads, so this page and the instruction the model receives are the same text by construction.
 
 ---
 
@@ -55,6 +55,7 @@
 | [`test_seasonal_simplification`](#test-seasonal-simplification) | Joint LR test for eliminating seasonal harmonics: H₀: cos_k = sin_k = 0. |
 | [`unit_root_analysis`](#unit-root-analysis) | ADF + KPSS unit root tests for d = 0, 1, ..., max_d — support tool. |
 | [`update_and_forecast`](#update-and-forecast) | Append new observations to a fuf file and update the forecast. |
+| [`verify_optimum`](#verify-optimum) | VERIFICA el óptimo de un `.pre` y saca errores típicos de un camino de verdad. |
 
 ---
 
@@ -2257,5 +2258,54 @@ Append new observations to a fuf file and update the forecast.
     output_html      : path to write the fue HTML forecast report (required)
     output_fuf_path  : where to save the updated fuf file (default: overwrites fuf_path)
     actual_dates     : (optional) date labels for new observations ("MM/YYYY")
+
+---
+
+## `verify_optimum`
+
+**Arguments**
+
+| name | type | required | default |
+|---|---|---|---|
+| `pre_path` | string | yes | — |
+| `output_inp` | string | yes | — |
+| `k` | number | no | `1.0` |
+| `tol` | number | no | `1e-05` |
+
+VERIFICA el óptimo de un `.pre` y saca errores típicos de un camino de verdad.
+
+    Para cuando un modelo convergió en pocas iteraciones —porque arrancó cerca
+    del óptimo, que es lo que el encadenado por `.pre` hace a propósito— y sus
+    errores típicos se quedaron en la semilla del BFGS, √(2/n). Los valores salen
+    bien y las SE mal, así que el fallo es invisible.
+
+    **NO pongas las semillas a cero para arreglarlo.** Es la tentación evidente y
+    es peligrosa por dos razones (BUG-0174):
+
+    * desde cero el optimizador arranca **fuera de la cuenca** del óptimo
+      conocido y puede caer en otra. Un óptimo distinto con ℓ mejor sería OTRO
+      MODELO, no el mismo mejor estimado — y se adoptaría creyendo haberlo
+      «verificado»;
+    * y si se vuelve práctica, **destruye el convenio del `.pre`**: la cadena
+      `.inp → .pre → .inp` sólo significa algo si cada eslabón arranca donde
+      acabó el anterior.
+
+    Esto perturba cada parámetro libre **una desviación típica** —`v ± k·SE`, con
+    signos alternos— reestima, y **compara ℓ**. Tres desenlaces, y sólo uno
+    autoriza a usar las SE nuevas:
+
+        verificado   |Δℓ| ≤ tol — mismo óptimo; úsalas
+        mejora       ℓ sube: el `.pre` NO era el óptimo. Hallazgo, no éxito
+        no llegó     ℓ baja: la corrida en frío no alcanzó; no valen
+
+    La perturbación es determinista: dos ejecuciones dan lo mismo. Un instrumento
+    de verificación que no se puede repetir no verifica.
+
+    Parameters
+    ----------
+    pre_path   : el `.pre` del modelo a verificar
+    output_inp : dónde escribir el `.inp` reestimado en frío
+    k          : tamaño de la perturbación, en desviaciones típicas (1.0)
+    tol        : cuánto puede moverse ℓ y seguir siendo el mismo óptimo (1e-5)
 
 ---
