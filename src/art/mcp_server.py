@@ -1965,10 +1965,22 @@ def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
     ruta = f'"{inp_path}"' if inp_path else "<inp>"
 
     def _fecha(obs):
+        # `obs` es el índice 1-BASED SOBRE LOS RESIDUOS (diagnosis: `i + 1`);
+        # `_at_to_date` quiere el 0-based SOBRE LA SERIE. Falta el desfase —lo
+        # que se comió la diferenciación, raíces estacionales incluidas—. Con
+        # d=1 y sin raíces los dos errores se cancelaban y por eso no se veía;
+        # con una raíz interior la fecha salía 2 meses pronto, con D=1 un año,
+        # y la alternativa trae la LLAMADA lista para ejecutar (BUG-0185).
+        # Sin modelo no se sabe el desfase: se dice el índice antes que fechar
+        # mal.
+        if model is None:
+            return f"obs {obs}"
         try:
             from art.guion import _at_to_date
-            return _at_to_date(int(obs), int(ts.start[0]), int(ts.start[1]),
-                               int(ts.freq))
+            from art.identification import desfase_observaciones
+            _s = ts if ts is not None else model.series
+            return _at_to_date(int(obs) - 1 + desfase_observaciones(model),
+                               int(_s.start[0]), int(_s.start[1]), int(_s.freq))
         except Exception:
             return f"obs {obs}"
 

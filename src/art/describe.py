@@ -71,12 +71,19 @@ def _resid_start(model) -> tuple:
 
     fue's TimeSeries.residuals doesn't propagate the series start, so we
     derive it: the first residual corresponds to the first observation of
-    the original series that survives d regular differences and D seasonal
-    differences (total n_lost = d + D*freq observations lost from the front).
+    the original series that survives the differencing — d regular, D seasonal
+    AND the seasonal unit roots of `ifadf` (`desfase_observaciones`).
     """
     s0   = model.series.start
     freq = model.series.freq if model.series.freq > 0 else 1
-    n_skip = model.d + model.D * freq
+    # No es `d + D·freq`: las raíces estacionales de `ifadf` también se comen
+    # observaciones (2 cada frecuencia interior, 1 la de Nyquist). Contándolas
+    # a mano sin ellas, el eje de la figura de diagnosis de un modelo del MEG
+    # se corría hacia atrás —en IPC_FR m03, dos raíces, el último residuo se
+    # dibujaba en 8/2019 siendo 12/2019— y los escaneos sobre residuos
+    # fechaban mal. La cuenta vive en un sitio (BUG-0172, BUG-0185).
+    from art.identification import desfase_observaciones
+    n_skip = desfase_observaciones(model)
     off    = (int(s0[1]) - 1) + n_skip
     return (int(s0[0]) + off // freq, off % freq + 1)
 

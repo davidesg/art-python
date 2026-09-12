@@ -533,8 +533,9 @@ def describe_escalera(escalera: "Escalera"):
         if _ser is not None:
             from art.describe import _eje_de_fechas
             _f = int(getattr(_ser, "freq", 1) or 1)
-            _desf = int(getattr(vivos[0].model, "d", 0)) \
-                + int(getattr(vivos[0].model, "D", 0)) * _f
+            # con las raíces estacionales: la cuenta vive en un sitio (BUG-0185)
+            from art.identification import desfase_observaciones
+            _desf = desfase_observaciones(vivos[0].model)
             for _a in axs:
                 _eje_de_fechas(_a, _f, getattr(_ser, "start", (1, 1)), _desf)
         axs[-1].set_xlabel("date", fontsize=9)
