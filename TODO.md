@@ -53,6 +53,16 @@ y 0.3.0 hay un trabajo de depurar y un cambio importante de arquitectura»*.
 - [ ] **Entorno Windows**: el servidor puede tardar más de 30 s en frío y la
       sesión sigue sin art sin avisar; `version_instrumento` da el árbol por limpio
       si `git status` se pasa de 3 s.
+- [ ] **El rescate de caminos del guion sólo mira la carpeta del guion.**
+      `_resuelve_ruta` prueba el camino guardado y el nombre del fichero junto al
+      guion. En run9 el LLM dejó el guion en `cases/IPC_ES/` y los modelos en
+      `cases/IPC_ES/work/`; archivada la carpeta, se resuelven 0 de 32. Probando
+      los sufijos del camino guardado (`work/…`, `IPC_ES/work/…`) contra la
+      carpeta del guion se resuelven las 32. Sólo actúa cuando el camino guardado
+      no existe, así que no puede robarle el sitio a nada.
+- [ ] **La lista de objetivos depende del LLM** (evidencia para BUG-0186): Claude
+      la presentó tal cual en run7 y la inventó en run9; DeepSeek, en run9_DS, la
+      presentó tal cual.
 
 ## PARA 0.3 — trocear el protocolo por etapas, con el criterio corregido (sep-2026)
 
