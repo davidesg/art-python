@@ -159,7 +159,9 @@ def test_la_salida_publica_las_TRES_columnas_que_deciden(pre_en_caliente):
 
 # ── el caso real del run 4 ─────────────────────────────────────────────────
 
-_RUN4 = os.path.expanduser("~/Dropbox/run4/cases/IPC_ES/work/IPC_ES_m06.pre")
+# El run 4 se archivó junto a run3 (12-sep): SF_MEG/empirical/run4.
+_RUN4 = os.path.expanduser(
+    "~/Dropbox/SF_MEG/empirical/run4/cases/IPC_ES/work/IPC_ES_m06.pre")
 
 
 @pytest.mark.skipif(not os.path.exists(_RUN4), reason="falta el run 4")

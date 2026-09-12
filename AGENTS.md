@@ -25,10 +25,17 @@ decision the evidence does not support; never present a decision as forced.
 - **Guided** — analyst + agent: present evidence, propose with arguments, the
   analyst confirms each decision node. Use `guided_identification` (4-call tree)
   then `confirm_and_estimate` / `suggest_intervention_form`.
-- **Autonomous** — `build_model` (or `batch_build`): the agent/heuristic decides
-  everything and presents a final model. `build_model` is the SAME engine in both
-  modes; passing a confirmed spec (`lam/d/D/p/q/n_harmonics/decision`) makes it
-  honour the analyst's choices.
+- **Autonomous** — **the agent IS the analyst.** It walks the SAME decision
+  nodes as the guided mode, in the same order and one at a time, and decides
+  each one itself: `guided_identification` → `confirm_and_estimate` →
+  interventions → `formal_tests` → reformulation. Every node is recorded with
+  `guion_node(..., decidido_por="LLM")` and its reason; every estimation call
+  passes `modo="autonomo"`, or the output stops at ⏸ waiting for a human who
+  is not there (BUG-0180, BUG-0181).
+- **`build_model` is NOT the autonomous mode.** It is the one-call heuristic
+  shortcut — an auto-ARIMA with the school's rules — for when the user asks
+  for an automatic fit without analysis. An "autonomous" run that reduces to
+  it is a hybrid of the guided mode and an auto-ARIMA: the worst of both.
 
 ## Non-negotiable rules
 

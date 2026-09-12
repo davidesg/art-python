@@ -55,11 +55,23 @@ PREGUNTA INICIAL OBLIGATORIA
 Al iniciar cualquier análisis, SIEMPRE pregunta primero al usuario:
 
   "¿Cómo deseas proceder?
-   1) Análisis GUIADO (paso a paso, con gráficos y confirmación en cada etapa)
-   2) Análisis AUTÓNOMO (pipeline automático completo)"
+   1) Análisis GUIADO   — tú decides cada nodo; yo te enseño la evidencia, te
+      propongo alternativas y paro en cada decisión.
+   2) Análisis AUTÓNOMO — yo hago de analista: recorro el mismo protocolo,
+      decido cada nodo con su razón por escrito, y te entrego el recorrido
+      y el modelo."
 
-Si el usuario elige autónomo → usa build_model o batch_build.
-Si elige guiado → sigue el protocolo siguiente.
+Si elige GUIADO → sigue el protocolo guiado.
+Si elige AUTÓNOMO → sigue «EL CARRIL AUTÓNOMO — TÚ ERES EL ANALISTA», más
+abajo. Recorres los MISMOS nodos que en guiado; lo único que cambia es quién
+ocupa la silla del analista.
+
+AUTÓNOMO NO ES build_model. build_model es un atajo heurístico de una llamada
+—un auto-ARIMA con las reglas de la escuela—: no sobreparametriza, no mira
+Semana Santa, no pasa los contrastes formales ni reformula. Un «autónomo» que
+se reduce a esa llamada es un híbrido entre el guiado y un auto-ARIMA: lo peor
+de los dos (BUG-0180). Úsalo sólo si el usuario pide expresamente un ajuste
+automático sin análisis.
 
 Si elige AUTÓNOMO, pregunta ADEMÁS —una sola vez, aquí:
 
@@ -76,9 +88,10 @@ Si elige AUTÓNOMO, pregunta ADEMÁS —una sola vez, aquí:
 
   Un renglón de sesgo por opción y nada más: el desarrollo largo lo entrega
   el propio pipeline EN EL NODO ESTACIONAL, que es cuando la decisión se toma.
-  Pásalo como objetivo= en build_model / batch_build. Si el usuario no
-  contesta es "univariante", y DILO al presentar el modelo: un defecto
-  silencioso no se puede discutir.
+  Pásalo como objetivo= en guided_identification y confirm_and_estimate (y en
+  build_model / batch_build si los usas). Si el usuario no contesta es
+  "univariante", y DILO al presentar el modelo: un defecto silencioso no se
+  puede discutir.
 
   POR QUÉ SÍ SE PREGUNTA AL ENTRAR, cuando la de d/D no (ver LLAMADA 3): no es
   una pregunta sobre los DATOS --que aún no has visto-- sino sobre el USO, que
@@ -233,16 +246,15 @@ CONSTRUCCIÓN DEL MODELO
   edites ficheros .inp de modelo manualmente. Cada estimación produce el trío
   .inp/.out/.pre, como hace fue, y registra la versión en el guion.
 
-  build_model es el MISMO motor en ambos modos (autónomo y guiado), y solo
-  cambia quién decide:
-   • Autónomo: build_model(inp, out) sin spec → la heurística decide todo.
-   • Guiado (tras guided_identification): pasa la spec confirmada como
-     argumentos — build_model(inp, out, lam=…, d=…, D=…, p=…, q=…,
-     n_harmonics=…, decision=…). Lo que fijes se respeta; lo que omitas lo
-     completa la heurística, y el ciclo de outliers corre automáticamente.
-   Usa confirm_and_estimate + suggest_intervention_form si quieres confirmar
-   CADA outlier paso a paso; usa build_model con spec si ya tienes el criterio
-   y quieres que el ciclo se complete de una vez con tus decisiones fijadas.
+  build_model es el ATAJO HEURÍSTICO, no un modo:
+   • Sin spec: build_model(inp, out) → la heurística decide todo en una
+     llamada. Ajuste automático, no análisis.
+   • Con spec (tras guided_identification): build_model(inp, out, lam=…, d=…,
+     D=…, p=…, q=…, n_harmonics=…, decision=…). Lo que fijes se respeta; lo
+     que omitas lo completa la heurística, y el ciclo de outliers corre solo.
+   Usa confirm_and_estimate + suggest_intervention_form para confirmar CADA
+   outlier paso a paso —es lo que hace el analista, humano o LLM—; build_model
+   con spec, si ya tienes el criterio y quieres cerrar el ciclo de una vez.
 
 ══════════════════════════════════════════════════════
 REGLA GENERAL — PRESENTAR SIEMPRE EL MODELO ESTIMADO
@@ -373,6 +385,77 @@ termina en una pregunta, el analista tiene que interrumpir el chat para poder
 decidir, y se van varios turnos aclarando qué opciones había y con qué
 argumentos se ejecutan. Las alternativas vienen ya con su llamada exacta para
 que eso no haga falta.
+
+══════════════════════════════════════════════════════
+EL CARRIL AUTÓNOMO — TÚ ERES EL ANALISTA
+══════════════════════════════════════════════════════
+Construyes el modelo DECIDIENDO TÚ SOLO CADA NODO. No hay analista humano que
+confirme: cuando art te ofrezca un punto de decisión, decides y sigues.
+
+Eso NO significa ir rápido. Significa que la responsabilidad de cada decisión
+es tuya y que tienes que dejarla razonada por escrito.
+
+Esta sección consolida lo que se midió en el estudio con varios LLM haciendo de
+analista (réplica del TFM y SF_MEG, 31 series, 283 nodos decididos por el LLM).
+Hasta 0.2.1 vivía en el enunciado de cada ejercicio y no aquí, y sin enunciado
+el autónomo se reducía a una llamada a build_model (BUG-0180).
+
+LOS NODOS — los mismos que en guiado, en el mismo orden, UNO POR VEZ:
+  1. dominio        qué CLASE de serie es. Antes de λ: la clase gobierna la
+                    regla de la transformación.
+  2. lambda         guided_identification(inp_path)
+  3. d              guided_identification(inp_path, lam=X)
+  4. estacionalidad guided_identification(inp_path, lam=X, d=Y)
+  5. media          ¿μ libre o fijada en cero?
+  6. modelo base    confirm_and_estimate(..., modo="autonomo") sin ARMA. Mira
+                    el escaneo de anómalos que viene en la salida.
+  7. intervenciones si los anómalos distorsionan la identificación, ANTES de
+                    (p,q). Una cada vez.
+  8. ordenes        guided_identification(..., pre_path=<último .pre>)
+  9. contrastes     formal_tests(...), SÓLO con la diagnosis limpia.
+ 10. reformulación  si un contraste manda cambiar algo, vuelve al nodo que
+                    corresponda. Volver atrás es el método funcionando.
+
+NUNCA DECIDAS NODOS EN LOTE. Decidir λ, d y la estacionalidad de una tacada
+aplana el bucle en una pasada hacia delante: tomas las decisiones antes de que
+exista el residuo que podría corregirlas. En el estudio bastó escribir esta
+regla para que los nodos en lote cayeran de 8 a 0.
+
+EL CARRIL SE DECLARA EN CADA LLAMADA: modo="autonomo" en confirm_and_estimate,
+estimate_and_diagnose y build_model. Sin él la salida es la del guiado y
+termina en ⏸. Si en autónomo te llega un ⏸ es que te lo dejaste: NO preguntes
+al usuario —no hay nadie esperando—; repite la llamada con modo="autonomo".
+
+REGLAS:
+  - La recomendación de art es EVIDENCIA, no una orden. Si el correlograma dice
+    una cosa y la lista otra, manda lo que puedas defender, y di por qué.
+  - Lee los párrafos, no sólo la línea de la recomendación: varias salidas
+    matizan su propia sugerencia unas líneas más abajo.
+  - Un empate se resuelve ESTIMANDO, no eligiendo. A menos de ~0,05 de
+    similitud o ~2 de AIC, estima los dos, decide con los dos delante y marca
+    el perdedor como callejón.
+  - Un contraste formal sobre un modelo inadecuado no es un contraste débil:
+    no es un contraste.
+  - Los anómalos se calibran, no se eliminan.
+  - No añadas un parámetro no significativo para cerrar un criterio.
+
+DOCUMENTACIÓN — obligatoria. Después de CADA nodo:
+
+    guion_node(guion_path, nodo="<dominio|lambda|d|estacionalidad|media|
+               ordenes|intervenciones|reformulacion>",
+               decidido="<el valor>", razon="<POR QUÉ>",
+               evidencia="<los estadísticos concretos>",
+               alternativas="<qué descartaste y por qué>",
+               decidido_por="LLM")
+
+  Pasa guion_path y guion_name a confirm_and_estimate y a
+  suggest_intervention_form. Una rama descartada se marca con
+  guion_abandon(guion_path, version, why=…): lo que una iteración fallida
+  produce de valor no es el modelo que se tira, es el motivo.
+
+AL TERMINAR: el modelo final (su terna .inp/.pre/.out), los nodos que más te
+costó decidir, y aquellos en que fuiste EN CONTRA de lo que recomendaba art,
+con la evidencia.
 
 ══════════════════════════════════════════════════════
 PROTOCOLO GUIADO — 4 ETAPAS
@@ -727,9 +810,11 @@ REGLAS GENERALES
   herramienta principal. Discútelo ANTES de los tests.
 - Los tests HAC, ADF, KPSS son herramientas de soporte, no árbitros.
   La decisión es siempre del analista a partir de los gráficos.
-- NUNCA encadenes pasos sin mostrar el gráfico y esperar confirmación del usuario.
+- En GUIADO, NUNCA encadenes pasos sin mostrar el gráfico y esperar confirmación
+  del usuario. En AUTÓNOMO los encadenas tú, un nodo cada vez y registrándolo.
 - confirm_and_estimate construye el INP del modelo — nunca busques ficheros .inp.
-- Las decisiones finales (λ, d, D, p, q) son del USUARIO, no del modelo.
+- En GUIADO las decisiones (λ, d, D, p, q) son del USUARIO, no tuyas. En
+  AUTÓNOMO son tuyas, y por eso cada una va razonada en el guion.
 """
 
 # EL ENUM VIAJA EN EL ESQUEMA — BUG-0155.
@@ -744,6 +829,19 @@ REGLAS GENERALES
 # no puede ni construir la llamada mal. Es la diferencia entre documentar una
 # regla y que el sistema la tenga.
 _Naturaleza = Literal["", "permanente", "transitorio", "recuperacion_parcial"]
+
+#: EL CARRIL, en el esquema — BUG-0181. `guiado`: decide el analista humano y la
+#: salida para en ⏸ a esperarle. `autonomo`: el LLM ES el analista —recorre los
+#: mismos nodos y decide él— y la salida no para, porque no hay nadie a quien
+#: esperar. Va como enum y no como texto libre por lo mismo que `_Naturaleza`
+#: (BUG-0155): un valor que el cliente puede escribir mal es un valor que acaba
+#: cayendo en el defecto sin que nadie lo vea.
+_Modo = Literal["guiado", "autonomo"]
+
+
+def _modo_del_sobre(modo: str) -> str:
+    """Lo que `envuelve_iteracion` recibe: «guiado» para, «autónomo» sigue."""
+    return "guiado" if (modo or "guiado") == "guiado" else "autónomo"
 
 mcp = FastMCP("ART — A Real-Time Time-Series Analysis", instructions=_INSTRUCTIONS)
 
@@ -3082,7 +3180,8 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
                           guion_rationale: str = "",
                           guion_problems: str = "",
                           guion_next: str = "",
-                          include_histogram: bool = False) -> list:
+                          include_histogram: bool = False,
+                          modo: _Modo = "guiado") -> list:
     """
     Fit the model specified in an .inp file and run diagnosis.
 
@@ -3101,6 +3200,11 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
     Parameters
     ----------
     inp_path    : path to the .inp file with the model specification
+    modo        : "guiado" (por defecto) | "autonomo". En GUIADO la salida
+                  termina en ⏸ y espera al analista. En AUTÓNOMO el analista
+                  eres tú —el LLM—, así que no hay a quién esperar y la salida
+                  NO para: pásalo en cada llamada del carril autónomo
+                  (BUG-0180, BUG-0181).
     include_histogram : devolver además el histograma de residuos (por defecto
                   False, igual que en `confirm_and_estimate`). El histograma NO
                   es parte del módulo básico de diagnosis: se pide (BUG-0129).
@@ -3142,7 +3246,10 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
         _escribe_fig(desc.figure_b64, "diagnosis")
         text = envuelve_iteracion(
             nombre=os.path.splitext(os.path.basename(output_path or inp_path))[0],
-            modo="guiado",
+            # El carril lo declara quien llama. Estaba fijo en «guiado», y en
+            # AUTÓNOMO cada estimación mandaba al LLM parar y esperar a un
+            # analista que no existe (BUG-0181).
+            modo=_modo_del_sobre(modo),
             especificacion=(f"`{os.path.basename(inp_path)}` estimado tal como "
                             f"está: esta vía no construye especificación, la "
                             f"relee."),
@@ -5939,7 +6046,8 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                           guion_decision: str = "",
                           guion_rationale: str = "",
                           guion_problems: str = "",
-                          guion_next: str = "") -> list:
+                          guion_next: str = "",
+                          modo: _Modo = "guiado") -> list:
     """
     Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
 
@@ -6078,6 +6186,12 @@ def confirm_and_estimate(inp_path: str, output_path: str,
     guion_rationale : justification for the choices made
     guion_problems  : problems found in the diagnosis of this model
     guion_next      : description of the next version to try
+    modo            : "guiado" (por defecto) | "autonomo". En GUIADO quien
+                      confirma la especificación es el analista humano y la
+                      salida termina en ⏸ para que decida él. En AUTÓNOMO quien
+                      la confirma eres tú —el LLM hace de analista—: no hay a
+                      quién esperar y la salida NO para. Pásalo en cada llamada
+                      del carril autónomo (BUG-0180, BUG-0181).
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -6245,14 +6359,18 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         text = (
             envuelve_iteracion(
                 nombre=os.path.splitext(os.path.basename(output_path))[0],
-                # ESTA ES LA HERRAMIENTA DEL CARRIL GUIADO —el nombre lo dice:
-                # se llama cuando el analista ha confirmado la especificación—
-                # y no declaraba su modo, así que el sobre le daba la forma del
-                # REGISTRO: empezaba por la especificación que el analista
-                # acababa de decidir y terminaba anunciando la reformulación,
-                # que era la decisión que le tocaba a él. Con eso el guiado se
-                # comportaba como un autónomo que además narra (BUG-0094).
-                modo="guiado",
+                # Se llama cuando el analista ha confirmado la especificación.
+                # Sin modo declarado el sobre le daba la forma del REGISTRO y el
+                # guiado se comportaba como un autónomo que además narra
+                # (BUG-0094); de ahí que se fijase «guiado».
+                #
+                # Pero fijarlo daba por hecho que QUIEN CONFIRMA ES SIEMPRE UN
+                # HUMANO. En el carril autónomo confirma el LLM, con esta misma
+                # herramienta —así lo hicieron las 31 series del estudio de
+                # 0.1.x—, y desde 06-sep cada llamada le mandaba parar a
+                # esperar a nadie (BUG-0181). El carril lo declara quien llama;
+                # por defecto sigue siendo guiado, que es el lado seguro.
+                modo=_modo_del_sobre(modo),
                 conclusiones=_conclusiones_desde(diag),
                 alternativas=_alternativas_desde(
                     diag, model=m, ts=ts, inp_path=output_path,
@@ -8613,22 +8731,29 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
                 guion_name: str = "",
                 guion_decision: str = "",
                 guion_rationale: str = "",
-                objetivo: str = "univariante") -> list:
+                objetivo: str = "univariante",
+                modo: _Modo = "guiado") -> list:
     """
-    Box-Jenkins-Treadway pipeline for a single series — autonomous or guided.
+    ATAJO HEURÍSTICO — el pipeline de una llamada. NO es el modo autónomo.
 
     Runs ONE engine (pipeline.run_full): decides the spec, estimates, adds
     interventions for detected outliers and re-estimates until the diagnosis is
-    clean or max_rounds. The only difference between modes is WHO supplies each
-    decision:
+    clean or max_rounds.
 
-      - Autonomous (all spec params left at their sentinel): the heuristic
-        DefaultPolicy decides λ, d, D, harmonics, p, q and the mean.
-      - Guided (any of lam/d/D/p/q/n_harmonics/estimate_mu/decision provided): those
-        analyst/Claude-confirmed choices are honoured (ClaudePolicy) and the
-        heuristic fills only what was left unspecified. Use after
-        guided_identification to run the build with the confirmed spec while
-        the outlier cycle proceeds automatically.
+      - Sin spec: la heurística `DefaultPolicy` decide λ, d, D, armónicos, p, q
+        y la media. Es un auto-ARIMA del estilo de pmdarima, con las reglas de
+        la escuela dentro — y NADA MÁS: no sobreparametriza, no mira Semana
+        Santa, no pasa los contrastes formales ni reformula.
+      - Con spec (lam/d/D/p/q/n_harmonics/estimate_mu/decision): se respeta lo
+        fijado (ClaudePolicy) y la heurística completa el resto, con el ciclo
+        de anómalos automático.
+
+    **El modo AUTÓNOMO de art no es esta herramienta** (BUG-0180). En autónomo
+    el LLM hace de analista y recorre los nodos del protocolo decidiendo cada
+    uno; un autónomo que se reduce a una llamada aquí es un híbrido entre el
+    guiado y un auto-ARIMA, que es lo peor de los dos. Úsala cuando el usuario
+    pida expresamente un ajuste automático sin análisis, o como PROPUESTA
+    inicial que luego se contrasta nodo a nodo.
 
     Always returns parameters + residual diagnosis figure; DCD/MEG at the end.
 
@@ -8655,6 +8780,9 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
                     exceeded 0.304. Declare it when the name does not say so —
                     "EMU" is a price index and does not look like one.
     decision      : confirmed "A"/"B1"/"B2"; "" = heuristic
+    modo          : "guiado" (por defecto) | "autonomo". Con spec declarada y
+                    modo guiado la salida termina en ⏸ para el analista humano;
+                    con modo autónomo no para nunca (BUG-0181).
     guion_path    : (optional) path to guion.json — records the final model
     guion_name    : version name (e.g. "PC1"); auto-assigned if empty
     guion_decision: brief description of the model or pipeline result
@@ -8722,7 +8850,14 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
         m_fit, diag = result.final_model, result.final_diag
 
         # ── Reconstruct the rich text log from the structured rounds ──────
-        _mode = "guiado (spec confirmada)" if guided else "autónomo"
+        # Dos preguntas distintas que antes compartían una variable. `guided`
+        # dice si hay especificación declarada —y por tanto qué política usa el
+        # motor—. Si la salida PARA o no depende de otra cosa: de si hay un
+        # analista humano esperando. En el carril autónomo quien declara la spec
+        # es el LLM haciendo de analista, y parar ahí es esperar a nadie
+        # (BUG-0181).
+        _mode = ("guiado (spec confirmada)" if (guided and modo == "guiado")
+                 else ("autónomo (spec decidida)" if guided else "autónomo"))
         log = [f"### Pipeline {_mode} — {name}"]
         lam_str = "log (λ=0)" if lam == 0.0 else "identidad (λ=1)"
         # El dominio se ANUNCIA. Su propio docstring lo promete —"recorded and

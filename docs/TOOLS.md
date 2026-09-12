@@ -11,7 +11,7 @@
 | [`ar_factorization`](#ar-factorization) | Factorize the estimated AR operator(s) of a fitted model and identify |
 | [`batch_build`](#batch-build) | Autonomous pipeline for multiple series. Builds one model per series. |
 | [`boxcox_analysis`](#boxcox-analysis) | Analyse Box-Cox transformation for a time series (standalone use). |
-| [`build_model`](#build-model) | Box-Jenkins-Treadway pipeline for a single series — autonomous or guided. |
+| [`build_model`](#build-model) | ATAJO HEURÍSTICO — el pipeline de una llamada. NO es el modo autónomo. |
 | [`compare_versions`](#compare-versions) | Compare two estimated models: spec diff, stats table, nested LR test. |
 | [`confirm_and_estimate`](#confirm-and-estimate) | Build the .inp for the confirmed spec, estimate and show diagnosis immediately. |
 | [`create_inp`](#create-inp) | Create a .inp file from raw time series data. |
@@ -178,21 +178,28 @@ Analyse Box-Cox transformation for a time series (standalone use).
 | `guion_decision` | string | no | `` |
 | `guion_rationale` | string | no | `` |
 | `objetivo` | string | no | `univariante` |
+| `modo` | string | no | `guiado` |
 
-Box-Jenkins-Treadway pipeline for a single series — autonomous or guided.
+ATAJO HEURÍSTICO — el pipeline de una llamada. NO es el modo autónomo.
 
     Runs ONE engine (pipeline.run_full): decides the spec, estimates, adds
     interventions for detected outliers and re-estimates until the diagnosis is
-    clean or max_rounds. The only difference between modes is WHO supplies each
-    decision:
+    clean or max_rounds.
 
-      - Autonomous (all spec params left at their sentinel): the heuristic
-        DefaultPolicy decides λ, d, D, harmonics, p, q and the mean.
-      - Guided (any of lam/d/D/p/q/n_harmonics/estimate_mu/decision provided): those
-        analyst/Claude-confirmed choices are honoured (ClaudePolicy) and the
-        heuristic fills only what was left unspecified. Use after
-        guided_identification to run the build with the confirmed spec while
-        the outlier cycle proceeds automatically.
+      - Sin spec: la heurística `DefaultPolicy` decide λ, d, D, armónicos, p, q
+        y la media. Es un auto-ARIMA del estilo de pmdarima, con las reglas de
+        la escuela dentro — y NADA MÁS: no sobreparametriza, no mira Semana
+        Santa, no pasa los contrastes formales ni reformula.
+      - Con spec (lam/d/D/p/q/n_harmonics/estimate_mu/decision): se respeta lo
+        fijado (ClaudePolicy) y la heurística completa el resto, con el ciclo
+        de anómalos automático.
+
+    **El modo AUTÓNOMO de art no es esta herramienta** (BUG-0180). En autónomo
+    el LLM hace de analista y recorre los nodos del protocolo decidiendo cada
+    uno; un autónomo que se reduce a una llamada aquí es un híbrido entre el
+    guiado y un auto-ARIMA, que es lo peor de los dos. Úsala cuando el usuario
+    pida expresamente un ajuste automático sin análisis, o como PROPUESTA
+    inicial que luego se contrasta nodo a nodo.
 
     Always returns parameters + residual diagnosis figure; DCD/MEG at the end.
 
@@ -219,6 +226,9 @@ Box-Jenkins-Treadway pipeline for a single series — autonomous or guided.
                     exceeded 0.304. Declare it when the name does not say so —
                     "EMU" is a price index and does not look like one.
     decision      : confirmed "A"/"B1"/"B2"; "" = heuristic
+    modo          : "guiado" (por defecto) | "autonomo". Con spec declarada y
+                    modo guiado la salida termina en ⏸ para el analista humano;
+                    con modo autónomo no para nunca (BUG-0181).
     guion_path    : (optional) path to guion.json — records the final model
     guion_name    : version name (e.g. "PC1"); auto-assigned if empty
     guion_decision: brief description of the model or pipeline result
@@ -286,6 +296,7 @@ Compare two estimated models: spec diff, stats table, nested LR test.
 | `guion_rationale` | string | no | `` |
 | `guion_problems` | string | no | `` |
 | `guion_next` | string | no | `` |
+| `modo` | string | no | `guiado` |
 
 Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
 
@@ -424,6 +435,12 @@ Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
     guion_rationale : justification for the choices made
     guion_problems  : problems found in the diagnosis of this model
     guion_next      : description of the next version to try
+    modo            : "guiado" (por defecto) | "autonomo". En GUIADO quien
+                      confirma la especificación es el analista humano y la
+                      salida termina en ⏸ para que decida él. En AUTÓNOMO quien
+                      la confirma eres tú —el LLM hace de analista—: no hay a
+                      quién esperar y la salida NO para. Pásalo en cada llamada
+                      del carril autónomo (BUG-0180, BUG-0181).
 
 ---
 
@@ -479,6 +496,7 @@ Create a .inp file from raw time series data.
 | `guion_problems` | string | no | `` |
 | `guion_next` | string | no | `` |
 | `include_histogram` | boolean | no | `False` |
+| `modo` | string | no | `guiado` |
 
 Fit the model specified in an .inp file and run diagnosis.
 
@@ -497,6 +515,11 @@ Fit the model specified in an .inp file and run diagnosis.
     Parameters
     ----------
     inp_path    : path to the .inp file with the model specification
+    modo        : "guiado" (por defecto) | "autonomo". En GUIADO la salida
+                  termina en ⏸ y espera al analista. En AUTÓNOMO el analista
+                  eres tú —el LLM—, así que no hay a quién esperar y la salida
+                  NO para: pásalo en cada llamada del carril autónomo
+                  (BUG-0180, BUG-0181).
     include_histogram : devolver además el histograma de residuos (por defecto
                   False, igual que en `confirm_and_estimate`). El histograma NO
                   es parte del módulo básico de diagnosis: se pide (BUG-0129).

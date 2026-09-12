@@ -177,11 +177,21 @@ def test_el_carril_se_reconoce_por_el_modo(modo, esperado):
 
 def test_confirm_and_estimate_declara_que_es_guiado():
     """Era la causa: la herramienta del carril guiado no declaraba su modo, así
-    que el sobre le daba la forma del registro."""
+    que el sobre le daba la forma del registro.
+
+    Se declaraba con un `modo="guiado"` fijo, y eso daba por hecho que quien
+    confirma una especificación es siempre un humano: en el carril autónomo
+    confirma el LLM y cada llamada le mandaba parar (BUG-0181). Ahora el modo
+    lo declara quien llama, y **por defecto es guiado** — que es lo que este
+    test protege: sin decir nada, la herramienta sigue siendo del guiado.
+    """
+    import inspect
     from tests._fuente import fuente_de
     ce = getattr(srv.confirm_and_estimate, "fn", srv.confirm_and_estimate)
+    assert inspect.signature(ce).parameters["modo"].default == "guiado"
     src = fuente_de(ce)
-    assert 'modo="guiado"' in src
+    assert "modo=_modo_del_sobre(modo)" in src
+    assert srv._modo_del_sobre("guiado") == "guiado"
     assert "_conclusiones_desde(" in src and "_alternativas_desde(" in src
 
 
