@@ -4,7 +4,7 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
-## art-tseries 0.2.1 — 2026-09-11  ·  **CONGELADA**
+## art-tseries 0.2.1 — 2026-09-12  ·  congelada el 11, validada el 12
 
 La 0.2.0 estaba en PyPI con defectos que la corrida guiada de ITCER destapó y sin
 funcionar en Windows. La decisión del analista fue **no subir de versión hasta
@@ -74,15 +74,67 @@ cubren el covid y Ucrania— y de un estudio de campo sobre 75 modelos guiados y
 **Lo demás**: 0149 (la superposición dibujaba en el nivel sobre residuos en ∇),
 0150 (las configuraciones tiraban las intervenciones del base).
 
+### Después de congelar: lo que entró por la tabla — 20 defectos
+
+Congelada la versión, sólo entraba lo que cumpliera la tabla —no arranca,
+publica un número incorrecto y calla, cierra una puerta de uso normal, pierde o
+corrompe datos—. Entraron veinte, todos de corridas reales: el run 3 de SF_MEG y
+los runs 4 a 9 de IPC_ES, uno en Windows y uno con DeepSeek.
+
+**El carril autónomo, rehecho** — el cambio de fondo de la versión.
+
+* **Autónomo es el LLM haciendo de analista** (0180, crítico). El estudio con
+  varios LLM de la 0.1.x —31 series, 283 nodos decididos por el LLM— nunca se
+  consolidó: sus reglas vivían en el enunciado de cada ejercicio y el protocolo
+  mandaba el autónomo a `build_model`. Sin enunciado, el autónomo era un
+  auto-ARIMA con las paradas del guiado. Ahora el protocolo tiene su carril —los
+  mismos nodos que el guiado, uno por vez, cada uno firmado con
+  `decidido_por="LLM"`— y `build_model` se presenta como lo que es, un atajo.
+* **Ninguna estimación para en ⏸ en autónomo** (0181, 0179). `modo` en
+  `confirm_and_estimate`, `estimate_and_diagnose`, `build_model`,
+  `suggest_intervention_form` y `guided_intervention`; por defecto, guiado.
+* **La rampa, instrumento de usuario avanzado** (0182): se rechaza en autónomo y
+  en guiado avisa con la cifra de lo que le hace a la previsión a largo plazo.
+* **Lo que el analista declara no se pierde en silencio**: el dominio (0178) y
+  el objetivo (0183) son listas cerradas y lo desconocido se rechaza.
+
+**Números que salían mal y callaban**
+
+* La **Q** restaba los deterministas de sus grados de libertad (0166): decide
+  `lags = 3f+3` con `df = lags − (p+q+P+Q)`.
+* `load_data` leía un índice mensual como **anual** (0169).
+* **Treadway** (0172), la alternativa **«intervenir»** y el **eje de la figura
+  de diagnosis** (0185) no contaban las raíces estacionales del desfase: con una
+  raíz interior la fecha salía dos meses pronto.
+* El DCD de subdiferenciación comparaba modelos desiguales (0167), y un aviso
+  publicaba un sesgo de las SE que nadie calcula (0168).
+
+**El guion como registro**
+
+* El linaje es un **contenido**, no una ruta (0175, y su regresión 0184).
+* Una reinscripción ya no se cuelga de la última entrada (0176), y cada entrada
+  guarda **sobre cuántos datos** se estimó (0177).
+
+**Puertas que faltaban**
+
+* `extend_sample` (0173) y `verify_optimum` (0174); `easter` al encadenar
+  (0170); la fecha extramuestral ya no se compara como texto (0171).
+
+**Validada** con runs reales sin enunciado: run7 (autónomo, Linux), run8
+(Windows, guiado y autónomo) y run9 (autónomo), que además detectó un error en
+los datos del usuario.
+
 ### Lo que queda dicho y NO hecho
 
 * art sabe **construir** la forma racional pero no **proponerla**: compite con el
   peldaño 2 de la escalera y pide un peldaño nuevo con su criterio de subida.
 * `incident_configurations` no busca la vuelta **hacia delante**; encadenar dos
   intervenciones y juntarlas con la ganancia neta ya funciona, pero a mano.
-* Abiertos: 0011, 0110, 0116, 0124, 0147, 0151.
+* La lista de objetivos la sigue componiendo el asistente (0186, para 0.3), y el
+  autónomo no siempre documenta los nodos. Lo que queda para 0.2.2, en `TODO.md`.
+* Abiertos: 0110, 0116, 0124, 0147, 0151, 0165, 0186.
 
-Suite: **1855 pasan**, 124 saltadas, 4 xfail, 0 fallos.
+Suite: **2058 pasan**, 124 saltadas, 4 xfail, 0 fallos.
 
 ## art-tseries 0.2.0 — 2026-09-07
 
@@ -716,6 +768,32 @@ instrucciones son el producto, y aquí había criterio escrito que no llegaba.
 - **BUG-0009 y BUG-0010 verificados y reproducidos**, ambos abiertos.
 - TODO: la pregunta del OBJETIVO (multivariante o previsión), analizada y sin
   implementar — el objetivo no manda sobre los datos, y ésa es la parte difícil.
+
+## atsw 1.4.0 — 2026-09-12
+
+Sube `art-tseries` a `>=0.2.1` y `fue` a `>=0.1.14`.
+
+**art `>=0.2.1`, por dos razones a la vez.** La 0.2.0 no funciona en Windows, y
+donde arranca **contesta mal**, que es la clase de la cota de 1.3.0: la Q con los
+grados de libertad equivocados, fechas de Treadway y de la alternativa
+«intervenir» desplazadas con raíces estacionales, λ=1 sobre un índice cuando el
+dominio no se reconocía, y un carril autónomo que se paraba en cada estimación.
+Detalle en `## art-tseries 0.2.1`.
+
+Y la cota hace falta aunque la 0.2.1 ya cumpla la anterior: con `>=0.1.12`,
+**quien ya tiene atsw instalado no recibe la 0.2.1** con `pip install -U atsw`,
+porque pip no sube una dependencia que ya satisface el mínimo.
+
+**fue `>=0.1.14`** es la cota que ya exige art 0.2.1 (fue/BUG-0014, BUG-0005). El
+paraguas no puede anunciar menos de lo que necesita su componente.
+
+**Por qué 1.4.0 y no 1.3.1**, por la misma regla que dio la 1.3.0: el diff de
+este paquete son dos cotas y su comentario, así que por contenido propio sería un
+parche; pero lo que las cotas HACEN es forzar un salto que **cambia veredictos**
+—con los mismos datos y la misma especificación pueden salir otra Q, otra fecha,
+otra λ—. Un parche esconde eso; un menor lo anuncia. Y deja la línea `1.3.x` como
+la última que resuelve `art 0.2.0`, para quien necesite reproducir un análisis
+anterior.
 
 ## atsw 1.3.0 — 2026-09-02
 
