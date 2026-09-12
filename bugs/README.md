@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**172 report(s), 7 open.**
+**174 report(s), 7 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -178,6 +178,8 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0173](BUG-0173-no-hay-forma-de-extender-la-muestra.md) | fixed | medium | mcp-tools | No hay forma de EXTENDER la muestra de un modelo — el encadenado que el propio método pide se hace editando el `.inp` a mano | 0.2.1 |
 | [BUG-0174](BUG-0174-reestimar-desde-cero-para-arreglar-las-SE.md) | fixed | high | estimation | Reestimar con las semillas a CERO para arreglar los errores típicos — funciona por suerte, puede caer en otro óptimo y destruye el convenio del `.pre` | 0.2.1 |
 | [BUG-0175](BUG-0175-el-linaje-se-guarda-como-una-ruta-no-como-un-contenido.md) | fixed | high | guion | El linaje se guarda como una RUTA, no como un contenido — si el `.pre` del padre se reescribe, el guardián del encadenado lo aprueba y `guion_map` sigue dibujando el árbol viejo | 0.2.1 |
+| [BUG-0176](BUG-0176-una-reinscripcion-se-cuelga-de-la-ultima-entrada.md) | fixed | high | guion | Reinscribir un modelo lo cuelga de la ÚLTIMA entrada del guion — el mapa publica que el modelo adoptado desciende de la sobreparametrización que lo rechazó, y que el FINAL desciende del descartado | 0.2.1 |
+| [BUG-0177](BUG-0177-el-guion-no-guarda-sobre-cuantos-datos.md) | fixed | high | guion | El guion guarda ℓ, AIC y BIC y no sobre qué muestra — desde `extend_sample` dos entradas del mismo árbol pueden estar en muestras distintas, y el mapa las dibuja como una mejora | 0.2.1 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 

@@ -1775,6 +1775,7 @@ Preview the contents of an Excel or CSV file before loading.
 | `rationale` | string | no | `` |
 | `problems_found` | string | no | `` |
 | `next_version` | string | no | `` |
+| `base_pre_path` | string | no | `` |
 
 Load, fit and record a model version in guion.json.
 
@@ -1791,6 +1792,10 @@ Load, fit and record a model version in guion.json.
     rationale      : justification for the parameter choices
     problems_found : problems detected in the diagnosis
     next_version   : description of the next version to try
+    base_pre_path  : el `.pre` del que SALE este modelo, si se encadenó de uno.
+                     Sin esto el padre es «la última entrada registrada», que es
+                     una conjetura y en el run 4 fue falsa tres veces: declara
+                     de dónde viene y el árbol lo dibuja bien (BUG-0176).
 
 ---
 

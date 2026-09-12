@@ -5680,10 +5680,26 @@ def _record_to_guion(
     # (BUG-0175). Se toma antes de inferir el padre porque es lo que decide
     # cuál de los homónimos lo es.
     base_pre_sha = sha_del_fichero(base_pre_path) if base_pre_path else ""
+    pre_sha = sha_del_fichero(pre_hermano(inp_path))
     parent = infer_parent(guion, base_pre_path, base_pre_sha)
     # Y CÓMO se supo. Sin `base_pre_path` el padre es «la última entrada», que
     # es una conjetura razonable y a veces falsa (BUG-0108).
     parent_origen = "declarado" if base_pre_path else "inferido"
+
+    # ¿ES ESTO UN MODELO NUEVO O EL MISMO OTRA VEZ? — BUG-0176.
+    # Mismo `.pre` byte a byte es el mismo modelo. Reinscribirlo —para ponerle
+    # nombre, para colgarle el veredicto— es legítimo; colgarlo de la última
+    # entrada, no: así el árbol dibujó en el run 4 que el modelo adoptado
+    # descendía de la sobreparametrización que lo rechazó, y que el FINAL
+    # descendía del descartado. Una copia hereda el padre del original.
+    re_registro_de = None
+    if pre_sha and not base_pre_path:
+        for e in guion.entries:
+            if e.pre_sha and e.pre_sha == pre_sha:
+                re_registro_de = e.version
+                parent = e.parent
+                parent_origen = "re-registro"
+                break
 
     diag_result = diagnose(model)
     spec  = _extract_spec(model, lam)
@@ -5715,7 +5731,8 @@ def _record_to_guion(
         # De dónde salió Y con qué contenido; y qué `.pre` deja esta versión
         # para que sus hijos puedan demostrar que vienen de ELLA (BUG-0175).
         base_pre_sha=base_pre_sha,
-        pre_sha=sha_del_fichero(pre_hermano(inp_path)),
+        pre_sha=pre_sha,
+        re_registro_de=re_registro_de,
         parent_origen=parent_origen,
         instrumento=_version_instr(),
     )
@@ -6221,7 +6238,8 @@ def record_version(inp_path: str,
                    decision: str = "",
                    rationale: str = "",
                    problems_found: str = "",
-                   next_version: str = "") -> list:
+                   next_version: str = "",
+                   base_pre_path: str = "") -> list:
     """
     Load, fit and record a model version in guion.json.
 
@@ -6238,6 +6256,10 @@ def record_version(inp_path: str,
     rationale      : justification for the parameter choices
     problems_found : problems detected in the diagnosis
     next_version   : description of the next version to try
+    base_pre_path  : el `.pre` del que SALE este modelo, si se encadenó de uno.
+                     Sin esto el padre es «la última entrada registrada», que es
+                     una conjetura y en el run 4 fue falsa tres veces: declara
+                     de dónde viene y el árbol lo dibuja bien (BUG-0176).
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -6264,7 +6286,7 @@ def record_version(inp_path: str,
             guion_path=guion_path, name=name,
             decision=decision, rationale=rationale,
             problems_found=problems_found, next_version=next_version,
-            figure_b64=b64,
+            figure_b64=b64, base_pre_path=base_pre_path,
         )
 
         # `record_version` CIERRA una iteración —escribe la entrada del guion—
@@ -6346,6 +6368,7 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
         from art.guion import (load_guion, path_to_root, safe_ancestor,
                                descendants, iteraciones, modelos_sin_registrar,
                                entradas_que_no_cuadran, linaje_dudoso,
+                               comparaciones_entre_muestras,
                                cifra as _cifra)
         g = load_guion(os.path.expanduser(guion_path))
         if not g.entries:
@@ -6400,8 +6423,14 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
             else:
                 q = "Q✓" if e.stats.q_pass else ("Q✗" if e.stats.q_pass is not None else "Q?")
                 jb = "JB✓" if e.stats.jb_pass else ("JB✗" if e.stats.jb_pass is not None else "JB?")
+                # Una reinscripción no es un paso más del método: es el mismo
+                # modelo otra vez, con otro nombre o con el veredicto encima
+                # (BUG-0176). Dibujarla sin decirlo infla el recorrido.
+                rr = (f"  ↻ re-registro de v{e.re_registro_de}"
+                      if getattr(e, "re_registro_de", None) else "")
+                nn = (f"  n={e.stats.nobs}" if getattr(e.stats, "nobs", None) else "")
                 lines.append(f"{sangria}{rama}{st} v{e.version} {e.name}  "
-                             f"logL={_cifra(e.stats.loglik)}  {q} {jb}"
+                             f"logL={_cifra(e.stats.loglik)}{nn}  {q} {jb}{rr}"
                              + (f"  ← {e.decision}" if e.decision else ""))
             if e.status == "dead-end" and e.why_abandoned:
                 lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
@@ -6497,6 +6526,25 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                               "no está comprobado — ni desmentido."]
         except Exception as e:
             _warn("no se pudo contrastar el linaje del guion", e)
+
+        # ¿SE PUEDEN COMPARAR LAS CIFRAS QUE ACABAN DE DIBUJARSE? ℓ, AIC y BIC
+        # son sumas sobre las observaciones. Entre muestras distintas no miden
+        # lo mismo, y el mapa las pone una debajo de otra —que es una invitación
+        # a leerlas como una mejora (BUG-0177).
+        try:
+            entre = comparaciones_entre_muestras(g)
+            if entre:
+                lines += ["", "⚠ **Hay saltos de MUESTRA en el árbol** "
+                              f"({len(entre)}). Donde la n cambia, `logL`, AIC y "
+                              "BIC dejan de ser comparables con el padre — la "
+                              "diferencia no es ajuste, es tamaño:"]
+                for hijo, nh, padre, npd in entre[:12]:
+                    lines.append(f"   · v{hijo} (n={nh}) frente a v{padre} "
+                                 f"(n={npd})")
+                if len(entre) > 12:
+                    lines.append(f"   · … y {len(entre) - 12} más")
+        except Exception as e:
+            _warn("no se pudo comprobar la muestra de cada entrada", e)
 
         # El guion guarda VEREDICTOS, y un veredicto sólo significa algo junto al
         # instrumento que lo produjo. Si alguna entrada se calculó con otra

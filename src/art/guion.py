@@ -120,7 +120,18 @@ class GuionStats:
     q_lags: list[int] = field(default_factory=list)
     q_pvalues: list[float] = field(default_factory=list)
     jb_pvalue: float | None = None
-    npar: int | None = None          # la corrección de g.l. que se usó
+    npar: int | None = None
+
+    # SOBRE CUÁNTOS DATOS — BUG-0177.
+    # El guion guardaba ℓ, AIC y BIC y no sobre qué muestra se calcularon. Con
+    # `extend_sample` (BUG-0173) dos modelos del MISMO guion pueden estar
+    # estimados sobre muestras distintas, y entonces esas tres cifras no son
+    # comparables: el mapa las dibujaba como padre→hijo y el último paso parecía
+    # un salto de ajuste que sólo era otra muestra.
+    #
+    # Es el mismo argumento por el que ya se guarda `refactor` —ℓ/AIC difieren en
+    # n·ln(factor), BUG-0085—, aplicado a la n.
+    nobs: int | None = None          # la corrección de g.l. que se usó
     # ── En qué UNIDADES están ℓ, AIC y BIC ───────────────────────────────
     # La suite estima sobre `refactor`·log(y) (100 por convención, que es lo que
     # hace que σ̂ₐ se lea en tanto por ciento). Un modelo en otra escala tiene
@@ -285,6 +296,21 @@ class GuionEntry:
     base_pre_sha: str = ""
     pre_sha: str = ""
 
+    # ESTA ENTRADA NO ES UN MODELO NUEVO: ES OTRA INSCRIPCIÓN DE UNO YA
+    # REGISTRADO — BUG-0176.
+    # Reinscribir es corriente y legítimo: se vuelve a registrar un modelo para
+    # ponerle nombre («m03»), para colgarle el veredicto final, o para marcarlo
+    # como adoptado. Lo que no puede pasar es que esa copia se cuelgue de la
+    # última entrada del guion, porque entonces el árbol dibuja que el modelo
+    # ADOPTADO desciende de la sobreparametrización que lo rechazó, o que el
+    # modelo FINAL desciende del que se descartó. Las dos cosas ocurrieron en el
+    # run 4, tres veces.
+    #
+    # Con `pre_sha` la copia se reconoce sola: mismo `.pre`, byte a byte, es el
+    # mismo modelo. Su padre es el del original, no el último que pasara por
+    # ahí; y el mapa lo dice en vez de fingir un paso más.
+    re_registro_de: int | None = None
+
     # Con QUÉ instrumento se calculó lo de arriba. Un guion sin esto no se puede
     # releer: no hay forma de saber si un veredicto viene de una versión con un
     # defecto ya corregido. Y es lo que hace comparables —o no— dos guiones de
@@ -424,6 +450,33 @@ def linaje_dudoso(guion: "Guion") -> list[tuple[int, str]]:
         hoy = sha_del_fichero(e.base_pre_path)
         if hoy and hoy != e.base_pre_sha:
             fuera.append((e.version, "el fichero ha cambiado"))
+    return fuera
+
+
+def comparaciones_entre_muestras(guion: "Guion") -> list[tuple]:
+    """Enlaces padre→hijo estimados sobre muestras DISTINTAS — BUG-0177.
+
+    Devuelve `(hijo, n_hijo, padre, n_padre)`. ℓ, AIC y BIC son sumas sobre las
+    observaciones: entre muestras distintas no miden lo mismo y su diferencia no
+    es una mejora de ajuste. El mapa los dibuja en la misma columna, uno debajo
+    de otro, así que hay que decir dónde deja de valer la lectura vertical.
+
+    Sólo se mira el enlace padre→hijo, no todos los pares: es el único sitio
+    donde el mapa invita a comparar.
+
+    `nobs` vacío —guiones anteriores al campo— no se denuncia: no consta no es
+    lo mismo que difiere.
+    """
+    por_version = {e.version: e for e in guion.entries}
+    fuera = []
+    for e in guion.entries:
+        if e.parent is None or e.stats is None or not e.stats.nobs:
+            continue
+        padre = por_version.get(e.parent)
+        if padre is None or padre.stats is None or not padre.stats.nobs:
+            continue
+        if padre.stats.nobs != e.stats.nobs:
+            fuera.append((e.version, e.stats.nobs, padre.version, padre.stats.nobs))
     return fuera
 
 
@@ -1091,6 +1144,7 @@ def _extract_stats(model, diag_result) -> GuionStats:
         jb_pvalue=float(diag_result.jb_pvalue),
         npar=int(diag_result.npar),
         refactor=float(getattr(model, "refactor", None) or 1.0),
+        nobs=int(n_orig),
     )
 
 
