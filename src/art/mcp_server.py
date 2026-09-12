@@ -5982,7 +5982,7 @@ def _record_to_guion(
     from art.guion import (
         Guion, GuionEntry, load_guion, save_guion, infer_parent,
         _extract_spec, _extract_stats, _build_equation,
-        sha_del_fichero, pre_hermano,
+        sha_del_fichero, pre_hermano, pre_de_la_base,
     )
     from art.diagnosis import diagnose
 
@@ -6007,7 +6007,11 @@ def _record_to_guion(
     # en algo contrastable en vez de una ruta que cualquiera puede reescribir
     # (BUG-0175). Se toma antes de inferir el padre porque es lo que decide
     # cuál de los homónimos lo es.
-    base_pre_sha = sha_del_fichero(base_pre_path) if base_pre_path else ""
+    # …y la del `.pre` de esa base aunque llegue un `.inp`: se compara con el
+    # `pre_sha` que registró el padre, y con otro fichero no cuadra nunca
+    # (BUG-0184).
+    base_pre_sha = (sha_del_fichero(pre_de_la_base(base_pre_path))
+                    if base_pre_path else "")
     pre_sha = sha_del_fichero(pre_hermano(inp_path))
     parent = infer_parent(guion, base_pre_path, base_pre_sha)
     # Y CÓMO se supo. Sin `base_pre_path` el padre es «la última entrada», que

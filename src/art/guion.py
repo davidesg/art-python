@@ -49,6 +49,22 @@ def pre_hermano(inp_path: str) -> str:
     return os.path.splitext(os.path.expanduser(inp_path or ""))[0] + ".pre"
 
 
+def pre_de_la_base(ruta: str) -> str:
+    """El `.pre` con el que se compara la base de un encadenado — BUG-0184.
+
+    Una versión registra la huella de su `.pre` (`pre_sha`). Para reconocerla
+    como padre hay que comparar CONTRA LO MISMO: la huella del `.pre` de la
+    base, no la del fichero que el llamante haya puesto en `base_pre_path`.
+    Y ahí no siempre llega un `.pre`: `suggest_intervention_form` y
+    `meg_reformulate` encadenan desde el `.inp` del padre. Con la huella del
+    `.inp` frente a la del `.pre` no cuadraba nunca, `infer_parent` concluía
+    «ninguno es el padre», y cada modelo con intervención quedaba como raíz
+    del árbol.
+    """
+    r = os.path.expanduser(ruta or "")
+    return r if r.lower().endswith(".pre") else pre_hermano(r)
+
+
 def cifra(v, fmt: str = ".2f", ausente: str = "—") -> str:
     """Un número del registro, o la marca de que NO CONSTA.
 
@@ -447,8 +463,14 @@ def linaje_dudoso(guion: "Guion") -> list[tuple[int, str]]:
         if padre is not None and padre.pre_sha and padre.pre_sha != e.base_pre_sha:
             fuera.append((e.version, "el padre es otro"))
             continue
-        hoy = sha_del_fichero(e.base_pre_path)
-        if hoy and hoy != e.base_pre_sha:
+        # Hoy se registra la huella del `.pre` de la base (BUG-0184); los
+        # guiones escritos entre BUG-0175 y BUG-0184 guardaron la del fichero
+        # tal como venía —a veces un `.inp`—. Vale cualquiera de las dos: lo
+        # que se pregunta es si CAMBIÓ, y un guion viejo no ha de sonar a
+        # alarma por el convenio con que se escribió.
+        hoy = {h for h in (sha_del_fichero(pre_de_la_base(e.base_pre_path)),
+                           sha_del_fichero(e.base_pre_path)) if h}
+        if hoy and e.base_pre_sha not in hoy:
             fuera.append((e.version, "el fichero ha cambiado"))
     return fuera
 
