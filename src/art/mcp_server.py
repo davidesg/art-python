@@ -5654,6 +5654,7 @@ def _record_to_guion(
     from art.guion import (
         Guion, GuionEntry, load_guion, save_guion, infer_parent,
         _extract_spec, _extract_stats, _build_equation,
+        sha_del_fichero, pre_hermano,
     )
     from art.diagnosis import diagnose
 
@@ -5674,7 +5675,12 @@ def _record_to_guion(
         name = f"PC{version}"
     # De qué versión desciende ésta. Encadenar desde un `.pre` antiguo ES volver
     # atrás, y hay que registrarlo como tal (guion.infer_parent).
-    parent = infer_parent(guion, base_pre_path)
+    # La huella del `.pre` semilla, LEÍDA AHORA: es lo que convierte el linaje
+    # en algo contrastable en vez de una ruta que cualquiera puede reescribir
+    # (BUG-0175). Se toma antes de inferir el padre porque es lo que decide
+    # cuál de los homónimos lo es.
+    base_pre_sha = sha_del_fichero(base_pre_path) if base_pre_path else ""
+    parent = infer_parent(guion, base_pre_path, base_pre_sha)
     # Y CÓMO se supo. Sin `base_pre_path` el padre es «la última entrada», que
     # es una conjetura razonable y a veces falsa (BUG-0108).
     parent_origen = "declarado" if base_pre_path else "inferido"
@@ -5706,6 +5712,10 @@ def _record_to_guion(
         # De dónde salió: el `.pre` que se usó como semilla. Es el dato con el
         # que se dedujo `parent`, y hasta ahora se consumía y se tiraba.
         base_pre_path=base_pre_path or "",
+        # De dónde salió Y con qué contenido; y qué `.pre` deja esta versión
+        # para que sus hijos puedan demostrar que vienen de ELLA (BUG-0175).
+        base_pre_sha=base_pre_sha,
+        pre_sha=sha_del_fichero(pre_hermano(inp_path)),
         parent_origen=parent_origen,
         instrumento=_version_instr(),
     )
@@ -6335,7 +6345,8 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
         from mcp.types import TextContent
         from art.guion import (load_guion, path_to_root, safe_ancestor,
                                descendants, iteraciones, modelos_sin_registrar,
-                               entradas_que_no_cuadran, cifra as _cifra)
+                               entradas_que_no_cuadran, linaje_dudoso,
+                               cifra as _cifra)
         g = load_guion(os.path.expanduser(guion_path))
         if not g.entries:
             return [TextContent(type="text", text="Guion vacío.")]
@@ -6459,6 +6470,33 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                              "registrarlo con `record_version` (BUG-0102).")
         except Exception as e:
             _warn("no se pudo comprobar el registro contra sus ficheros", e)
+
+        # ¿SE SOSTIENE EL ÁRBOL QUE ACABA DE DIBUJARSE? Un enlace padre→hijo se
+        # guardaba como la RUTA del `.pre` semilla, y una ruta no identifica un
+        # contenido: reescrito ese fichero, el hijo seguía declarando un linaje
+        # que ya no era cierto y el mapa lo dibujaba igual (BUG-0175). El mapa
+        # ES el árbol; si sus enlaces no se contrastan, hay que decirlo AQUÍ.
+        try:
+            dudosos = linaje_dudoso(g)
+            graves = [(v, m) for v, m in dudosos if m != "sin contrastar"]
+            if graves:
+                lines += ["", "⚠ **El árbol dibuja enlaces que no se sostienen** "
+                              f"({len(graves)}). El `.pre` del que dice venir "
+                              "una versión no es el que hay:"]
+                for v, motivo in graves[:12]:
+                    lines.append(f"   · v{v}: {motivo}")
+                if len(graves) > 12:
+                    lines.append(f"   · … y {len(graves) - 12} más")
+                lines.append("   Un `.pre` reescrito deja de ser el que se "
+                             "encadenó. Comprueba de qué modelo desciende de "
+                             "verdad antes de seguir desde ahí (BUG-0175).")
+            sin = [v for v, m in dudosos if m == "sin contrastar"]
+            if sin:
+                lines += ["", f"· {len(sin)} enlace(s) sin huella: el guion es "
+                              "anterior a que se registrara, así que su linaje "
+                              "no está comprobado — ni desmentido."]
+        except Exception as e:
+            _warn("no se pudo contrastar el linaje del guion", e)
 
         # El guion guarda VEREDICTOS, y un veredicto sólo significa algo junto al
         # instrumento que lo produjo. Si alguna entrada se calculó con otra

@@ -1,6 +1,7 @@
 """Guion de análisis BJ-T — traza completa de versiones del modelo."""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -12,6 +13,41 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# La huella de un fichero del convenio — BUG-0175
+# ---------------------------------------------------------------------------
+
+def sha_del_fichero(ruta: str) -> str:
+    """sha256 de un `.pre` (o `.inp`), o `""` si no se puede leer.
+
+    POR QUÉ UNA HUELLA Y NO UNA RUTA. El linaje se guardaba como el CAMINO del
+    `.pre` del que se encadenó. Un camino no identifica un contenido: si ese
+    fichero se reescribe —otra sesión, una reestimación en la misma ruta, una
+    edición— el hijo sigue declarando que desciende de él y nadie lo desmiente.
+    El convenio dice «un `.pre` que se TOCA vuelve a ser un `.inp`»; estaba
+    enunciado y no comprobado, o sea que era una costumbre y no una propiedad
+    del sistema.
+
+    Devuelve `""` en vez de levantar: un guion tiene que poder registrarse
+    aunque el fichero no esté —lo que no puede es AFIRMAR un linaje que no
+    comprobó—. La cadena vacía significa «no consta», y los contrastes de
+    `linaje_dudoso` la tratan como tal en vez de darla por buena.
+    """
+    try:
+        h = hashlib.sha256()
+        with open(os.path.expanduser(ruta), "rb") as fh:
+            for trozo in iter(lambda: fh.read(65536), b""):
+                h.update(trozo)
+        return h.hexdigest()
+    except Exception:
+        return ""
+
+
+def pre_hermano(inp_path: str) -> str:
+    """El `.pre` de un `.inp`: la terna comparte basename (BUG-0092)."""
+    return os.path.splitext(os.path.expanduser(inp_path or ""))[0] + ".pre"
+
 
 def cifra(v, fmt: str = ".2f", ausente: str = "—") -> str:
     """Un número del registro, o la marca de que NO CONSTA.
@@ -232,6 +268,23 @@ class GuionEntry:
     # diga de dónde vino Y a dónde llegó.
     base_pre_path: str = ""
 
+    # ── Y CON QUÉ CONTENIDO, que es lo que una ruta no dice — BUG-0175 ──
+    # `base_pre_path` identificaba al padre por su CAMINO. Si ese `.pre` se
+    # reescribe, el camino sigue apuntando y el contenido ya es otro: el hijo
+    # declara un linaje falso y `infer_parent` devuelve a quien lo PISÓ, no a
+    # quien lo produjo (el `reversed` del bucle lo garantiza). Ocurre dentro de
+    # una sola sesión: basta reestimar dos veces en la misma ruta.
+    #
+    # `base_pre_sha` es la huella del `.pre` semilla EN EL MOMENTO de encadenar;
+    # `pre_sha`, la del `.pre` que esta versión produjo. Con las dos, el enlace
+    # padre→hijo se puede CONTRASTAR —`linaje_dudoso`— en vez de creerse.
+    #
+    # Vacías significan «no consta», no «cuadra»: un guion escrito antes de este
+    # campo se sigue leyendo (BUG-0098) y sus enlaces quedan sin contrastar, que
+    # es la verdad sobre ellos.
+    base_pre_sha: str = ""
+    pre_sha: str = ""
+
     # Con QUÉ instrumento se calculó lo de arriba. Un guion sin esto no se puede
     # releer: no hay forma de saber si un veredicto viene de una versión con un
     # defecto ya corregido. Y es lo que hace comparables —o no— dos guiones de
@@ -285,7 +338,8 @@ class Guion:
 # El mapa: parentesco, ramas y callejones
 # ---------------------------------------------------------------------------
 
-def infer_parent(guion: "Guion", base_pre_path: str = "") -> int | None:
+def infer_parent(guion: "Guion", base_pre_path: str = "",
+                 base_pre_sha: str = "") -> int | None:
     """De qué versión desciende la que se está registrando.
 
     Dos casos, y el orden importa:
@@ -300,16 +354,77 @@ def infer_parent(guion: "Guion", base_pre_path: str = "") -> int | None:
        lineal es el caso corriente y no hay que hacerla explícita.
 
     Devuelve None sólo para la primera versión del guion.
+
+    QUÉ SE EMPAREJA — BUG-0175. Hasta 0.2.1 esto comparaba sólo la RUTA, y el
+    docstring decía otra cosa: «la versión que produjo ESE fichero». Lo que
+    devolvía era *la última entrada cuya ruta coincide*, o sea quien lo
+    REESCRIBIÓ. Con dos estimaciones en la misma ruta, los hijos de la primera
+    quedaban colgando de la segunda sin un aviso.
+
+    Ahora la ruta sólo SELECCIONA candidatos; quien decide es la huella. Si se
+    conoce `base_pre_sha` y la entrada guarda su `pre_sha`, tienen que coincidir.
+    Un candidato cuya huella NO cuadra se descarta: es un homónimo, no el padre.
+    Cuando alguna de las dos huellas no consta —guiones anteriores al campo— se
+    acepta por ruta, como antes, porque lo contrario rompería el linaje ya
+    escrito; ahí `linaje_dudoso` es lo que dice que no se contrastó.
     """
     if not guion.entries:
         return None
     if base_pre_path:
         import os
         objetivo = os.path.splitext(os.path.abspath(os.path.expanduser(base_pre_path)))[0]
-        for e in reversed(guion.entries):
-            if os.path.splitext(os.path.abspath(e.inp_path))[0] == objetivo:
-                return e.version
+        homonimos = [e for e in reversed(guion.entries)
+                     if os.path.splitext(os.path.abspath(e.inp_path))[0] == objetivo]
+        # 1º: el que cuadra por CONTENIDO, mire donde mire el reloj.
+        if base_pre_sha:
+            for e in homonimos:
+                if e.pre_sha and e.pre_sha == base_pre_sha:
+                    return e.version
+            # Hay homónimos y ninguno cuadra: el fichero lo escribió algo que
+            # este guion no registró. Devolver el último sería nombrar padre a
+            # un impostor, así que no se nombra ninguno.
+            if homonimos and any(e.pre_sha for e in homonimos):
+                return None
+        # 2º: sin huellas que comparar, la ruta es lo único que hay.
+        if homonimos:
+            return homonimos[0].version
     return guion.entries[-1].version
+
+
+def linaje_dudoso(guion: "Guion") -> list[tuple[int, str]]:
+    """Enlaces padre→hijo que el guion AFIRMA y no puede sostener — BUG-0175.
+
+    Devuelve `(version, motivo)` por cada entrada cuyo linaje no se contrasta.
+    Tres motivos, de peor a menos malo:
+
+    * **el padre es otro**: la entrada dice descender de un `.pre` cuya huella
+      no es la que su padre registrado produjo. El árbol dibuja un enlace que no
+      existe.
+    * **el fichero ha cambiado**: el `.pre` semilla sigue en su sitio pero hoy
+      hashea distinto que cuando se encadenó. Lo que se estimó no se puede
+      reproducir desde lo que hay en disco.
+    * **sin contrastar**: no consta huella. No es un fallo —es un guion escrito
+      antes de que el campo existiera— pero tampoco es una comprobación.
+
+    Un `.pre` que ya no está NO se denuncia: que un fichero de trabajo se borre
+    es corriente y no contradice nada de lo registrado.
+    """
+    por_version = {e.version: e for e in guion.entries}
+    fuera: list[tuple[int, str]] = []
+    for e in guion.entries:
+        if not e.base_pre_path:
+            continue
+        if not e.base_pre_sha:
+            fuera.append((e.version, "sin contrastar"))
+            continue
+        padre = por_version.get(e.parent) if e.parent is not None else None
+        if padre is not None and padre.pre_sha and padre.pre_sha != e.base_pre_sha:
+            fuera.append((e.version, "el padre es otro"))
+            continue
+        hoy = sha_del_fichero(e.base_pre_path)
+        if hoy and hoy != e.base_pre_sha:
+            fuera.append((e.version, "el fichero ha cambiado"))
+    return fuera
 
 
 def descendants(guion: "Guion", version: int) -> list[int]:

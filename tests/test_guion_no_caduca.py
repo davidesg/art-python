@@ -150,12 +150,24 @@ def test_la_semilla_sobrevive_al_viaje_de_ida_y_vuelta(tmp_path):
 
 def test_record_version_guarda_la_semilla_que_uso_para_el_padre():
     """El campo con el que se DEDUCE el parentesco tiene que quedar: si no, se
-    puede leer de quién desciende un nodo pero no comprobarlo."""
+    puede leer de quién desciende un nodo pero no comprobarlo.
+
+    Y no basta la RUTA. Una ruta no identifica un contenido: reescrito el `.pre`
+    semilla, el hijo seguía declarando un linaje que ya no era cierto y nadie lo
+    desmentía (BUG-0175). Lo que se deduce se deduce con la ruta Y con la
+    huella, y las dos se guardan.
+    """
     from tests._fuente import cuerpo_de
     import art.mcp_server as srv
     src = cuerpo_de(srv._record_to_guion)
-    assert "infer_parent(guion, base_pre_path)" in src
-    assert "base_pre_path=base_pre_path" in src
+    llamada = [l for l in src.splitlines() if "infer_parent(" in l]
+    assert llamada, "nadie deduce el padre"
+    assert all(x in llamada[0] for x in ("base_pre_path", "base_pre_sha")), (
+        f"el padre se deduce sin la huella: {llamada[0].strip()}")
+    for campo in ("base_pre_path=base_pre_path",
+                  "base_pre_sha=base_pre_sha",
+                  "pre_sha="):
+        assert campo in src, f"no se guarda {campo}"
 
 
 def test_los_defectos_estan_documentados():
