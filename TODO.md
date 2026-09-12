@@ -17,6 +17,102 @@
       estado o texto** — el problema no es que falten herramientas, sobran sin
       conectar.
 
+## PARA 0.3 — trocear el protocolo por etapas, con el criterio corregido (sep-2026)
+
+- [ ] **El coste por llamada es el problema; el troceo sigue siendo la
+      respuesta.** La fase 1 (`6757644`, 10-sep) midió el salto: **112.472 →
+      48.758 caracteres por llamada**, con una cabecera corta y un recurso
+      `art://protocolo/{etapa}` para pedir sólo la etapa que hace falta
+      —`identificacion`, `estimacion`, `intervencion`, `contrastes`, `datos`,
+      `modelo`, `reglas`—.
+
+      **Se revirtió** (`20eb5e0`, la misma noche) y por una razón buena, que no
+      es «trocear estaba mal»:
+
+      > «La recomendación es confusa. La entiendo, pero era mejor antes. La
+      > prosa ha perdido mucho y ahora es muy esotérica.» — el analista,
+      > corriendo ITCER con la fase 1 dentro.
+
+      La causa está escrita en el propio commit de la vuelta atrás: el criterio
+      fue *«lo que decide se queda, lo que explica se va al recurso»*, y **ese
+      criterio es falso en el nodo de intervención**, porque ahí lo que explica
+      ES lo que decide — la forma de una intervención no se elige por una regla,
+      se argumenta. Al llevarse la teoría de la escalera y de Treadway a
+      `art://doc/`, quedó la mecánica sin el argumento.
+
+      **El criterio corregido para 0.3:** no se saca del protocolo lo que
+      sostiene una decisión. Se puede trocear por etapas —el texto YA está
+      dividido en secciones `══` y en las cuatro `ETAPA n —`, así que el corte
+      existe— pero cada etapa tiene que viajar con su argumento, no sólo con
+      sus pasos. Lo que sí puede salir entero: los censos, los índices de
+      herramientas y los ejemplos largos.
+
+      **Y una guarda que faltó la primera vez:** si se vuelve a anunciar
+      `art://protocolo/<etapa>`, un test tiene que comprobar que **cada etapa
+      anunciada resuelve a texto no vacío**. La cabecera y los recursos
+      entraron y salieron juntos por suerte, no por construcción.
+
+      Va en la misma dirección que los tres puntos del fuf de abajo: lo que se
+      paga en tokens es la doctrina que el asistente no puede pedir a trozos.
+
+## PARA 0.3 — el fuf debería entrar por el `.pre`, como drtran (sep-2026)
+
+- [ ] **Un `.inp` propio del fuf no hace falta hoy, y confunde terriblemente.**
+      Decisión del analista, 2026-09-12, tras ver el coste en el uso real.
+
+      **Dónde está el problema.** La previsión tiene contrato propio y está
+      construido sobre un fichero que *parece* otra cosa:
+
+        fue <modelo> -f <H>    →  forecast_<modelo>.inp    un fuf
+        fuf <forecast_modelo>  →  forecast_<modelo>.out + .png + .html
+
+      Un fuf **es un `.inp` más una sección** (`** Forecast horizon and
+      estimated innovation variance`), y por eso lleva extensión `.inp`
+      (`fue/src/fue/inp.py:64`). En la carpeta de trabajo conviven entonces dos
+      clases de `.inp` indistinguibles por el nombre salvo por el prefijo
+      `forecast_`, que es convenio y no formato.
+
+      **El coste es real y se paga en tokens.** Un asistente que se encuentra
+      esa carpeta tiene que abrir ficheros para saber qué es cada cual, y lo
+      resuelve —pero a un coste altísimo—. Un convenio que hay que deducir
+      leyendo el contenido no es un convenio: es un acertijo.
+
+      **La forma que propone el analista: entrar por el `.pre`.** Es como entra
+      drtran —`load_pre`— y es coherente con el resto de la escalera: el `.pre`
+      YA es el óptimo en forma reejecutable, que es exactamente lo que la
+      previsión necesita (parámetros fijos). Lo único que el `.pre` no lleva es
+      el horizonte y σ², y las dos son cosas de la LLAMADA, no del modelo: H lo
+      decide quien prevé, y σ² sale del `.out` o se recalcula a parámetros
+      fijos.
+
+      **Toca a los dos repos**, y por eso está anotado en los dos:
+      - `fue`: `fuf` aceptando un `.pre` + H, sin exigir un fichero intermedio;
+        `load_fuf` seguiría leyendo los fuf que ya existen.
+      - `art`: `generate_forecast` dejaría de fabricar un fuf para volver a
+        leerlo acto seguido — hoy escribe, recarga y prevé.
+
+      **Lo que NO hay que perder al hacerlo:** el fuf guarda σ² *dentro*, y eso
+      es lo que hace que dos previsiones hechas en momentos distintos sean
+      comparables. Si σ² pasa a recalcularse en cada llamada, esa propiedad se
+      va sin que nadie lo note.
+
+- [ ] **art no escribe el `.out` de una previsión** (`write_fuf_out`) ni la
+      figura (`plot_forecast`), ni nombra el fuf `forecast_<nombre>.inp`. En
+      esta escuela el `.out` ES el registro; una previsión hecha por art hoy
+      deja un HTML, que es una representación. Documentado en el protocolo
+      (sep-2026) para que al menos se sepa; el arreglo es de 0.3, y encaja con
+      el punto anterior porque puede que el `.out` sea lo único que quede.
+
+- [ ] **Comparar modelos por previsión no es una herramienta de la suite.**
+      Varios orígenes, parámetros fijos, RMSE por horizonte, Diebold-Mariano
+      con corrección HLN. Hoy vive en `SF_MEG/empirical/sps/forecast_compare.py`
+      (315 líneas a mano, diseño copiado del `-estwin` de
+      `drvarma/forecast.py::recursive_forecast`), con seis *gotchas*
+      documentados que costaron tiempo real — el primero, que prever con
+      `model.forecast` en vez de `forecast_fuf` usa la raíz NO invertible del
+      testigo MA_f e infla espuriamente el error del modelo estocástico.
+      Es lo que decide entre dos modelos en la frontera del MEG, y está fuera.
+
 ## Funcionalidad pendiente
 
 - [ ] **El carril GUIADO tampoco registra todo lo que estima** — la otra mitad de

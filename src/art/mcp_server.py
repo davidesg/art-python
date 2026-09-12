@@ -666,7 +666,56 @@ Se usan para mirar algo concreto. Ninguno sustituye a un nodo del protocolo.
              seasonal_param_analysis · test_seasonal_simplification
   ESTACIONAL meg_frequency (una frecuencia) · meg_reformulate (aplica ifadf[f]=1)
   INFORMES   full_report · sps_dashboard · save_identification_report
-  PREVISIÓN  generate_forecast · update_and_forecast
+  PREVISIÓN  generate_forecast · update_and_forecast — LEE «EL CONVENIO DEL
+             FUF» más abajo antes de usarlas: la previsión tiene contrato
+             propio, distinto del de la estimación.
+
+══════════════════════════════════════════════════════
+EL CONVENIO DEL FUF — LA PREVISIÓN TIENE CONTRATO PROPIO
+══════════════════════════════════════════════════════
+Prever NO es estimar, y el fichero con el que se prevé no es el mismo con el
+que se estima. `fuf` es un PROGRAMA aparte —no una función de fue— con su
+propio trío, paralelo al de `fue`:
+
+  fue <modelo> -f <H>    →  forecast_<modelo>.inp   el fuf: parámetros FIJOS,
+                                                    horizonte y σ² dentro
+  fuf <forecast_modelo>  →  forecast_<modelo>.out   el REGISTRO de la previsión
+                            …_forecast.png          la figura
+                            …<modelo>.html          el informe
+
+LO QUE HAY QUE SABER, Y NO SE DEDUCE MIRANDO:
+
+1. UN FUF ES UN `.inp` MÁS UNA SECCIÓN. Lleva dentro
+   `** Forecast horizon and estimated innovation variance` con L y σ². Por eso
+   la extensión es `.inp` y no `.fuf`: `fue.load()` lo detecta por esa clave y
+   `load_fuf` la exige. El prefijo `forecast_` NO es decorativo — es lo único
+   que distingue por el nombre un fuf de una especificación, y `load_fuf` lo
+   quita para recuperar el nombre del modelo.
+
+2. LOS PARÁMETROS VAN FIJOS. `forecast_fuf` no reestima: lee los valores como
+   están y calcula los residuos en una pasada. Eso es lo que hace comparables
+   dos previsiones hechas en momentos distintos, y es la razón de que el fuf
+   guarde σ² en vez de recalcularlo.
+
+3. PREVER NO ES UN NODO DEL MÉTODO. Se prevé DESPUÉS de adoptar un modelo, y
+   una previsión no se mete en el guion como una iteración: no hay decisión
+   que registrar porque no se ha elegido nada.
+
+4. LA BANDA QUE VES NO ES LA QUE DEVUELVE EL MOTOR. `level_std` está en
+   unidades Box-Cox, no de nivel; art aplica el método delta —se = level_std ·
+   nivel^(1−λ)— antes de dar el IC 95%. En un modelo en logaritmos, leer
+   `level_std` como si fuese absoluto es un error de escala (BUG-0008).
+
+5. LO QUE ART NO HACE HOY, Y CONVIENE QUE SEPAS: no escribe el `.out` de la
+   previsión —`write_fuf_out`, el registro— ni nombra el fuf con el prefijo
+   `forecast_`. Deja el fuf y el HTML. Si necesitas el registro en el formato
+   de la escuela, hoy hay que pasar por el programa `fuf`.
+
+6. COMPARAR MODELOS POR PREVISIÓN NO ES UNA HERRAMIENTA DE ART. Elegir entre
+   dos modelos por su error fuera de muestra —varios orígenes, parámetros
+   fijos, RMSE por horizonte, Diebold-Mariano— no está en la suite: hoy se
+   hace con arneses a mano. No lo mejores improvisando uno y presentando el
+   resultado como si saliera de art.
 
 ══════════════════════════════════════════════════════
 REGLAS GENERALES
