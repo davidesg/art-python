@@ -17,6 +17,43 @@
       estado o texto** — el problema no es que falten herramientas, sobran sin
       conectar.
 
+## PARA 0.2.2 — lo que quedó fuera de la 0.2.1 (12-sep-2026)
+
+Decisión del analista al cerrar la 0.2.1: *«todo lo demás para 0.2.2. Entre 0.2.x
+y 0.3.0 hay un trabajo de depurar y un cambio importante de arquitectura»*.
+
+- [ ] **`README.md` —la página de PyPI— define mal el carril autónomo**: dice
+      *«Autonomous — Claude/heuristic decides every step»*, que es justo lo que
+      BUG-0180 retiró. `AGENTS.md` y el protocolo ya dicen lo correcto; el README
+      se quedó atrás.
+- [ ] **`docs/DEEPSEEK_MCP_SETUP.md` promete de más**: *«funcionan con cualquier
+      cliente MCP compatible»*. Lo cierto: se conectan y responden desde cualquier
+      cliente (comprobado con DeepSeek TUI); el protocolo está escrito y validado
+      con Claude. En run9_DS (12-sep) DeepSeek no documentó ningún nodo y modelizó
+      como sucesos un error de los datos que Claude sí detectó.
+- [ ] **El autónomo no siempre documenta los nodos.** run6 y run7 (Claude, Linux):
+      12 de 12. run8 (Claude, Windows, autónomo a mitad de sesión) y run9_DS: 0.
+      Hacerlo cumplir desde la herramienta —p. ej. aviso de `confirm_and_estimate`
+      en autónomo cuando llega sin ningún `guion_node` del LLM desde la anterior.
+- [ ] **Datos sustituidos desde internet sin preguntar.** En run9 el LLM detectó
+      que el `.xlsx` no era la serie oficial, bajó la del INE y estimó con ella
+      (sin tocar el Excel, y documentado). Los datos son del usuario: en autónomo
+      debería avisar y preguntar.
+- [ ] **Las copias `DEF_*` con la base declarada no se marcan como re-registro**
+      (resto de BUG-0176, run8): el padre sale bien; faltan la etiqueta y el
+      recuento de iteraciones.
+- [ ] **`verify_optimum` no publica los errores típicos que verifica** (A2 del
+      informe de run8). Es la razón de ser de la herramienta (BUG-0174).
+- [ ] **Doctrina: «equivalentes en previsión»** (`describe.py`, citando
+      `tab:compare` de SF_MEG) en la banda de cuasi-cancelación. En punto es casi
+      cierto; en bandas no a largo plazo (3,1× a diez años con θ=0,968). Decisión
+      del analista.
+- [ ] **El resto de defectos potenciales de `INFORME_run8.md`** (A1–A7, M1–M11,
+      B…), por revisar uno a uno.
+- [ ] **Entorno Windows**: el servidor puede tardar más de 30 s en frío y la
+      sesión sigue sin art sin avisar; `version_instrumento` da el árbol por limpio
+      si `git status` se pasa de 3 s.
+
 ## PARA 0.3 — trocear el protocolo por etapas, con el criterio corregido (sep-2026)
 
 - [ ] **El coste por llamada es el problema; el troceo sigue siendo la

@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**182 report(s), 7 open.**
+**183 report(s), 8 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -14,6 +14,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0147](BUG-0147-la-figura-se-escribe-y-no-se-dice-donde.md) | open | medium | mcp-tools | Seis herramientas escriben su figura y no dicen dónde — el otro medio BUG-0122, y sólo se ve cruzando la frontera | — |
 | [BUG-0151](BUG-0151-la-covarianza-del-out-conserva-la-semilla-del-bf.md) | open | high | estimation | La covarianza del .out conserva la semilla del BFGS en direcciones ROTADAS — ningún detector por parámetro la ve | — |
 | [BUG-0165](BUG-0165-dos-renderizadores-para-la-misma-diagnosis.md) | open | medium | figuras | Dos renderizadores para la MISMA diagnosis — `record_version` y `full_report` se saltan `describe_diagnosis` y salen con el dibujo anterior a pyfug | — |
+| [BUG-0186](BUG-0186-la-lista-de-objetivos-se-sigue-reformulando.md) | open | medium | protocolo | La lista de objetivos se sigue reformulando con BUG-0183 dentro — el protocolo no basta, porque la pregunta se hace con la herramienta del cliente antes de llamar a art | — |
 | [BUG-0011](BUG-0011-dcd-overdiff-recommends-d2-on-seasonal-price-index.md) | in-progress | medium | formal-tests | dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
