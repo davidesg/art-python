@@ -1047,6 +1047,31 @@ def _result(desc) -> list:
     return items
 
 
+def dominio_declarado(domain: str) -> str:
+    """El dominio que declara el analista, validado. `""` si no declaró — BUG-0178.
+
+    UNA COPIA, DOS CAMINOS — y aquí eran tres puertas y dos copias. `domain`
+    decide λ (`policy.decide_lambda`: un índice va en log SIEMPRE, su base es
+    una convención), así que un valor que la política no reconoce no es un
+    detalle de forma: cae a `decide_domain`, el estadístico decide, y sobre un
+    índice de precios eso da λ=1 donde la regla dice λ=0.
+
+    `guided_identification` y `confirm_and_estimate` ya rechazaban lo no
+    reconocido. `build_model` —la puerta del carril AUTÓNOMO— no, y ahí el
+    valor entraba, se anunciaba como si se hubiera aplicado y el modelo salía
+    en niveles. Es exactamente la lección de BUG-0015 repetida: la regla vive
+    en `policy`, y tenerla sólo en unas capas es lo que parte una familia de
+    series entre logs y niveles.
+
+    Levanta `ValueError` para que cada puerta lo convierta en su `_err`.
+    """
+    d = (domain or "").strip()
+    if d and d not in policy.DOMINIOS:
+        raise ValueError(f"domain={d!r} no es un dominio reconocido. "
+                         "Usa uno de: " + ", ".join(policy.DOMINIOS))
+    return d
+
+
 def _err(msg: str) -> list:
     """El error, presentado. Un incumplimiento del CONTRATO va sin traceback.
 
@@ -4663,10 +4688,10 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             # BUG-0040 —`multiplicative` y `ratio`, que van en log salvo que el
             # dato lo desmienta— no llegaban al carril guiado ni declarándolas.
             # Se enruta por `decide_lambda`, que las tiene todas.
-            dom_decl = (domain or "").strip()
-            if dom_decl and dom_decl not in policy.DOMINIOS:
-                return _err(f"domain={dom_decl!r} no es un dominio reconocido. "
-                            "Usa uno de: " + ", ".join(policy.DOMINIOS))
+            try:
+                dom_decl = dominio_declarado(domain)
+            except ValueError as exc:
+                return _err(str(exc))
             dom = dom_decl or policy.decide_domain(ts)
             lam_pol = policy.decide_lambda(bc.data, domain=dom)
             index_note = ""
@@ -6128,11 +6153,11 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         # guiado no ofrecía dónde corregirlo). No se bloquea —el analista manda—
         # pero se dice.
         aviso_dom = ""
-        _dd = (domain or "").strip()
+        try:
+            _dd = dominio_declarado(domain)
+        except ValueError as exc:
+            return _err(str(exc))
         if _dd:
-            if _dd not in policy.DOMINIOS:
-                return _err(f"domain={_dd!r} no es un dominio reconocido. "
-                            "Usa uno de: " + ", ".join(policy.DOMINIOS))
             if _dd == "price_index" and lam != 0.0:
                 aviso_dom = (
                     f"\n\n> ⚠ **Dominio `{_dd}` con λ={lam:g}.** Un índice no "
@@ -8659,11 +8684,36 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
         # BUG-0013: -1 leaves the mean to the policy's drift test, which is what
         # you want -- the analyst only overrides to force it on or off.
         if estimate_mu >= 0: overrides["estimate_mu"] = bool(estimate_mu)
-        # BUG-0015: qué CLASE de serie es. Declarado gana a inferido del nombre.
-        if domain:           overrides["domain"] = domain
         if decision:         overrides["decision"] = decision
+
+        # EL CARRIL LO DECIDEN LAS DECISIONES, NO LOS DATOS — BUG-0179.
+        #
+        # Hasta aquí `overrides` sólo lleva DECISIONES de especificación, que es
+        # lo que el docstring promete como disparador del carril guiado. El
+        # dominio NO es una: es un dato sobre qué clase de serie es ésta, y
+        # entra después, a propósito, para que declararlo no saque la llamada
+        # del carril autónomo.
+        #
+        # Lo hacía. `domain` iba en el mismo diccionario y `guided =
+        # bool(overrides)` lo contaba: declarar el dominio —un dato— volvía
+        # «guiada» la llamada, la salida tomaba la forma de turno guiado y
+        # terminaba en `FIN_DE_TURNO_GUIADO`. El asistente leía ⏸, paraba y
+        # preguntaba: el carril autónomo dejaba de ser autónomo. La bifurcación
+        # existía desde 12-ago (f8ee98e) y no se veía hasta que la salida se
+        # unificó en el sobre de iteración (9cc69fe, 06-sep).
         guided = bool(overrides)
-        decision_policy = policy.ClaudePolicy(**overrides) if guided else None
+
+        # DECLARADO GANA A INFERIDO, y un valor que nadie reconoce NO gana
+        # nada — BUG-0178. La guarda existía en `guided_identification` y no
+        # aquí, que es por donde pasa el carril autónomo.
+        try:
+            dom_decl = dominio_declarado(domain)
+        except ValueError as exc:
+            return _err(str(exc))
+        # BUG-0015: qué CLASE de serie es. Declarado gana a inferido del nombre.
+        if dom_decl:         overrides["domain"] = dom_decl
+
+        decision_policy = policy.ClaudePolicy(**overrides) if overrides else None
 
         # ── Run the pipeline (decisions + outlier loop) ────────────────────
         result = run_full(ts, output_path, max_rounds=max_rounds,
