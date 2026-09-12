@@ -55,6 +55,17 @@
       Va en la misma dirección que los tres puntos del fuf de abajo: lo que se
       paga en tokens es la doctrina que el asistente no puede pedir a trozos.
 
+## PARA 0.3 — el veto del multivariante, en las herramientas y no en el protocolo (sep-2026)
+
+- [ ] **`formal_tests` y `meg_reformulate` deberían recibir `objetivo`** y aplicar
+      ellos el veto del multivariante: con `objetivo="multivariante"`, ni D=1 ni
+      `ifadf[f]=1`, diga el MEG lo que diga. Hoy `objetivo` sólo llega al nodo
+      estacional (`guided_identification`) y a `build_model`/`batch_build`; en el
+      carril autónomo la regla la sostiene una línea del protocolo (BUG-0183),
+      o sea que es una costumbre y no una propiedad del sistema. En el run 6 el
+      modelo final llevaba f=3 estocástica y nada lo habría impedido con el
+      objetivo multivariante.
+
 ## PARA 0.3 — el fuf debería entrar por el `.pre`, como drtran (sep-2026)
 
 - [ ] **Un `.inp` propio del fuf no hace falta hoy, y confunde terriblemente.**

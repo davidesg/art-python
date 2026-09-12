@@ -929,6 +929,7 @@ Sequential identification — ONE decision node per call.
 | `guion_rationale` | string | no | `` |
 | `guion_problems` | string | no | `` |
 | `guion_next` | string | no | `` |
+| `modo` | string | no | `guiado` |
 
 Sequential INTERVENTION — ONE decision node per call.
 
@@ -975,6 +976,9 @@ Sequential INTERVENTION — ONE decision node per call.
     inp_path      : .inp del modelo estimado **SIN** la intervención
     date          : "" → Call 1. "MM/YYYY", "QN/YYYY" o "YYYY" → Call 2 ó 3
     form          : "" → Call 2. "step"|"pulse"|"impulse"|"ramp" → Call 3
+    modo          : "guiado" (por defecto) | "autonomo". En AUTÓNOMO la rampa
+                    se rechaza (BUG-0182); se pasa tal cual a
+                    `suggest_intervention_form`, que es quien la construye.
     n_delta       : nº de coeficientes δ del denominador. 0 = sin denominador.
                     Con `form="impulse"` y `n_delta=1` es la FORMA RACIONAL
                     ω₀/(1−δB) — salta y decae, dos parámetros (BUG-0161).
@@ -2074,6 +2078,7 @@ Generate a sequential prediction (SPS) dashboard for all series in a directory.
 | `guion_rationale` | string | no | `` |
 | `guion_problems` | string | no | `` |
 | `guion_next` | string | no | `` |
+| `modo` | string | no | `guiado` |
 
 Add an intervention to the .inp, re-estimate and show updated diagnosis.
 
@@ -2115,6 +2120,11 @@ Add an intervention to the .inp, re-estimate and show updated diagnosis.
                         nivel que `incident_configurations` identifica como
                         «fecha×N» — antes no había forma de construirla desde
                         aquí, aunque el motor la soportaba (BUG-0079).
+    modo              : "guiado" (por defecto) | "autonomo". En AUTÓNOMO
+                        `form="ramp"` se RECHAZA (BUG-0182): una rampa en el
+                        nivel es una tendencia determinista desde su fecha, y
+                        fija para siempre la pendiente de la previsión. Es
+                        instrumento de usuario avanzado, del carril guiado.
     form              : "pulse", "step", "ramp" — o **"auto"**, que corre la
                         ESCALERA DE OCKHAM: estima los peldaños en orden (1a
                         escalón permanente, 1b impulso transitorio, 2 episodio

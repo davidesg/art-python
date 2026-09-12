@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**178 report(s), 7 open.**
+**180 report(s), 7 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -184,6 +184,8 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0179](BUG-0179-declarar-el-dominio-saca-la-llamada-del-carril-autonomo.md) | fixed | high | pipeline | Declarar `domain` saca la llamada del carril AUTÓNOMO — la salida toma forma de turno guiado, termina en ⏸ y el asistente deja de iterar y pregunta | 0.2.1 |
 | [BUG-0180](BUG-0180-el-autonomo-del-estudio-no-se-consolido.md) | fixed | critical | protocolo | El carril AUTÓNOMO que el estudio validó —el LLM hace de analista y decide cada nodo— nunca pasó al protocolo; art mandaba el autónomo a `build_model`, y sin enunciado el «autónomo» era un auto-ARIMA con paradas del guiado | 0.2.1 |
 | [BUG-0181](BUG-0181-las-herramientas-de-estimacion-paran-en-cualquier-carril.md) | fixed | high | mcp-tools | `confirm_and_estimate` y `estimate_and_diagnose` llevan el carril «guiado» fijo — en AUTÓNOMO cada estimación termina en ⏸ y le ordena al LLM parar a esperar a un analista que no existe | 0.2.1 |
+| [BUG-0182](BUG-0182-la-rampa-fija-la-prevision-y-art-la-ofrecia-como-una-forma-mas.md) | fixed | high | interventions | art ofrecía la RAMPA como una forma más — en autónomo el LLM la usó para zanjar el orden de integración, y fijó para siempre la inflación de largo plazo con una banda que no recoge esa incertidumbre | 0.2.1 |
+| [BUG-0183](BUG-0183-el-objetivo-se-reformulaba-y-lo-desconocido-caia-en-univariante.md) | fixed | high | mcp-tools | El objetivo del análisis viajaba como texto libre — el asistente ofreció «Previsión / Estructural / Ambos», se perdió MULTIVARIANTE, y lo que art no reconocía se convertía en «univariante» en silencio | 0.2.1 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 

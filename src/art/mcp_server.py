@@ -86,11 +86,21 @@ Si elige AUTÓNOMO, pregunta ADEMÁS —una sola vez, aquí:
    3) ESTRUCTURAL   — leer los componentes. Prefiere la determinista, que
       los deja explícitos con su amplitud."
 
+  PRESÉNTALAS TAL CUAL: LAS TRES, CON ESOS NOMBRES. No las reformules ni
+  añadas otras —«previsión», «ambos», «sin preferencia»—: cada opción es un
+  VALOR de `objetivo` (univariante · multivariante · estructural) y art no
+  entiende ningún otro. Prever una serie sola es «univariante». Y la razón de
+  ser de la lista es la opción 2: es la única que VETA algo —la raíz unitaria
+  estacional—, y una lista sin ella no pregunta lo que tiene que preguntar
+  (BUG-0183).
+
   Un renglón de sesgo por opción y nada más: el desarrollo largo lo entrega
   el propio pipeline EN EL NODO ESTACIONAL, que es cuando la decisión se toma.
-  Pásalo como objetivo= en guided_identification y confirm_and_estimate (y en
-  build_model / batch_build si los usas). Si el usuario no contesta es
-  "univariante", y DILO al presentar el modelo: un defecto silencioso no se
+  Pásalo como objetivo= en guided_identification —la llamada del nodo
+  estacional— y en build_model / batch_build si los usas. Ninguna otra
+  herramienta lo recibe: a confirm_and_estimate, formal_tests o
+  meg_reformulate no se lo pases, porque no lo leen. Si el usuario no contesta
+  es "univariante", y DILO al presentar el modelo: un defecto silencioso no se
   puede discutir.
 
   POR QUÉ SÍ SE PREGUNTA AL ENTRAR, cuando la de d/D no (ver LLAMADA 3): no es
@@ -405,7 +415,7 @@ LOS NODOS — los mismos que en guiado, en el mismo orden, UNO POR VEZ:
                     regla de la transformación.
   2. lambda         guided_identification(inp_path)
   3. d              guided_identification(inp_path, lam=X)
-  4. estacionalidad guided_identification(inp_path, lam=X, d=Y)
+  4. estacionalidad guided_identification(inp_path, lam=X, d=Y, objetivo=…)
   5. media          ¿μ libre o fijada en cero?
   6. modelo base    confirm_and_estimate(..., modo="autonomo") sin ARMA. Mira
                     el escaneo de anómalos que viene en la salida.
@@ -438,6 +448,16 @@ REGLAS:
     no es un contraste.
   - Los anómalos se calibran, no se eliminan.
   - No añadas un parámetro no significativo para cerrar un criterio.
+  - NO USES RAMPAS. Una rampa en el nivel es una tendencia determinista desde
+    su fecha: la previsión hereda esa pendiente para siempre y la banda no
+    recoge incertidumbre sobre ella. Si ves un cambio en la tasa media de
+    crecimiento, la pregunta es de ORDEN DE INTEGRACIÓN: vuelve al nodo d y
+    contrasta la alternativa estocástica, o acota la ventana muestral. En
+    autónomo suggest_intervention_form la rechaza (BUG-0182).
+  - CON OBJETIVO MULTIVARIANTE, LA ESTACIONALIDAD QUEDA DETERMINISTA. El MEG
+    puede clasificar una frecuencia como estocástica, pero no reformules: ni
+    D=1 ni ifadf[f]=1. formal_tests y meg_reformulate no conocen el objetivo,
+    así que esta regla la llevas tú (BUG-0183).
 
 DOCUMENTACIÓN — obligatoria. Después de CADA nodo:
 
@@ -658,6 +678,16 @@ ETAPA 3 — DIAGNOSIS E INTERVENCIONES
     (con n_omega para una FLT de varios ω) → MUESTRA la diagnosis actualizada.
   → Cuando el modelo parezca limpio: test_interventions.
 
+RAMPA — INSTRUMENTO DE USUARIO AVANZADO (BUG-0182). Una rampa en el nivel
+es un escalón pasado por 1/(1−B): ganancia infinita, tendencia determinista
+desde su fecha. Con d=1 es un escalón en la tasa de crecimiento; sobre un
+índice de precios, fijar para siempre un cambio en la inflación tendencial.
+La previsión hereda esa pendiente sin fecha de caducidad y la banda no
+recoge incertidumbre sobre ella. Si la fecha sale de mirar los datos, los
+contrastes de orden de integración posteriores no tienen sus críticos
+habituales (Zivot-Andrews). Proponla sólo si el analista la pide o la
+defiende, y enséñale el aviso con sus cifras: sale en la propia salida.
+
 ─────────────────────────────────────────────────────
 ETAPA 4 — CONTRASTES FORMALES
 ─────────────────────────────────────────────────────
@@ -837,6 +867,15 @@ _Naturaleza = Literal["", "permanente", "transitorio", "recuperacion_parcial"]
 #: (BUG-0155): un valor que el cliente puede escribir mal es un valor que acaba
 #: cayendo en el defecto sin que nadie lo vea.
 _Modo = Literal["guiado", "autonomo"]
+
+#: PARA QUÉ ES EL MODELO, en el esquema — BUG-0183. Viajaba como texto libre y
+#: la política convertía en silencio cualquier valor desconocido en
+#: «univariante»: un asistente que ofreció «Previsión / Estructural / Ambos» y
+#: pasó lo que eligió el usuario obtenía un objetivo que nadie había elegido. Y
+#: el único valor que VETA algo —«multivariante», que prohíbe la raíz unitaria
+#: estacional porque rompe la comparabilidad de los órdenes de integración— es
+#: justo el que se perdió.
+_Objetivo = Literal["univariante", "multivariante", "estructural"]
 
 
 def _modo_del_sobre(modo: str) -> str:
@@ -1168,6 +1207,108 @@ def dominio_declarado(domain: str) -> str:
         raise ValueError(f"domain={d!r} no es un dominio reconocido. "
                          "Usa uno de: " + ", ".join(policy.DOMINIOS))
     return d
+
+
+def objetivo_declarado(objetivo: str) -> str:
+    """El objetivo, validado — BUG-0183. Mismo patrón que `dominio_declarado`.
+
+    `policy.decide_seasonal_route` cae a «univariante» ante cualquier valor que
+    no reconoce, y así se queda para quien la llame directamente. Pero por las
+    puertas de art no puede entrar un objetivo que nadie eligió: se rechaza
+    diciendo cuáles valen.
+    """
+    o = (objetivo or "").strip().lower()
+    if not o:
+        return policy.OBJETIVO_POR_DEFECTO
+    if o not in policy.OBJETIVOS:
+        raise ValueError(
+            f"objetivo={objetivo!r} no es un objetivo de art. Usa uno de: "
+            + ", ".join(policy.OBJETIVOS) + ". «multivariante» es el que "
+            "fuerza estacionalidad determinista; no hay objetivo «previsión»: "
+            "prever una serie sola es «univariante».")
+    return o
+
+
+def aviso_rampa(model) -> str:
+    """Lo que una RAMPA le hace a la previsión, con sus números — BUG-0182.
+
+    Una rampa en el nivel es un escalón pasado por un integrador,
+    R_t = S_t/(1−B): el límite δ=1 de la forma racional ω/(1−δB). Su ganancia
+    es infinita y su efecto sobre el nivel crece sin cota — es una TENDENCIA
+    DETERMINISTA desde la fecha. Con d=1 equivale a un escalón en la tasa de
+    crecimiento: sobre un índice de precios, a fijar para siempre un cambio en
+    la inflación tendencial.
+
+    La función de previsión la hereda sin fecha de caducidad, y la banda no
+    recoge ninguna incertidumbre sobre ella: es determinista y entra como
+    conocida. En el run 6 de IPC_ES una rampa de −0,204 %/mes en 07/2008 fijó la
+    inflación de largo plazo en 0,94 % anual, un −8,8 % de nivel a diez años
+    frente al modelo sin ella, con una banda un tercio de la que daría la
+    alternativa estocástica a esa distancia.
+
+    Devuelve "" si el modelo no lleva rampas.
+    """
+    try:
+        from art.interventions import _intervention_param_start
+        itvs = list(getattr(model, "interventions", None) or [])
+        rampas = [(i, it) for i, it in enumerate(itvs)
+                  if str(getattr(it, "type", "")).lower() == "ramp"]
+        if not rampas:
+            return ""
+        import numpy as _np
+        r = getattr(model, "_result", None)
+        # NUNCA `x or []` sobre algo que puede ser un array de numpy: su verdad
+        # es ambigua y revienta — BUG-0158 y BUG-0174 fueron exactamente esto.
+        _p = getattr(r, "params", None) if r is not None else None
+        params = [float(x) for x in _np.ravel(_p)] if _p is not None else []
+        freq = int(getattr(model.series, "freq", 1) or 1)
+        lam = getattr(model, "boxlam", None)
+        refac = float(getattr(model, "refactor", 1.0) or 1.0)
+        en_pct = (lam is not None and float(lam) == 0.0 and refac == 100.0)
+        u = "%" if en_pct else " (unidades de la serie transformada)"
+        filas = []
+        for i, it in rampas:
+            om = None
+            _omf = getattr(it, "omega_free", None)
+            omf = [bool(x) for x in _np.ravel(_omf)] if _omf is not None else [True]
+            if params and (not omf or omf[0]):
+                k = _intervention_param_start(model, i)
+                if k < len(params):
+                    om = float(params[k])
+            _om = getattr(it, "omega", None)
+            if om is None and _om is not None and _np.size(_om) > 0:
+                om = float(_np.ravel(_om)[0])
+            try:
+                yr, per = model.series._obs_to_date(int(it.at) + 1)
+                fecha = f"{per:02d}/{yr}" if freq > 1 else str(yr)
+            except Exception:
+                fecha = f"obs {int(it.at) + 1}"
+            if om is None:
+                filas.append(f"   · rampa en {fecha}: ω aún sin estimar")
+            else:
+                anual = (f" ≈ {om * freq:+.2f}{u} al año" if freq > 1 else "")
+                filas.append(f"   · rampa en {fecha}: ω = {om:+.4f}{u} por "
+                             f"periodo{anual}, desde esa fecha y PARA SIEMPRE")
+        return ("\n\n> ⚠ **RAMPA EN EL NIVEL — cambia la previsión a largo plazo "
+                "sin fecha de caducidad** (BUG-0182).\n>\n"
+                + "\n".join("> " + f for f in filas) + "\n>\n"
+                "> Una rampa es un escalón pasado por 1/(1−B): ganancia infinita, "
+                "efecto sobre el nivel sin cota. Es una **tendencia determinista** "
+                "desde la fecha; con d=1, un escalón en la tasa de crecimiento. La "
+                "función de previsión hereda esa pendiente indefinidamente y la "
+                "**banda no recoge incertidumbre sobre ella**, porque entra como "
+                "conocida.\n>\n"
+                "> Si la fecha salió de mirar los datos —el residuo mayor, el perfil "
+                "de ℓ—, los contrastes de orden de integración posteriores no tienen "
+                "sus críticos habituales (Zivot-Andrews): una rampa puede hacer "
+                "desaparecer una raíz unitaria por construcción. Antes de "
+                "adoptarla, contrasta la alternativa estocástica en el nodo d.\n>\n"
+                "> Instrumento de usuario avanzado: el carril autónomo no la admite.")
+    except Exception as exc:                            # pragma: no cover
+        _warn("no se pudo describir la rampa del modelo", exc)
+        return ("\n\n> ⚠ **El modelo lleva una RAMPA** (BUG-0182): tendencia "
+                "determinista desde su fecha, heredada por la previsión sin "
+                "fecha de caducidad.")
 
 
 def _err(msg: str) -> list:
@@ -3252,7 +3393,7 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
             modo=_modo_del_sobre(modo),
             especificacion=(f"`{os.path.basename(inp_path)}` estimado tal como "
                             f"está: esta vía no construye especificación, la "
-                            f"relee."),
+                            f"relee." + aviso_rampa(m)),
             ecuacion=eq_text,
             diagnosis=desc.summary + "\n\n---\n" + desc.recommendation,
             conclusiones=_conclusiones_desde(desc),
@@ -4707,7 +4848,7 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
 def guided_identification(inp_path: str, lam: float = -1.0,
                            d: int = -1, D: int = -1,
                            pre_path: str = "",
-                           objetivo: str = "univariante",
+                           objetivo: _Objetivo = "univariante",
                            domain: str = "") -> list:
     """
     Sequential identification — ONE decision node per call.
@@ -4775,6 +4916,12 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                its residuals instead of the raw transformed series.
     """
     try:
+        # Por las puertas de art no entra un objetivo que nadie eligió: la
+        # política lo convertía en «univariante» en silencio (BUG-0183).
+        try:
+            objetivo = objetivo_declarado(objetivo)
+        except ValueError as _exc_obj:
+            return _err(str(_exc_obj))
         from mcp.types import TextContent, ImageContent
         from art.describe import describe_boxcox, describe_seasonality, describe_identification
         ts, _ = _load_ts_model(inp_path)
@@ -6380,7 +6527,10 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                     + (f"\n\n*Encadenado desde "
                        f"`{os.path.basename(base_pre_path)}`: se conservan sus "
                        f"intervenciones y armónicos, y se sustituye el ARMA.*"
-                       if base_pre_path else "")),
+                       if base_pre_path else "")
+                    # Encadenar desde un `.pre` hereda sus intervenciones, y
+                    # una rampa heredada sigue fijando la previsión (BUG-0182).
+                    + aviso_rampa(m)),
                 ecuacion=eq_text,
                 # La diagnosis de esta escuela son los métodos formales Y los
                 # informales: el veredicto de Q y JB, y el escaneo de anómalos
@@ -7585,7 +7735,8 @@ def guided_intervention(inp_path: str,
                         guion_decision: str = "",
                         guion_rationale: str = "",
                         guion_problems: str = "",
-                        guion_next: str = "") -> list:
+                        guion_next: str = "",
+                        modo: _Modo = "guiado") -> list:
     """
     Sequential INTERVENTION — ONE decision node per call.
 
@@ -7632,6 +7783,9 @@ def guided_intervention(inp_path: str,
     inp_path      : .inp del modelo estimado **SIN** la intervención
     date          : "" → Call 1. "MM/YYYY", "QN/YYYY" o "YYYY" → Call 2 ó 3
     form          : "" → Call 2. "step"|"pulse"|"impulse"|"ramp" → Call 3
+    modo          : "guiado" (por defecto) | "autonomo". En AUTÓNOMO la rampa
+                    se rechaza (BUG-0182); se pasa tal cual a
+                    `suggest_intervention_form`, que es quien la construye.
     n_delta       : nº de coeficientes δ del denominador. 0 = sin denominador.
                     Con `form="impulse"` y `n_delta=1` es la FORMA RACIONAL
                     ω₀/(1−δB) — salta y decae, dos parámetros (BUG-0161).
@@ -7760,7 +7914,7 @@ def guided_intervention(inp_path: str,
                           guion_decision=guion_decision,
                           guion_rationale=guion_rationale,
                           guion_problems=guion_problems,
-                          guion_next=guion_next)
+                          guion_next=guion_next, modo=modo)
             texto = "\n".join(getattr(c, "text", "") for c in partes)
             if texto.startswith("❌"):
                 return partes
@@ -8160,7 +8314,8 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                                guion_decision: str = "",
                                guion_rationale: str = "",
                                guion_problems: str = "",
-                               guion_next: str = "") -> list:
+                               guion_next: str = "",
+                               modo: _Modo = "guiado") -> list:
     """
     Add an intervention to the .inp, re-estimate and show updated diagnosis.
 
@@ -8202,6 +8357,11 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                         nivel que `incident_configurations` identifica como
                         «fecha×N» — antes no había forma de construirla desde
                         aquí, aunque el motor la soportaba (BUG-0079).
+    modo              : "guiado" (por defecto) | "autonomo". En AUTÓNOMO
+                        `form="ramp"` se RECHAZA (BUG-0182): una rampa en el
+                        nivel es una tendencia determinista desde su fecha, y
+                        fija para siempre la pendiente de la previsión. Es
+                        instrumento de usuario avanzado, del carril guiado.
     form              : "pulse", "step", "ramp" — o **"auto"**, que corre la
                         ESCALERA DE OCKHAM: estima los peldaños en orden (1a
                         escalón permanente, 1b impulso transitorio, 2 episodio
@@ -8220,6 +8380,28 @@ def suggest_intervention_form(inp_path: str, output_path: str,
     guion_problems    : problems found in the diagnosis
     guion_next        : description of the next version to try
     """
+    # LA RAMPA NO ES DEL CARRIL AUTÓNOMO — BUG-0182.
+    #
+    # En el run 6 de IPC_ES el LLM, haciendo de analista, resolvió una
+    # discrepancia SF/DCD en f=0 metiendo una rampa en 07/2008: fijó la
+    # inflación de largo plazo en 0,94 % anual PARA SIEMPRE, con una banda que
+    # no recoge esa incertidumbre, y leyó después el DCD con los críticos de
+    # siempre sobre una fecha elegida mirando los datos. La razón era buena —
+    # ¿raíz unitaria en la inflación o ruptura en su media?— y el método no:
+    # decidir el orden de integración a golpe de término determinista. Esa
+    # pregunta se contesta en el nodo d, y con el analista humano delante.
+    if (form or "").strip().lower() == "ramp" and modo == "autonomo":
+        return _err(
+            "form=\"ramp\" no se admite en el carril AUTÓNOMO (BUG-0182). Una "
+            "rampa en el nivel es una tendencia determinista desde su fecha: la "
+            "función de previsión hereda esa pendiente sin fecha de caducidad y "
+            "la banda no recoge incertidumbre sobre ella. Si lo que ves es un "
+            "cambio en la tasa media de crecimiento, esa es una pregunta sobre "
+            "el ORDEN DE INTEGRACIÓN: vuelve al nodo d y contrasta la "
+            "alternativa estocástica (d+1, con su testigo MA), o acota la "
+            "ventana muestral al régimen que quieras modelizar. Si de verdad "
+            "hace falta una rampa, es una decisión del carril guiado.")
+
     try:
         from mcp.types import TextContent, ImageContent
         from art.describe import describe_diagnosis
@@ -8659,7 +8841,8 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             especificacion=(
                 f"**Intervención {'REHECHA' if rehacer else 'añadida'}:** "
                 f"{_forma_txt}  {date_note}"
-                f"{context_str}" + _nota_rehacer + conv_txt + escalera_txt),
+                f"{context_str}" + _nota_rehacer + conv_txt + escalera_txt
+                + aviso_rampa(m_fit)),
             ecuacion=eq_text,
             diagnosis=(diag.summary + "\n\n---\n" + diag.recommendation
                        + scan_section),
@@ -8731,7 +8914,7 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
                 guion_name: str = "",
                 guion_decision: str = "",
                 guion_rationale: str = "",
-                objetivo: str = "univariante",
+                objetivo: _Objetivo = "univariante",
                 modo: _Modo = "guiado") -> list:
     """
     ATAJO HEURÍSTICO — el pipeline de una llamada. NO es el modo autónomo.
@@ -8789,6 +8972,12 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
     guion_rationale: justification for the spec
     """
     try:
+        # Por las puertas de art no entra un objetivo que nadie eligió: la
+        # política lo convertía en «univariante» en silencio (BUG-0183).
+        try:
+            objetivo = objetivo_declarado(objetivo)
+        except ValueError as _exc_obj:
+            return _err(str(_exc_obj))
         from mcp.types import TextContent, ImageContent
         from art.describe import describe_diagnosis
         from art.diagnosis import plot_diagnosis
@@ -9118,7 +9307,7 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
 @mcp.tool()
 def batch_build(inp_paths: list[str], output_dir: str,
                 max_rounds: int = 5, run_meg: bool = False,
-                objetivo: str = "univariante") -> list:
+                objetivo: _Objetivo = "univariante") -> list:
     """
     Autonomous pipeline for multiple series. Builds one model per series.
 
@@ -9142,6 +9331,12 @@ def batch_build(inp_paths: list[str], output_dir: str,
                   produces a batch that cannot be assembled.
     """
     try:
+        # Por las puertas de art no entra un objetivo que nadie eligió: la
+        # política lo convertía en «univariante» en silencio (BUG-0183).
+        try:
+            objetivo = objetivo_declarado(objetivo)
+        except ValueError as _exc_obj:
+            return _err(str(_exc_obj))
         from mcp.types import TextContent, ImageContent
         from art.describe import describe_diagnosis
         from art.formal_tests import dcd as _dcd
