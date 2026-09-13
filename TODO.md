@@ -17,6 +17,41 @@
       estado o texto** — el problema no es que falten herramientas, sobran sin
       conectar.
 
+## A DISCUTIR — la previsión y la comparación de previsiones: ¿un MCP aparte? (13-sep-2026)
+
+- [ ] **No están cubiertas.** Palabras del analista al cerrar la sesión del
+      12/13-sep: *«Las funciones de previsión y comparación de previsión no están
+      cubiertas y es posible que necesitemos un MCP aparte. A discutir.»* Se
+      discute ANTES de escribir código. Lo que hay sobre la mesa:
+
+      - **Lo que art tiene**: `generate_forecast` y `update_and_forecast`, sobre
+        `forecast_fuf` de fue. No escriben el `.out` de la previsión ni siguen el
+        convenio `forecast_<modelo>.inp` (ver «PARA 0.3 — el fuf debería entrar
+        por el `.pre`», más abajo). El protocolo documenta desde el 12-sep lo que
+        art NO hace.
+      - **Lo que no existe**: comparar modelos por su error fuera de muestra.
+        Vive a mano en `SF_MEG/empirical/sps/forecast_compare.py` —varios
+        orígenes, parámetros fijos (el `-estwin` de drvarma), RMSE por horizonte,
+        Diebold-Mariano con HLN— y sus trampas en
+        `SF_MEG/empirical/FORECAST_COMPARISON.md`: la primera, prever con la raíz
+        NO invertible del testigo MA_f infla el error del modelo estocástico.
+      - **Por qué quizá un MCP aparte**: la previsión tiene contrato propio (el
+        fuf), su propio flujo (se prevé después de adoptar, no es un nodo del
+        método) y serviría a los tres asistentes —un `.pre` de art, de mtram o de
+        sima—. Meterlo en art engordaría un protocolo que ya pasa de 45.000
+        caracteres por llamada.
+      - **Referencia externa (Nixtla, revisada el 13-sep)**:
+        `statsforecast.cross_validation(h, n_windows, step_size, input_size,
+        refit=False)` es exactamente el diseño de parámetros fijos y varios
+        orígenes; `utilsforecast` trae MAE, RMSE, MASE, RMSSE, cobertura,
+        Winkler, pérdida por cuantiles. **No tiene Diebold-Mariano ni nada MCP.**
+        Su `AutoARIMA` (Hyndman-Khandakar, KPSS para d, heurística para D) es el
+        atajo de `build_model` y valdría como línea base del carril autónomo.
+      - **Doctrina pendiente** que afecta a esto: art dice que en la banda de
+        cuasi-cancelación las representaciones son «equivalentes en previsión»;
+        es cierto en punto y no en bandas a largo plazo (3,1× a diez años con
+        θ=0,968).
+
 ## PARA 0.2.2 — lo que quedó fuera de la 0.2.1 (12-sep-2026)
 
 Decisión del analista al cerrar la 0.2.1: *«todo lo demás para 0.2.2. Entre 0.2.x
