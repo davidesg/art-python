@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**183 report(s), 8 open.**
+**186 report(s), 8 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -189,6 +189,9 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0183](BUG-0183-el-objetivo-se-reformulaba-y-lo-desconocido-caia-en-univariante.md) | fixed | high | mcp-tools | El objetivo del análisis viajaba como texto libre — el asistente ofreció «Previsión / Estructural / Ambos», se perdió MULTIVARIANTE, y lo que art no reconocía se convertía en «univariante» en silencio | 0.2.1 |
 | [BUG-0184](BUG-0184-encadenar-desde-un-inp-dejaba-huerfano-al-modelo.md) | fixed | high | guion | Regresión de BUG-0175 — encadenar desde un `.inp` dejaba huérfano al modelo; cada intervención quedaba como raíz del árbol, en los dos carriles | 0.2.1 |
 | [BUG-0185](BUG-0185-la-alternativa-intervenir-fecha-el-residuo-sin-el-desfase.md) | fixed | high | mcp_server | La alternativa «Intervenir <fecha>» fecha el residuo extremo sin el desfase — sexto sitio de BUG-0172; en un modelo con raíz estacional propone intervenir el mes equivocado | 0.2.1 |
+| [BUG-0187](BUG-0187-write-inp-no-escribe-las-columnas-de-datos-de-lo.md) | fixed | high | inp-builder | _write_inp no escribe las columnas de datos de los deterministas NO ESTANDAR: un regresor externo vuelve identicamente cero y el lector lo relee sin avisar | 0.2.2 |
+| [BUG-0188](BUG-0188-write-inp-escribe-los-datos-de-la-serie-con-6f-y.md) | fixed | medium | inp-builder | _write_inp escribe los datos de la serie con %.6f y los trunca: el mismo defecto que el GUI en C documenta haber arreglado, y su escritor hermano _write_bare_inp usa .10f | 0.2.2 |
+| [BUG-0189](BUG-0189-art-lee-la-media-por-getattr-model-mu-y-el-atrib.md) | fixed | high | guion | art lee la media por getattr(model, 'mu'), y el atributo se llama mu0: el guion registra mu=0.0 SIEMPRE, y los clones de la escalera y del barrido pierden la semilla heredada | 0.2.2 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 

@@ -1104,7 +1104,10 @@ def _extract_spec(model, lam: float) -> dict[str, Any]:
         "D": model.D,
         # La media: `mu` sin `estimate_mu` no dice nada — un μ=0 fijo y un μ=0
         # estimado son modelos distintos con un parámetro de diferencia.
-        "mu": float(getattr(model, "mu", 0.0) or 0.0),
+        # El atributo de `fue.Model` es `mu0`; el argumento del constructor es
+        # `mu`. Leído por `mu`, el `getattr` devolvía el 0.0 del defecto y el
+        # guion registraba μ=0 SIEMPRE (BUG-0189).
+        "mu": float(getattr(model, "mu0", 0.0) or 0.0),
         "estimate_mu": bool(getattr(model, "estimate_mu", False)),
         "alter": tiene_alter,
         "ar_free": _banderas(model.ar, getattr(model, "ar_free", None)),

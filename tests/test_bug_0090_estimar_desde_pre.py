@@ -67,7 +67,13 @@ def test_los_valores_coinciden_y_por_eso_es_invisible(par):
     no hay nada en el modelo que delate la diferencia."""
     m_inp, m_pre, _, _ = par
     assert abs(m_inp._result.loglik - m_pre._result.loglik) < 1e-6
-    assert np.allclose(m_inp._result.params, m_pre._result.params, atol=1e-6)
+    # La tolerancia de los parámetros es la del OPTIMIZADOR, no 1e-6: el `.pre`
+    # siembra los libres a `.4f`, BFGS para en una iteración con el gradiente
+    # satisfecho y el punto donde para dista del óptimo del `.inp` lo que
+    # permita ese criterio. Con los datos redondeados a `.6f` de antes de
+    # BUG-0188 caía por debajo de 1e-6 por casualidad; con los datos exactos, el
+    # AR queda a 1,8e-6 con ℓ igual a 1e-6.
+    assert np.allclose(m_inp._result.params, m_pre._result.params, atol=1e-5)
 
 
 def test_las_desviaciones_tipicas_no_coinciden(par):

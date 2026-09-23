@@ -618,10 +618,13 @@ def evalua_configuraciones(model_base, candidatos: Sequence[tuple[int, int]],
             # —sobre FOOD_UEM, −2002 frente a −8,20— (BUG-0085).
             for a in ("ar", "ma", "ar_s", "ma_s", "ar_free", "ma_free",
                       "ar_s_free", "ma_s_free", "ar_f", "ma_f", "d", "D",
-                      "ifadf", "mu", "estimate_mu", "boxlam", "refactor"):
+                      "ifadf", "estimate_mu", "boxlam", "refactor"):
                 v = getattr(model_base, a, None)
                 if v is not None:
                     kw[a] = v
+            # La semilla de la media vive en `mu0`, no en `mu` —el nombre del
+            # argumento—: por `mu` el clon arrancaba μ en 0 (BUG-0189).
+            kw["mu"] = getattr(model_base, "mu0", 0.0)
             m = fue.Model(model_base.series,
                           interventions=base_itvs + [itv], **kw)
             m.fit()

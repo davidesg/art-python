@@ -34,6 +34,7 @@ def _load_ts_model(path: str):
 
 def _write_bare_inp(ts, path: str) -> None:
     """Write a minimal fue .inp with only series data and no model spec."""
+    import numpy as np
     freq    = ts.freq
     begyear = int(ts.start[0])
     # El periodo inicial de una serie ANUAL es 1, no el año repetido. `_write_inp`
@@ -77,8 +78,11 @@ def _write_bare_inp(ts, path: str) -> None:
         f" 0 {_RESCALE_FACTOR:.2f}",
         "** Time series (stochastic and non-standard deterministic variables): ",
     ]
-    for v in ts.data:
-        lines.append(f"{v:.10f} ")
+    # Los DATOS no son semillas: se escriben con la representación más corta
+    # que relee idéntica (BUG-0188). `float()` porque el repr de un np.float64
+    # en numpy 2 es «np.float64(…)».
+    for v in np.asarray(ts.data, dtype=float):
+        lines.append(f"{float(v)!r} ")
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w") as fh:
         fh.write("\n".join(lines) + "\n")
@@ -501,6 +505,24 @@ def extiende_muestra(pre_path: str, datos_nuevos, output_inp: str,
     return ts_new, m, n_new - n_old
 
 
+def _exacto(v, decimales):
+    """`v` con `decimales` decimales si así relee idéntico; si no, con los
+    mínimos que lo consigan. Para lo que es ESPECIFICACIÓN y no semilla —un
+    parámetro FIJO, λ, un armónico, una frecuencia fija—: redondearlo no
+    re-siembra, cambia el modelo (fue/bugs/BUG-0021)."""
+    v = float(v)
+    for d in range(decimales, 18):
+        t = f"{v:.{d}f}"
+        if float(t) == v:
+            return t
+    return repr(v)
+
+
+def _coef(v, free, decimales=6):
+    """Semilla libre con su formato de siempre; valor FIJO, exacto."""
+    return f"{float(v):.{decimales}f}" if free else _exacto(v, decimales)
+
+
 def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> None:
     """
     Write a fue .inp file from a (ts, model) pair.
@@ -536,13 +558,15 @@ def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> No
         if t in ("pulse", "impulse", "compimp"):
             period, year = _obs_to_date(beg_year, beg_period, freq, itv.at)
             c_type = "compimp" if t == "compimp" else "impulse"
-            return f"{c_type} {period} {year}" if freq > 1 else f"impulse {year}"
+            return f"{c_type} {period} {year}" if freq > 1 else f"{c_type} {year}"
         elif t in ("step", "ramp"):
             period, year = _obs_to_date(beg_year, beg_period, freq, itv.at)
             return f"{t} {period} {year}" if freq > 1 else f"{t} {year}"
         elif t in ("cos", "sin"):
-            h = int(itv.harmonic) if hasattr(itv, "harmonic") else 1
-            return f"{t} {h}"
+            # El armónico es especificación: `int()` convertía un cos 1.5 en
+            # cos 1, otro regresor.
+            h = getattr(itv, "harmonic", 1)
+            return f"{t} {_exacto(h, 0)}"
         elif t == "alter":
             return "alter"
         elif t in ("trend", "easter"):
@@ -557,7 +581,9 @@ def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> No
         "************************************************",
         "",
         "** Frequency of time series: either 1(A), 4(Q) or 12(M):",
-        f" {freq}",
+        # Una serie SIN FECHAR vuelve como `number`, no como anual con un año
+        # inventado (fue/bugs/BUG-0018).
+        " number" if getattr(ts, "numbering", False) else f" {freq}",
         "** Number of observations and starting date of time series:",
     ]
     if freq > 1:
@@ -589,7 +615,7 @@ def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> No
             omf  = itv.omega_free if (hasattr(itv, "omega_free") and itv.omega_free) else [True] * len(om)
             lines.append("**")
             for v, f in zip(om, omf):
-                lines.append(f"{v:.6f}  {1 if f else 0}")
+                lines.append(f"{_coef(v, f)}  {1 if f else 0}")
 
         # Delta orders
         lines.append("**")
@@ -606,7 +632,7 @@ def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> No
                 dlf = itv.delta_free if (hasattr(itv, "delta_free") and itv.delta_free) else [True] * dord
                 lines.append("**")
                 for v, f in zip(dl, dlf):
-                    lines.append(f"{v:.6f}  {1 if f else 0}")
+                    lines.append(f"{_coef(v, f)}  {1 if f else 0}")
 
     def _arma_block(factors, free_lists, orders, label):
         n_ops = len(factors)
@@ -617,7 +643,7 @@ def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> No
         for coefs, frees in zip(factors, free_lists):
             block.append("**")
             for v, f in zip(coefs, frees):
-                block.append(f"{v:.6f}  {1 if f else 0}")
+                block.append(f"{_coef(v, f)}  {1 if f else 0}")
         return block
 
     def _free_or_default(factors, free_lists):
@@ -674,11 +700,11 @@ def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> No
     def _ffixed_block(factors, label):
         if not factors:
             return [f"** {label}", "0"]
-        freqs_str = " ".join(str(int(f.freq)) for f in factors)
+        freqs_str = " ".join(_exacto(f.freq, 0) for f in factors)
         block = [f"** {label}", f"{len(factors)} {freqs_str}"]
         for f in factors:
             block.append("**")
-            block.append(f"{f.coef:.6f}  {1 if f.free else 0}")
+            block.append(f"{_coef(f.coef, f.free)}  {1 if f.free else 0}")
         return block
 
     lines += _ffixed_block(ar2f, "Number and frequencies of regular AR(2) operators with fixed frequency:")
@@ -690,6 +716,10 @@ def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> No
     lines += ["** Mean parameter (mu):"]
     if mu_free:
         lines.append(f"{mu:.6f} 1")
+    elif mu:
+        # Una μ FIJA no nula es parte del modelo: con «0» desaparecía al
+        # releer (el hermano en art de fue/bugs/BUG-0021).
+        lines.append(f"{_exacto(mu, 6)} 0")
     else:
         lines.append("0")
 
@@ -699,7 +729,7 @@ def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> No
     D   = model.D   or 0
     lines += [
         "** Box-Cox lambda, m. Regular differences and complete annual differences:",
-        f" {lam:.2f}  {d}  {D}",
+        f" {_exacto(lam, 2)}  {d}  {D}",
         "** Individual factors of the annual difference (starting at freq 0.0):",
     ]
     if freq > 1:
@@ -730,13 +760,33 @@ def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> No
                 "deliberado, pasa `refactor=` explícito para silenciar este "
                 "aviso (art/bugs/BUG-0085).",
                 RuntimeWarning, stacklevel=2)
+    cbands = float(getattr(model, "cbands", 0.0) or 0.0)
     lines += [
         "** ACF/PACF bands (0 Automatic) and reescaling factor:",
-        f" 0 {float(refactor):.2f}",
+        f" {cbands:.2f} {float(refactor):.2f}" if cbands else f" 0 {float(refactor):.2f}",
         "** Time series (stochastic and non-standard deterministic variables):",
     ]
-    for v in np.asarray(ts.data, dtype=float):
-        lines.append(f"{v:.6f} ")
+    # BUG-0187. Detrás de la serie va UNA COLUMNA POR CADA DETERMINISTA NO
+    # ESTÁNDAR, en el orden en que se declararon —el que asume el lector—. La
+    # etiqueta de la sección lo dice; esta función sólo escribía la primera, y
+    # el regresor externo volvía idénticamente cero. Sin datos no se escribe:
+    # declarar el determinista y omitir su columna es un fichero que miente.
+    cols = []
+    for k, itv in enumerate(itvs):
+        if itv.type != "custom":
+            continue
+        dat = getattr(itv, "data", None)
+        if dat is None or len(dat) < n:
+            raise ValueError(
+                f"art: el determinista no estándar #{k + 1} no trae datos para "
+                f"las {n} observaciones; sin su columna {output_path} no "
+                f"representaría el modelo (BUG-0187).")
+        cols.append(np.asarray(dat, dtype=float))
+    # BUG-0188. Los DATOS no son semillas: `.6f` los redondeaba para siempre.
+    # Se escribe la representación más corta que relee idéntica (`float()`
+    # porque el repr de un np.float64 en numpy 2 es «np.float64(…)»).
+    for i, v in enumerate(np.asarray(ts.data, dtype=float)):
+        lines.append(f"{float(v)!r} " + "".join(f" {float(c[i])!r}" for c in cols))
 
     # BUG-0084 §3. El directorio se crea. La ruta que el propio nodo guiado
     # sugiere en su «próximo paso» es `cases/<serie>/work/...`, que todavía no

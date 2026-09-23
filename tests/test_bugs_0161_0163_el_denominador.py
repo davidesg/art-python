@@ -123,9 +123,18 @@ def test_la_semilla_va_en_cero_y_eso_esta_MEDIDO():
     Medido sobre este mismo testigo: 0,0 / 0,5 / −0,5 convergen a δ̂=0,5692 con
     AIC 1616,41 en ~14 iteraciones; 0,9 da δ̂=0,7070 con AIC 1864,56 tras 500
     iteraciones sin anular el gradiente — 248 puntos de AIC peor, con números de
-    aspecto normal."""
+    aspecto normal.
+
+    OJO — medido sobre la serie REDONDEADA A SEIS DECIMALES, que es lo que
+    `_write_inp` escribía antes de BUG-0188. Con los datos exactos las dos
+    semillas llegan al mismo óptimo (AIC 1616,41): la cuenca espuria depende
+    del séptimo decimal. El testigo se reproduce tal como se midió; lo que
+    enseña —que el óptimo al que se llega depende de la semilla, y que la
+    frontera de las cuencas es frágil— sigue siendo la razón de sembrar en 0."""
     import tempfile
-    ts = _serie()
+    ts0 = _serie()
+    ts = fue.TimeSeries(np.round(ts0.data, 6).tolist(), freq=ts0.freq,
+                        start=ts0.start, name=ts0.name)
     res = {}
     for semilla in (0.0, 0.9):
         d = tempfile.mkdtemp()

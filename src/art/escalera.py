@@ -254,10 +254,13 @@ def _clona_con(model, itvs):
     # entre clones, incomparables con el modelo del que salieron (BUG-0085).
     for a in ("ar", "ma", "ar_s", "ma_s", "ar_free", "ma_free",
               "ar_s_free", "ma_s_free", "ar_f", "ma_f", "d", "D",
-              "ifadf", "mu", "estimate_mu", "boxlam", "refactor"):
+              "ifadf", "estimate_mu", "boxlam", "refactor"):
         v = getattr(model, a, None)
         if v is not None:
             kw[a] = v
+    # La semilla de la media vive en `mu0`, no en `mu` —el nombre del
+    # argumento—: por `mu` el clon arrancaba μ en 0 (BUG-0189).
+    kw["mu"] = getattr(model, "mu0", 0.0)
     return fue.Model(model.series, interventions=itvs, **kw)
 
 
