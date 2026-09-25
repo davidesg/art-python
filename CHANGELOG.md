@@ -4,6 +4,68 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.2.2 — 2026-09-25
+
+Por el criterio de la 0.2.1 —en la línea 0.2.x sólo entran defectos que
+comprometen el uso—, y los de esta versión lo hacen: **tres herramientas no
+funcionaban en ninguna instalación limpia**, y dos figuras y un texto publicaban
+números incorrectos. Exige **fue ≥ 0.1.16** y **pyfug ≥ 2.0.1**.
+
+### Las dependencias — BUG-0191 (crítico)
+
+`generate_forecast`, `update_and_forecast` y `sps_dashboard` fallaban en toda
+instalación limpia con `write_forecast_report requires jinja2`: el informe de
+previsión es de fue y necesita su extra `report`, y art dependía de `fue` a
+secas. **La 0.2.1 publicada lo tiene.** Nadie lo vio porque en los entornos de
+desarrollo jinja2 estaba por otra vía. Ahora `fue[report]`, y además `pandas` y
+`openpyxl` —la lectura de Excel de `load_data`—, que llegaban de rebote por
+pyfug. Una prueba exige que todo lo que art importa esté declarado.
+
+Se encontró probando las ruedas en un entorno limpio antes de publicar, y ese
+paso entra en el procedimiento: `docs/PUBLISHING.md` §5.
+
+### Una sola figura de residuos, con la Q bien rotulada — BUG-0165, BUG-0190
+
+Había dos figuras de residuos + ACF/PACF para el mismo modelo. El carril guiado
+dibujaba con pyfug; `record_version`, `build_model`, `full_report` y
+`save_diagnosis_report`, con `fue.plots`, que rotulaba **Q(28) donde el test
+tiene 39 grados de libertad** —restaba también los armónicos— y fechaba mal el
+primer residuo. `build_model` además enseñaba una y guardaba en el guion la
+otra. BUG-0165 se había aplazado como «un número correcto mal presentado»; no lo
+era, y se reclasificó.
+
+La de pyfug tampoco rotulaba bien: con `npar=0` el paréntesis eran los retardos
+(Q(39) donde son 38). La identificación sobre los residuos de un `.pre` salía
+×100. Y el recuento de ARMA del **texto** no contaba los factores de frecuencia
+fija que introduce el MEG: en un modelo reformulado, la Q tenía un grado de
+libertad de más por factor — **su p-valor cambia, y con él puede cambiar el
+veredicto**.
+
+Ahora `diagnosis.figura_residuos` es el único constructor, para las seis vías, y
+el conocimiento del modelo —ARMA estimados, desfase de la diferenciación, regla
+de retardos de fug C— vive en `fue.diagnostics` (fue/BUG-0023): art delega.
+
+### El `.inp` que escribe art — BUG-0187, BUG-0188, BUG-0189
+
+* **0187** — `_write_inp` no escribía la columna de datos de los deterministas no
+  estándar: un regresor externo volvía idénticamente cero.
+* **0188** — los datos de la serie se escribían con `.6f`, truncados.
+* **0189** — la media se leía de `model.mu`, que no existe (es `mu0`): el guion
+  registraba μ = 0 siempre, y los clones de la escalera perdían la semilla.
+
+### Documentación
+
+* `docs/DISENO-dominio-en-los-ordenes.md` — el dominio en la elección de los
+  órdenes ARIMA como procedimiento y no como una regla por disyuntiva. Diseño
+  para la 0.3; no hay nada implementado.
+* `TODO.md` — para la 0.3: la figura de un modelo dibujada por fue con pyfug como
+  extra opcional, y el estudio para retirar statsmodels de pyfug y de art.
+
+### Lo que no entra, aunque estaba en la lista de la 0.2.2
+
+El README de PyPI todavía describe mal el carril autónomo, `DEEPSEEK_MCP_SETUP.md`
+promete de más, y los demás puntos de «PARA 0.2.2» en `TODO.md` siguen abiertos.
+
 ## art-tseries 0.2.1 — 2026-09-12  ·  congelada el 11, validada el 12
 
 La 0.2.0 estaba en PyPI con defectos que la corrida guiada de ITCER destapó y sin
@@ -768,6 +830,25 @@ instrucciones son el producto, y aquí había criterio escrito que no llegaba.
 - **BUG-0009 y BUG-0010 verificados y reproducidos**, ambos abiertos.
 - TODO: la pregunta del OBJETIVO (multivariante o previsión), analizada y sin
   implementar — el objetivo no manda sobre los datos, y ésa es la parte difícil.
+
+## atsw 1.5.0 — 2026-09-25
+
+Sube `art-tseries` a `>=0.2.2`, `fue` a `>=0.1.16` y `pyfug` a `>=2.0.1`.
+
+**art `>=0.2.2`.** En la 0.2.1, `generate_forecast`, `update_and_forecast` y
+`sps_dashboard` fallan en toda instalación limpia —falta jinja2— (BUG-0191), y la
+Q del texto cuenta un grado de libertad de más por cada factor de frecuencia
+fija (BUG-0190). Detalle en `## art-tseries 0.2.2`.
+
+**fue `>=0.1.16`** y **pyfug `>=2.0.1`** son las cotas que ya exige art 0.2.2: el
+paraguas no anuncia menos de lo que necesita su componente. pyfug 2.0.0 rompe con
+toda serie anual (pyfug/BUG-0002).
+
+**Por qué 1.5.0 y no 1.4.1**, por la regla de la 1.3.0 y la 1.4.0: el diff son
+tres cotas y su comentario, pero lo que las cotas hacen es forzar un salto que
+**cambia veredictos** —en un modelo reformulado por el MEG la Q del texto sale
+con otro p-valor—. Un menor lo anuncia; la línea `1.4.x` queda como la última
+que resuelve art 0.2.1.
 
 ## atsw 1.4.0 — 2026-09-12
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "art-tseries"
-version         = "0.2.1"
+version         = "0.2.2"
 description     = "ART — A Real-Time Time-Series Analysis toolkit (Box-Jenkins-Treadway methodology) + MCP server (uses fue and pyfug)"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -45,8 +45,16 @@ dependencies = [
     # necesita; sin él, las tres herramientas fallaban en TODA instalación
     # limpia —la 0.2.1 publicada incluida— y nadie lo veía porque en los
     # entornos de desarrollo jinja2 estaba por otra vía (BUG-0191).
-    "fue[report]>=0.1.14",
-    "pyfug>=2.0",
+    # >=0.1.16: art llama a fue.diagnostics.free_arma_count, default_lags,
+    # differencing_offset y residuals_start (fue/BUG-0023), el conocimiento del
+    # modelo que la figura de residuos necesita (BUG-0165, BUG-0190). Con la
+    # 0.1.14 art no importa esas funciones: falla, no degrada. Y trae el
+    # contrato de ficheros de fue/BUG-0017…0022, que art/BUG-0187…0189 supone.
+    "fue[report]>=0.1.16",
+    # >=2.0.1: la 2.0.0 lanza UnboundLocalError en `plot_combined` con TODA
+    # serie anual (pyfug/BUG-0002), que es la figura de identificación y la de
+    # residuos de art: con una serie anual, art se quedaba sin figuras.
+    "pyfug>=2.0.1",
     "numpy>=1.24",
     "matplotlib>=3.7",
     "scipy>=1.10",

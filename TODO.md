@@ -70,6 +70,9 @@ y 0.3.0 hay un trabajo de depurar y un cambio importante de arquitectura»*.
 - [ ] **Que el smoke test del CI llame a una herramienta que escriba un informe**
       (p. ej. `generate_forecast` sobre un `.pre` de ejemplo): el de hoy sólo
       comprueba que el servidor arranca, y por eso BUG-0191 pasó a PyPI.
+- [ ] **Versiones y CHANGELOG preparados (25-sep)**: pyfug 2.0.1, fue 0.1.16, art
+      0.2.2, atsw 1.5.0, con las cotas subidas. Falta: la prueba en entorno
+      limpio (PUBLISHING §5), los `workflow_dispatch`, y las etiquetas.
 - [ ] **Publicar antes de la 0.2.2, en este orden**: pyfug 2.0.1 (los 3 commits
       de BUG-0002 sin subir: la 2.0.0 de PyPI rompe con TODA serie anual), fue con
       BUG-0017…0023, y entonces `fue>=` esa versión en `pyproject.toml`: art

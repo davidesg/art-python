@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "1.4.0"
+version         = "1.5.0"
 description     = "ATSW — A Time Series Workshop: the Box-Jenkins-Treadway suite (univariate exact-ML estimation, graphics, model building, transfer functions and multivariate VARMA) with three MCP assistants for LLM-driven analysis"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -68,8 +68,12 @@ dependencies = [
     # arregla un óptimo con media absurda (fue/BUG-0005)—. El paraguas no puede
     # anunciar menos de lo que necesita su propio componente: pip lo resolvería
     # igual por art, pero una cota que miente sobre la suite no se sostiene.
-    "fue>=0.1.14",            # univariate estimation engine + FUF forecasting
-    "pyfug>=2.0",             # Jenkins-Treadway graphics
+    # >=0.1.16 desde atsw 1.5.0: la que exige art-tseries 0.2.2 (fue/BUG-0023,
+    # el conocimiento del modelo que la figura de residuos de art necesita).
+    "fue>=0.1.16",            # univariate estimation engine + FUF forecasting
+    # >=2.0.1 desde atsw 1.5.0: la 2.0.0 rompe con toda serie anual
+    # (pyfug/BUG-0002).
+    "pyfug>=2.0.1",           # Jenkins-Treadway graphics
     # >=0.1.12 es de una CLASE DISTINTA a las demás cotas de este fichero, y
     # conviene decirlo en vez de disfrazarlo. Todas las anteriores son «la
     # primera versión que instala y arranca»: por debajo, el paquete no se
@@ -100,7 +104,10 @@ dependencies = [
     # Y hace falta subirla aunque 0.2.1 ya cumpla `>=0.1.12`: con la cota vieja,
     # quien ya tenga atsw instalado NO recibe la 0.2.1 con `pip install -U atsw`,
     # porque pip no sube una dependencia que ya satisface el mínimo.
-    "art-tseries>=0.2.1",     # model building + MCP server (art-mcp)
+    # >=0.2.2 desde atsw 1.5.0: en la 0.2.1 las tres herramientas de previsión
+    # fallan en toda instalación limpia (BUG-0191), y la Q del texto tiene un
+    # grado de libertad de más por cada factor de frecuencia fija (BUG-0190).
+    "art-tseries>=0.2.2",     # model building + MCP server (art-mcp)
     # >=0.2.0 is NOT housekeeping. Up to 0.1.1 drtran related each series
     # differenced by ITS OWN operator, so whenever the output and the input
     # carried different differencing the fitted transfer was nu(B)*Delta(B) and
