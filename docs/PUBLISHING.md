@@ -100,12 +100,42 @@ Los comentarios de ese `pyproject` explican por qué cada cota mínima es la que
 es. **No las subas sin leerlos**: varias no son mantenimiento sino la frontera de
 un fallo concreto.
 
+## 5. Probar en un entorno limpio — con las suites, no sólo con el smoke test
+
+**Añadido el 2026-09-25**, tras encontrar así BUG-0191: la 0.2.1 publicada tenía
+rotas tres herramientas en toda instalación limpia (faltaba jinja2), y ni la
+suite ni el smoke test del CI podían verlo, porque en el entorno de desarrollo
+todo estaba instalado por otra vía.
+
+Y hay una segunda razón: **el entorno de desarrollo envejece**. El 2026-09-25
+tenía numpy 1.26 y pandas 2.1; un `pip install` limpio trajo numpy 2.5 y pandas
+3.0, y sólo así salieron los tests de fue que no funcionaban con numpy 2.
+
+```bash
+D=/ruta/de/pruebas
+python -m build --outdir $D/dist                 # en pyfug, fue y art (art: antes
+                                                 # tools/sync_material.py)
+python -m venv $D/env
+$D/env/bin/pip install $D/dist/*.whl pytest
+# las suites CONTRA LO INSTALADO — y comprobando que es lo instalado lo que se
+# importa (un test canario que mire `art.__file__`, `fue.__file__`…):
+cd art-python && $D/env/bin/python -m pytest tests     # art: `-m`, sus tests
+                                                       # importan `tests._texto`
+cd fue/fue    && $D/env/bin/pytest --import-mode=importlib tests
+cp -r fug/pyfug/tests $D/t && cd $D && env/bin/pytest t   # pyfug mete la raíz
+                                                          # del repo en sys.path
+```
+
+Lo que falle aquí y no en desarrollo es exactamente lo que verá un usuario.
+
 ## Checklist previo a cada publicación
 
 - [ ] Versión subida en `pyproject` (y en `__version__` donde aplique).
 - [ ] Entrada de `CHANGELOG.md` escrita, con la fecha del día.
 - [ ] `dependencies` correctas y mínimas, con su porqué comentado.
 - [ ] Suite completa en verde.
+- [ ] **Las ruedas instaladas en un entorno limpio, y las suites en verde contra
+      ellas** (§5).
 - [ ] `python -m build` sin avisos; `twine check dist/*` OK.
 - [ ] **Ninguna ruta personal en el sdist**: `tar xzf` y `grep -r /home/`.
 - [ ] `bugs/` NO viaja (lo garantiza `prune bugs` en `MANIFEST.in`; compruébalo

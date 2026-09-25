@@ -62,6 +62,14 @@ y 0.3.0 hay un trabajo de depurar y un cambio importante de arquitectura»*.
       39 gl— y cerrado con BUG-0190 y fue/BUG-0023. Un constructor único,
       `diagnosis.figura_residuos`, para las seis vías; el conocimiento del modelo
       (ARMA libres, desfase, retardos de fug C) vive en `fue.diagnostics`.
+- [x] **BUG-0191 (crítico, publicado en la 0.2.1)**: las tres herramientas de
+      previsión fallaban en toda instalación limpia —faltaba jinja2, el extra
+      `fue[report]`—, y pandas/openpyxl llegaban de rebote por pyfug. Declarados,
+      con una prueba que exige que todo lo importado esté declarado. Encontrado
+      probando las ruedas en un entorno limpio: `docs/PUBLISHING.md` §5.
+- [ ] **Que el smoke test del CI llame a una herramienta que escriba un informe**
+      (p. ej. `generate_forecast` sobre un `.pre` de ejemplo): el de hoy sólo
+      comprueba que el servidor arranca, y por eso BUG-0191 pasó a PyPI.
 - [ ] **Publicar antes de la 0.2.2, en este orden**: pyfug 2.0.1 (los 3 commits
       de BUG-0002 sin subir: la 2.0.0 de PyPI rompe con TODA serie anual), fue con
       BUG-0017…0023, y entonces `fue>=` esa versión en `pyproject.toml`: art

@@ -40,12 +40,24 @@ dependencies = [
     #     produce el nodo de intervenciones de art, así que el alcance es amplio.
     #   · 0.1.14 (fue/BUG-0005) un óptimo con una media absurda dejaba de
     #     reportarse como `converged=True` sin aviso.
-    "fue>=0.1.14",
+    # [report]: el extra que trae jinja2. generate_forecast, update_and_forecast
+    # y sps_dashboard escriben su informe con fue.write_forecast_report, que lo
+    # necesita; sin él, las tres herramientas fallaban en TODA instalación
+    # limpia —la 0.2.1 publicada incluida— y nadie lo veía porque en los
+    # entornos de desarrollo jinja2 estaba por otra vía (BUG-0191).
+    "fue[report]>=0.1.14",
     "pyfug>=2.0",
     "numpy>=1.24",
     "matplotlib>=3.7",
     "scipy>=1.10",
     "statsmodels>=0.14",
+    # pandas: load_data, preview_data y create_inp leen Excel y CSV con él. Y
+    # openpyxl es el motor que pandas usa para `.xlsx`, cargado en tiempo de
+    # ejecución (ningún import lo nombra). Los dos llegaban de REBOTE, como
+    # dependencias de pyfug: si pyfug los suelta, la entrada de datos de art se
+    # rompe sin que nada en art haya cambiado (BUG-0191).
+    "pandas>=2.0",
+    "openpyxl>=3.1",
     # mcp<2 is NOT conservatism: mcp 2.0.0 REMOVED `mcp.server.fastmcp`, which
     # is what `art/mcp_server.py:18` imports. An unbounded `mcp>=1.0` resolves
     # to 2.x on any fresh install, and `art-mcp` then dies on import. Verified:

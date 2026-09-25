@@ -142,8 +142,10 @@ def test_una_corrida_de_la_suite_no_deja_nada_en_el_temporal_comun(tmp_path):
     r = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/test_bug_0078_show_fig.py",
          "-q", "-p", "no:randomly"],
-        cwd=os.path.dirname(os.path.dirname(os.path.abspath(srv.__file__)))
-            .replace("/src", ""),
+        # La raíz del REPOSITORIO, que es donde está el test que se corre. No
+        # se deduce del paquete: instalado (no editable), `art` vive en
+        # site-packages y dos niveles por encima no hay ningún `tests/`.
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         capture_output=True, text=True, timeout=300,
         env={**os.environ, "ART_NO_VIEWER": "1"})
     despues = set(f for f in os.listdir(tmpdir) if f.startswith("art_"))

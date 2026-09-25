@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**187 report(s), 7 open.**
+**188 report(s), 7 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -193,6 +193,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0188](BUG-0188-write-inp-escribe-los-datos-de-la-serie-con-6f-y.md) | fixed | medium | inp-builder | _write_inp escribe los datos de la serie con %.6f y los trunca: el mismo defecto que el GUI en C documenta haber arreglado, y su escritor hermano _write_bare_inp usa .10f | 0.2.2 |
 | [BUG-0189](BUG-0189-art-lee-la-media-por-getattr-model-mu-y-el-atrib.md) | fixed | high | guion | art lee la media por getattr(model, 'mu'), y el atributo se llama mu0: el guion registra mu=0.0 SIEMPRE, y los clones de la escalera y del barrido pierden la semilla heredada | 0.2.2 |
 | [BUG-0190](BUG-0190-la-figura-de-pyfug-no-recibe-lo-que-sabe-el-modelo.md) | fixed | high | figuras | La figura de residuos de pyfug no recibe lo que sólo sabe el modelo — la Q rotula retardos y no grados de libertad, la identificación sobre residuos sale ×100, y el texto no cuenta los factores de frecuencia fija | 0.2.2 |
+| [BUG-0191](BUG-0191-lo-que-art-usa-no-esta-en-sus-dependencias.md) | fixed | critical | packaging | Lo que art usa no está en sus dependencias — las tres herramientas de previsión fallan en toda instalación limpia (falta jinja2), y pandas y openpyxl llegan de rebote por pyfug | 0.2.2 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 
