@@ -68,27 +68,20 @@ def desfase_observaciones(model) -> int:
         A_m06  n=216  nres=213  d=1  ifadf=[3]    consumo 2  ✓
         B_m01  n=293  nres=292  d=1  ifadf=[]     consumo 0  ✓
 
-    Vive aquí, en un solo sitio, porque escrita en cinco es una costumbre: basta
-    que alguien añada un operador nuevo para que vuelva a divergir.
+    Vivía aquí, en un solo sitio, porque escrita en cinco es una costumbre:
+    basta que alguien añada un operador nuevo para que vuelva a divergir.
+    Desde BUG-0023 de fue vive en fue, que es el dueño del modelo
+    (`fue.diagnostics.differencing_offset`): también la necesita la figura de
+    residuos de fue. Aquí queda el nombre, para los que ya la llaman.
     """
-    s = int(getattr(getattr(model, "series", None), "freq", 1) or 1)
-    n = int(getattr(model, "d", 0) or 0) + int(getattr(model, "D", 0) or 0) * s
-    for f, v in enumerate(list(getattr(model, "ifadf", None) or [])):
-        if v == 1:
-            n += 1 if (s >= 2 and f == s // 2) else 2
-    return n
+    from fue.diagnostics import differencing_offset
+    return differencing_offset(model)
 
 
 def _default_lags_fug(n: int, freq: int) -> int:
-    """Default ACF/PACF lags matching fug diagnose.c formula."""
-    if n < 3 * (freq + 1):
-        return max(1, n - freq // 2)
-    elif freq == 1 and n > 200:
-        return 45
-    elif freq == 1:
-        return 9
-    else:
-        return 3 * (freq + 1)
+    """Default ACF/PACF lags — fug C's rule, which lives in fue (BUG-0023)."""
+    from fue.diagnostics import default_lags
+    return default_lags(n, freq)
 
 
 def boxcox_transform(y: np.ndarray, lam: float, shift: float = 0.0) -> np.ndarray:

@@ -100,9 +100,15 @@ def test_sin_modelo_no_se_fecha():
 @pytest.mark.parametrize("donde", [("mcp_server", "_alternativas_desde"),
                                    ("describe", "_resid_start")])
 def test_los_dos_sitios_usan_la_cuenta_comun(donde):
+    # La cuenta común bajó a fue en fue/BUG-0023 (`differencing_offset`, y
+    # `residuals_start` encima); `desfase_observaciones` delega en ella. Vale
+    # cualquiera de los tres nombres: lo que la guardia prohíbe es la cuenta
+    # escrita a mano, que caza `test_ningun_modulo_vuelve_a_escribir…`.
     import importlib
     mod = importlib.import_module(f"art.{donde[0]}")
-    assert "desfase_observaciones" in cuerpo_de(mod, donde[1])
+    cuerpo = cuerpo_de(mod, donde[1])
+    assert any(n in cuerpo for n in ("desfase_observaciones",
+                                     "differencing_offset", "residuals_start"))
 
 
 # La guardia de BUG-0172, ampliada: también `describe.py`, objetos con punto o

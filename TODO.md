@@ -57,6 +57,19 @@
 Decisión del analista al cerrar la 0.2.1: *«todo lo demás para 0.2.2. Entre 0.2.x
 y 0.3.0 hay un trabajo de depurar y un cambio importante de arquitectura»*.
 
+- [x] **La figura de residuos, una y con la Q bien rotulada** (25-sep-2026):
+      BUG-0165 reclasificado —la figura vieja publicaba Q(28) donde el test tiene
+      39 gl— y cerrado con BUG-0190 y fue/BUG-0023. Un constructor único,
+      `diagnosis.figura_residuos`, para las seis vías; el conocimiento del modelo
+      (ARMA libres, desfase, retardos de fug C) vive en `fue.diagnostics`.
+- [ ] **Publicar antes de la 0.2.2, en este orden**: pyfug 2.0.1 (los 3 commits
+      de BUG-0002 sin subir: la 2.0.0 de PyPI rompe con TODA serie anual), fue con
+      BUG-0017…0023, y entonces `fue>=` esa versión en `pyproject.toml`: art
+      llama ya a `fue.diagnostics.free_arma_count`, `default_lags`,
+      `differencing_offset` y `residuals_start`, que la 0.1.14 no tiene.
+      Ojo con la numeración de fue: `pyproject` dice 0.1.15 (sin publicar) y los
+      informes 0017…0023 dicen `fixed_in: 0.1.16`.
+
 - [ ] **`README.md` —la página de PyPI— define mal el carril autónomo**: dice
       *«Autonomous — Claude/heuristic decides every step»*, que es justo lo que
       BUG-0180 retiró. `AGENTS.md` y el protocolo ya dicen lo correcto; el README
@@ -98,6 +111,57 @@ y 0.3.0 hay un trabajo de depurar y un cambio importante de arquitectura»*.
 - [ ] **La lista de objetivos depende del LLM** (evidencia para BUG-0186): Claude
       la presentó tal cual en run7 y la inventó en run9; DeepSeek, en run9_DS, la
       presentó tal cual.
+
+## PARA 0.3 — un solo dibujo para la figura de un modelo (25-sep-2026)
+
+El paso 2 de la revisión de las figuras (el paso 1 es BUG-0165/0190 y
+fue/BUG-0023, en la 0.2.2). Decidido con el analista:
+
+> **serie → pyfug directamente; modelo → fue, que dibuja con pyfug si está y
+> con su respaldo si no.**
+
+- [ ] `fue.plots.plot_model_diagnostics(model)` pasa a ser la ÚNICA entrada para
+      la figura de un modelo: delega en `pyfug.graphics.plot_combined` si pyfug
+      está instalado (extra opcional `fue[graficos]`, importado de forma
+      perezosa) y conserva `plots.py` como respaldo con los MISMOS números. fue
+      no pasa a depender de pyfug; quien quiera el dibujo idéntico instala el
+      extra.
+- [ ] art deja de construir la figura de un modelo: `diagnosis.figura_residuos`
+      se la pide a fue. Las figuras de SERIE (Box-Cox, identificación) siguen
+      llamando a pyfug directamente: ahí `npar=0` es correcto y pyfug está en su
+      terreno.
+- [ ] Test de conformidad en fue: con y sin pyfug, la misma Q, los mismos gl, la
+      misma media y σ para los modelos de `tests/data/bug_0023`.
+- [ ] **Condiciones previas, en pyfug**: (a) que deje de reescribir los
+      `rcParams` globales de matplotlib al importarse (`graphics/base.py:74`);
+      (b) que la regla de retardos sea la de fug C y no `max(10, 3(f+1))`;
+      (c) el doble desplazamiento de la fecha en `diffgraph` (un dato diferenciado
+      se corre dos veces: mensual d=D=1 desde 2000/1 empieza en 2002.17); (d) el
+      estudio de statsmodels, abajo.
+
+## PARA 0.3 — estudio: retirar statsmodels de la suite (25-sep-2026)
+
+Palabras del analista: *«si art depende de statsmodels solamente por esos dos
+tests, tampoco tiene sentido porque son triviales»*. Un estudio, para decidir
+con números, en pyfug y en art:
+
+- [ ] **pyfug** lo usa para ACF, PACF (`statistics.py:15`, al importar) y
+      Ljung-Box (`acorr_ljungbox`). Coste medido: `import pyfug` 1,85 s, de ellos
+      1,37 s statsmodels (`import fue`: 0,10 s). `fue.diagnostics` tiene ACF,
+      PACF (Durbin-Levinson) y Ljung-Box en numpy que dan lo mismo a 1e-15, y
+      sin el tope de retardos n/2 − 1 que la PACF de statsmodels impone y que
+      aparta a pyfug de fug C. Es además la condición para que `fue[graficos]`
+      sea una dependencia barata.
+- [ ] **art** lo usa en tres sitios, no en dos: `adfuller` y `kpss` para la raíz
+      unitaria (`describe.py`, `identification.py`) y `ArmaProcess` para la
+      ACF/PACF TEÓRICAS de la similitud de candidatos (`model_detection.py`).
+      Qué medir: que un ADF/KPSS propios reproduzcan los de statsmodels
+      (estadístico, retardos por AIC, p-valores de MacKinnon y las tablas de
+      KPSS) sobre el corpus; que la ACF teórica de un ARMA se calcule por la
+      recursión ψ (o la de fue) con el mismo resultado; y el ahorro real en
+      instalación e importación. Riesgo a vigilar: los p-valores de MacKinnon
+      son tablas de respuesta de superficie, no «triviales»: hay que portarlas
+      con su referencia, no reimplementarlas de memoria.
 
 ## PARA 0.3 — trocear el protocolo por etapas, con el criterio corregido (sep-2026)
 

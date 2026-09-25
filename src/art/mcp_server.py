@@ -5223,11 +5223,19 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             # es el modo NORMAL de usarla.
             _, m_pre = _mirar(pre_path)
             res_start = _rs(m_pre)
+            # En FRACCIÓN, como toda figura de residuos: pyfug rotula ×100 %
+            # y los residuos vienen en la escala de `refactor` (BUG-0084). Y
+            # la Q con los grados de libertad del modelo del que salen: sus
+            # ARMA estimados (BUG-0190).
+            from fue.diagnostics import free_arma_count as _fac
+            _rf = float(getattr(m_pre, "refactor", None) or 1.0)
+            _res = [float(v) / _rf for v in m_pre.residuals.data]
             res_ts = _fue.TimeSeries(
-                m_pre.residuals.data, freq=ts.freq,
+                _res, freq=ts.freq,
                 start=res_start, name=f"Resid {ts.name or ''}"
             )
-            ident      = describe_identification(res_ts, d=0, D=0, lam=1.0)
+            ident      = describe_identification(res_ts, d=0, D=0, lam=1.0,
+                                                 npar=_fac(m_pre))
             data_label = f"residuos de `{os.path.basename(pre_path)}`"
         else:
             ident      = describe_identification(ts, d=d, D=D, lam=lam)
@@ -6622,15 +6630,15 @@ def record_version(inp_path: str,
     try:
         from mcp.types import TextContent, ImageContent
         from art.describe import _fig_b64
-        from art.diagnosis import diagnose, plot_diagnosis
+        from art.diagnosis import diagnose, figura_residuos
         import matplotlib.pyplot as plt
 
         _, m = _mirar(inp_path)
 
-        # Diagnosis figure
+        # Diagnosis figure — la MISMA que en el carril guiado (BUG-0165)
         diag_result = diagnose(m)
         try:
-            fig = plot_diagnosis(diag_result, m)
+            fig = figura_residuos(m)
             b64 = _fig_b64(fig)
             plt.close(fig)
         except Exception as e:
@@ -9111,8 +9119,12 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
 
         def _round_fig_b64(diag_result, model, label: str) -> str:
             """Render a diagnosis figure and return as base64 PNG."""
+            # La misma figura que el carril guiado y que la que se guarda en el
+            # guion: antes se ENSEÑABA la de fue y se GUARDABA la de pyfug
+            # (BUG-0165).
+            from art.diagnosis import figura_residuos
             diag_result.label = label
-            fig = plot_diagnosis(diag_result, model)
+            fig = figura_residuos(model, label)
             buf = io.BytesIO()
             fig.savefig(buf, format='png', dpi=110, bbox_inches='tight')
             plt.close(fig)

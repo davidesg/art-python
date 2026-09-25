@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**186 report(s), 8 open.**
+**187 report(s), 7 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -13,7 +13,6 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0124](BUG-0124-los-dos-detectores-de-covarianza-semilla-se-excluye.md) | open | high | diagnosis | Los dos detectores de covarianza-semilla se excluyen mutuamente — con degeneración PARCIAL el aviso cuenta sólo las coincidencias exactas y calla las que están a 0,02 % de la semilla | — |
 | [BUG-0147](BUG-0147-la-figura-se-escribe-y-no-se-dice-donde.md) | open | medium | mcp-tools | Seis herramientas escriben su figura y no dicen dónde — el otro medio BUG-0122, y sólo se ve cruzando la frontera | — |
 | [BUG-0151](BUG-0151-la-covarianza-del-out-conserva-la-semilla-del-bf.md) | open | high | estimation | La covarianza del .out conserva la semilla del BFGS en direcciones ROTADAS — ningún detector por parámetro la ve | — |
-| [BUG-0165](BUG-0165-dos-renderizadores-para-la-misma-diagnosis.md) | open | medium | figuras | Dos renderizadores para la MISMA diagnosis — `record_version` y `full_report` se saltan `describe_diagnosis` y salen con el dibujo anterior a pyfug | — |
 | [BUG-0186](BUG-0186-la-lista-de-objetivos-se-sigue-reformulando.md) | open | medium | protocolo | La lista de objetivos se sigue reformulando con BUG-0183 dentro — el protocolo no basta, porque la pregunta se hace con la herramienta del cliente antes de llamar a art | — |
 | [BUG-0011](BUG-0011-dcd-overdiff-recommends-d2-on-seasonal-price-index.md) | in-progress | medium | formal-tests | dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
@@ -169,6 +168,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0162](BUG-0162-no-hay-forma-de-modificar-una-intervencion-solo-anadir.md) | fixed | high | interventions | No hay forma de MODIFICAR una intervención — todos los constructores hacen append, y reformular depende de que el analista se acuerde de volver al `.pre` anterior | 0.2.1 |
 | [BUG-0163](BUG-0163-una-forma-racional-no-publica-ni-su-delta-ni-su-ganancia.md) | fixed | medium | interventions | Una intervención con δ no publica ni δ̂ ni la ganancia — la línea que las lleva sólo se imprime cuando hay Wald, y con forma racional lo normal es que no lo haya | 0.2.1 |
 | [BUG-0164](BUG-0164-el-encadenado-por-pre-se-cerro-al-negar-estimar.md) | fixed | high | mcp-tools | Las cuatro puertas del carril guiado rechazaban un `.pre` — BUG-0159 cerró `estimar` y ellas seguían llamándola sin necesitarla | 0.2.1 |
+| [BUG-0165](BUG-0165-dos-renderizadores-para-la-misma-diagnosis.md) | fixed | high | figuras | Dos renderizadores para la MISMA diagnosis — `record_version` y `full_report` se saltan `describe_diagnosis` y salen con el dibujo anterior a pyfug | 0.2.2 |
 | [BUG-0166](BUG-0166-la-Q-resta-los-deterministas-de-sus-grados-de-libertad.md) | fixed | critical | diagnosis | La Q resta TODOS los parámetros de sus grados de libertad —armónicos e intervenciones incluidos— y declara no-ruido-blanco un ruido blanco; con df negativo, siempre | 0.2.1 |
 | [BUG-0167](BUG-0167-el-dcd-de-subdiferenciacion-compara-modelos-desiguales.md) | fixed | high | formal-tests | El DCD de subdiferenciación colapsa el AR contra la raíz unitaria — de los 39,9 puntos de LR, 38,3 son dinámica perdida y no evidencia sobre la frontera | 0.2.1 |
 | [BUG-0168](BUG-0168-el-aviso-publicaba-un-sesgo-que-nadie-calcula.md) | fixed | high | diagnosis | El aviso de las SE publicaba una magnitud de sesgo que ningún algoritmo calcula — y el LLM la repetía como si fuera una medida | 0.2.1 |
@@ -192,6 +192,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0187](BUG-0187-write-inp-no-escribe-las-columnas-de-datos-de-lo.md) | fixed | high | inp-builder | _write_inp no escribe las columnas de datos de los deterministas NO ESTANDAR: un regresor externo vuelve identicamente cero y el lector lo relee sin avisar | 0.2.2 |
 | [BUG-0188](BUG-0188-write-inp-escribe-los-datos-de-la-serie-con-6f-y.md) | fixed | medium | inp-builder | _write_inp escribe los datos de la serie con %.6f y los trunca: el mismo defecto que el GUI en C documenta haber arreglado, y su escritor hermano _write_bare_inp usa .10f | 0.2.2 |
 | [BUG-0189](BUG-0189-art-lee-la-media-por-getattr-model-mu-y-el-atrib.md) | fixed | high | guion | art lee la media por getattr(model, 'mu'), y el atributo se llama mu0: el guion registra mu=0.0 SIEMPRE, y los clones de la escalera y del barrido pierden la semilla heredada | 0.2.2 |
+| [BUG-0190](BUG-0190-la-figura-de-pyfug-no-recibe-lo-que-sabe-el-modelo.md) | fixed | high | figuras | La figura de residuos de pyfug no recibe lo que sólo sabe el modelo — la Q rotula retardos y no grados de libertad, la identificación sobre residuos sale ×100, y el texto no cuenta los factores de frecuencia fija | 0.2.2 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 

@@ -89,7 +89,8 @@ def save_full_report(
 
     # --- Run all sub-modules ---
     diag   = diagnose(model, z_threshold=z_threshold)
-    fig    = plot_diagnosis(diag, model)
+    from .diagnosis import figura_residuos
+    fig    = figura_residuos(model)                     # BUG-0165
     diag_b64 = _fig_to_b64(fig)
     plt.close(fig)
 

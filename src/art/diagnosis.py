@@ -711,20 +711,12 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
     # El daño se COMPONE, que es lo peor: el analista lee «no es ruido blanco»,
     # añade una intervención, `npar` sube, el df baja y el rechazo se refuerza.
     # Empuja exactamente hacia la sobreparametrización que el método evita.
-    def _libres(fac, free):
-        if not fac:
-            return 0
-        n = 0
-        for k, f in enumerate(fac):
-            msk = (free[k] if (free and k < len(free) and free[k] is not None)
-                   else [True] * len(f))
-            n += sum(1 for j in range(len(f)) if j >= len(msk) or msk[j])
-        return n
-
-    n_arma = (_libres(getattr(model, "ar", None), getattr(model, "ar_free", None))
-              + _libres(getattr(model, "ma", None), getattr(model, "ma_free", None))
-              + _libres(getattr(model, "ar_s", None), getattr(model, "ar_s_free", None))
-              + _libres(getattr(model, "ma_s", None), getattr(model, "ma_s_free", None)))
+    # La cuenta vive en fue (BUG-0023 de fue), y es la del `.out`: cuenta
+    # también los factores AR(2)/MA(2) de FRECUENCIA FIJA, que la copia que
+    # había aquí se dejaba — en un modelo reformulado por el MEG el df salía
+    # uno de más por cada factor (BUG-0190).
+    from fue.diagnostics import free_arma_count
+    n_arma = free_arma_count(model)
 
     # Y un df ≤ 0 NO es un contraste: es que no hay contraste. Publicar un
     # p-valor ahí es peor que no publicarlo — se lee, y manda.
@@ -816,6 +808,49 @@ def _period_label(start: tuple[int, int], offset: int, freq: int) -> str:
         return str(y0 + offset)
 
 
+def figura_residuos(model, title: str | None = None):
+    """La figura de residuos + ACF/PACF de un modelo — el ÚNICO constructor.
+
+    BUG-0165. Había dos: el carril guiado dibujaba con pyfug y `record_version`,
+    `build_model`, `full_report` y `save_diagnosis_report` con `fue.plots`, en
+    otro formato y con OTRA Q (restaba todos los parámetros). Ahora todos pasan
+    por aquí, y pyfug recibe lo que sólo sabe el modelo (BUG-0190):
+
+    * los residuos en FRACCIÓN — pyfug rotula `×100 %` (BUG-0084);
+    * la fecha del primer residuo, después de d, D y las raíces de `ifadf`;
+    * `npar` = los ARMA ESTIMADOS, para que el paréntesis de la Q sean sus
+      grados de libertad; con `npar=0` rotulaba los retardos;
+    * `nlags` = la regla de fug C, la misma del texto y del `.out`.
+
+    Sin pyfug, el respaldo es `fue.plots` (`plot_diagnosis`), que desde fue
+    BUG-0023 da los MISMOS números.
+    """
+    from fue.diagnostics import default_lags, free_arma_count
+    try:
+        from pyfug.graphics import plot_combined
+    except ImportError:
+        return plot_diagnosis(diagnose(model), model)
+    serie = serie_residuos_pyfug(model, title)
+    return plot_combined(serie, npar=free_arma_count(model),
+                         nlags=default_lags(serie.nobs, serie.freq),
+                         title=serie.name)
+
+
+def serie_residuos_pyfug(model, title: str | None = None):
+    """Los residuos de un modelo como `pyfug.Tseries`: en fracción y fechados."""
+    from fue.diagnostics import residuals_start
+    from pyfug.core import Tseries
+    if title is None:
+        mname = getattr(model, "_inp_stem", None) or model.series.name or ""
+        title = f"A.{mname}" if mname else "Residuos"
+    rf  = float(getattr(model, "refactor", None) or 1.0)
+    res = np.asarray(model.residuals.data, dtype=float)
+    res = res / rf if rf != 1.0 else res
+    y0, p0 = residuals_start(model)
+    return Tseries(name=title, freq=model.series.freq, nobs=len(res),
+                   begyear=int(y0), begtime=int(p0), data=res)
+
+
 def plot_diagnosis(result: DiagnosisResult, model=None) -> plt.Figure:
     """Treadway-Jenkins diagnostic panel (fue layout).
 
@@ -895,7 +930,7 @@ def save_diagnosis_report(model, path: str, z_threshold: float = 3.0) -> Diagnos
     import base64, io
 
     result = diagnose(model, z_threshold=z_threshold)
-    fig    = plot_diagnosis(result, model)
+    fig    = figura_residuos(model)                     # BUG-0165
 
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=130, bbox_inches='tight')

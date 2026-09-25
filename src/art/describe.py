@@ -82,10 +82,9 @@ def _resid_start(model) -> tuple:
     # se corría hacia atrás —en IPC_FR m03, dos raíces, el último residuo se
     # dibujaba en 8/2019 siendo 12/2019— y los escaneos sobre residuos
     # fechaban mal. La cuenta vive en un sitio (BUG-0172, BUG-0185).
-    from art.identification import desfase_observaciones
-    n_skip = desfase_observaciones(model)
-    off    = (int(s0[1]) - 1) + n_skip
-    return (int(s0[0]) + off // freq, off % freq + 1)
+    # La cuenta vive en fue desde BUG-0023 de fue: es conocimiento del modelo.
+    from fue.diagnostics import residuals_start
+    return residuals_start(model)
 
 
 # ---------------------------------------------------------------------------
@@ -606,7 +605,8 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
 # Identification (ACF/PACF + order suggestions)
 # ---------------------------------------------------------------------------
 
-def describe_identification(ts, d: int, D: int, lam: float = 0.0) -> Description:
+def describe_identification(ts, d: int, D: int, lam: float = 0.0,
+                            npar: int = 0) -> Description:
     """Generate identification listing and suggest ARMA orders with per-candidate reasoning."""
     import numpy as np
     # `incluir_dispersos=True` aquí y sólo aquí: la presentación es el único
@@ -756,7 +756,12 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0) -> Description
             new_start = (int(orig[0]) + off // ts.freq, off % ts.freq + 1)
             name_w = transform_label(lam, d, D, ts.freq, name=ts.name or "")
             pf     = _pyfug_ts(w, ts.freq, new_start, name=name_w)
-            fig    = _pyfug_combined(pf, title=name_w)
+            # `npar`: 0 sobre una serie; los ARMA estimados cuando `ts` son los
+            # RESIDUOS de un modelo (guided_identification con pre_path). Y los
+            # retardos, la regla de fug C, no la de pyfug (BUG-0190).
+            from fue.diagnostics import default_lags as _dl
+            fig    = _pyfug_combined(pf, npar=int(npar),
+                                     nlags=_dl(len(w), ts.freq), title=name_w)
             b64_ident = _fig_b64(fig)
             plt.close(fig)
         else:
@@ -1687,11 +1692,11 @@ def describe_diagnosis(model) -> Description:
         # stem (e.g. IPC_ES_m00); fall back to the series name.
         mname = getattr(model, "_inp_stem", None) or model.series.name or ""
         rtitle = f"A.{mname}" if mname else "Residuos"
-        pf   = _pyfug_ts(_residuos_en_fraccion(model), res.freq,
-                         _resid_start(model), name=rtitle)
-        title_acf  = rtitle
+        # UN constructor para la figura de residuos (BUG-0165, BUG-0190).
+        from art.diagnosis import figura_residuos, serie_residuos_pyfug
+        pf   = serie_residuos_pyfug(model, rtitle)
         title_hist = f"Histograma {rtitle}" if mname else "Histograma residuos"
-        fig_acf  = _pyfug_combined(pf, d=0, title=title_acf)
+        fig_acf  = figura_residuos(model, rtitle)
         b64      = _fig_b64(fig_acf);  plt.close(fig_acf)
         fig_hist = _pyfug_histogram(pf, d=0, title=title_hist)
         hist_b64 = _fig_b64(fig_hist); plt.close(fig_hist)
@@ -2739,9 +2744,8 @@ def describe_interventions(model, threshold: float = 3.5) -> Description:
             # fue convention: residuals titled "A.<nombre del modelo>".
             mname = getattr(model, "_inp_stem", None) or model.series.name or ""
             rtitle = f"A.{mname}" if mname else "Residuos"
-            pf   = _pyfug_ts(_residuos_en_fraccion(model), res.freq,
-                             _resid_start(model), name=rtitle)
-            fig_diag = _pyfug_combined(pf, d=0, title=rtitle)
+            from art.diagnosis import figura_residuos
+            fig_diag = figura_residuos(model, rtitle)      # BUG-0165
             b64_diag = _fig_b64(fig_diag)
             plt.close(fig_diag)
         else:
