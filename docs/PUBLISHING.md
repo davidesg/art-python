@@ -16,9 +16,17 @@ test que el workflow hace antes de publicar.
 | paquete | repositorio | workflow | etiqueta que dispara | notas |
 |---|---|---|---|---|
 | **fue** | `atws/fue/fue` | `.github/workflows/wheels.yml` | `v*` | extensión C → **cibuildwheel**, ruedas por plataforma |
-| **pyfug** | `atws/fug/pyfug` | `.github/workflows/publish.yml` | — | puro Python |
+| **pyfug** | `atws/fug/pyfug` | `.github/workflows/publish.yml` | `v*` | puro Python; **activo sólo desde el 2026-09-25** (ver abajo) |
 | **art-tseries** | `ART/art-python` | `.github/workflows/publish-art.yml` | `art-v*` | **con smoke test** antes de publicar |
 | **atsw** | `ART/art-python` (`atsw-suite/`) | `.github/workflows/publish-atsw.yml` | `atsw-v*` | meta-paquete |
+
+**pyfug: su workflow no funcionó hasta el 2026-09-25.** Estaba en el repo desde
+julio, pero GitHub nunca lo registró (la lista de workflows sólo tenía
+«Dependency Graph», y `gh workflow run` daba 404): la 2.0.0 se subió a mano, y
+pyfug no tenía ningún tag. Se registró tocando el fichero. Si un workflow no
+aparece en `gh workflow list`, ése es el remedio. Publicar por él exige un
+*trusted publisher* en PyPI para `davidesg/pyfug`, workflow `publish.yml`,
+entorno `pypi`.
 
 **Orden de publicación** (respeta dependencias): `fue → pyfug → art-tseries →
 atsw`. Sólo hace falta el paquete que cambia; los demás se quedan donde están.
