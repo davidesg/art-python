@@ -831,6 +831,19 @@ instrucciones son el producto, y aquí había criterio escrito que no llegaba.
 - TODO: la pregunta del OBJETIVO (multivariante o previsión), analizada y sin
   implementar — el objetivo no manda sobre los datos, y ésa es la parte difícil.
 
+## atsw 1.6.1 — 2026-09-26
+
+Sube `drvarma` a `>=0.1.7`.
+
+En la 0.1.6 **el optimizador se colgaba para siempre con un objetivo NaN o
+infinito** (drvarma BUG-0006): la búsqueda lineal no aceptaba ni abandonaba el
+paso, sin error ni salida. Es el optimizador del motor de drvarma y también el
+de drtran, que usa el mismo `_qnewt`; drtran lo había sufrido con datos reales.
+
+**Por qué parche y no menor**, por la regla de las anteriores: en el uso normal
+—valores finitos— no se mueve ningún número. La suite de drvarma y la de drtran
+dan los mismos resultados con la 0.1.7; sólo cambia el caso que antes no volvía.
+
 ## atsw 1.6.0 — 2026-09-26
 
 Sube `drtran` a `>=0.2.5`.
