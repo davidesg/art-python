@@ -831,6 +831,24 @@ instrucciones son el producto, y aquí había criterio escrito que no llegaba.
 - TODO: la pregunta del OBJETIVO (multivariante o previsión), analizada y sin
   implementar — el objetivo no manda sobre los datos, y ésa es la parte difícil.
 
+## atsw 1.6.0 — 2026-09-26
+
+Sube `drtran` a `>=0.2.5`.
+
+**`mtram` no arrancaba en Python 3.10 ni 3.11** con la 1.5.0: drtran 0.2.4 usa
+sintaxis de f-string que sólo acepta Python 3.12 y declara `>=3.10` (drtran
+BUG-51). pip lo instalaba sin avisar y el asistente caía al importarse. Lo
+encontró una instalación en frío de atsw 1.5.0 en contenedores limpios de
+Python 3.10–3.13; la validación de atsw sólo levantaba art, y sólo en 3.12.
+
+La validación de este paquete (`publish-atsw.yml`) instala ahora lo construido
+en Python 3.10, 3.11, 3.12 y 3.13 e importa los TRES asistentes.
+
+**Por qué 1.6.0 y no 1.5.1**, por la regla de las anteriores: drtran 0.2.5 trae
+también que la puerta diagonal cuente las raíces de `ifadf` en la muestra
+común, y con eso el veredicto de la puerta puede cambiar en modelos con raíces
+estacionales. Un menor lo anuncia.
+
 ## atsw 1.5.0 — 2026-09-25
 
 Sube `art-tseries` a `>=0.2.2`, `fue` a `>=0.1.16` y `pyfug` a `>=2.0.1`.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "1.5.0"
+version         = "1.6.0"
 description     = "ATSW — A Time Series Workshop: the Box-Jenkins-Treadway suite (univariate exact-ML estimation, graphics, model building, transfer functions and multivariate VARMA) with three MCP assistants for LLM-driven analysis"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -114,7 +114,12 @@ dependencies = [
     # the reported GAIN was wrong by Delta(1) -- annihilated outright when the
     # excess root sat at frequency zero. An open lower bound would let a stale
     # environment satisfy the suite with the defect live. See drtran BUG-8.
-    "drtran[mcp]>=0.2.0",     # transfer functions and networks + MCP server (mtram)
+    # >=0.2.5 desde atsw 1.6.0: en la 0.2.4 `mtram` NO ARRANCA en Python 3.10
+    # ni 3.11 —sintaxis de f-string que sólo acepta 3.12, y drtran declara
+    # >=3.10 (drtran BUG-51)—, y la puerta diagonal medía la muestra común sin
+    # las raíces de `ifadf`. Con la cota vieja, quien ya tiene atsw no recibe
+    # la 0.2.5 con `pip install -U atsw`.
+    "drtran[mcp]>=0.2.5",     # transfer functions and networks + MCP server (mtram)
     "drvarma[mcp]>=0.1.3",    # multivariate VARMA + MCP server (sima)
 ]
 
