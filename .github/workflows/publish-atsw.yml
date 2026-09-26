@@ -22,17 +22,40 @@ jobs:
         run: |
           pip install build
           python -m build atsw-suite --outdir dist
-      # INSTALAR LO QUE SE VA A PUBLICAR, QUE AQUÍ ES *TODO* EL PAQUETE.
-      #
-      # `publish-art.yml` tiene este paso desde que 0.1.3 se publicó rota por un
-      # problema de RESOLUCIÓN, no de empaquetado. atsw no lo tenía — y atsw es
-      # **sólo** resolución: su contenido entero son cotas de dependencia y un
-      # script de consola. Construirlo sin instalarlo no comprueba nada de lo
-      # único que hace.
-      #
-      # Su propio CHANGELOG 1.2.6 documenta un fallo de esta especie: la pareja
-      # (art 0.1.10, fue 0.1.11) «instala limpiamente y luego aborta». Ese es
-      # exactamente el caso que este paso caza y el `build` solo no.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  # INSTALAR LO QUE SE VA A PUBLICAR, QUE AQUÍ ES *TODO* EL PAQUETE.
+  #
+  # `publish-art.yml` tiene este paso desde que 0.1.3 se publicó rota por un
+  # problema de RESOLUCIÓN, no de empaquetado. atsw no lo tenía — y atsw es
+  # **sólo** resolución: su contenido entero son cotas de dependencia y un
+  # script de consola. Construirlo sin instalarlo no comprueba nada de lo
+  # único que hace.
+  #
+  # EN MATRIZ, y con los TRES asistentes (2026-09-26). El paso decía «los tres
+  # asistentes levantan de verdad» y sólo levantaba art, y sólo en Python 3.12.
+  # Por eso atsw 1.5.0 se publicó con `mtram` roto en Python 3.10 y 3.11: drtran
+  # 0.2.4 usa sintaxis de f-string de 3.12 y declara >=3.10 (BUG-51 de drtran).
+  # Una instalación en frío en contenedores lo encontró; este paso lo habría
+  # encontrado antes de publicar.
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
       - name: Smoke-test — que las cotas RESUELVAN y la suite arranque
         run: |
           WHL=$(ls dist/atsw-*-py3-none-any.whl)
@@ -54,23 +77,23 @@ jobs:
           assert not fallos, fallos
           print("atsw", version("atsw"), "— cotas satisfechas")
           PY
-          # 2. los tres asistentes levantan de verdad
+          # 2. los tres asistentes levantan de verdad: art, mtram (drtran) y
+          #    sima (drvarma). Importar su servidor es lo que falla si alguno
+          #    usa sintaxis que esta versión de Python no acepta.
           python - <<'PY'
-          import asyncio
-          from art.mcp_server import mcp as art_mcp
-          n = len(asyncio.run(art_mcp.list_tools()))
-          print("art tools:", n); assert n >= 30, n
+          import asyncio, importlib, sys
+          for mod, minimo in (("art.mcp_server", 30), ("drtran.mcp_server", 10),
+                              ("drvarma.mcp_server", 10)):
+              n = len(asyncio.run(importlib.import_module(mod).mcp.list_tools()))
+              print(f"{mod}: {n} herramientas (Python {sys.version.split()[0]})")
+              assert n >= minimo, (mod, n)
           PY
           # 3. el único script de consola que el paraguas expone
           atsw-mcp --help > /dev/null && echo "atsw-mcp: OK"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/*
 
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: [build, smoke]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/atsw-v')
     environment: pypi

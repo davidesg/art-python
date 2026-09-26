@@ -143,6 +143,14 @@ fue/BUG-0023, en la 0.2.2). Decidido con el analista:
       terreno.
 - [ ] Test de conformidad en fue: con y sin pyfug, la misma Q, los mismos gl, la
       misma media y σ para los modelos de `tests/data/bug_0023`.
+- [ ] **En series cortas la figura y el texto miran distinto número de retardos**
+      (visto en la instalación en frío, 2026-09-26). pyfug recorta los retardos
+      a n/2 − 1 porque la PACF de statsmodels no admite más: con `ripc` (72
+      datos mensuales, d=D=1, 59 residuos) la figura rotula Q(26) —28 retardos
+      menos 2 ARMA— y el texto usa los 39 de la regla de fug C. No es un número
+      mal calculado (la Q de la figura es coherente con SUS retardos), pero el
+      analista ve dos m distintos. Lo cierra el estudio de statsmodels, abajo:
+      con la PACF de Durbin-Levinson de fue no hay tope n/2.
 - [ ] **Condiciones previas, en pyfug**: (a) que deje de reescribir los
       `rcParams` globales de matplotlib al importarse (`graphics/base.py:74`);
       (b) que la regla de retardos sea la de fug C y no `max(10, 3(f+1))`;
