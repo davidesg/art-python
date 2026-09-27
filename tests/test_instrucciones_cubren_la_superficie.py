@@ -82,7 +82,11 @@ def test_la_regla_del_out_sigue_escrita():
     """Estaba antes de esta sesión y el código la incumplía (BUG-0091). Ahora
     la cumple; la regla no debe desaparecer al arreglarla."""
     ins = srv._INSTRUCTIONS
-    assert "NUNCA DE REEJECUTAR" in ins
+    # Reescrita con fue/BUG-0015 (fue 0.1.17): la regla ya no es «nunca
+    # reejecutes un .pre» sino «mira qué hessiano dio las SE», y en el caso del
+    # BFGS sigue mandando leerlas del .out.
+    assert "MIRA QUÉ HESSIANO LOS DIO" in ins
+    assert "se leen del .out de la estimación real" in ins
     assert "get_out_report" in ins
 
 

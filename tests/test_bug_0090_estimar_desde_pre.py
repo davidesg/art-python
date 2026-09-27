@@ -34,6 +34,14 @@ from art.pipeline import (_RESCALE_FACTOR, _write_inp, aviso_se_no_fiable,
                           estimar, mirar, viene_de_pre)
 
 
+# Este módulo fija el comportamiento con un fue ANTERIOR a 0.1.17, cuyas SE
+# salen del BFGS del camino (fue/BUG-0015). Con fue ≥ 0.1.17 se emula ese fue;
+# el comportamiento nuevo está en test_fue_bug_0015_metodo_de_las_se.py.
+@pytest.fixture(scope="module", autouse=True)
+def _con_un_fue_anterior(como_fue_anterior_modulo):
+    yield
+
+
 @pytest.fixture(scope="module")
 def par(tmp_path_factory):
     """El mismo modelo por las dos vías: (m_inp, m_pre, rutas)."""

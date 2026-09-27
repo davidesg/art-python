@@ -31,7 +31,10 @@ def test_las_instrucciones_traen_el_convenio():
 
 
 @pytest.mark.parametrize("regla", [
-    "NUNCA DE REEJECUTAR",          # de dónde salen los errores típicos
+    # de dónde salen los errores típicos. Desde fue 0.1.17 (fue/BUG-0015) la
+    # regla es mirar el MÉTODO: con fdhess el .pre da las mismas SE que el .inp;
+    # con el BFGS del camino se leen del .out o se reestima desde el .inp.
+    "MIRA QUÉ HESSIANO LOS DIO",
     "NUNCA ESCRIBAS UN .pre",       # sólo el programa que estimó afirma un óptimo
     "VUELVE A SER UN .inp",         # tocar un .pre lo devuelve a especificación
 ])
@@ -86,7 +89,8 @@ def test_la_salida_dice_para_que_sirve_cada_fichero(salida):
     _, txt = salida
     assert "Parámetros, errores típicos y covarianza" in txt
     assert "semilla del siguiente paso" in txt
-    assert "no reestimando el `.pre`" in txt
+    # y dice con qué herramienta se lee (BUG-0029)
+    assert "get_out_report(" in txt
 
 
 def test_el_out_existe_y_trae_los_errores_tipicos(salida):

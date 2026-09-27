@@ -91,6 +91,15 @@ class LecturaOut:
     D: int | None = None
     freq: int | None = None
     residuos: ResiduosOut = field(default_factory=ResiduosOut)
+    #: "Standard errors: <método>", que fue escribe desde 0.1.17 (fue/BUG-0015):
+    #: "fdhess", "bfgs (fdhess: …)" o "none (…)". None = `.out` de un fue
+    #: anterior, cuyas desviaciones típicas son las del BFGS del camino.
+    metodo_se: str | None = None
+
+    @property
+    def se_del_hessiano(self) -> bool:
+        """¿Estas desviaciones típicas son la curvatura EN el óptimo?"""
+        return self.metodo_se == "fdhess"
 
     @property
     def se(self) -> list[float]:
@@ -111,6 +120,7 @@ class LecturaOut:
 
 _PAR = re.compile(r"^\s*(-?\d+\.\d+)\s*\(\s*(-?\d+\.?\d*)\s*\)\s*\[\s*(\d+)\s*\]")
 _COV = re.compile(r"^\s*x\[\s*(\d+)\]\s*->\s*(.*)$")
+_TERMINO_COV = re.compile(r"-?\d*\.\d{9}")
 _EXTREMO = re.compile(
     r"^\s*(Minimum|Maximum):\s*(-?\d+\.\d+)\s+at\s+(\S+)\s+\(observation\s+(\d+)\)")
 
@@ -167,6 +177,8 @@ def lee_out(path: str) -> LecturaOut:
                 r.iteraciones = int(m.group(1))
         elif "STOPPING CRITERIUM" in s and "SATISFIED" not in s:
             r.convergio = False
+        elif s.startswith("Standard errors:"):
+            r.metodo_se = s.split(":", 1)[1].strip() or None
 
         # ── especificación ──
         elif s.startswith("Box-Cox lambda"):
@@ -210,7 +222,11 @@ def lee_out(path: str) -> LecturaOut:
         if en_cov:
             m = _COV.match(L)
             if m:
-                cov.append([float(x) for x in m.group(2).split()])
+                # fue escribe cada término con "%13.9f" y SIN separador: un
+                # valor de 100 o más llena el campo (o lo desborda) y se pega al
+                # anterior —"34.9639402631296.568401265"—. Cada número lleva
+                # exactamente nueve decimales, y eso es lo que los separa.
+                cov.append([float(x) for x in _TERMINO_COV.findall(m.group(2))])
             continue
 
         if en_res:
@@ -266,3 +282,29 @@ def hay_out(path: str) -> bool:
     if p.lower().endswith(".out"):
         return os.path.exists(p)
     return os.path.exists(os.path.splitext(p)[0] + ".out")
+
+
+# ── Un `.out` anterior a fue 0.1.17 ─────────────────────────────────────────
+#
+# Hasta fue 0.1.16 las desviaciones típicas del `.out` salían del BFGS del
+# CAMINO (fue/BUG-0015): son la constancia fiel de lo que se publicó, pero no la
+# curvatura en el óptimo. Se siguen leyendo —el `.out` es el registro— y se dice
+# de dónde vienen, con la salida: reestimar el `.pre` con un fue que calcula el
+# hessiano da las mismas estimaciones y las desviaciones típicas buenas.
+
+AVISO_OUT_BFGS = (
+    "ℹ **Las desviaciones típicas de este `.out` son las del BFGS del camino** "
+    "(el `.out` es de un fue anterior a 0.1.17, o fue tuvo que caer al BFGS). "
+    "Son las que se publicaron, pero dependen de por dónde pasó el optimizador "
+    "(fue/BUG-0015). Las ESTIMACIONES son correctas. Para tener la curvatura en "
+    "el óptimo, reestima el `.pre`: con fue ≥ 0.1.17 da las mismas estimaciones "
+    "y las desviaciones típicas del hessiano (`estimate_and_diagnose` sobre el "
+    "`.pre`)."
+)
+
+
+def aviso_out(lectura: "LecturaOut") -> str:
+    """El aviso para un `.out` cuyas SE no son del hessiano en el óptimo, o ""."""
+    if lectura is None or lectura.se_del_hessiano:
+        return ""
+    return AVISO_OUT_BFGS

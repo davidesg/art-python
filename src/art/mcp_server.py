@@ -179,31 +179,26 @@ y confundirlos produce números que parecen buenos y no lo son.
 
 TRES REGLAS, y las tres se han incumplido en uso real:
 
-1. LOS PARÁMETROS Y SUS ERRORES TÍPICOS SE LEEN DEL .out, NUNCA DE REEJECUTAR
-   UN .pre. Correr fue sobre un .pre y comprobar que los números no se mueven es
-   la VERIFICACIÓN del invariante, no una estimación. Y tiene una consecuencia
-   medida (bugs/BUG-0027): al arrancar exactamente en el óptimo el optimizador
-   para en niter=0, nunca actualiza el hessiano, y devuelve como covarianza la
-   semilla del BFGS — todos los errores típicos idénticos y sin sentido, con
-   converged=True y sin ningún aviso. Si necesitas errores típicos:
-   get_out_report, o reestima desde el .inp.
+1. LOS ERRORES TÍPICOS: MIRA QUÉ HESSIANO LOS DIO. Desde fue 0.1.17 cada
+   ajuste lo dice (en el .out, la línea "Standard errors: <método>"):
 
-   Y NO ES SÓLO LOS ERRORES TÍPICOS: ES TODA LA COVARIANZA (bugs/BUG-0061).
-   Las CORRELACIONES ENTRE PARÁMETROS salen de la misma matriz, así que
-   overparameterization_analysis leído sobre un .pre no da un número inflado —
-   da un número DISTINTO y, peor, PIERDE PARES. Una varianza que sigue siendo la
-   semilla no correlaciona con nada, de modo que los acoplamientos que la
-   involucran se hunden hacia cero y no llegan al umbral.
+   · "fdhess" — la curvatura EN el óptimo. Sale igual desde el .inp que desde
+     el .pre (difieren en 6.5e-9), así que reestimar un .pre para tener errores
+     típicos es VÁLIDO, y estimar() lo acepta. Es el caso normal.
+   · "bfgs (fdhess: <motivo>)", un fue anterior, o un .out SIN esa línea — la
+     matriz que el BFGS acumuló por el CAMINO (fue/BUG-0015). Arrancando en el
+     óptimo no se actualiza: niter=0 y la covarianza es la semilla, con
+     converged=True y sin aviso de fue (bugs/BUG-0027). Y es TODA la covarianza,
+     también las correlaciones de parámetros (bugs/BUG-0061: sobre RATIO_m23 un
+     .pre reejecutado perdía un par de los tres por encima de 0.7). En este caso
+     los errores típicos se leen del .out de la estimación real
+     (get_out_report) o se reestima desde el .inp; art lo avisa.
+   · "none (…)" — no hay errores típicos: sólo valores.
 
-   Medido sobre RATIO_m23: su .out (61 iteraciones) publica tres pares por
-   encima de 0.7 --0.93, 0.98 y 0.80--; reejecutando su .pre salían dos, con
-   valores 0.981 y 0.993, y el tercero DESAPARECÍA. Era el acoplamiento entre el
-   MA(2) y el armónico coseno, o sea el menos visible de los tres y el que más
-   falta hacía ver.
-
-   La regla operativa, en una línea: PARA REESTIMAR SE USA EL .inp; el .pre sólo
-   VERIFICA. Todo lo que se lea de la covarianza --errores típicos, t, y
-   correlaciones de parámetros-- se lee del .out de la estimación real.
+   Un .out antiguo sigue siendo el REGISTRO de lo que se publicó; si sus errores
+   típicos son del BFGS, art lo dice al leerlo y ofrece recalcularlos desde el
+   .pre (mismas estimaciones). Reejecutar un .pre sigue siendo además la
+   VERIFICACIÓN del invariante: los valores no se mueven.
 
 2. NUNCA ESCRIBAS UN .pre. Sólo el programa que estimó puede afirmar un óptimo,
    y el fichero no lleva marca de quién lo escribió. Un modelo cuyo .pre se
@@ -763,16 +758,17 @@ Se usan para mirar algo concreto. Ninguno sustituye a un nodo del protocolo.
 
   DATOS      load_data · preview_data · series_info · create_inp
              verify_optimum — VERIFICA el óptimo de un `.pre` perturbando UNA
-             desviación típica y comparando ℓ; saca las SE de la semilla del
-             BFGS sin salir de la cuenca. **Nunca pongas las semillas a 0 para
+             desviación típica y comparando ℓ (con un fue anterior a 0.1.17,
+             saca además las SE de la semilla del BFGS sin salir de la cuenca). **Nunca pongas las semillas a 0 para
              esto: puede caer en otro óptimo y destruye el convenio del `.pre`.**
              extend_sample — MÁS observaciones sobre el MISMO modelo, para
              validarlo contra lo que vino después o incorporar un episodio
              nuevo sin rehacer la identificación. No reestima.
   MODELO     estimate_and_diagnose (estima un .inp y persiste .inp/.pre/.out +
              guion) · model_equation_display · model_histogram
-  REGISTRO   get_out_report — LEE el .out de un modelo estimado; es de donde
-             salen los errores típicos, NUNCA de reejecutar un .pre
+  REGISTRO   get_out_report — LEE el .out de un modelo estimado: el registro
+             de lo que se publicó, con la línea que dice qué hessiano dio sus
+             errores típicos (regla 1 del convenio)
   COMPARAR   compare_versions (avisa y suprime el Δ si no son comparables:
              distinto operador de diferenciación o distinta escala)
   ESTRUCTURA ar_factorization · overparameterization_analysis ·
@@ -1365,16 +1361,19 @@ def _equation_for_prompt(ts, model) -> str:
                                    degenerate_variance_indices,
                                    near_seed_variance_indices,
                                    near_seed_distances,
-                                   AVISO_COV_DEGENERADA,
-                                   AVISO_COV_CASI_SEMILLA)
+                                   AVISO_COV_CASI_SEMILLA,
+                                   aviso_covarianza, se_ausentes, metodo_se)
         r = getattr(model, "_result", None)
-        if covariance_is_degenerate(r):
+        if se_ausentes(r):
+            aviso = ("\n\n⚠ **Este modelo no tiene errores típicos**: "
+                     + aviso_covarianza(r))
+        elif covariance_is_degenerate(r):
             idx = degenerate_variance_indices(r)
             npar = int(getattr(r, "npar", 0) or 0)
             cuantos = ("TODOS los" if (not idx or len(idx) >= npar)
                        else f"{len(idx)} de los {npar}")
             aviso = (f"\n\n⚠ **{cuantos} errores típicos de arriba NO son válidos** "
-                     f"(niter={getattr(r, 'niter', '?')}): " + AVISO_COV_DEGENERADA)
+                     f"(niter={getattr(r, 'niter', '?')}): " + aviso_covarianza(r))
         else:
             # BUG-0041: la degeneración EXACTA (niter=0) ya se avisa arriba, pero
             # una dirección que se movió un 7% tampoco lleva información del
@@ -1390,6 +1389,14 @@ def _equation_for_prompt(ts, model) -> str:
                 aviso = (f"\n\nℹ **Errores típicos sospechosos** "
                          f"(niter={getattr(r, 'niter', '?')}): {detalle} "
                          + AVISO_COV_CASI_SEMILLA)
+        # fue ≥ 0.1.17 que tuvo que caer al BFGS: el porqué, en una línea. Con
+        # "fdhess" no se dice nada —es el caso normal y el silencio no cuesta
+        # tokens—; con un fue anterior tampoco, porque no hay método que citar.
+        _met = metodo_se(r)
+        if _met and _met.startswith("bfgs"):
+            aviso += (f"\n\nℹ **Errores típicos del BFGS, no del hessiano en el "
+                      f"óptimo** — fue: `{_met}`. Dependen del camino del "
+                      f"optimizador; tómalos como orientativos (fue/BUG-0015).")
     except Exception as _e:               # BUG-0160: no se calla
         _warn("no se pudo componer el aviso del método en _equation_for_prompt", _e)
     # Y el ORIGEN, que es la causa y no el síntoma. Lo de arriba detecta que la
@@ -1414,8 +1421,11 @@ def _equation_for_prompt(ts, model) -> str:
     # y se comparan. Es la asimetría que había que corregir — se publicaba lo
     # incalculable y se callaba lo calculable.
     try:
-        from art.diagnosis import se_exacta_de_la_media
-        _se_mu = se_exacta_de_la_media(model)
+        from art.diagnosis import se_exacta_de_la_media, se_del_hessiano
+        # Con fdhess fue ya publica σ̂/√n para μ sin ARMA (medido: 0.057296 los
+        # dos): la comparación sólo informa cuando las SE son del BFGS.
+        _se_mu = (None if se_del_hessiano(getattr(model, "_result", None))
+                  else se_exacta_de_la_media(model))
         if _se_mu is not None:
             _r = getattr(model, "_result", None)
             # μ es el ÚLTIMO parámetro en el orden de `fue` (ω/δ de cada
@@ -3906,7 +3916,7 @@ def ar_factorization(inp_path: str, sper: int = 0) -> list:
         # niter=0 y la covarianza que vuelve es la semilla del BFGS (c·I), no el
         # hessiano. Los ± del método delta que saldrían de ahí son ficción — y una
         # ficción creíble, porque el valor es pequeño. Mejor no darlos.
-        from art.diagnosis import covariance_is_degenerate, AVISO_COV_DEGENERADA
+        from art.diagnosis import covariance_is_degenerate, aviso_covarianza
         _cov_degenerada = covariance_is_degenerate(getattr(m, "_result", None))
         if _cov_degenerada:
             cov_full = None
@@ -3987,7 +3997,7 @@ def ar_factorization(inp_path: str, sper: int = 0) -> list:
 
         if _cov_degenerada:
             blocks.insert(0, "⚠ **Sin errores típicos** (BUG-0027): "
-                             + AVISO_COV_DEGENERADA
+                             + aviso_covarianza(getattr(m, "_result", None))
                              + "\n\nLos factores y sus d/frecuencia/periodo que siguen "
                                "son correctos; lo que falta son los ±.")
         from mcp.types import TextContent
@@ -6492,8 +6502,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                             f"semilla del siguiente paso: {pre_path}*"
                             f"\n\n*Parámetros, errores típicos y covarianza en "
                             f"`{out_path}` — se leen con "
-                            f"`get_out_report(\"{output_path}\")`, no reestimando "
-                            f"el `.pre`.*")
+                            f"`get_out_report(\"{output_path}\")`.*")
             except Exception:
                 pre_note = (f"\n\n*Modelo guardado en: {output_path}  |  "
                             f"parámetros: {pre_path}*")
@@ -10350,14 +10359,18 @@ def get_out_report(inp_path: str) -> list:
     """
     try:
         from mcp.types import TextContent
-        from art.outfile import hay_out, lee_out
+        from art.outfile import hay_out, lee_out, aviso_out
 
         if hay_out(inp_path):
             r = lee_out(inp_path)
             cab = (f"*Leído de `{os.path.basename(r.ruta)}` — es el registro de "
                    f"la estimación, no una reestimación.*\n\n")
+            # fue/BUG-0015: un `.out` que no dice "Standard errors: fdhess"
+            # trae las SE del BFGS del camino. Se lee igual y se dice.
+            _av = aviso_out(r)
             return [TextContent(type="text",
-                                text=cab + f"```\n{r.texto}\n```")]
+                                text=cab + f"```\n{r.texto}\n```"
+                                + (f"\n\n{_av}" if _av else ""))]
 
         ts, m = _load_fitted(inp_path)
         out_text = m.write_out()
@@ -10444,12 +10457,15 @@ def guion_evidencia(guion_path: str, version: int = 0,
         ruta_out = e.out_path or (os.path.splitext(e.inp_path or "")[0] + ".out"
                                   if e.inp_path else "")
         if ruta_out and os.path.exists(ruta_out):
-            from art.outfile import lee_out
+            from art.outfile import lee_out, aviso_out
             r = lee_out(ruta_out)
             L += ["### Parámetros, del registro de la estimación", "",
                   f"*Leídos de `{os.path.basename(ruta_out)}` — no se ha "
                   f"reestimado nada, así que estos errores típicos son "
-                  f"exactamente los que se calcularon.*", "", "```"]
+                  f"exactamente los que se calcularon.*", ""]
+            if aviso_out(r):                    # fue/BUG-0015: SE del BFGS
+                L += [aviso_out(r), ""]
+            L += ["```"]
             for p_ in r.parametros:
                 L.append(f"  [{p_.indice:2d}] {p_.valor:+12.6f}  "
                          f"({p_.se:.6f})   t={p_.t:+7.3f}   {p_.bloque}")
@@ -10460,13 +10476,23 @@ def guion_evidencia(guion_path: str, version: int = 0,
                          + (f"   iter = {r.iteraciones}" if r.iteraciones else ""))
             L += ["```", ""]
         else:
-            L += ["### Parámetros", "",
-                  f"⚠ **No hay `.out` para este nodo**, así que los errores "
-                  f"típicos no se pueden leer. La covarianza es un subproducto "
-                  f"del camino del optimizador y no se recupera del `.pre`: "
-                  f"habría que reestimar desde `"
-                  + (os.path.basename(e.inp_path) if e.inp_path else "?")
-                  + "` con `estimate_and_diagnose`.", ""]
+            from art.diagnosis import fue_calcula_hessiano
+            if fue_calcula_hessiano():
+                # fue ≥ 0.1.17: el hessiano en el óptimo se recupera del `.pre`.
+                L += ["### Parámetros", "",
+                      f"ℹ **No hay `.out` para este nodo**, así que no hay "
+                      f"errores típicos REGISTRADOS. Se pueden recalcular: con "
+                      f"el fue instalado salen del hessiano en el óptimo, y "
+                      f"reestimar el `.pre` los da exactos "
+                      f"(`estimate_and_diagnose`).", ""]
+            else:
+                L += ["### Parámetros", "",
+                      f"⚠ **No hay `.out` para este nodo**, así que los errores "
+                      f"típicos no se pueden leer. La covarianza es un subproducto "
+                      f"del camino del optimizador y no se recupera del `.pre`: "
+                      f"habría que reestimar desde `"
+                      + (os.path.basename(e.inp_path) if e.inp_path else "?")
+                      + "` con `estimate_and_diagnose`.", ""]
 
         # ── la ecuación esquemática que el guion sí guarda ──
         if e.equation:

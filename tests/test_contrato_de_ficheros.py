@@ -84,6 +84,7 @@ def test_el_nombre_historico_sigue_valiendo():
     assert pipeline._load_fitted is estimar
 
 
+@pytest.mark.usefixtures("como_fue_anterior")   # fue < 0.1.17 (fue/BUG-0015)
 def test_estimar_RECHAZA_un_pre(terna):
     """El cambio de BUG-0159: de avisar a negarse."""
     from art.pipeline import ErrorDeContrato
@@ -92,6 +93,7 @@ def test_estimar_RECHAZA_un_pre(terna):
         estimar(f_pre)
 
 
+@pytest.mark.usefixtures("como_fue_anterior")   # fue < 0.1.17 (fue/BUG-0015)
 def test_y_el_rechazo_dice_por_donde_salir(terna):
     """Negarse sin dar la salida convierte una regla en un muro."""
     from art.pipeline import ErrorDeContrato
@@ -183,6 +185,7 @@ def test_una_herramienta_de_mirar_calla_de_extremo_a_extremo(terna):
     assert _n_avisos(fn, f_pre) == 0
 
 
+@pytest.mark.usefixtures("como_fue_anterior")   # fue < 0.1.17 (fue/BUG-0015)
 def test_una_herramienta_de_estimar_SE_NIEGA_de_extremo_a_extremo(terna):
     """Lo que el analista tiene que ver por la superficie MCP no es un aviso
     —que nadie lee— sino la negativa, **sin traceback**: el carril sólo enseña

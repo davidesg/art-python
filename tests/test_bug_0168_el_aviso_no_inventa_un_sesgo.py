@@ -118,6 +118,7 @@ def test_sin_media_estimada_no_aplica(tmp_path):
     assert se_exacta_de_la_media(estimar(f)[1]) is None
 
 
+@pytest.mark.usefixtures("como_fue_anterior")   # fue < 0.1.17 (fue/BUG-0015)
 def test_el_bloque_lo_IMPRIME_y_lo_compara(tmp_path):
     """Publicarlo sin el número publicado al lado deja al lector sin la
     comparación, que es la mitad útil."""

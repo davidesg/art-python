@@ -4,6 +4,39 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries — unreleased
+
+### Standard errors: art checks which Hessian fue used (fue/BUG-0015)
+
+*In English from here on.*
+
+- **What changed in fue.** fue 0.1.17 (unreleased) computes standard errors
+  from the finite-difference Hessian at the optimum and says so in
+  `FitResult.se_method` (`"fdhess"`, `"bfgs (fdhess: …)"`, `"none (…)"`) and
+  in the `.out` (`Standard errors: <method>`).
+- **art's defences now apply only when the method is not fdhess.** These
+  defences were built around the BFGS-path problem:
+  - the seed and near-seed detectors, the ✗ marks and the warnings of
+    BUG-0027, 0041, 0060, 0090 and 0168;
+  - the refusal of `estimar()` on a `.pre` (BUG-0159).
+
+  They stay in force with an earlier fue (no `se_method`) and when fue falls
+  back to BFGS, so art still works with fue 0.1.16.
+- **With fdhess, `estimar()` accepts a `.pre`.** Its SEs equal the `.inp`'s,
+  so the reason for refusing is gone.
+- **When there are no SEs** (`"none"`), art says so instead of blaming the
+  BFGS seed.
+- **An old `.out`** (no `Standard errors:` line) is still read as the record
+  of what was published. `get_out_report` and `guion_evidencia` add that its
+  SEs come from the BFGS path and can be recomputed from the `.pre`, with the
+  same estimates.
+- **Rule 1 of the file convention** in the MCP instructions now describes
+  the three cases.
+- **Fix to the `.out` reader** (`lee_out`). It split the covariance matrix
+  on spaces. fue writes each term as `%13.9f` with no separator, so a value
+  of 100 or more merged with the previous one. Terms are now separated by
+  their nine decimals.
+
 ## art-tseries 0.2.2 — 2026-09-25
 
 Por el criterio de la 0.2.1 —en la línea 0.2.x sólo entran defectos que

@@ -165,6 +165,7 @@ _RUN4 = os.path.expanduser(
 
 
 @pytest.mark.skipif(not os.path.exists(_RUN4), reason="falta el run 4")
+@pytest.mark.usefixtures("como_fue_anterior")   # fue < 0.1.17 (fue/BUG-0015)
 def test_sobre_el_caso_del_run4(tmp_path):
     """m06: cinco SE en la semilla √(2/216)=0,09645, y la maniobra de cero
     acertó sin comprobarlo."""

@@ -903,8 +903,10 @@ def model_equation(ts, model) -> str:
     # `degenerate_variance_indices` van sobre el vector plano, cuyo orden no es
     # el de render (el propio módulo avisa de ese desajuste).
     try:
-        from art.diagnosis import bfgs_seed_var as _seed
-        _sv = _seed(getattr(model, "_result", None))
+        from art.diagnosis import bfgs_seed_var as _seed, se_del_hessiano
+        _r_eq = getattr(model, "_result", None)
+        # fue ≥ 0.1.17 con fdhess: no hay semilla que marcar (fue/BUG-0015).
+        _sv = None if se_del_hessiano(_r_eq) else _seed(_r_eq)
         _se_semilla = (_sv ** 0.5) if _sv else None
     except Exception:
         _se_semilla = None

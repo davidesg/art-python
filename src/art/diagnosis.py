@@ -202,6 +202,70 @@ class DiagnosisResult:
 # Parameter labeling and correlation (Bloque I)
 # ---------------------------------------------------------------------------
 
+# ── QUÉ HESSIANO DIO LOS ERRORES TÍPICOS — fue/BUG-0015 ──────────────────────
+#
+# Hasta fue 0.1.16 la covarianza salía de la matriz que el BFGS acumula por el
+# CAMINO: dependía de por dónde pasó el optimizador y, arrancando en el óptimo
+# (un `.pre`), se quedaba en la semilla 2/n. Todo lo de abajo —la semilla, la
+# casi-semilla, el rechazo de estimar desde un `.pre`— existe por eso.
+#
+# fue 0.1.17 la calcula con el hessiano por diferencias finitas EN el óptimo
+# (el `fdhess` de Mauricio) y dice cuál usó en `FitResult.se_method`:
+#
+#     "fdhess"               la curvatura en el óptimo: válida desde el `.inp`
+#                            y desde el `.pre` por igual (difieren en 6.5e-9);
+#     "bfgs (fdhess: …)"     el óptimo está en la frontera o el hessiano no es
+#                            definido positivo: fue cae al BFGS y lo dice. Aquí
+#                            las defensas de siempre siguen teniendo sentido;
+#     "none (…)"             ni lo uno ni lo otro: no hay errores típicos (NaN).
+#
+# Con un fue anterior no hay `se_method` y todo sigue como estaba. Las defensas
+# NO se quitan: se aplican sólo donde el método no es "fdhess".
+
+def metodo_se(result) -> str | None:
+    """El método con que fue calculó los errores típicos, o None (fue < 0.1.17)."""
+    m = getattr(result, "se_method", None) if result is not None else None
+    return m if isinstance(m, str) and m else None
+
+
+def se_del_hessiano(result) -> bool:
+    """¿Los errores típicos son la curvatura EN el óptimo (fdhess)?"""
+    return metodo_se(result) == "fdhess"
+
+
+def se_ausentes(result) -> bool:
+    """¿fue no pudo dar errores típicos (ni fdhess ni un BFGS construido)?"""
+    return (metodo_se(result) or "").startswith("none")
+
+
+def fue_calcula_hessiano() -> bool:
+    """¿El fue instalado calcula los errores típicos con fdhess (≥ 0.1.17)?
+
+    Se mira la capacidad y no el número de versión: `Model(hessian=...)` es lo
+    que la 0.1.17 añadió junto a `se_method`.
+    """
+    try:
+        import inspect
+        import fue
+        return "hessian" in inspect.signature(fue.Model).parameters
+    except Exception:                                    # pragma: no cover
+        return False
+
+
+AVISO_SE_AUSENTES = (
+    "no existen: fue no pudo calcular el hessiano en el óptimo (está en la "
+    "frontera de la región admisible, o no es definido positivo) y el "
+    "optimizador no iteró, así que tampoco hay matriz del BFGS a la que "
+    "recurrir. Los VALORES del modelo son correctos; lo que no hay es "
+    "inferencia sobre ellos (fue/BUG-0015)."
+)
+
+
+def aviso_covarianza(result) -> str:
+    """El texto del aviso que corresponde a ESTE resultado."""
+    return AVISO_SE_AUSENTES if se_ausentes(result) else AVISO_COV_DEGENERADA
+
+
 AVISO_COV_DEGENERADA = (
     "provienen de la semilla del BFGS (c·I), no del hessiano — el optimizador "
     "no actualizó esas direcciones. Dos causas: (a) la estimación arrancó ya en "
@@ -244,8 +308,8 @@ def degenerate_variance_indices(result) -> list[int]:
     y dos se habían movido. Unos errores típicos válidos y otros no, sin nada que
     los distinga en la salida.
     """
-    if result is None:
-        return []
+    if result is None or se_del_hessiano(result):
+        return []            # fdhess no tiene semilla: la covarianza es la curvatura
     semilla = bfgs_seed_var(result)
     cov = getattr(result, "cov_matrix", None)
     if cov is None or semilla is None:
@@ -301,7 +365,7 @@ def near_seed_variance_indices(result, tol: float = BANDA_CASI_SEMILLA) -> list[
     semilla **excluyendo** las que ya son la semilla exacta — ésas las reporta
     `degenerate_variance_indices` con un veredicto más fuerte.
     """
-    if result is None:
+    if result is None or se_del_hessiano(result):
         return []
     semilla = bfgs_seed_var(result)
     cov = getattr(result, "cov_matrix", None)
@@ -401,6 +465,14 @@ def covariance_is_degenerate(result) -> bool:
     """
     if result is None:
         return False
+    # fue ≥ 0.1.17 dice qué hessiano usó: con fdhess `niter = 0` ya no significa
+    # nada (arrancar en el óptimo da la misma curvatura), y sin errores típicos
+    # ("none") la covarianza no sirve. Sólo sin método —fue anterior— o con la
+    # caída al BFGS se mira la semilla.
+    if se_del_hessiano(result):
+        return False
+    if se_ausentes(result):
+        return True
     if int(getattr(result, "niter", -1) or 0) == 0 and \
             getattr(result, "cov_matrix", None) is not None:
         return True

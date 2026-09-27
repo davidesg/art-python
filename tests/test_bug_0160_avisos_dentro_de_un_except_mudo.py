@@ -69,6 +69,7 @@ def test_warn_sigue_escribiendo_donde_se_ve(capsys):
     assert cap.out == "", "un aviso de servidor no va a stdout"
 
 
+@pytest.mark.usefixtures("como_fue_anterior")   # fue < 0.1.17 (fue/BUG-0015)
 def test_el_aviso_de_covarianza_semilla_sigue_saliendo(tmp_path):
     """La comprobación de que el arreglo no rompió lo que protegía: el aviso más
     caro de perder —«estos errores típicos NO son válidos»— sigue componiéndose.

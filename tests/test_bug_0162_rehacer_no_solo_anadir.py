@@ -106,6 +106,7 @@ def test_guided_identification_acepta_su_propio_pre_path(cadena):
     assert "No se puede hacer eso con este fichero" not in t
 
 
+@pytest.mark.usefixtures("como_fue_anterior")   # fue < 0.1.17 (fue/BUG-0015)
 def test_las_que_SI_imprimen_SE_del_origen_siguen_negandose(cadena):
     """La otra mitad: el arreglo no puede reabrir la puerta que BUG-0159 cerró.
     `test_interventions` publica razones t del modelo que carga."""

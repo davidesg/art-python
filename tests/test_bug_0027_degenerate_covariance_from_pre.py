@@ -22,6 +22,14 @@ from art.diagnosis import covariance_is_degenerate, degenerate_variance_indices
 from art.pipeline import _write_inp, _load_ts_model
 
 
+# Este módulo fija el comportamiento con un fue ANTERIOR a 0.1.17, cuyas SE
+# salen del BFGS del camino (fue/BUG-0015). Con fue ≥ 0.1.17 se emula ese fue;
+# el comportamiento nuevo está en test_fue_bug_0015_metodo_de_las_se.py.
+@pytest.fixture(scope="module", autouse=True)
+def _con_un_fue_anterior(como_fue_anterior_modulo):
+    yield
+
+
 def _ee(m):
     return np.sqrt(np.diag(np.asarray(m._result.cov_matrix)))
 

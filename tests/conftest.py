@@ -28,3 +28,50 @@ def _figuras_fuera_del_temporal_comun(tmp_path, monkeypatch):
     monkeypatch.setenv("ART_FIG_DIR", str(d))
     # Y ninguna prueba abre ventanas en la pantalla de nadie.
     monkeypatch.setenv("ART_NO_VIEWER", "1")
+
+
+# ── fue anterior a 0.1.17 (fue/BUG-0015) ──────────────────────────────────────
+#
+# Muchas pruebas fijan las defensas de art contra la covarianza del BFGS del
+# CAMINO: la semilla 2/n al reestimar un `.pre`, el rechazo de `estimar()`, los
+# avisos. Con fue ≥ 0.1.17 esas defensas no se disparan —las SE salen del
+# hessiano en el óptimo—, pero art sigue aceptando fue 0.1.16 y ahí tienen que
+# seguir funcionando. Estas fixtures emulan EXACTAMENTE ese fue: estima con la
+# matriz del BFGS (`hessian="bfgs"`), no publica `se_method` y no declara la
+# capacidad. Con un fue anterior instalado no hacen nada.
+
+def _emula_fue_anterior(mp):
+    import fue
+    import art.diagnosis as D
+    if not D.fue_calcula_hessiano():
+        return
+    original = fue.Model.fit
+
+    def fit_como_antes(self, *a, **k):
+        self.hessian = "bfgs"
+        out = original(self, *a, **k)
+        r = getattr(self, "_result", None)
+        if r is not None:
+            r.se_method = None
+        return out
+
+    mp.setattr(fue.Model, "fit", fit_como_antes)
+    mp.setattr(D, "fue_calcula_hessiano", lambda: False)
+
+
+@pytest.fixture
+def como_fue_anterior():
+    mp = pytest.MonkeyPatch()
+    _emula_fue_anterior(mp)
+    yield
+    mp.undo()
+
+
+@pytest.fixture(scope="module")
+def como_fue_anterior_modulo():
+    """Para módulos cuyas fixtures de módulo ya estiman (se crean antes que una
+    fixture de función)."""
+    mp = pytest.MonkeyPatch()
+    _emula_fue_anterior(mp)
+    yield
+    mp.undo()

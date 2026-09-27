@@ -136,6 +136,7 @@ def test_la_entrada_tiene_campo_para_el_histograma():
 
 # ───────────── cuando falta algo, lo DICE ─────────────
 
+@pytest.mark.usefixtures("como_fue_anterior")   # fue < 0.1.17 (fue/BUG-0015)
 def test_sin_out_lo_dice_en_vez_de_reestimar(caso):
     g, d = caso
     e = load_guion(g).entries[-1]

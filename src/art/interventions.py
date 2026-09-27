@@ -503,9 +503,9 @@ def test_intervention(model, itv_idx: int,
     # que vuelve es la semilla del BFGS (c·I). Los `t` que salen de ahí son
     # ficción, y creíble. Un contraste sobre una covarianza que no existe no es un
     # contraste: se para aquí en vez de publicar el número.
-    from art.diagnosis import covariance_is_degenerate, AVISO_COV_DEGENERADA
+    from art.diagnosis import covariance_is_degenerate, aviso_covarianza
     if covariance_is_degenerate(r):
-        raise ValueError("BUG-0027: " + AVISO_COV_DEGENERADA)
+        raise ValueError("BUG-0027: " + aviso_covarianza(r))
     params = np.asarray(r.params)
     cov    = np.asarray(r.cov_matrix)
     n_obs  = model.series.nobs if model.series else len(r.residuals)
@@ -735,9 +735,9 @@ def net_gain(model, itv_idxs: "Sequence[int]",
         raise ValueError(f"intervenciones repetidas en {idx}")
 
     r = model._result
-    from art.diagnosis import covariance_is_degenerate, AVISO_COV_DEGENERADA
+    from art.diagnosis import covariance_is_degenerate, aviso_covarianza
     if covariance_is_degenerate(r):
-        raise ValueError("BUG-0027: " + AVISO_COV_DEGENERADA)
+        raise ValueError("BUG-0027: " + aviso_covarianza(r))
 
     params = np.asarray(r.params)
     cov    = np.asarray(r.cov_matrix)

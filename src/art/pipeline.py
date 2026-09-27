@@ -167,7 +167,14 @@ class ErrorDeContrato(ValueError):
 
 
 def estimar(path: str):
-    """Carga y ESTIMA un modelo. **Exige `.inp`: un `.pre` se RECHAZA.**
+    """Carga y ESTIMA un modelo. Con fue ≥ 0.1.17 acepta `.inp` y `.pre`; con
+    un fue anterior **exige `.inp`: un `.pre` se RECHAZA.**
+
+    **Con fue ≥ 0.1.17 (fue/BUG-0015 arreglado).** Los errores típicos salen del
+    hessiano EN el óptimo, así que reestimar un `.pre` da los mismos que el
+    `.inp` (difieren en 6.5e-9): la razón del rechazo desaparece y el `.pre` se
+    acepta. Si en ese óptimo fue tiene que caer al BFGS (frontera, hessiano no
+    definido positivo), `se_method` lo dice y `aviso_se_no_fiable` avisa.
 
     El convenio es `.inp(t−1) → .pre(t−1) → .inp(t) → .pre(t)`: sólo el `.inp`
     se usa para estimar; el `.pre` sirve para modificar y crear el `.inp`
@@ -194,7 +201,8 @@ def estimar(path: str):
     path = os.path.expanduser(path)
     if not os.path.exists(path):
         raise FileNotFoundError(f"File not found: {path}")
-    if path.lower().endswith(".pre"):
+    from art.diagnosis import fue_calcula_hessiano
+    if path.lower().endswith(".pre") and not fue_calcula_hessiano():
         hermano = path[:-4] + ".inp"
         salida = (f"Usa `{os.path.basename(hermano)}`, que está al lado."
                   if os.path.exists(hermano) else
@@ -212,7 +220,8 @@ def estimar(path: str):
     ts, m = fue.load(path)
     m.fit()
     try:
-        setattr(m, ATRIBUTO_ORIGEN, "inp")
+        setattr(m, ATRIBUTO_ORIGEN,
+                "pre" if path.lower().endswith(".pre") else "inp")
     except Exception:                                    # pragma: no cover
         pass
     return ts, m
@@ -269,8 +278,17 @@ def viene_de_pre(model) -> bool:
 
 
 def aviso_se_no_fiable(model) -> str:
-    """El aviso, o "" si no procede. Para pegarlo junto a una tabla de SE."""
-    return ("\n\n" + AVISO_SE_DESDE_PRE) if viene_de_pre(model) else ""
+    """El aviso, o "" si no procede. Para pegarlo junto a una tabla de SE.
+
+    Desde fue 0.1.17 el origen ya no basta: si los errores típicos son del
+    hessiano en el óptimo (`se_method == "fdhess"`), un `.pre` da los mismos que
+    el `.inp` y no hay nada que avisar. Sólo si fue cayó al BFGS —o es un fue
+    anterior, sin `se_method`— el `.pre` vuelve a ser la causa del problema.
+    """
+    from art.diagnosis import se_del_hessiano
+    if not viene_de_pre(model) or se_del_hessiano(getattr(model, "_result", None)):
+        return ""
+    return "\n\n" + AVISO_SE_DESDE_PRE
 
 
 def _obs_to_date(begyear, begtime, freq, at_0based):
