@@ -6,6 +6,24 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### Identification proposes the airline on series G (BUG-0192)
+
+- **The MA template had its sign inverted by the port.** ART's C builds the
+  theoretical ACF in the Box-Jenkins convention, (1 − θB)(1 − ΘBˢ); the port
+  passed the C's θ, Θ > 0 to statsmodels' `ArmaProcess`, which reads them as
+  (1 + θB)(1 + ΘBˢ). Every MA added moved the template away from a series with
+  negative bars: on ∇∇₁₂ ln of Box-Jenkins' series G the airline came fourth.
+  It is now first (0.879). On Spain's CPI 2002–2019 the regular part stays
+  ambiguous between AR(1) and MA(1), a known property of that series.
+
+### formal_tests runs the DCD of the seasonal MA (BUG-0193)
+
+- The test existed (`dcd_s`, BUG-0039) but only the autonomous lane used it.
+  The formal-tests report now has its section, with the DCD Table 3.2 law and
+  the verdict (the ∇ₛ is genuine, or superfluous: back to B1), and a Θ on the
+  wall enters «Reformulación necesaria». Airline, series G: Θ̂ = 0.557,
+  LR = 30.6 against 2.31.
+
 ### Standard errors: art checks which Hessian fue used (fue/BUG-0015)
 
 *In English from here on.*

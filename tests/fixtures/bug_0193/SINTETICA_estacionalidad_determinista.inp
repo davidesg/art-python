@@ -1,0 +1,180 @@
+************************************************
+* Input file for program FUE                   *
+* DOCTYPE ATSW-interface SYSTEM                *
+************************************************
+
+** Frequency of time series: either 1(A), 4(Q) or 12(M):
+ 12
+** Number of observations and starting date of time series:
+ 144  1 1949 SINTETICA
+** Number of deterministic variables (including seasonal components):
+0
+** Number and orders of regular AR operators:
+0
+** Number and orders of annual AR operators:
+0
+** Number and orders of regular MA operators:
+1 1
+**
+0.389670  1
+** Number and orders of anual MA operators:
+1 1
+**
+0.313013  1
+** Number and frequencies of regular AR(2) operators with fixed frequency:
+0
+** Number and frequencies of regular MA(2) operators with fixed frequency:
+0
+** Mean parameter (mu):
+0
+** Box-Cox lambda, m. Regular differences and complete annual differences:
+ 0.00  1  1
+** Individual factors of the annual difference (starting at freq 0.0):
+0 0 0 0 0 0 0
+** ACF/PACF bands (0 Automatic) and reescaling factor:
+ 0 100.00
+** Time series (stochastic and non-standard deterministic variables):
+148.4186
+146.7895
+156.1434
+149.0166
+145.5351
+150.0049
+161.1720
+166.1147
+151.0956
+135.5443
+129.5405
+141.8401
+143.7194
+136.9955
+146.8000
+146.9261
+139.7148
+146.3316
+148.2409
+141.1965
+123.3345
+111.9271
+101.4762
+110.8261
+112.4675
+109.6240
+109.0224
+105.1505
+103.9529
+110.7569
+113.4581
+110.7306
+99.2602
+88.5423
+86.0826
+91.0201
+91.8453
+92.4471
+97.4295
+95.1808
+94.5465
+100.5852
+103.9857
+103.1865
+99.2163
+86.5644
+83.6524
+90.9446
+90.1077
+93.7863
+102.9132
+97.3106
+96.5579
+104.3180
+111.2501
+112.4229
+103.5725
+96.5721
+94.9590
+100.8037
+102.4392
+99.0248
+106.6112
+100.8438
+98.1202
+103.5762
+114.1223
+116.9361
+103.7435
+92.5808
+88.8980
+90.7144
+90.3618
+88.3144
+98.3579
+98.4251
+96.4938
+101.3340
+107.8688
+111.7900
+101.8785
+92.2655
+87.8164
+94.7863
+95.1740
+90.2230
+96.7315
+93.5627
+95.9297
+103.8771
+111.3283
+112.4530
+102.7541
+96.9217
+91.2626
+100.6091
+97.7600
+96.8260
+98.7183
+91.0319
+89.3066
+92.3031
+99.4843
+105.3557
+94.8589
+85.0868
+80.6271
+88.6437
+89.0620
+86.7608
+95.0334
+94.6159
+90.8142
+96.2010
+103.2857
+99.0737
+92.1723
+82.0986
+79.6054
+86.7356
+87.8424
+84.5898
+90.4010
+83.4563
+79.8684
+85.7354
+86.2637
+87.6023
+76.7401
+71.7456
+65.8751
+73.0490
+74.0736
+69.3353
+77.2023
+79.0183
+78.0778
+82.2274
+87.7676
+84.3891
+80.5111
+72.3929
+68.0725
+72.0078

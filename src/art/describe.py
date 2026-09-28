@@ -33,7 +33,7 @@ from .identification import (
 from .seasonal_detection import detect_seasonality, plot_seasonality
 from .model_detection import suggest_orders
 from .diagnosis import diagnose, plot_diagnosis
-from .formal_tests import (dcd, dcd_f, rv, meg, shin_fuller, dcd_overdiff_regular,
+from .formal_tests import (dcd, dcd_s, dcd_f, rv, meg, shin_fuller, dcd_overdiff_regular,
                            shin_fuller_sobreajuste,
                             dcd_underdiff_regular)
 from .interventions import diagnose_interventions
@@ -2140,6 +2140,11 @@ def describe_formal_tests(model, run_meg: bool = True,
     sf_sobre = (_try(lambda: shin_fuller_sobreajuste(model), None)
                 if (sf_res is None and "raíz REAL" in sf_motivo) else None)
     dcd_res   = _try(lambda: dcd(model),   [])
+    # BUG-0193: el DCD del MA ESTACIONAL (BUG-0039) sólo lo consumía el carril
+    # autónomo (`pipeline._seasonal_ma_invertible`); este informe, que es el de
+    # `formal_tests` y el que lee el guiado, no lo ejecutaba, así que un B2 no
+    # se podía refutar donde más falta hace.
+    dcds_res  = _try(lambda: dcd_s(model), [])
     od_res    = _try(lambda: dcd_overdiff_regular(model), None)
     # SE PIDE, NO SE OFRECE — BUG-0167. Sin `subdiferenciacion=True` no se
     # estima nada: son dos ajustes que además no se necesitan.
@@ -2229,6 +2234,24 @@ def describe_formal_tests(model, run_meg: bool = True,
             c5 = r._crit['5%']
             verdict = "Invertible ✓" if r.lr >= c5 else "No invertible ✗"
             lines.append(f"- Factor {r.factor_index+1}: θ̂={r.coef_free:+.4f}, "
+                         f"LR={r.lr:.3f} (crít 5%={c5:.2f}) → {verdict}")
+
+    # DCD del MA estacional — el lado B2 del par que adjudica la ruta estacional
+    # (el MEG es el lado B1). Su ley es la de DCD Tabla 3.2, no la de `dcd()`.
+    if dcds_res:
+        _s = int(getattr(model.series, "freq", 1) or 1)
+        lines.append(f"\n**DCD — no invertibilidad MA estacional** (H₀: Θ=1, "
+                     f"ley DCD Tabla 3.2, s={_s})")
+        for r in dcds_res:
+            c5 = r._crit['5%']
+            if r.lr >= c5:
+                verdict = (f"Invertible ✓ — la ∇{_s} es GENUINA "
+                           "(estacionalidad estocástica)")
+            else:
+                verdict = (f"En la frontera ✗ — la (1 − ΘB^{_s}) cancela la "
+                           f"(1 − B^{_s}): la ∇{_s} SOBRA (estacionalidad "
+                           "determinista, ruta B1)")
+            lines.append(f"- Factor {r.factor_index+1}: Θ̂={r.coef_free:+.4f}, "
                          f"LR={r.lr:.3f} (crít 5%={c5:.2f}) → {verdict}")
 
     # DCD sobre-diferenciación regular — confirmatorio del ORDEN DE INTEGRACIÓN
@@ -2605,11 +2628,16 @@ def describe_formal_tests(model, run_meg: bool = True,
             "en las frecuencias estacionales — significa que no se miraron."
         )
     elif run_meg and not _meg_suitable(model):
+        # BUG-0193: sobre un B2 el MEG no aplica, pero el par tiene su otro
+        # lado, y decirlo evita que el silencio se lea como «nada que mirar».
         lines.append(
             "\n*MEG no aplica: requiere D=0 con armónicos cos/sin en el modelo.*"
+            + (" *En un modelo con ∇ₛ, el lado B2 del par es el DCD del MA "
+               "estacional, arriba.*" if dcds_res else "")
         )
 
-    if sf_res is None and not dcd_res and not dcd_f_res and not rv_res and not meg_res:
+    if (sf_res is None and not dcd_res and not dcds_res and not dcd_f_res
+            and not rv_res and not meg_res):
         lines.append("*Ningún contraste aplicable a esta especificación.*")
 
     # Build recommendation
@@ -2649,6 +2677,15 @@ def describe_formal_tests(model, run_meg: bool = True,
             "el factor θ=1 es una raíz unitaria en el polinomio MA. "
             "Considera eliminar ese factor MA o reducir q en 1."
         )
+    _s = int(getattr(model.series, "freq", 1) or 1)
+    for r in dcds_res:
+        if r.lr < r._crit['5%']:
+            issues.append(
+                f"MA estacional {r.factor_index+1} en la frontera (Θ̂={r.coef_free:+.4f}, "
+                f"LR={r.lr:.2f} < {r._crit['5%']:.2f}, DCD Tabla 3.2): la ∇{_s} "
+                f"sobra y la estacionalidad es determinista. Vuelve a la ruta B1 "
+                f"(D=0 con armónicos cos/sin) y contrasta cada frecuencia con el MEG."
+            )
     for freq in stochastic_freqs:
         issues.append(
             f"freq={freq} es estocástica: activa ifadf[{freq}]=1 y elimina "
@@ -2699,6 +2736,10 @@ def describe_formal_tests(model, run_meg: bool = True,
             ),
             "dcd": [{"factor": r.factor_index, "lr": r.lr, "coef": r.coef_free}
                     for r in dcd_res],
+            "dcd_s": [{"factor": r.factor_index, "lr": r.lr, "coef": r.coef_free,
+                       "crit_5pct": r._crit['5%'],
+                       "seasonal_difference_genuine": r.lr >= r._crit['5%']}
+                      for r in dcds_res],
             "overdiff_regular": (
                 {"lr": od_res.lr, "coef": od_res.coef_free,
                  "crit_5pct": od_res._crit['5%'],
