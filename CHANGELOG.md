@@ -6,6 +6,24 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### art without statsmodels
+
+- **The theoretical ACF/PACF is ART's C simulator**, ported in
+  `art._acf_teorica` (ARMA.c: ψ weights truncated at 2000 terms,
+  autocovariances, Durbin-Levinson), in the Box-Jenkins convention by
+  construction, so BUG-0192 cannot come back. One deliberate difference with
+  the C: in mixed models the MA is the full multiplicative product (the C's
+  mixed branch drops the θΘ cross term; its pure-MA branch has it).
+- **ADF and KPSS are written from the literature** in `art._raiz_unitaria`
+  (MacKinnon 1994/2010; KPSS 1992 with Hobijn et al. 1998), not ported from
+  the C, whose ADF p-value comes from a Student t and whose KPSS "5 %" value
+  switches columns by n. They reproduce what art called before
+  (statsmodels' `adfuller(autolag="AIC")` and `kpss(regression="c",
+  nlags="auto")`): on 308 series, the same lag, the same verdict at 5 %, the
+  statistic to 3e-10 and the p-value to 4e-13.
+- statsmodels moves to the `dev` extra, where `tests/test_sin_statsmodels.py`
+  pins the agreement. pyfug drops it too (its ACF, PACF and Ljung-Box).
+
 ### Identification proposes the airline on series G (BUG-0192)
 
 - **The MA template had its sign inverted by the port.** ART's C builds the

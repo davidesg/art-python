@@ -6,7 +6,7 @@ Algorithm:
   For each candidate (p,q,P,Q) structure:
     1. Pre-filter: validate AR/MA pattern against empirical ACF/PACF
     2. Compute theoretical ACF/PACF with representative coefficients
-       (statsmodels ArmaProcess — no coefficient grid needed)
+       (ART's C simulator, ported in `_acf_teorica` — no coefficient grid)
     3. Extract structural features from both empirical and theoretical patterns
     4. Score similarity (weighted 60/25/15: short lags / seasonal lags / cut-off points)
     5. Apply parsimony penalty (mirrors C evaluate_model_similarity exactly)
@@ -23,11 +23,12 @@ from fue.diagnostics import ljung_box as _fue_ljung_box
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from statsmodels.tsa.arima_process import ArmaProcess
 
 from fue import TimeSeries
 from fue.diagnostics import acf as _fue_acf, pacf as _fue_pacf
 from fue.plots import _draw_acf_panel, _snap_cmax, _tj_spines
+
+from ._acf_teorica import acf_pacf as _acf_pacf_bj
 
 from .identification import boxcox_transform, apply_differences, _default_lags_fug
 
@@ -287,7 +288,7 @@ def _effective_orders(
 
 
 # ---------------------------------------------------------------------------
-# Theoretical ACF/PACF via statsmodels ArmaProcess
+# Theoretical ACF/PACF: ART's C simulator (ARMA.c), ported in `_acf_teorica`
 # ---------------------------------------------------------------------------
 
 def _theoretical_acf_pacf(
@@ -318,34 +319,16 @@ def _theoretical_acf_pacf(
     Phi   = np.array([0.4 / (i + 1) for i in range(P)])
     Theta = np.array([min(0.3 + i * 0.1, 0.8) for i in range(Q)])
 
-    # AR poly: (1 - φ₁B - ... - φₚBᵖ)(1 - Φ₁Bˢ - ... - ΦₚB^{Ps})
-    ar_reg  = np.r_[1.0, -phi]
-    ar_seas = np.zeros(P * s + 1);  ar_seas[0] = 1.0
-    for i, v in enumerate(Phi):
-        ar_seas[(i + 1) * s] = -v
-    ar_poly = np.convolve(ar_reg, ar_seas)
-
-    # MA poly in the Box-Jenkins convention, as the C: (1 − θ₁B − … − θ_qB^q)
-    # (1 − Θ₁Bˢ − …). BUG-0192: the port wrote (1 + θB)(1 + ΘBˢ) — statsmodels'
-    # ArmaProcess takes the polynomial as it is, and the C's θ > 0 were passed
-    # with it unchanged. The C (ARMA.c, calcular_coeficientes_psi, every
-    # version from ART_v1 to 18.1) has ψⱼ = −θⱼ and ψ_{js} = −Θⱼ, so its
-    # representative θ = 0.3 gives a NEGATIVE bar at lag 1, as the airline's
-    # ACF has; the port gave +0.275, and each MA added moved the template
-    # further from the series (series G: the airline came fourth).
-    ma_reg  = np.r_[1.0, -theta]
-    ma_seas = np.zeros(Q * s + 1);  ma_seas[0] = 1.0
-    for i, v in enumerate(Theta):
-        ma_seas[(i + 1) * s] = -v
-    ma_poly = np.convolve(ma_reg, ma_seas)
-
+    # The polynomials in the Box-Jenkins convention, as the C:
+    #   (1 − φ₁B − …)(1 − Φ₁Bˢ − …) wₜ = (1 − θ₁B − …)(1 − Θ₁Bˢ − …) aₜ
+    # BUG-0192: through statsmodels' ArmaProcess the port wrote the MA as
+    # (1 + θB)(1 + ΘBˢ), since it takes the polynomial as written and the C's
+    # θ > 0 were passed unchanged; the representative θ = 0.3 then gave +0.275
+    # at lag 1 instead of the C's negative bar, and on series G the airline came
+    # fourth. `_acf_teorica` is the C's own computation (ψ weights, Durbin-
+    # Levinson), so the convention is the C's by construction.
     try:
-        proc = ArmaProcess(ar=ar_poly, ma=ma_poly)
-        if not proc.isstationary or not proc.isinvertible:
-            return None, None
-        acf_all  = proc.acf(lags=lags + 1)   # shape (lags+1,), lag 0 = 1.0
-        pacf_all = proc.pacf(lags=lags + 1)
-        return acf_all[1:lags + 1], pacf_all[1:lags + 1]
+        return _acf_pacf_bj(phi, theta, Phi, Theta, s, lags)
     except Exception:
         return None, None
 

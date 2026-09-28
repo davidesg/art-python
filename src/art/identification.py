@@ -354,7 +354,7 @@ def unit_root_tests(ts: "TimeSeries",
     (may be shorter if the differenced series becomes too short)
     """
     import warnings
-    from statsmodels.tsa.stattools import adfuller, kpss as _kpss
+    from ._raiz_unitaria import adf as _adf, kpss as _kpss
 
     y = np.asarray(ts.data, dtype=float)
     z = boxcox_transform(y, lam)
@@ -367,10 +367,10 @@ def unit_root_tests(ts: "TimeSeries",
             break
         lbl = transform_label(lam, d, 0, freq)
 
-        adf_stat, adf_p, *_ = adfuller(w, autolag="AIC")
+        adf_stat, adf_p, *_ = _adf(w)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            kpss_stat, kpss_p, *_ = _kpss(w, regression="c", nlags="auto")
+            kpss_stat, kpss_p, *_ = _kpss(w)
 
         adf_rejects  = adf_p   < 0.05
         kpss_rejects = kpss_p  < 0.05

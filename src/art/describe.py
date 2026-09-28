@@ -257,7 +257,7 @@ def describe_boxcox(ts) -> Description:
 def describe_seasonality(ts) -> Description:
     """Run HAC F-test for seasonality and recommend d, D and decision A/B1/B2."""
     import numpy as np
-    from statsmodels.tsa.stattools import adfuller, kpss
+    from ._raiz_unitaria import adf as _adf, kpss as _kpss
 
     result = detect_seasonality(ts)
     fig    = plot_seasonality(result)
@@ -276,8 +276,8 @@ def describe_seasonality(ts) -> Description:
             y_diff = np.diff(y)
         else:
             y_diff = np.diff(np.log(y))
-        adf_stat, adf_p, *_ = adfuller(y_diff, autolag="AIC")
-        kpss_stat, kpss_p, *_ = kpss(y_diff, regression="c", nlags="auto")
+        adf_stat, adf_p, *_ = _adf(y_diff)
+        kpss_stat, kpss_p, *_ = _kpss(y_diff)
         adf_ok   = adf_p  < 0.05   # rejects unit root → stationary
         kpss_ok  = kpss_p > 0.05   # does not reject stationarity
         d_ok     = adf_ok and kpss_ok

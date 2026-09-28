@@ -58,7 +58,11 @@ dependencies = [
     "numpy>=1.24",
     "matplotlib>=3.7",
     "scipy>=1.10",
-    "statsmodels>=0.14",
+    # statsmodels is NOT a dependency since 2026-09-28: the theoretical ACF is
+    # the C's simulator (`_acf_teorica`), and ADF/KPSS are written from the
+    # literature (`_raiz_unitaria`). It stays in `dev`, where the tests pin the
+    # agreement with it. Its ArmaProcess reads the MA with the opposite sign to
+    # Box-Jenkins', and that already cost a defect (BUG-0192).
     # pandas: load_data, preview_data y create_inp leen Excel y CSV con él. Y
     # openpyxl es el motor que pandas usa para `.xlsx`, cargado en tiempo de
     # ejecución (ningún import lo nombra). Los dos llegaban de REBOTE, como
@@ -76,7 +80,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev  = ["pytest>=7"]
+dev  = ["pytest>=7", "statsmodels>=0.14"]
 
 [project.urls]
 # No había NINGUNA: la página de PyPI no llevaba a ningún sitio. `Documentation`
