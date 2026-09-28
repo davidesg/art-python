@@ -325,11 +325,18 @@ def _theoretical_acf_pacf(
         ar_seas[(i + 1) * s] = -v
     ar_poly = np.convolve(ar_reg, ar_seas)
 
-    # MA poly: (1 + θ₁B + ... + θ_qB^q)(1 + Θ₁Bˢ + ...)
-    ma_reg  = np.r_[1.0, theta]
+    # MA poly in the Box-Jenkins convention, as the C: (1 − θ₁B − … − θ_qB^q)
+    # (1 − Θ₁Bˢ − …). BUG-0192: the port wrote (1 + θB)(1 + ΘBˢ) — statsmodels'
+    # ArmaProcess takes the polynomial as it is, and the C's θ > 0 were passed
+    # with it unchanged. The C (ARMA.c, calcular_coeficientes_psi, every
+    # version from ART_v1 to 18.1) has ψⱼ = −θⱼ and ψ_{js} = −Θⱼ, so its
+    # representative θ = 0.3 gives a NEGATIVE bar at lag 1, as the airline's
+    # ACF has; the port gave +0.275, and each MA added moved the template
+    # further from the series (series G: the airline came fourth).
+    ma_reg  = np.r_[1.0, -theta]
     ma_seas = np.zeros(Q * s + 1);  ma_seas[0] = 1.0
     for i, v in enumerate(Theta):
-        ma_seas[(i + 1) * s] = v
+        ma_seas[(i + 1) * s] = -v
     ma_poly = np.convolve(ma_reg, ma_seas)
 
     try:
