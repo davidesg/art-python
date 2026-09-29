@@ -269,7 +269,27 @@ def _effective_orders(
                 break
         return result
 
-    eff_p = _last_sig(pacf, p_max)
+    # BUG-0194. The regular AR orders are searched as before, up to 3. An AR
+    # of order s/2 (or a multiple within p_max) enters ONLY on its own
+    # pattern: the PACF bar at s/2 significant and ISOLATED, every lag from 4
+    # to s/2 - 1 inside the band — the half-year wave of HICP_ES_m01's
+    # residuals (+0.18 at 1, +0.23 at 6, 2..5 inside). Decided 29-sep-2026: a
+    # block of significant PACF lags is persistence, not a high-order AR —
+    # on Chile's ∇ln CPI (an I(2) series, PACF significant at 1, 2, 3, 5, 6)
+    # letting any AR up to s/2 compete made an AR(6) win and absorb the unit
+    # root that the final DCD has to find.
+    eff_p = _last_sig(pacf, min(p_max, 3))
+    # Generalised on the analyst's remark (29-sep-2026): with HYBRID
+    # seasonality and only a regular AR specified, a high-order AR can show at
+    # any badly represented seasonal frequency, not only at f = 2. So every
+    # submultiple s/k >= 4 is looked at (monthly: 6, f = 2; 4, f = 3), with
+    # the same isolation rule. The MEG is what settles the specification.
+    if s > 1:
+        subs = sorted({s // k for k in range(1, s + 1) if s % k == 0 and 4 <= s // k <= p_max})
+        for lag in subs:
+            if (lag <= lags and abs(pacf[lag - 1]) > thr
+                    and all(abs(pacf[k - 1]) <= thr for k in range(4, lag))):
+                eff_p = max(eff_p, lag)
     eff_q = _last_sig(acf,  q_max)
 
     eff_P = eff_Q = 0
@@ -291,11 +311,28 @@ def _effective_orders(
 # Theoretical ACF/PACF: ART's C simulator (ARMA.c), ported in `_acf_teorica`
 # ---------------------------------------------------------------------------
 
+def _yule_walker_template(p, acf_emp):
+    """The AR(p) coefficients for a high-order template (BUG-0194)."""
+    base = np.array([0.5 / (i + 1) for i in range(p)])
+    scaled = base * (0.8 / base.sum())
+    if acf_emp is None or len(acf_emp) < p:
+        return scaled
+    r = np.r_[1.0, np.asarray(acf_emp, float)[:p]]
+    R = np.array([[r[abs(i - j)] for j in range(p)] for i in range(p)])
+    try:
+        phi = np.linalg.solve(R, r[1:p + 1])
+    except np.linalg.LinAlgError:
+        return scaled
+    roots = np.roots(np.r_[1.0, -phi][::-1])
+    return phi if np.all(np.abs(roots) > 1.0) else scaled
+
+
 def _theoretical_acf_pacf(
     p: int, q: int, P: int, Q: int,
     s: int, lags: int,
     sparse_ar_lag: int = 0,
     sparse_ma_lag: int = 0,
+    acf_emp: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
     """
     Compute theoretical ACF/PACF of SARIMA(p,0,q)(P,0,Q)_s with representative
@@ -318,6 +355,18 @@ def _theoretical_acf_pacf(
         theta[sparse_ma_lag - 1] = 0.35
     Phi   = np.array([0.4 / (i + 1) for i in range(P)])
     Theta = np.array([min(0.3 + i * 0.1, 0.8) for i in range(Q)])
+
+    # BUG-0194. For p >= 4 the representative 0.5/(i+1) (the C's high-order
+    # fallback) sums to more than 1 — 1.04 at p = 4, 1.225 at p = 6 — so the
+    # template was NOT STATIONARY and the candidate vanished in silence: no AR
+    # of order 4 or more could ever enter the list. And a decaying template has
+    # no bar at p, which is what a high-order AR is proposed for (the half-year
+    # wave at 6 in monthly data). Decided 29-sep-2026: for a complete AR of
+    # order >= 4 the template is the AR(p) of Yule-Walker on the EMPIRICAL ACF
+    # — what an AR(p) looks like on these data —; if that is not stationary,
+    # the representative one scaled to sum 0.8. Orders <= 3 are unchanged.
+    if p >= 4 and not sparse_ar_lag:
+        phi = _yule_walker_template(p, acf_emp)
 
     # The polynomials in the Box-Jenkins convention, as the C:
     #   (1 − φ₁B − …)(1 − Φ₁Bˢ − …) wₜ = (1 − θ₁B − …)(1 − Θ₁Bˢ − …) aₜ
@@ -477,8 +526,8 @@ def suggest_orders(
     d: int = 1,
     D: int = 0,
     lam: float = 0.0,
-    p_max: int = 3,
-    q_max: int = 3,
+    p_max: int | None = None,
+    q_max: int = 2,
     P_max: int = 1,
     Q_max: int = 1,
     top_n: int = 5,
@@ -494,7 +543,12 @@ def suggest_orders(
     ts           : fue.TimeSeries
     d, D         : differencing orders already decided (from identification listing)
     lam          : Box-Cox lambda (0.0 = log)
-    p_max, q_max, P_max, Q_max : maximum orders to consider
+    p_max, q_max, P_max, Q_max : maximum orders to consider. BUG-0194, the
+                   school's criterion (29-sep-2026): high orders make sense in
+                   the AR operators only. p_max defaults to max(3, s/2) in
+                   seasonal data — 6 in monthly, so the half-year wave (sales
+                   twice a year) can be reached — and 3 otherwise; the MA space
+                   is q <= 2 and Q <= 1 (q_max was 3).
     top_n        : number of candidates to return (sorted by score descending)
     n_harmonics  : harmonic pairs to subtract before ACF/PACF.
                    -1 (default) = auto: s//2 when D==0 and s>1, else 0.
@@ -513,6 +567,8 @@ def suggest_orders(
     """
     s    = ts.freq
     n    = len(ts.data)
+    if p_max is None:
+        p_max = max(3, s // 2) if s > 1 else 3
 
     # --- Prepare series: transform + difference ---
     y = np.asarray(ts.data, dtype=float)
@@ -541,7 +597,9 @@ def suggest_orders(
         acf_emp, pacf_emp, s, nw,
         p_max, q_max, P_max, Q_max,
     )
-    eff_p = max(eff_p, p_max) if eff_p == 0 else min(eff_p, p_max)
+    # With no significant bar the search opens up to 3, not to p_max: a high
+    # order enters only on its own pattern (BUG-0194).
+    eff_p = min(p_max, 3) if eff_p == 0 else min(eff_p, p_max)
     eff_q = max(eff_q, q_max) if eff_q == 0 else min(eff_q, q_max)
     eff_P = min(eff_P, P_max)
     eff_Q = min(eff_Q, Q_max)
@@ -558,6 +616,7 @@ def suggest_orders(
         acf_th, pacf_th = _theoretical_acf_pacf(
             p, q, P, Q, s, lags,
             sparse_ar_lag=sparse_ar, sparse_ma_lag=sparse_ma,
+            acf_emp=acf_emp,
         )
         if acf_th is None:
             return
@@ -736,8 +795,8 @@ def save_model_detection_report(
     d: int = 1,
     D: int = 0,
     lam: float = 0.0,
-    p_max: int = 3,
-    q_max: int = 3,
+    p_max: int | None = None,
+    q_max: int = 2,
     P_max: int = 1,
     Q_max: int = 1,
     top_n: int = 5,

@@ -69,6 +69,9 @@ class DiagnosisResult:
     # Residual mean against zero — Brajín's adequacy criterion, see `centred`
     mean: float = 0.0
     mean_t: float = 0.0
+    # The ARMA parameters the Q discounts (fue's free_arma_count): the
+    # degrees of freedom are lag - q_df_correction (BUG-0166, BUG-0195).
+    q_df_correction: int = 0
 
     # EL CANCERBERO — decisión del analista, 11-sep-2026.
     #
@@ -177,7 +180,8 @@ class DiagnosisResult:
                 flag = "  <- DECIDE (3f+3)" + ("" if p > 0.05 else "  *** RECHAZA")
             else:
                 flag = "" if p > 0.05 else "  (salvedad)"
-            lines.append(f"    lag={l:3d}  Q={q:6.2f}  p={p:.4f}{flag}")
+            lines.append(f"    lag={l:3d}  df={l - self.q_df_correction:3d}  Q={q:6.2f}"
+                         f"  p={p:.4f}{flag}")
         if self.salvedades_q:
             _s = ", ".join(f"lag {l} (p={p:.4f})" for l, p in self.salvedades_q)
             lines.append(
@@ -695,6 +699,80 @@ def _npar(model) -> int:
     return n
 
 
+def _q_lags_and_df(model, s, npar, lags):
+    """The Ljung-Box lags of the diagnosis and the ARMA parameters it discounts.
+
+    One place for both (BUG-0195): the diagnosis and the scan of the residuals
+    call this, so they cannot disagree on the lag or on the degrees of freedom.
+    """
+    if s > 1:
+        q_check_lags = [s, 2 * s, 3 * s, 3 * s + 3]
+    else:
+        # Sin estacionalidad, 9. Y no es una adaptación a lo que hay: es que
+        # `_default_lags_fug` devuelve 9 para freq=1 porque es lo que hace
+        # `diagnose.c` de `fug`, así que **el 9 ES la convención del motor**.
+        # Una décima de retardo arriba o abajo no cambia nada en un Portmanteau;
+        # lo que importa es que Python y el motor decidan en el mismo sitio.
+        q_check_lags = [5, 9]
+    q_check_lags = sorted({l for l in q_check_lags if 1 <= l <= lags})
+    if not q_check_lags:                       # serie muy corta
+        q_check_lags = [max(1, min(lags, npar + 1))]
+
+    # LOS GRADOS DE LIBERTAD SON m − p − q, NO m − npar — BUG-0166.
+    #
+    # Ljung-Box corrige restando los parámetros **ARMA**, que son los que se
+    # estiman a partir de la autocorrelación de los residuos. Los DETERMINISTAS
+    # —armónicos, intervenciones, media— no entran: no se estiman de ahí.
+    #
+    # Restar `npar` resta también ésos, y el daño crece con el modelo. Medido
+    # sobre ruido blanco puro (n=292, 39 retardos, Q=39,27, p=0,458):
+    #
+    #     npar=11  df=28  p=0,077    pasa
+    #     npar=13  df=26  p=0,046    RECHAZA      ← ruido blanco «no adecuado»
+    #     npar=39  df= 0  p=3,7e-10  RECHAZA
+    #     npar=45  df=−6  p=3,7e-10  RECHAZA      ← y no da error: da un p-valor
+    #
+    # Y sobre `ES_CPI_m10` —n=215, npar=13, ARMA real 1— el retardo 12 daba
+    # df=−1 y p=0,0033 contra el 0,658 correcto: un modelo adecuado declarado
+    # inadecuado por un grado de libertad negativo.
+    #
+    # El daño se COMPONE, que es lo peor: el analista lee «no es ruido blanco»,
+    # añade una intervención, `npar` sube, el df baja y el rechazo se refuerza.
+    # Empuja exactamente hacia la sobreparametrización que el método evita.
+    # La cuenta vive en fue (BUG-0023 de fue), y es la del `.out`: cuenta
+    # también los factores AR(2)/MA(2) de FRECUENCIA FIJA, que la copia que
+    # había aquí se dejaba — en un modelo reformulado por el MEG el df salía
+    # uno de más por cada factor (BUG-0190).
+    from fue.diagnostics import free_arma_count
+    n_arma = free_arma_count(model)
+
+    # Y un df ≤ 0 NO es un contraste: es que no hay contraste. Publicar un
+    # p-valor ahí es peor que no publicarlo — se lee, y manda.
+    q_check_lags = [l for l in q_check_lags if l - n_arma >= 1] or q_check_lags[-1:]
+    return q_check_lags, n_arma
+
+
+def q_decisive(model):
+    """The Q that DECIDES (the cancerbero, 3f+3) of a fitted model, exactly as
+    `diagnose` computes it: (lag, degrees of freedom, statistic, p-value).
+
+    BUG-0195: the scan of the residuals reported another Q under the same
+    label, without discounting the ARMA parameters (p 0.179 "pasa" against the
+    diagnosis' 0.043 "falla" on HICP_ES_m02)."""
+    r = np.asarray(model.residuals.data, dtype=float)
+    s = model.series.freq if model.series is not None else 1
+    lags = _default_lags_fug(len(r), s)
+    q_lags, n_arma = _q_lags_and_df(model, s, _npar(model), lags)
+    lag = q_lags[-1]
+    lb = ljung_box(r, [lag], df_correction=n_arma)
+    return lag, lag - n_arma, float(lb["statistic"][0]), float(lb["pvalue"][0])
+
+
+def q_label(lag, df):
+    """The one label of a residual Q: the lag AND the degrees of freedom."""
+    return f"Q({lag} retardos, {df} g.l.)"
+
+
 def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
     """
     Diagnose a fitted fue.Model.
@@ -749,50 +827,7 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
     # Nota: `_default_lags_fug` devuelve `3*(freq+1)` para series
     # estacionales, que ES f·3+3. La longitud del correlograma del motor ya era
     # la convención; lo único que faltaba era EVALUAR ahí.
-    if s > 1:
-        q_check_lags = [s, 2 * s, 3 * s, 3 * s + 3]
-    else:
-        # Sin estacionalidad, 9. Y no es una adaptación a lo que hay: es que
-        # `_default_lags_fug` devuelve 9 para freq=1 porque es lo que hace
-        # `diagnose.c` de `fug`, así que **el 9 ES la convención del motor**.
-        # Una décima de retardo arriba o abajo no cambia nada en un Portmanteau;
-        # lo que importa es que Python y el motor decidan en el mismo sitio.
-        q_check_lags = [5, 9]
-    q_check_lags = sorted({l for l in q_check_lags if 1 <= l <= lags})
-    if not q_check_lags:                       # serie muy corta
-        q_check_lags = [max(1, min(lags, npar + 1))]
-
-    # LOS GRADOS DE LIBERTAD SON m − p − q, NO m − npar — BUG-0166.
-    #
-    # Ljung-Box corrige restando los parámetros **ARMA**, que son los que se
-    # estiman a partir de la autocorrelación de los residuos. Los DETERMINISTAS
-    # —armónicos, intervenciones, media— no entran: no se estiman de ahí.
-    #
-    # Restar `npar` resta también ésos, y el daño crece con el modelo. Medido
-    # sobre ruido blanco puro (n=292, 39 retardos, Q=39,27, p=0,458):
-    #
-    #     npar=11  df=28  p=0,077    pasa
-    #     npar=13  df=26  p=0,046    RECHAZA      ← ruido blanco «no adecuado»
-    #     npar=39  df= 0  p=3,7e-10  RECHAZA
-    #     npar=45  df=−6  p=3,7e-10  RECHAZA      ← y no da error: da un p-valor
-    #
-    # Y sobre `ES_CPI_m10` —n=215, npar=13, ARMA real 1— el retardo 12 daba
-    # df=−1 y p=0,0033 contra el 0,658 correcto: un modelo adecuado declarado
-    # inadecuado por un grado de libertad negativo.
-    #
-    # El daño se COMPONE, que es lo peor: el analista lee «no es ruido blanco»,
-    # añade una intervención, `npar` sube, el df baja y el rechazo se refuerza.
-    # Empuja exactamente hacia la sobreparametrización que el método evita.
-    # La cuenta vive en fue (BUG-0023 de fue), y es la del `.out`: cuenta
-    # también los factores AR(2)/MA(2) de FRECUENCIA FIJA, que la copia que
-    # había aquí se dejaba — en un modelo reformulado por el MEG el df salía
-    # uno de más por cada factor (BUG-0190).
-    from fue.diagnostics import free_arma_count
-    n_arma = free_arma_count(model)
-
-    # Y un df ≤ 0 NO es un contraste: es que no hay contraste. Publicar un
-    # p-valor ahí es peor que no publicarlo — se lee, y manda.
-    q_check_lags = [l for l in q_check_lags if l - n_arma >= 1] or q_check_lags[-1:]
+    q_check_lags, n_arma = _q_lags_and_df(model, s, npar, lags)
 
     lb = ljung_box(r, q_check_lags, df_correction=n_arma)
     q_stats   = [float(x) for x in lb['statistic']]
@@ -843,6 +878,7 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
         q_lags=q_check_lags,
         q_stats=q_stats,
         q_pvalues=q_pvalues,
+        q_df_correction=int(n_arma),
         jb_stat=jb_stat,
         jb_pvalue=jb_pvalue,
         skewness=skew,

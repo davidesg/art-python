@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**190 report(s), 7 open.**
+**192 report(s), 7 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -196,6 +196,8 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0191](BUG-0191-lo-que-art-usa-no-esta-en-sus-dependencias.md) | fixed | critical | packaging | Lo que art usa no está en sus dependencias — las tres herramientas de previsión fallan en toda instalación limpia (falta jinja2), y pandas y openpyxl llegan de rebote por pyfug | 0.2.2 |
 | [BUG-0192](BUG-0192-la-identificacion-no-propone-el-airline.md) | fixed | high | identification | La identificación no propone el airline sobre la serie G de Box-Jenkins — la plantilla teórica del MA lleva el signo fijado en (1 + θB)(1 + ΘBˢ), así que cada MA que se añade AUMENTA la distancia a una FAS con barras negativas | 0.2.3.dev0 |
 | [BUG-0193](BUG-0193-formal-tests-no-ejecuta-el-dcd-del-ma-estacional.md) | fixed | high | formal-tests | formal_tests no ejecuta el DCD del MA estacional — dcd_s existe y está validado (BUG-0039), pero sólo lo consume el carril autónomo, así que en guiado un modelo B2 sigue sin poderse refutar | 0.2.3.dev0 |
+| [BUG-0194](BUG-0194-la-identificacion-no-ve-un-ar-de-orden-alto.md) | fixed | high | identification | La identificación no puede proponer un AR de orden mayor que 3 — p_max=3 y el corte «tres retardos seguidos no significativos» dejan fuera el AR(6) que la FAP pide en una serie mensual con rebajas semestrales | 0.2.3.dev0 |
+| [BUG-0195](BUG-0195-dos-q-con-el-mismo-nombre-y-distinto-p.md) | fixed | high | diagnosis | Dos Ljung-Box con el mismo rótulo «Q(39)» y veredictos opuestos — el escaneo de anómalos no descuenta los parámetros ARMA (p = 0,179, «pasa») y la diagnosis sí (p = 0,043, «falla») pero lo rotula por el retardo, no por los grados de libertad | 0.2.3.dev0 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 

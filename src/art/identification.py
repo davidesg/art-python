@@ -506,7 +506,7 @@ def _draw_acf_pacf_row(ax_acf: plt.Axes, ax_pacf: plt.Axes,
     ax_acf.set_title('acf', loc='center', fontsize=11, pad=4)
     ax_pacf.set_title('pacf', loc='center', fontsize=11, pad=4)
     ax_acf.set_xlabel(
-        f"Q({st.ljung_box_df}) = {st.ljung_box_stat:.1f}",
+        f"Q({st.lags} lags, {st.ljung_box_df} df) = {st.ljung_box_stat:.1f}",
         fontsize=10, labelpad=4,
     )
     ax_pacf.set_xlabel('')

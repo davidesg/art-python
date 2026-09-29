@@ -6,6 +6,29 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### Identification can propose a high-order AR (BUG-0194)
+
+- An AR of order 4 or more could never enter the list: `p_max` was 3, the
+  cut on three quiet lags swallowed the s/2 lag, and the representative AR
+  template (0.5/(i+1)) is not stationary from p = 4 on, so those candidates
+  vanished in silence. Now `p_max` = max(3, s/2) (6 in monthly); an AR of
+  order s/k >= 4 (monthly: 6, f=2; 4, f=3) enters when the PACF bar there is
+  ISOLATED (the lags from 4 up to it inside the band) — typically HYBRID
+  seasonality badly represented by a regular AR, which the MEG then settles —,
+  so a block of significant lags — persistence, as in an
+  under-differenced series — does not open it; a complete AR of order >= 4 is
+  templated by Yule-Walker on the empirical ACF. MA orders are capped at
+  q <= 2, Q <= 1.
+  On HICP_ES_m01's residuals (PACF bars at 1 and 6) the AR(6) is now listed.
+
+### One Q of the residuals, one label (BUG-0195)
+
+- The residual scan reported a Ljung-Box without discounting the ARMA
+  parameters, under the diagnosis' label: on HICP_ES_m02 it said "pasa"
+  (p 0.179) where the diagnosis said "falla" (p 0.043). Both now publish the
+  same Q, labelled with the lag AND the degrees of freedom:
+  «Q(39 retardos, 32 g.l.)».
+
 ### art without statsmodels
 
 - **The theoretical ACF/PACF is ART's C simulator**, ported in

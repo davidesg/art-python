@@ -32,7 +32,7 @@ from .identification import (
 )
 from .seasonal_detection import detect_seasonality, plot_seasonality
 from .model_detection import suggest_orders
-from .diagnosis import diagnose, plot_diagnosis
+from .diagnosis import diagnose, plot_diagnosis, q_label
 from .formal_tests import (dcd, dcd_s, dcd_f, rv, meg, shin_fuller, dcd_overdiff_regular,
                            shin_fuller_sobreajuste,
                             dcd_underdiff_regular)
@@ -664,6 +664,20 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
             f"{marker} {i}. ARIMA({sp.p},{sp.d},{sp.q})({sp.P},{sp.D},{sp.Q})_{sp.s}"
             f"{sufijo}  sim={sp.similarity:.3f}  —  {label}"
         )
+
+    altos = [sp for sp in completos if sp.p >= 4]
+    if altos:
+        # BUG-0194: an AR of high order is proposed as the COMPLETE polynomial
+        # (no zeros imposed, BUG-0095); what it hides is read in its roots.
+        lines += ["",
+                  f"**AR de orden alto** (p = {', '.join(str(sp.p) for sp in altos)}): "
+                  "se propone porque la FAP tiene una barra AISLADA en un submúltiplo "
+                  "de la estacionalidad. Suele ser estacionalidad HÍBRIDA mal "
+                  "representada en esa frecuencia, cuando sólo se ha especificado un AR "
+                  "regular (en mensual, el retardo 6 es f=2 y el 4 es f=3). Se propone "
+                  "el polinomio COMPLETO, sin ceros impuestos: estímalo, factorízalo "
+                  "(`ar_factorization`) para ver la frecuencia del factor que esconde, "
+                  "y deja que el **MEG** aclare la especificación de esa frecuencia."]
 
     if dispersos:
         lines += [
@@ -1726,7 +1740,8 @@ def describe_diagnosis(model) -> Description:
         # Sin distinguirlos, los cuatro se leían como cuatro veredictos y
         # cualquiera bloqueaba.
         (f"- Ruido blanco (Q): {wn}  "
-         + (f"Q({result.q_lag_cancerbero})={result.q_stats[-1]:.2f}, "
+         + (f"{q_label(result.q_lag_cancerbero, result.q_lag_cancerbero - result.q_df_correction)}"
+            f"={result.q_stats[-1]:.2f}, "
             f"p={result.q_p_cancerbero:.4f} — **decide 3f+3**"
             if result.q_lags else "sin contraste")),
         f"- Normalidad (JB): {nm}  JB={result.jb_stat:.3f}, p={result.jb_pvalue:.4f}",
@@ -3148,7 +3163,8 @@ def _criterio_umbral(umbral: float, n: int) -> str:
 
 def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
                           threshold: float = 3.5,
-                          omitir=None, motivo: str = "") -> Description:
+                          omitir=None, motivo: str = "",
+                          q_model=None) -> Description:
     """
     Scan the differenced series for extreme observations BEFORE ARMA identification.
 
@@ -3164,6 +3180,14 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
     * `omitir=["Q4/2008", "Q1/2009", "Q2/2009"]` — **por INCIDENTE**: el
       episodio entero, que es lo que el nodo de intervención necesita antes de
       elegir la forma: «¿cómo quedaría el correlograma sin este suceso?».
+
+    `q_model`: el modelo ajustado cuando lo que se escanea son SUS residuos.
+    La Q que se publica es entonces la de la diagnosis —el mismo retardo, los
+    mismos grados de libertad, el mismo p (`diagnosis.q_decisive`)—: antes se
+    calculaba otra sin descontar los parámetros ARMA y se rotulaba igual, y
+    sobre HICP_ES_m02 decía «pasa» (p 0,179) donde la diagnosis decía «falla»
+    (p 0,043) — BUG-0195. Sin modelo (la serie antes de identificar) no hay
+    nada que descontar: g.l. = retardos.
 
     `motivo` es el texto que acompaña al criterio en la cabecera y en el título
     de la figura. Sin él, el gráfico no dice qué se ha quitado, y con tres
@@ -3329,10 +3353,15 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
     q_p = None
     try:
         from fue.diagnostics import ljung_box as _lb
-        _k = min(n_lags, max(1, len(w_std) // 4))
-        _lbr = _lb(w_std, [_k])
-        q_obs = float(_lbr["statistic"][0])
-        q_p = float(_lbr["pvalue"][0])
+        if q_model is not None:
+            from art.diagnosis import q_decisive
+            _k, q_df, q_obs, q_p = q_decisive(q_model)
+        else:
+            _k = min(n_lags, max(1, len(w_std) // 4))
+            _lbr = _lb(w_std, [_k])
+            q_obs = float(_lbr["statistic"][0])
+            q_p = float(_lbr["pvalue"][0])
+            q_df = _k
         q_lag = _k
         if outliers:
             from art.calibracion import _acf_pacf as _ap
@@ -3511,7 +3540,7 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         # significa nada.
         _pie = []
         if q_obs is not None:
-            _pie.append(f"Q({q_lag}) = {q_obs:.1f}"
+            _pie.append(f"Q({q_lag} lags, {q_df} df) = {q_obs:.1f}"
                         + (f" (p={q_p:.3f})" if q_p is not None else ""))
             if _lect_q.pie:
                 _pie.append(f"omitting: {efecto:+.0f}% ({_lect_q.pie})")
@@ -3535,10 +3564,12 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
     ]
     if q_obs is not None:
         lines.append(
-            f"- Q({q_lag}) = **{q_obs:.1f}**"
+            f"- {q_label(q_lag, q_df)} = **{q_obs:.1f}**"
             + (f" (p={q_p:.3f}) — **{'pasa' if q_p >= 0.05 else 'RECHAZA'}**"
                if q_p is not None else "")
-            + "  (Ljung-Box, la misma que la figura de diagnosis)")
+            + ("  (Ljung-Box: la MISMA de la diagnosis — retardo, g.l. y p)"
+               if q_model is not None else
+               "  (Ljung-Box sobre la serie, sin modelo: nada que descontar)"))
         if efecto is not None:
             lines.append(
                 f"- Efecto de omitir sobre la Q: **{efecto:+.0f}%**  "

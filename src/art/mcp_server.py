@@ -3214,7 +3214,7 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER,
         )
         desc = describe_prelim_scan(res_ts, d=0, D=0, lam=1.0,
                                     threshold=threshold,
-                                    omitir=omitir, motivo=motivo)
+                                    omitir=omitir, motivo=motivo, q_model=m)
         cab = (f"*Escaneo sobre los RESIDUOS de `{os.path.basename(inp_path)}` "
                f"(n={len(m.residuals.data)}), no sobre la serie.*\n\n")
 
@@ -4750,7 +4750,8 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
         # outlier_autoscan (2.5): more sensitive than the user-facing 3.5 so that
         # marginal outliers are flagged during the cycle, not after formal diagnosis.
         _autoscan_z = policy.THRESHOLDS["outlier_autoscan"]
-        scan = _prelim_scan(_res_ts, d=0, D=0, lam=1.0, threshold=_autoscan_z)
+        scan = _prelim_scan(_res_ts, d=0, D=0, lam=1.0, threshold=_autoscan_z,
+                            q_model=m)
         # Count only FREE (estimated) ARMA parameters to distinguish m00 from final
         def _n_free(vals, free):
             if not vals:
@@ -8317,7 +8318,7 @@ def guided_intervention(inp_path: str,
             _res_ts = _fue.TimeSeries(data=m._result.residuals, freq=ts.freq,
                                       start=_resid_start(m), name="Resid")
             _fig = describe_prelim_scan(_res_ts, d=0, D=0, lam=1.0,
-                                        threshold=threshold).figure_b64
+                                        threshold=threshold, q_model=m).figure_b64
         except Exception as _fe:
             _warn(f"guided_intervention: figura del escaneo no disponible: {_fe}")
         return _result(Description(summary="\n".join(L),
