@@ -1,5 +1,11 @@
 # art-python — TODO
 
+## PRÓXIMA VERSIÓN — revisión a fondo del identificador ARMA (decidido 29-sep-2026)
+
+Con su reproducción en **BUG-0198** (la rata almizclera: FAP en 2 y 6, ciclo de
+~10 años, y la lista no propone ni el AR(2) ni el AR(6)); relacionados
+BUG-0192, BUG-0194 y BUG-0196.
+
 ## Arquitectura
 
 - [ ] **Revisión de arquitectura** — [`docs/ARCHITECTURE_REVIEW.md`](docs/ARCHITECTURE_REVIEW.md),

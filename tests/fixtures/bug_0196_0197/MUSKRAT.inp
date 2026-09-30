@@ -1,0 +1,94 @@
+************************************************
+* Input file for program FUE                   *
+* DOCTYPE ATSW-interface SYSTEM                *
+************************************************
+
+** Frequency of time series: either 1(A), 4(Q) or 12(M):
+ 1
+** Number of observations and starting date of time series:
+ 62  1 1850 MUSKRAT
+** Number of deterministic variables (including seasonal components):
+ 0
+**Number and orders of regular AR operators:
+ 0
+** Number and orders of annual AR operators:
+ 0
+** Number and orders of regular MA operators:
+ 0
+** Number and orders of anual MA operators:
+ 0
+** Number and frequencies of regular AR(2) operators with fixed frequency:
+ 0
+** Number and frequencies of regular MA(2) operators with fixed frequency:
+ 0
+** Mean parameter (mu):
+0
+** Box-Cox lambda, regular differences and complete annual differences:
+1.00 0 0
+** Individual factors of the annual difference (from freq 0.0): 
+ 0
+** ACF/PACF bands (0 Automatic) and reescaling factor: 
+ 0 100.00
+** Time series (stochastic and non-standard deterministic variables): 
+175472.0 
+194682.0 
+292530.0 
+493952.0 
+512291.0 
+345626.0 
+258806.0 
+302267.0 
+313502.0 
+254246.0 
+177291.0 
+206020.0 
+335385.0 
+357060.0 
+509769.0 
+418370.0 
+320824.0 
+412164.0 
+618081.0 
+404173.0 
+232251.0 
+443999.0 
+704789.0 
+767896.0 
+671982.0 
+523802.0 
+583319.0 
+437121.0 
+486030.0 
+499727.0 
+478078.0 
+829034.0 
+1029296.0 
+1069183.0 
+1083067.0 
+817003.0 
+347050.0 
+380132.0 
+344878.0 
+223614.0 
+322160.0 
+574742.0 
+806103.0 
+934646.0 
+648687.0 
+674811.0 
+813159.0 
+551716.0 
+568934.0 
+701487.0 
+767741.0 
+928199.0 
+1650214.0 
+1488287.0 
+924439.0 
+1056253.0 
+695070.0 
+407472.0 
+172418.0 
+302195.0 
+749142.0 
+963597.0 

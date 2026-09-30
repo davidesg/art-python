@@ -5094,6 +5094,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 _ruta_sea = _escribe_fig(sea.figure_b64, "seasonality")   # BUG-0113
                 sea_fig  = sea.figure_b64
                 sea_text = (
+                    ("\n\n" + sea.summary) if sea.data.get("annual") else
                     "\n\n**Test HAC de estacionalidad (soporte):**\n"
                     + sea.summary + "\n\n---\n" + sea.recommendation
                 )
@@ -5108,18 +5109,39 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 hay_estacionalidad = bool(sea.data.get("seasonal_detected", False))
                 if not hay_estacionalidad:
                     from art.describe import describe_unit_root as _dur
-                    _urt2  = _dur(ts, lam=lam, max_d=d + 1)
+                    _urt2  = _dur(ts, lam=lam, max_d=d + 1, current_d=d)
                     _rec2  = int(_urt2.data.get("recommended_d", d))
+                    # BUG-0197: ONE decision about d, the policy's, said once.
+                    # The table's consensus can sit at d+1 only because the ADF
+                    # does not reject at d — with a short series or a cycle it
+                    # lacks power. Another difference is invited only when BOTH
+                    # tests at d say unit root; when they disagree it is a
+                    # caveat, not an instruction (the muskrat: ADF p=0.14, KPSS
+                    # accepts; d=2 is exactly the error there).
+                    _row_d = next((r for r in _urt2.data.get("results", [])
+                                   if r.get("d") == d), {})
+                    _both  = _row_d.get("verdict") == "unit_root"
                     # La pregunta del nodo es «¿hace falta UNA MÁS?», no
                     # «redecide d desde cero». `recommended_d` recorre la tabla
                     # entera y puede devolver un valor POR DEBAJO de la d
                     # actual: eso no contesta esta pregunta — apunta a
                     # sobrediferenciación, que es el otro lado y lo dictamina el
                     # DCD sobre el modelo estimado, no un ADF sobre la serie.
-                    if _rec2 > d:
+                    if _rec2 > d and _both:
                         _veredicto = (
-                            f"\n\n→ La evidencia apunta a **d={_rec2}**. "
-                            f"Reentra con `guided_identification(inp_path, lam={lam}, d={d + 1})`.")
+                            f"\n\n→ En d={d} los dos contrastes ven raíz unitaria (el ADF "
+                            f"no la rechaza y el KPSS rechaza la estacionariedad): "
+                            f"**hace falta otra diferencia**. Reentra con "
+                            f"`guided_identification(inp_path, lam={lam}, d={d + 1})`.")
+                    elif _rec2 > d:
+                        _veredicto = (
+                            f"\n\n→ **Se sigue con d={d}.** La tabla llega al consenso "
+                            f"en d={_rec2}, pero en d={d} los contrastes no coinciden "
+                            f"(el ADF no rechaza la raíz unitaria; el KPSS no rechaza la "
+                            f"estacionariedad): no hay evidencia firme de otra diferencia, "
+                            f"y con una serie corta o un ciclo el ADF pierde potencia. "
+                            f"Salvedad, no instrucción: si el modelo estimado la pide, lo "
+                            f"dirán Shin-Fuller y el DCD de sobrediferenciación.")
                     elif _rec2 < d:
                         _veredicto = (
                             f"\n\n→ **No hace falta otra diferencia** — pero ojo: la "
@@ -5190,14 +5212,23 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 "frecuencia requiere tratamiento estocástico."
             )
 
-            text = (
-                f"## Paso 3 — {sym}y({lam_str}), d={d}\n\n"
+            # BUG-0196: annual data have no seasonal lags to look for.
+            _guia = (
+                "Observa la serie diferenciada y su ACF/PACF:\n\n"
+                "**Datos anuales:** no hay retardos estacionales que mirar; D=0 "
+                "por construcción. Un ciclo de varios años es no estacional y lo "
+                "modela la parte AR.\n\n"
+                "**¿Hace falta otra diferencia?** → abajo, con su contraste."
+                if int(ts.freq or 1) <= 1 else
                 "Observa la serie diferenciada y su ACF/PACF:\n\n"
                 "**¿Estacionalidad?** (picos en ACF/PACF a lags s, 2s, 3s…)\n"
                 "  - Picos regulares/estables → **B1** (D=0, armónicos deterministas)\n"
                 "  - Picos muy dominantes o irregulares → **B2** (D=1, dif. estacional)\n"
                 "  - Sin picos estacionales → D=0, sin armónicos, → Call 4 directo\n\n"
-                "**¿Tendencia residual?** → considera d=" + str(d + 1)
+                "**¿Tendencia residual?** → abajo, con su contraste.")
+            text = (
+                f"## Paso 3 — {sym}y({lam_str}), d={d}\n\n"
+                + _guia
                 + sea_text + d_next_text
                 # BUG-0043: `b1_note`, `b1_steps` y `b2_steps` se anexaban
                 # SIEMPRE. Tras concluir «Decisión A — sin estacionalidad… sin

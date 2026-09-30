@@ -89,7 +89,9 @@ def test_sin_estacionalidad_el_aviso_se_conserva():
     seas = describe_seasonality(_serie_i2())
     assert bool(seas.data["seasonal_detected"]) is False
     assert bool(seas.data["d_stationary"]) is False   # numpy.bool_, de ahí el bool()
-    assert "Considera d=2" in seas.summary
+    # BUG-0197: the warning stays, in the voice of evidence — the decision is
+    # node 3's, said once («Considera d=2» contradicted it).
+    assert "queda abierta la pregunta de una diferencia más" in seas.summary
 
 
 # ─────────────────────────────────────────────────────────────────────────────

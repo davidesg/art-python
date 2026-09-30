@@ -254,10 +254,33 @@ def describe_boxcox(ts) -> Description:
 # Seasonal detection
 # ---------------------------------------------------------------------------
 
+ANNUAL_SEASONALITY = (
+    "**Datos anuales (s = 1): no hay frecuencias estacionales**, así que no hay "
+    "contraste de estacionalidad que hacer: **D = 0 por construcción**, sin "
+    "armónicos. Un ciclo que se repita cada varios años (poblaciones, ciclos "
+    "económicos) no es estacional —su periodo no es fijo ni divide al año—: lo "
+    "modela la parte AR con raíces complejas, y `ar_factorization` da su periodo "
+    "y su amortiguamiento."
+)
+
+
 def describe_seasonality(ts) -> Description:
-    """Run HAC F-test for seasonality and recommend d, D and decision A/B1/B2."""
+    """Run HAC F-test for seasonality and recommend d, D and decision A/B1/B2.
+
+    BUG-0196: with annual data (freq = 1) there are no seasonal frequencies,
+    so there is nothing to test — no F with zero numerator degrees of
+    freedom, no empty figure, no B1/B2 routes: D = 0 by construction."""
     import numpy as np
     from ._raiz_unitaria import adf as _adf, kpss as _kpss
+
+    if int(getattr(ts, "freq", 1) or 1) <= 1:
+        return Description(
+            summary=ANNUAL_SEASONALITY,
+            figure_b64=None,
+            recommendation="Decisión A. D = 0 por construcción (datos anuales), sin armónicos.",
+            data={"seasonal_detected": False, "decision": "A", "recommended_D": 0,
+                  "annual": True, "freq_results": []},
+        )
 
     result = detect_seasonality(ts)
     fig    = plot_seasonality(result)
@@ -369,10 +392,15 @@ def describe_seasonality(ts) -> Description:
                 "el contraste que vale sobre el modelo estimado es Shin-Fuller.",
             ]
         else:
+            # BUG-0197: this is EVIDENCE, not the decision. The guided node 3
+            # asks «one more difference?» with its own table and one verdict;
+            # a second instruction here («Considera d=2») contradicted it.
             lines += [
                 "",
-                "⚠ Los tests de raíz unitaria sugieren que ∇log(y) puede no ser "
-                "estacionaria. Considera d=2.",
+                "⚠ El ADF sobre ∇log(y) no rechaza la raíz unitaria: queda abierta "
+                "la pregunta de una diferencia más. Se contesta con ADF+KPSS en "
+                "d+1 y, sobre el modelo estimado, con Shin-Fuller y el DCD de "
+                "sobrediferenciación — no con este contraste solo.",
             ]
 
     if decision == "B1":
@@ -408,7 +436,8 @@ def describe_seasonality(ts) -> Description:
 # Unit root tests (Bloque L)
 # ---------------------------------------------------------------------------
 
-def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
+def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2,
+                       current_d: int = 0) -> Description:
     """
     Run ADF + KPSS for d=0…max_d and return a coloured summary table.
 
@@ -496,7 +525,10 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2) -> Description:
         "",
         f"**Lo que encuentran los contrastes**: d = {rec_d} ({_que_es}).",
     ]
-    if _rec_pol != rec_d:
+    # BUG-0197: the «starting point» advice answers the question asked FROM
+    # THE LEVEL. At d > 0 the caller asks «one more?» and gives the one verdict
+    # itself; repeating «d = 1, no 2» there was a second, contradicting voice.
+    if _rec_pol != rec_d and current_d == 0:
         _salto = [r.verdict for r in results if 0 < r.d < rec_d]
         lines += [
             "",
@@ -728,8 +760,17 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
     rec_P   = top_sp.P if top_sp else 0
     rec_Q   = top_sp.Q if top_sp else 0
 
-    if D == 0:
-        seasonal_note = "Añade armónicos cos/sin (n_harmonics=freq//2) en confirm_and_estimate."
+    _freq = int(getattr(ts, "freq", 1) or 1)
+    if _freq <= 1:
+        # BUG-0196: annual data have no seasonal frequencies — no harmonics.
+        seasonal_note = "Datos anuales: sin armónicos (n_harmonics=0, seasonal=False)."
+    elif D == 0:
+        # BUG-0196: D=0 is both route B1 (harmonics) and Decision A (no
+        # seasonality); this listing does not know which node 3 took.
+        seasonal_note = (
+            "Si el nodo 3 detectó estacionalidad (ruta B1), añade armónicos cos/sin "
+            f"(n_harmonics={max(_freq // 2 - 1, 0)}) en confirm_and_estimate; si no "
+            "(Decisión A), sin armónicos.")
     else:
         if rec_P > 0 or rec_Q > 0:
             seasonal_note = (
@@ -742,15 +783,18 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
     if ambiguous:
         sp0, sp1 = specs[0], specs[1]
         rec = (
-            f"Decisión ambigua entre SARIMA({sp0.p},{d},{sp0.q})({sp0.P},{D},{sp0.Q}) y "
-            f"SARIMA({sp1.p},{d},{sp1.q})({sp1.P},{D},{sp1.Q}). "
-            f"Estima ambos y elige por AIC/BIC y diagnosis de residuos. "
+            (f"Decisión ambigua entre ARIMA({sp0.p},{d},{sp0.q}) y "
+             f"ARIMA({sp1.p},{d},{sp1.q}). " if _freq <= 1 else
+             f"Decisión ambigua entre SARIMA({sp0.p},{d},{sp0.q})({sp0.P},{D},{sp0.Q}) y "
+             f"SARIMA({sp1.p},{d},{sp1.q})({sp1.P},{D},{sp1.Q}). ")
+            + f"Estima ambos y elige por AIC/BIC y diagnosis de residuos. "
             + seasonal_note
         )
     else:
         rec = (
-            f"Confirma SARIMA({rec_p},{d},{rec_q})({rec_P},{D},{rec_Q})_{specs[0].s if specs else ''}"
-            f" como punto de partida. "
+            (f"Confirma ARIMA({rec_p},{d},{rec_q})" if _freq <= 1 else
+             f"Confirma SARIMA({rec_p},{d},{rec_q})({rec_P},{D},{rec_Q})_{specs[0].s if specs else ''}")
+            + " como punto de partida. "
             f"Revisa la figura ACF/PACF antes de estimar. "
             + seasonal_note
         )

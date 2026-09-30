@@ -699,6 +699,9 @@ def _npar(model) -> int:
     return n
 
 
+MIN_Q_DF = 2     # degrees of freedom the decisive Q keeps, at least (BUG-0196)
+
+
 def _q_lags_and_df(model, s, npar, lags):
     """The Ljung-Box lags of the diagnosis and the ARMA parameters it discounts.
 
@@ -748,8 +751,26 @@ def _q_lags_and_df(model, s, npar, lags):
 
     # Y un df ≤ 0 NO es un contraste: es que no hay contraste. Publicar un
     # p-valor ahí es peor que no publicarlo — se lee, y manda.
-    q_check_lags = [l for l in q_check_lags if l - n_arma >= 1] or q_check_lags[-1:]
-    return q_check_lags, n_arma
+    #
+    # BUG-0196: y con 1 g.l. apenas lo es. Con datos anuales y un modelo largo
+    # la convención (9 retardos) deja 0, 1 o 2 grados de libertad (el ARIMA(6,1,1)
+    # de la rata almizclera: 2). Decidido el 30-sep-2026, como en sima: el
+    # retardo que decide deja AL MENOS `MIN_Q_DF` por encima de los ARMA; si la
+    # convención no llega, el retardo SUBE —hasta n − 2—, no se queda.
+    ok = [l for l in q_check_lags if l - n_arma >= MIN_Q_DF]
+    if not ok:
+        n_res = len(getattr(model.residuals, "data", model.residuals))
+        need = n_arma + MIN_Q_DF
+        ok = [need] if need <= n_res - 2 else (
+            [l for l in q_check_lags if l - n_arma >= 1] or q_check_lags[-1:])
+    return ok, n_arma
+
+
+def q_figure_lags(n, freq, n_arma):
+    """The acf/pacf lags of the residual figure: fug's rule, moved up so that
+    its Q keeps `MIN_Q_DF` degrees of freedom (BUG-0196), never beyond n − 2."""
+    from fue.diagnostics import default_lags
+    return int(min(max(default_lags(n, freq), n_arma + MIN_Q_DF), n - 2))
 
 
 def q_decisive(model):
@@ -939,8 +960,9 @@ def figura_residuos(model, title: str | None = None):
     except ImportError:
         return plot_diagnosis(diagnose(model), model)
     serie = serie_residuos_pyfug(model, title)
-    return plot_combined(serie, npar=free_arma_count(model),
-                         nlags=default_lags(serie.nobs, serie.freq),
+    n_arma = free_arma_count(model)
+    return plot_combined(serie, npar=n_arma,
+                         nlags=q_figure_lags(serie.nobs, serie.freq, n_arma),
                          title=serie.name)
 
 

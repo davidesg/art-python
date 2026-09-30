@@ -6,6 +6,26 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### Annual data have no seasonality to test (BUG-0196)
+
+- With freq = 1 node 3 no longer publishes a HAC F with zero numerator
+  degrees of freedom, an empty figure and the B1/B2 routes: «datos anuales:
+  D = 0 por construcción», and a cycle of several years is left to the AR
+  (`describe_seasonality` answers so for every caller, `run_full` included).
+  The identification listing no longer recommends harmonics for annual data
+  (nor for Decision A without saying so), and says ARIMA, not SARIMA.
+- The Q that decides keeps at least 2 degrees of freedom: when the
+  convention leaves fewer (annual data, long models), the lag moves up to
+  n_arma + 2; the residual figure takes the same lags.
+
+### Node 3 says one thing about d (BUG-0197)
+
+- «Considera d=2», «Punto de partida recomendado: d = 1, no 2» and «Reentra
+  con d=2» came out together. Now one decision: another difference is
+  invited only when both tests at the current d see a unit root; when they
+  disagree (the muskrat: ADF p = 0.14, KPSS accepts) it stays at d with the
+  caveat that Shin-Fuller and the DCD decide on the estimated model.
+
 ### Identification can propose a high-order AR (BUG-0194)
 
 - An AR of order 4 or more could never enter the list: `p_max` was 3, the
