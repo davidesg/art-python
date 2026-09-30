@@ -64,6 +64,8 @@ class ModelSpec:
     pacf_theoretical: np.ndarray
     sparse_ar_lag: int = 0      # >0: AR only at this lag (φ₁=...=0, φₖ≠0)
     sparse_ma_lag: int = 0
+    aicc: float | None = None   # BUG-0198: the fit that ranks (quick estimates)
+    weight: float | None = None # its Akaike weight among the listed candidates
 
     def label(self) -> str:
         if self.sparse_ar_lag > 0:
@@ -383,6 +385,145 @@ def _theoretical_acf_pacf(
 
 
 # ---------------------------------------------------------------------------
+# The template of a candidate, SEARCHED as ART's C does (BUG-0198)
+# ---------------------------------------------------------------------------
+#
+# The port had replaced the C's search by one set of «representative»
+# coefficients per order (φᵢ = 0.5/(i+1), θᵢ = 0.3/(i+1)…), on the belief that
+# "the structural pattern is determined by (p,q,P,Q,s), not by exact
+# coefficients". It is not: the representative AR(2), 1 − 0.5B − 0.25B², has
+# REAL roots and cannot oscillate, so an AR(2) with complex roots — a cycle,
+# the pattern the school looks for in monthly CPI and that `ar_factorization`
+# turns into AR_f candidates for the MEG — never looked like its own
+# correlogram and ranked behind the AR(1): 1 in 12 simulated series, and on
+# the muskrat neither the AR(2) nor Jenkins and Alavi's AR(6) entered the
+# list. The C (ART_18 model_detection.c, adaptive_grid_search):
+#
+#   * a pure AR (q = Q = 0) takes the Yule-Walker coefficients of the
+#     empirical ACF (`estimate_ar_yule_walker`), the seasonal AR those of the
+#     ACF at the seasonal lags;
+#   * any other model searches a coarse grid (step 0.30 in [−0.9, 0.9]; the
+#     seasonal MA in [0.1, 0.8]), every coefficient of a polynomial at the same
+#     value, then refines each coefficient by ±0.2 in steps of 0.1;
+#   * past p + q + P + Q = 10, the representative coefficients.
+#
+# The best similarity reached is the candidate's; the parsimony penalty then
+# charges its orders, as before.
+
+GRID_MIN, GRID_MAX = -0.9, 0.9
+COARSE_STEP, FINE_STEP = 0.30, 0.10
+SMA_MIN, SMA_MAX = 0.1, 0.8
+
+
+def _contract(c, limit=0.95):
+    """A polynomial 1 − Σ cᵢBⁱ made stationary (invertible) WITHOUT moving its
+    cycles: cᵢ·ρⁱ scales every inverse root by ρ and keeps its angle — the
+    period of a complex pair. Untouched when already inside.
+
+    Not the C's guard. `estimate_ar_yule_walker` rescales any AR with
+    Σ|φ| ≥ 0.99 to 0.95 (Hannan-Rissanen at 0.95 → 0.90), and an AR(2) with
+    complex roots — φ = (1.0, −0.5): inverse roots of modulus 0.71, a period
+    of 8 — has Σ|φ| = 1.5: the guard flattened exactly the cycles this
+    identifier must find (BUG-0198), to (0.63, −0.32), whose AICc then lost
+    by 30 points to an ARMA(3,1)."""
+    c = np.asarray(c, float)
+    if c.size == 0:
+        return c
+    if not np.all(np.isfinite(c)):
+        return None
+    mx = float(np.max(np.abs(np.roots(np.r_[1.0, -c]))))   # inverse roots
+    if mx < 1.0:
+        return c
+    rho = limit / mx
+    return c * rho ** np.arange(1, c.size + 1)
+
+
+def _yw(r, p):
+    """Yule-Walker AR(p) from autocorrelations r[0..p] (r[0] = 1), made
+    stationary by `_contract` if it is not (never otherwise)."""
+    R = np.array([[r[abs(i - j)] for j in range(p)] for i in range(p)])
+    try:
+        phi = np.linalg.solve(R, np.asarray(r[1:p + 1], float))
+    except np.linalg.LinAlgError:
+        return None
+    return _contract(phi)
+
+
+def _score(phi, theta, Phi, Theta, s, lags, emp_feat, nw):
+    acf_th, pacf_th = _acf_pacf_bj(phi, theta, Phi, Theta, s, lags)
+    if acf_th is None:
+        return None, None, -1.0
+    th = _pattern_features(acf_th, pacf_th, s, nw)
+    return acf_th, pacf_th, _pattern_similarity(th, emp_feat, s, lags)
+
+
+def _searched_template(p, q, P, Q, s, lags, acf_emp, emp_feat, nw,
+                       sparse_ar=0, sparse_ma=0, w=None):
+    """(acf, pacf, raw similarity) of the candidate's best template."""
+    if sparse_ar or sparse_ma or p + q + P + Q > 10:
+        acf_th, pacf_th = _theoretical_acf_pacf(
+            p, q, P, Q, s, lags, sparse_ar_lag=sparse_ar, sparse_ma_lag=sparse_ma,
+            acf_emp=acf_emp)
+        if acf_th is None:
+            return None, None, 0.0
+        th = _pattern_features(acf_th, pacf_th, s, nw)
+        return acf_th, pacf_th, _pattern_similarity(th, emp_feat, s, lags)
+
+    r = np.r_[1.0, np.asarray(acf_emp, float)]
+    if q == 0 and Q == 0:                                   # pure AR: Yule-Walker
+        phi = _yule_walker_template(p, acf_emp) if p >= 4 else (
+            _yw(r, p) if p else np.zeros(0))
+        Phi = np.zeros(0)
+        if P:
+            rs = np.r_[1.0, [r[i * s] if i * s < len(r) else 0.0 for i in range(1, P + 1)]]
+            Phi = _yw(rs, P)
+        if phi is not None and Phi is not None:
+            a, pa, sim = _score(phi, [], Phi, [], s, lags, emp_feat, nw)
+            if a is not None:
+                return a, pa, sim
+        # a singular or non-stationary Yule-Walker: fall back to the grid
+
+    grid = np.arange(GRID_MIN, GRID_MAX + 1e-9, COARSE_STEP)
+    sgrid = np.arange(SMA_MIN, SMA_MAX + 1e-9, COARSE_STEP)
+    best = (None, None, -1.0, None)
+    for a in (grid if p else [0.0]):
+        for b in (grid if q else [0.0]):
+            for c in (grid if P else [0.0]):
+                for e in (sgrid if Q else [0.0]):
+                    co = [np.full(p, a), np.full(q, b), np.full(P, c), np.full(Q, e)]
+                    acf_th, pacf_th, sim = _score(*co, s, lags, emp_feat, nw)
+                    if sim > best[2]:
+                        best = (acf_th, pacf_th, sim, co)
+    # The fitted coefficients compete with the grid (option B, BUG-0198): a
+    # pure AR's template is Yule-Walker — fitted to these data —, and a grid
+    # whose coefficients start all equal cannot fit an MA as closely; on
+    # series G the AR(3)×SAR(1) reached 0.973 against the airline's 0.882 on
+    # that alone. Hannan-Rissanen refined by conditional least squares gives
+    # the MA models their own fitted template.
+    if w is not None:
+        fit = _refined_fit(w, acf_emp, s, p, q, P, Q)
+        if fit is not None:
+            a_, pa_, sim_ = _score(*fit, s, lags, emp_feat, nw)
+            if sim_ > best[2]:
+                best = (a_, pa_, sim_, [np.asarray(c, float) for c in fit])
+    if best[3] is None:
+        return None, None, 0.0
+    co = [x.copy() for x in best[3]]
+    for kind in range(4):                                    # the refinement
+        lo, hi = (SMA_MIN, SMA_MAX) if kind == 3 else (GRID_MIN, GRID_MAX)
+        for i in range(len(co[kind])):
+            orig = float(best[3][kind][i])
+            for delta in np.arange(-0.2, 0.2 + 1e-9, FINE_STEP):
+                trial = [x.copy() for x in co]
+                trial[kind][i] = min(max(orig + delta, lo), hi)
+                acf_th, pacf_th, sim = _score(*trial, s, lags, emp_feat, nw)
+                if sim > best[2]:
+                    best = (acf_th, pacf_th, sim, trial)
+            co[kind][i] = best[3][kind][i]
+    return best[0], best[1], best[2]
+
+
+# ---------------------------------------------------------------------------
 # Pattern similarity  (mirrors pattern_similarity in C — weights 60/25/15)
 # ---------------------------------------------------------------------------
 
@@ -503,6 +644,288 @@ def _parsimony_score(
 # Main public function
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# The ranking by fit (ART_18's rank_shortlist_by_fit — BUG-0198)
+# ---------------------------------------------------------------------------
+#
+# The pattern similarity proposes; the FIT ranks. With searched templates a
+# larger model always looks at least as similar — the AR(3)×SAR(1) of series G
+# reached 0.973 against the airline's 0.882 — and a per-parameter penalty in
+# similarity units cannot say by how much it should. The C closes the loop
+# with a light estimation of every candidate (Yule-Walker for a pure AR,
+# iterated Hannan-Rissanen for an ARMA, Yule-Walker at the seasonal lags for
+# Φ, Θ₁ by inverting ρ_s) and its AICc on a COMMON sample, and breaks ties
+# within ΔAICc < 1 by Box-Jenkins' parsimony: fewer parameters win; at equal
+# count the C asks its MLP, here the pattern similarity. The candidates are
+# still what the correlogram proposes; the MLE of `confirm_and_estimate`
+# decides in the end.
+
+TIE_AICC = 2.0
+
+
+def _hannan_rissanen(y, p, q, niter=4):
+    """ARMA(p, q) by iterated Hannan-Rissanen, as the C: a long AR (Yule-
+    Walker) for the first residuals, then OLS of y on its lags and the
+    residuals' lags, the residuals refiltered with the model each iteration.
+    Box-Jenkins convention: y_t = Σ φ y_{t−i} + e_t − Σ θ e_{t−j}. None if it
+    fails."""
+    y = np.asarray(y, float)
+    n = y.size
+    yc = y - y.mean()
+    m = max(p, q) + int(math.sqrt(n))
+    m = max(m, max(p, q) + 2)
+    m = min(m, n - 10)
+    if m < 1:
+        return None
+    ac = np.asarray(_fue_acf(yc, lags=min(m + 5, n - 2)), float)
+    phl = _yw(np.r_[1.0, ac], m)
+    if phl is None:
+        return None
+    e = np.zeros(n)
+    for t in range(m, n):
+        e[t] = yc[t] - phl @ yc[t - m:t][::-1]
+    start = max(m + q, max(p, q))
+    nobs = n - start
+    k = p + q
+    if nobs < k + 5:
+        return None
+    beta = np.zeros(k)
+    for _ in range(niter):
+        X = np.column_stack([yc[start - j - 1:n - j - 1] for j in range(p)]
+                            + [e[start - j - 1:n - j - 1] for j in range(q)])
+        Y = yc[start:]
+        try:
+            beta = np.linalg.solve(X.T @ X + 1e-6 * np.eye(k), X.T @ Y)
+        except np.linalg.LinAlgError:
+            return None
+        for t in range(start, n):
+            e[t] = yc[t] - (beta[:p] @ yc[t - p:t][::-1] if p else 0.0) \
+                - (beta[p:] @ e[t - q:t][::-1] if q else 0.0)
+    # the C rescaled Σ|coef| > 0.95 to 0.90; here only what is outside moves
+    if not np.all(np.isfinite(beta)):
+        return None
+    phi, theta = _contract(beta[:p], 0.90), _contract(-beta[p:], 0.90)
+    return None if phi is None or theta is None else (phi, theta)
+
+
+def _seasonal_ma1(rho_s):
+    """Θ₁ by inverting ρ_s = −Θ/(1 + Θ²), the invertible root (as the C)."""
+    if abs(rho_s) < 1e-6:
+        return 0.0
+    rho_s = max(min(rho_s, 0.49), -0.49)
+    return (-1.0 + math.sqrt(max(1.0 - 4.0 * rho_s * rho_s, 0.0))) / (2.0 * rho_s)
+
+
+def _stable(coef):
+    if coef is None:
+        return False
+    c = np.asarray(coef, float)
+    if c.size == 0:
+        return True
+    if not np.all(np.isfinite(c)):
+        return False
+    return bool(np.all(np.abs(np.roots(np.r_[1.0, -c][::-1])) > 1.0))
+
+
+_FITS: dict = {}          # refined light estimates, per suggest_orders call
+
+
+def _refined_fit(w, acf_emp, s, p, q, P, Q):
+    """`_quick_fit` refined by conditional least squares on the candidate's own
+    start, computed once per candidate and call: the template search and the
+    AICc information share it."""
+    key = (p, q, P, Q)
+    if key not in _FITS:
+        fit = _quick_fit(w, acf_emp, s, p, q, P, Q)
+        if fit is not None and p + q + P + Q:
+            fit = _css_refine(np.asarray(w, float), fit, s, max(p + P * s, q + Q * s))
+        _FITS[key] = fit
+    return _FITS[key]
+
+
+def _quick_fit(w, acf_emp, s, p, q, P, Q):
+    """The light estimates of a candidate, or None if unstable (as the C)."""
+    r = np.r_[1.0, np.asarray(acf_emp, float)]
+    if q == 0:
+        phi = _yw(r, p) if p else np.zeros(0)
+        theta = np.zeros(0)
+    else:
+        hr = _hannan_rissanen(w, p, q)
+        if hr is None:
+            phi = np.array([0.3 / (i + 1) for i in range(p)])
+            theta = np.array([0.3 / (i + 1) for i in range(q)])
+        else:
+            phi, theta = hr
+    if phi is None:
+        return None
+    Phi = np.zeros(0)
+    if P:
+        rs = np.r_[1.0, [r[i * s] if i * s < len(r) else 0.0 for i in range(1, P + 1)]]
+        Phi = _yw(rs, P)
+        if Phi is None:
+            return None
+    Theta = np.zeros(Q)
+    if Q:
+        Theta[0] = _seasonal_ma1(r[s]) if s < len(r) else SMA_MIN
+        Theta[1:] = SMA_MIN
+    if not (_stable(phi) and _stable(Phi) and _stable(theta) and _stable(Theta)):
+        return None
+    return phi, theta, Phi, Theta
+
+
+def _css_rss(y, phi, theta, Phi, Theta, s, start):
+    """Conditional sum of squares from `start`: the residuals of
+    ar(B) y = ma(B) e filtered from zero pre-sample values (scipy's lfilter,
+    the recursion of the C's compute_sarima_aicc), the first `start` dropped."""
+    from scipy.signal import lfilter
+    ar = np.convolve(np.r_[1.0, -np.asarray(phi, float)], _seasonal_poly(Phi, s))
+    ma = np.convolve(np.r_[1.0, -np.asarray(theta, float)], _seasonal_poly(Theta, s))
+    e = lfilter(ar, ma, y - y.mean())[start:]
+    return float(e @ e)
+
+
+def _css_refine(y, fit, s, start):
+    """The light estimates refined by conditional least squares (BUG-0198):
+    so that the AICc compares FITS, not the roughness of Hannan-Rissanen —
+    with a true MA(1) the rough MA lost to a Yule-Walker AR(3) that imitated
+    it. Stationary and invertible, or the light estimates are kept."""
+    from scipy.optimize import minimize
+    sizes = [len(c) for c in fit]
+    x0 = np.concatenate([np.asarray(c, float) for c in fit])
+    if x0.size == 0:
+        return fit
+
+    def split(x):
+        out, i = [], 0
+        for k in sizes:
+            out.append(x[i:i + k]); i += k
+        return out
+
+    def obj(x):
+        parts = split(x)
+        if not all(_stable(c) for c in parts):
+            return 1e30
+        return _css_rss(y, *parts, s, start)
+
+    try:
+        r = minimize(obj, x0, method="Powell",
+                     options={"xtol": 1e-4, "ftol": 1e-8, "maxfev": 400 * x0.size})
+    except Exception:                                        # noqa: BLE001
+        return fit
+    if not r.success and r.fun >= obj(x0):
+        return fit
+    best = split(r.x) if r.fun < obj(x0) else fit
+    return best
+
+
+def _sarima_aicc(y, phi, theta, Phi, Theta, s, min_start, refine=True):
+    """AICc of the multiplicative SARMA on a common start (the C's
+    compute_sarima_aicc), its coefficients refined by conditional least
+    squares from the light estimates. White noise: k = 0."""
+    y = np.asarray(y, float)
+    n = y.size
+    k = len(phi) + len(theta) + len(Phi) + len(Theta)
+    dar = len(phi) + len(Phi) * s
+    dma = len(theta) + len(Theta) * s
+    if dar >= n // 2 or dma >= n // 2:
+        return math.inf
+    start = max(dar, dma, min_start)
+    if start >= n - 2:
+        return math.inf
+    if refine and k:
+        phi, theta, Phi, Theta = _css_refine(y, (phi, theta, Phi, Theta), s, start)
+    used = n - start
+    rss = _css_rss(y, phi, theta, Phi, Theta, s, start)
+    if used <= k + 2 or rss <= 0.0:
+        return math.inf
+    return used * math.log(rss / used) + 2.0 * k + 2.0 * k * (k + 1.0) / (used - k - 1)
+
+
+def _seasonal_poly(c, s):
+    b = np.zeros(len(c) * s + 1)
+    b[0] = 1.0
+    for i, v in enumerate(c):
+        b[(i + 1) * s] = -float(v)
+    return b
+
+
+TIE_SIM = 0.04
+
+
+def _nested_parsimony(cands):
+    """Box-Jenkins' parsimony when the pattern cannot tell candidates apart.
+
+    With fitted templates a model that contains another (an ARMA(2,1) and the
+    AR(2) inside it) always looks at least as similar, by a hair; and two
+    different models can look equally similar (series G: the airline 0.902,
+    an AR(1)×SAR(1) 0.905). Within `TIE_SIM` of the best similarity the
+    candidate with FEWER parameters goes first; at equal count a PURE model
+    (AR or MA at each level, regular and seasonal) before a mixed one — Box-Jenkins' order, and the guard against
+    an ARMA(1,1) whose φ ≈ 1 absorbs a missing difference (the thesis'
+    Colombian CPI: it tied with the AR(2) and won on AICc) —; then the lower
+    AICc: the fit settles what the pattern leaves tied, and only that (option
+    B). The others stay in the list, behind."""
+    rest = list(cands)
+    out = []
+    while rest:
+        top = rest[0]
+        band = [c for c in rest if top.similarity - c.similarity < TIE_SIM]
+        pick = min(band, key=lambda c: (c.p + c.q + c.P + c.Q,
+                                        (c.p > 0 and c.q > 0) or (c.P > 0 and c.Q > 0),
+                                        c.aicc if c.aicc is not None else math.inf,
+                                        -c.similarity))
+        out.append(pick)
+        rest.remove(pick)
+    return out
+
+
+def _fit_information(cands, w, acf_emp, s):
+    """Fill `aicc` and the Akaike `weight` of each candidate (light estimates
+    refined by conditional least squares, common start) WITHOUT reordering."""
+    if not cands:
+        return cands
+    start = max(max(c.p + c.P * s, c.q + c.Q * s) for c in cands)
+    for c in cands:
+        # the refined estimates; on the common start they are re-refined only
+        # by the few observations the start adds, so they are used as they are
+        fit = _refined_fit(w, acf_emp, s, c.p, c.q, c.P, c.Q)
+        c.aicc = math.inf if fit is None else _sarima_aicc(w, *fit, s, start, refine=False)
+    fin = [c.aicc for c in cands if math.isfinite(c.aicc)]
+    if fin:
+        best = min(fin)
+        ws = [math.exp(-0.5 * (c.aicc - best)) if math.isfinite(c.aicc) else 0.0
+              for c in cands]
+        tot = sum(ws)
+        for c, v in zip(cands, ws):
+            c.weight = v / tot
+    return cands
+
+
+def _rank_by_fit(cands, w, acf_emp, s):
+    """Order the candidates by AICc of their light estimates, the ties within
+    ΔAICc < 1 by fewer parameters and then by similarity; fill `aicc` and the
+    Akaike `weight`. Candidates whose estimates are unstable go last."""
+    if not cands:
+        return cands
+    start = max(max(c.p + c.P * s, c.q + c.Q * s) for c in cands)
+    for c in cands:
+        fit = _quick_fit(w, acf_emp, s, c.p, c.q, c.P, c.Q)
+        c.aicc = math.inf if fit is None else _sarima_aicc(w, *fit, s, start)
+    cands.sort(key=lambda c: c.aicc)
+    best = cands[0].aicc
+    if math.isfinite(best):
+        band = [c for c in cands if c.aicc - best < TIE_AICC]
+        win = min(band, key=lambda c: (c.p + c.q + c.P + c.Q, -c.similarity))
+        cands.remove(win)
+        cands.insert(0, win)
+        ws = [math.exp(-0.5 * (c.aicc - best)) if math.isfinite(c.aicc) else 0.0
+              for c in cands]
+        tot = sum(ws)
+        for c, v in zip(cands, ws):
+            c.weight = v / tot if tot > 0 else None
+    return cands
+
+
 def _remove_harmonics(w: np.ndarray, s: int, n_harmonics: int) -> np.ndarray:
     """
     OLS-subtract harmonic fit (cos/sin f=1..n_harmonics) + intercept from w.
@@ -565,6 +988,7 @@ def suggest_orders(
     -------
     list[ModelSpec]  sorted by similarity score (best first)
     """
+    _FITS.clear()
     s    = ts.freq
     n    = len(ts.data)
     if p_max is None:
@@ -613,15 +1037,15 @@ def suggest_orders(
         if key in seen:
             return
         seen.add(key)
-        acf_th, pacf_th = _theoretical_acf_pacf(
-            p, q, P, Q, s, lags,
-            sparse_ar_lag=sparse_ar, sparse_ma_lag=sparse_ma,
-            acf_emp=acf_emp,
-        )
+        # BUG-0198: the template is SEARCHED, as in the C — Yule-Walker for a
+        # pure AR, the coarse grid and its refinement otherwise — so that it
+        # has the shape these data can have (an AR(2) with complex roots, a
+        # negative MA) and not one fixed shape per order.
+        acf_th, pacf_th, raw_sim = _searched_template(
+            p, q, P, Q, s, lags, acf_emp, emp_feat, nw,
+            sparse_ar=sparse_ar, sparse_ma=sparse_ma, w=w)
         if acf_th is None:
             return
-        th_feat = _pattern_features(acf_th, pacf_th, s, nw)
-        raw_sim = _pattern_similarity(th_feat, emp_feat, s, lags)
         final   = _parsimony_score(raw_sim, p, q, P, Q, emp_feat, s)
         candidates.append(ModelSpec(
             p=p, d=d, q=q,
@@ -699,9 +1123,41 @@ def suggest_orders(
     #
     # No se ELIMINAN: son plausibles y a veces son la respuesta. Se sacan del
     # ranking y se ofrecen aparte, marcados como lo que son.
+    # The C's mixed cells (add_arma_grid_candidates): ARMA(p ≤ 3, q ≤ 2) by
+    # Hannan-Rissanen and AICc, the best four added if missing. The cut-off
+    # gates read PURE models, and a mixed ARMA tails off on both sides — they
+    # kept the ARMA(1,1) out of the list (BUG-0198).
+    mixed = []
+    for pp in range(1, min(3, p_max) + 1):
+        for qq in range(1, min(2, q_max) + 1):
+            fit = _quick_fit(w, acf_emp, s, pp, qq, 0, 0)
+            if fit is not None:
+                mixed.append((_sarima_aicc(w, *fit, s, max(pp, qq)), pp, qq))
+    for _a, pp, qq in sorted(mixed)[:4]:
+        _add_candidate(pp, qq, 0, 0)
+
     completos = [m for m in candidates
                  if not (m.sparse_ar_lag or m.sparse_ma_lag)]
     completos.sort(key=lambda m: m.similarity, reverse=True)
+    _fit_information(completos, w, acf_emp, s)
+    completos = _nested_parsimony(completos)
+    # BUG-0198, option B (decided 30-sep-2026): the ORDER is the pattern's —
+    # the school's reading of the correlogram. The AICc of the light estimates
+    # is INFORMATION for the analyst, not the ranking: on the difference taken
+    # once it rewards the models that absorb what the formal tests must decide
+    # (φ ≈ 1 where a difference is missing, θ ≈ 1 where one is too many, an AR
+    # and an MA nearly cancelling), and on the thesis' I(2) CPIs ranking by it
+    # changed the MEG's verdict.
+    # BUG-0194, kept under the fitted templates (BUG-0198): an AR of order
+    # s/k >= 4 opened by an ISOLATED PACF bar enters the list — with the MA
+    # and ARMA templates now fitted, the parsimony charge on its order pushed
+    # HICP_ES_m01's AR(6) (raw similarity 0.967, the highest) to seventh. It
+    # takes the last place shown if it is not already there.
+    if eff_p >= 4:
+        high = next((m for m in completos if (m.p, m.q, m.P, m.Q) == (eff_p, 0, 0, 0)), None)
+        if high is not None and high not in completos[:top_n]:
+            completos.remove(high)
+            completos.insert(max(top_n - 1, 0), high)
     if not incluir_dispersos:
         return completos[:top_n]
     dispersos = [m for m in candidates

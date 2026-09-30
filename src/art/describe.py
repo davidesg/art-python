@@ -692,9 +692,17 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
         if getattr(sp, "sparse_ma_lag", 0):
             disperso.append(f"MA sólo en B^{sp.sparse_ma_lag}")
         sufijo = f"  [{', '.join(disperso)}]" if disperso else ""
+        # BUG-0198 (option B): the AICc is INFORMATION next to the pattern's
+        # order, as ΔAICc against the best candidate listed.
+        _a = getattr(sp, "aicc", None)
+        _best = min((c.aicc for c in completos
+                     if getattr(c, "aicc", None) is not None and np.isfinite(c.aicc)),
+                    default=None)
+        _fit = (f"  ΔAICc={_a - _best:+.1f}" if _a is not None and _best is not None
+                and np.isfinite(_a) else "")
         lines.append(
             f"{marker} {i}. ARIMA({sp.p},{sp.d},{sp.q})({sp.P},{sp.D},{sp.Q})_{sp.s}"
-            f"{sufijo}  sim={sp.similarity:.3f}  —  {label}"
+            f"{sufijo}  sim={sp.similarity:.3f}{_fit}  —  {label}"
         )
 
     altos = [sp for sp in completos if sp.p >= 4]
@@ -739,8 +747,9 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
 
     # Ambiguity: top-2 gap < 0.05 — sobre el RANKING, no sobre los dispersos
     specs = completos or specs
-    ambiguous = len(specs) >= 2 and (specs[0].similarity - specs[1].similarity) < 0.05
-    top_gap   = (specs[0].similarity - specs[1].similarity) if len(specs) >= 2 else 1.0
+    # |gap|: parsimony may put a slightly less similar candidate first (BUG-0198)
+    ambiguous = len(specs) >= 2 and abs(specs[0].similarity - specs[1].similarity) < 0.05
+    top_gap   = abs(specs[0].similarity - specs[1].similarity) if len(specs) >= 2 else 1.0
 
     if ambiguous:
         lines += [

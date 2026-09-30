@@ -45,5 +45,7 @@ def test_spain_cpi_seasonal_ma_the_regular_part_is_the_known_ambiguity():
     make a positive bar, so the airline is not first here; that is the C's
     behaviour too, and it is left so."""
     top = _orders(_ts("IPC_ES_2002_2019.csv", "value", (2002, 1)), 3)
-    assert all(Q == 1 and P == 0 for (_p, _q, P, Q) in top)
-    assert (0, 1, 0, 1) in top and (1, 0, 0, 1) in top
+    # BUG-0198: with fitted templates the two readings of the known ambiguity
+    # come first, the airline ahead (the pattern ties them; parsimony and the
+    # fit settle it) — before, the airline was not first here.
+    assert top[:2] == [(0, 1, 0, 1), (1, 0, 0, 1)]

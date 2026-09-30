@@ -6,6 +6,22 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### The identifier finds the AR(2) with complex roots (BUG-0198)
+
+- The candidates' templates are searched again, as in ART_18 (Yule-Walker for
+  a pure AR; the grid and the fitted coefficients for models with an MA): the
+  single representative AR(2) had real roots and could not oscillate, so a
+  cycle — what the school looks for in monthly CPI — ranked behind the AR(1).
+  A complex AR(2) now comes first in 12 of 12 simulated series (1 before), and
+  the muskrat's AR(2) first.
+- The C's stationarity guard (Σ|φ| ≥ 0.99 rescaled to 0.95), which flattened
+  exactly those AR(2), is replaced by a contraction that keeps the period.
+- The order is the pattern's; ties within 0.04 go to fewer parameters, then
+  pure before mixed, then the lower AICc. Every candidate carries its AICc
+  and Akaike weight as information.
+- The theoretical ψ weights run on `scipy.signal.lfilter` (same numbers,
+  ~150× faster).
+
 ### Annual data have no seasonality to test (BUG-0196)
 
 - With freq = 1 node 3 no longer publishes a HAC F with zero numerator

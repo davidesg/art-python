@@ -1,11 +1,11 @@
 ---
 id: BUG-0198
 title: El identificador no ve el ciclo de la rata almizclera — con la FAP significativa en 2 y 6 y la FAS oscilante, ni el AR(2) ni el AR(6) de Jenkins y Alavi están entre los cinco primeros; propone AR(1), ARMA(1,2) y MA(1)
-status: open
+status: fixed
 severity: high
 component: identification
 found_in: 0.2.3.dev0
-fixed_in:
+fixed_in: 0.2.3.dev0
 reported: 2026-09-29
 reporter: David / Claude — análisis guiado de la rata almizclera (Jenkins y Alavi 1981), camino a sima
 tags:
@@ -105,3 +105,50 @@ con el identificador del C (ART_18) como referencia.
   entre los primeros candidatos.
 - El banco de casos conocido, sin regresiones (BUG-0192, 0194 y los de la
   tesis).
+
+## Resolution (2026-09-30)
+
+**Root cause, measured.** The port had replaced ART_18's coefficient search by
+one «representative» template per order (φᵢ = 0.5/(i+1) …), on the belief that
+the pattern does not depend on the coefficients. The representative AR(2),
+1 − 0.5B − 0.25B², has REAL roots and cannot oscillate: an AR(2) with complex
+roots never looked like its own correlogram. On a bench of simulated series it
+came first in 1 of 12 (behind the AR(1)); on the muskrat neither the AR(2) nor
+the AR(6) was listed. The C itself carries a second defect, on its own 18.2
+plan (§1.3) and not yet fixed there: its stationarity guard rescales any AR
+with Σ|φ| ≥ 0.99 to 0.95 (Hannan-Rissanen at 0.95 → 0.90), which flattens the
+typical complex AR(2), φ = (1.0, −0.5), a stationary one.
+
+**Fix (option B, decided with the analyst):**
+
+- The templates are SEARCHED again, as in ART_18: Yule-Walker on the empirical
+  ACF for a pure AR (every order; the seasonal AR at the seasonal lags); for
+  models with an MA, the best of the C's grid (coarse 0.30, refined 0.10) and
+  the candidate's own coefficients (Hannan-Rissanen refined by conditional
+  least squares).
+- `_contract` replaces the C's guard: only a polynomial outside the unit
+  circle is pulled in, by cᵢρⁱ, which keeps the roots' angle — the period.
+- `_acf_teorica.psi_weights` runs the C's recursion with `scipy.signal.lfilter`
+  (identical to 1e-17, ~150× faster), which makes the search affordable.
+- The ORDER is the pattern's (the school's reading). Within 0.04 of the best
+  similarity: fewer parameters first; at equal count a pure model (AR or MA at
+  each level) before a mixed one; then the lower AICc. The AICc of every
+  candidate (conditional, common start) and its Akaike weight are
+  information; they rank nothing else. Ranking by AICc — the C's
+  `rank_shortlist_by_fit` — was measured and rejected: on the difference taken
+  once it rewards models that absorb what the formal tests must decide (the
+  thesis' I(2) CPIs: an ARMA(1,2) with φ ≈ 1 and an MA root near 1, and the MEG
+  verdict changed).
+- The C's mixed cells (ARMA p ≤ 3, q ≤ 2 by Hannan-Rissanen and AICc, best
+  four) join the candidates: the cut-off gates read pure models only.
+- BUG-0194's isolated high AR keeps its place in the list.
+
+**Validation:** `tests/test_bug_0198_el_ar2_con_raices_complejas.py`. Bench
+(first place): complex AR(2) 12/12 (monthly, period 6, annual), AR(1), real
+AR(2), MA(1) and negative MA(1) 16/16, ARMA(1,1) 0/4 (listed 2nd–4th: the
+price of pure before mixed), the muskrat's AR(2) first. Series G's airline
+first; the Spanish CPI's airline first and the AR(1)×SMA second; the thesis'
+Colombian and Chilean CPIs unchanged. The ARMA(1,2) the AICc prefers on the
+muskrat (exact AIC 37.75, as Jenkins and Alavi's ARIMA(6,1,1), against 43.55
+of the AR(2)) has an MA root at 0.91: an over-differencing signal (Chan and
+Wallis' deterministic trend) for the DCD, not an order.

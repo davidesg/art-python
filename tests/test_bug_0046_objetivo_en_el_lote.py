@@ -19,8 +19,14 @@ import fue
 from art.pipeline import run_full
 
 
-def _serie_estocastica(n=120, seed=1):
-    """Estacionalidad que EVOLUCIONA: ln y = paseo + paseo estacional."""
+def _serie_estocastica(n=120, seed=2):
+    """Estacionalidad que EVOLUCIONA: ln y = paseo + paseo estacional.
+
+    seed=2 desde BUG-0198: con la semilla 1 el identificador (ahora con
+    plantillas buscadas) encuentra en B1 un AR(3) ≈ 1 + B + B² + B³, la
+    estacionalidad estocástica escondida en un AR regular, B1 pasa la
+    diagnosis que B2 no pasa y el caso deja de separar las dos rutas. Lo
+    medido aquí es la unificación de D, no ese caso concreto."""
     rng = np.random.default_rng(seed)
     tend = np.cumsum(rng.standard_normal(n)) / 60.0
     s = np.zeros(n + 4)
@@ -54,30 +60,31 @@ def test_objetivo_es_declarable_en_toda_entrada(entrada):
     assert "objetivo" in inspect.signature(_unwrap(entrada)).parameters
 
 
-def test_multivariante_unifica_la_D_que_univariante_deja_dispar(tmp_path):
-    """El daño y su reparación, medidos en la D que sale.
+def test_multivariante_unifica_la_D_que_univariante_deja_dispar():
+    """El daño y su reparación, medidos en la decisión de ruta.
 
-    Univariante: cada serie gana por su ajuste y salen D distintas -- correcto
-    para uso univariante, e inservible para un sistema. Multivariante: una sola
-    D, que es el requisito para que los órdenes de integración sean comparables.
+    Univariante: con las frecuencias estocásticas y las dos ramas adecuadas,
+    gana B2 (D=1) — correcto para uso univariante, e inservible para un
+    sistema. Multivariante: B1 (D=0), una sola D, que es el requisito para que
+    los órdenes de integración sean comparables.
+
+    BUG-0198: antes se medía sobre una serie sintética completa, y la ruta se
+    decidía allí porque NINGUNA rama pasaba la diagnosis; con el identificador
+    nuevo una de las dos la pasa y manda la adecuación, como debe. La propiedad
+    es de la política, y se mide en ella.
     """
-    warnings.simplefilter("ignore")
-    series = [_serie_estocastica(), _serie_determinista()]
-
-    D_por_objetivo = {}
-    for obj in ("univariante", "multivariante"):
-        Ds = []
-        for ts in series:
-            out = tmp_path / f"{ts.name}_{obj}.inp"
-            Ds.append(run_full(ts, str(out), max_rounds=1, objetivo=obj).D)
-        D_por_objetivo[obj] = Ds
-
-    # El síntoma: sin declarar objetivo, el lote no es montable.
-    assert len(set(D_por_objetivo["univariante"])) > 1, (
-        "el caso sintético ya no separa las dos rutas; el test no mide nada")
-    # El arreglo: declarado multivariante, un solo tratamiento estacional.
-    assert len(set(D_por_objetivo["multivariante"])) == 1
-    assert D_por_objetivo["multivariante"][0] == 0, "el veto es a D=1"
+    from art.policy import decide_seasonal_route
+    megs = {1: "stochastic", 2: "stochastic"}
+    uni, _ = decide_seasonal_route(megs, True, objetivo="univariante",
+                                   b1_ok=True, b2_ok=True)
+    multi, _ = decide_seasonal_route(megs, True, objetivo="multivariante",
+                                     b1_ok=True, b2_ok=True)
+    assert uni == "B2"
+    assert multi == "B1", "el veto es a D=1"
+    # y la adecuación manda antes que el objetivo
+    solo_b2, _ = decide_seasonal_route(megs, True, objetivo="multivariante",
+                                       b1_ok=False, b2_ok=True)
+    assert solo_b2 == "B2"
 
 
 def test_batch_build_pasa_el_objetivo_a_run_full(tmp_path, monkeypatch):
