@@ -762,6 +762,40 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
     elif specs:
         lines += ["", f"El patrón favorece claramente el modelo 1 (gap={top_gap:.3f})."]
 
+    # THE CARD OF IMPLIED DYNAMICS — the domain procedure (docs/DISENO-dominio-
+    # en-los-ordenes.md, decided 2026-09-30): generated here, by itself, when
+    # the identification leaves a GENUINE tie — the first place's band (within
+    # 0.04 of similarity, BUG-0198) holds more than one candidate. The engine
+    # computes; the choice is read against the expectations declared in the
+    # `dominio` node before the candidates were seen.
+    tied = [sp for sp in specs if getattr(sp, "tied", False) and getattr(sp, "coef", None)]
+    card_text = ""
+    if len(tied) >= 2:
+        from art.dinamica import card as _card, forecast_gap, render
+        tied = tied[:3]
+        s_ = int(getattr(ts, "freq", 1) or 1)
+        cards = [_card(f"({sp.p},{d},{sp.q})" + (f"({sp.P},{D},{sp.Q})" if s_ > 1 else ""),
+                       *sp.coef, d=d, D=D, s=s_) for sp in tied]
+        gap = None
+        if getattr(tied[0], "series", None) is not None:
+            try:
+                gap = forecast_gap(tied[0].series, [sp.coef for sp in tied], d, D, s_)
+            except Exception:
+                gap = None
+        card_text = render(cards, gap)
+        lines += ["", "### Empate genuino — ficha de dinámica implícita", "",
+                  "El patrón no separa estos candidatos (banda de 0,04 de similitud). "
+                  "La ficha traduce cada uno a la dinámica que implica, con los "
+                  "coeficientes ligeros de la identificación (orientativos; el MLE "
+                  "los fija):", "", card_text, "",
+                  "**Cómo se usa** (procedimiento del dominio): léela contra las "
+                  "**expectativas declaradas en el nodo `dominio`** —persistencia, "
+                  "ciclo, memoria finita, media o estacionalidad estocástica— y decide "
+                  "con el formato fijo, registrando `criterio` en `guion_node`. Sólo "
+                  "entre candidatos ADECUADOS: si uno falla la diagnosis, manda la "
+                  "adecuación. Un MA emparejado con su diferencia cerca de 1 no se "
+                  "decide aquí: vuelve al nodo d (o D) con esta ficha."]
+
     rec_p = specs[0].p if specs else 0
     rec_q = specs[0].q if specs else 1
 
@@ -853,6 +887,8 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
             "d": d, "D": D, "lam": lam,
             "ambiguous": ambiguous,
             "top_gap": top_gap,
+            "tie": [(sp.p, sp.q, sp.P, sp.Q) for sp in tied] if len(tied) >= 2 else [],
+            "card": card_text,
             "suggestions": [
                 {"p": sp.p, "q": sp.q, "P": sp.P, "Q": sp.Q,
                  "similarity": sp.similarity, "pattern": _pattern_label(sp)}

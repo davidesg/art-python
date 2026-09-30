@@ -6,6 +6,27 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### The domain in the orders node (docs/DISENO-dominio-en-los-ordenes.md)
+
+- The procedure of the design study, with its decisions of 2026-09-30:
+  - `art.dinamica`: the card of implied dynamics — ψ, roots and periods,
+    forecast weights on the levels (finite, infinite, alternating), Σψ, the
+    reading of each (∇, MA) pair (a stochastic mean with 1 − θ; θ < 0
+    alternates; an MA root near 1 sends the question back to d or D) and the
+    materiality (the largest forecast difference to H = 2s in σ; under 0.25 σ
+    the choice is interpretative). It reproduces the study's PGAS example.
+  - On a GENUINE tie — the identifier's first-place band (BUG-0198) holds more
+    than one candidate — the identification listing carries the card by
+    itself, with how to use it.
+  - `guion_node(nodo="dominio")` requires `expectativas`: the dynamics the
+    theory expects for the class, declared before the candidates are seen.
+    `criterio` ("estadístico" | "dominio" | "uso") records how a tie was
+    decided; "dominio" requires a declared expectation. The docstring carries
+    the fixed decision format.
+  - The protocol: the dominio node before call 1 (guided) and as node 1
+    (autonomous) asks for the expectations; the AR(1)/MA(1) rule becomes the
+    worked example of the procedure.
+
 ### The identifier finds the AR(2) with complex roots (BUG-0198)
 
 - The candidates' templates are searched again, as in ART_18 (Yule-Walker for

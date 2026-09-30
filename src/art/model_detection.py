@@ -66,6 +66,9 @@ class ModelSpec:
     sparse_ma_lag: int = 0
     aicc: float | None = None   # BUG-0198: the fit that ranks (quick estimates)
     weight: float | None = None # its Akaike weight among the listed candidates
+    tied: bool = False          # in the first place's tie band (a GENUINE tie)
+    coef: tuple | None = None   # its light estimates (phi, theta, Phi, Theta)
+    series: np.ndarray | None = None   # the stationary series it was read on
 
     def label(self) -> str:
         if self.sparse_ar_lag > 0:
@@ -867,9 +870,16 @@ def _nested_parsimony(cands):
     B). The others stay in the list, behind."""
     rest = list(cands)
     out = []
+    first = True
     while rest:
         top = rest[0]
         band = [c for c in rest if top.similarity - c.similarity < TIE_SIM]
+        if first:
+            # the first place's band is the GENUINE tie of the domain procedure
+            # (docs/DISENO-dominio-en-los-ordenes.md §4.2): mark it
+            for c in band:
+                c.tied = len(band) > 1
+            first = False
         pick = min(band, key=lambda c: (c.p + c.q + c.P + c.Q,
                                         (c.p > 0 and c.q > 0) or (c.P > 0 and c.Q > 0),
                                         c.aicc if c.aicc is not None else math.inf,
@@ -1140,6 +1150,9 @@ def suggest_orders(
                  if not (m.sparse_ar_lag or m.sparse_ma_lag)]
     completos.sort(key=lambda m: m.similarity, reverse=True)
     _fit_information(completos, w, acf_emp, s)
+    for c in completos:                      # for the card of implied dynamics
+        c.coef = _refined_fit(w, acf_emp, s, c.p, c.q, c.P, c.Q)
+        c.series = w
     completos = _nested_parsimony(completos)
     # BUG-0198, option B (decided 30-sep-2026): the ORDER is the pattern's —
     # the school's reading of the correlogram. The AICc of the light estimates

@@ -406,8 +406,12 @@ Hasta 0.2.1 vivía en el enunciado de cada ejercicio y no aquí, y sin enunciado
 el autónomo se reducía a una llamada a build_model (BUG-0180).
 
 LOS NODOS — los mismos que en guiado, en el mismo orden, UNO POR VEZ:
-  1. dominio        qué CLASE de serie es. Antes de λ: la clase gobierna la
-                    regla de la transformación.
+  1. dominio        qué CLASE de serie es, y qué DINÁMICA espera la teoría
+                    (persistencia, ciclo, memoria finita, media o
+                    estacionalidad estocástica): guion_node(nodo="dominio",
+                    expectativas=…), obligatorio. Antes de λ: la clase gobierna
+                    la regla de la transformación, y las expectativas deciden
+                    los empates de órdenes (nodo 8).
   2. lambda         guided_identification(inp_path)
   3. d              guided_identification(inp_path, lam=X)
   4. estacionalidad guided_identification(inp_path, lam=X, d=Y, objetivo=…)
@@ -484,6 +488,18 @@ ETAPA 1 — IDENTIFICACIÓN (árbol de decisiones secuencial)
   NO llames boxcox_analysis, identification_analysis, seasonal_analysis
   ni unit_root_analysis individualmente — son herramientas internas.
 
+ANTES DE LA LLAMADA 1 — EL NODO DOMINIO (obligatorio desde 2026-09-30):
+  qué CLASE de serie es (price_index, multiplicative, ratio, generic) y QUÉ
+  DINÁMICA ESPERA LA TEORÍA para ella, sobre el proceso EN NIVELES:
+  persistencia, ciclo (y su duración), memoria finita, reversión, media o
+  estacionalidad estocástica — y por qué. Pregúntaselo al analista (en
+  autónomo lo declaras tú) y regístralo ANTES de ver ningún orden candidato:
+      guion_node(guion_path, nodo="dominio", decidido="<clase>",
+                 razon="…", expectativas="<la dinámica esperada y por qué>")
+  Es un preregistro: elegida después de ver qué modelo ajusta, la historia no
+  es un criterio. «Sin expectativa» es una respuesta honesta para una clase
+  sin teoría conocida; entonces, en un empate, manda el dato.
+
 LLAMADA 1 — guided_identification(inp_path)   [lam=-1 por defecto]
   Devuelve: gráfico Box-Cox (media vs desviación típica)
   Lee con el usuario:
@@ -554,6 +570,20 @@ LLAMADA 4 — guided_identification(inp_path, lam=X, d=<confirmado>, D=<confirma
   • Corte brusco ACF, decaimiento PACF → MA(q)
   • Ambas decaen → ARMA(p,q)
   • Sin estructura → p=0, q=0
+
+  ⚠ UN EMPATE GENUINO SE RESUELVE CON EL PROCEDIMIENTO DEL DOMINIO. Cuando
+    el patrón no separa los primeros candidatos (banda de 0,04 de similitud),
+    el listado trae por sí solo la **ficha de dinámica implícita** de cada uno
+    —ψ, raíces y períodos, pesos de previsión (finitos, infinitos, alternan),
+    Σψ, la lectura del par (∇, MA) y la MATERIALIDAD (diferencia de previsión
+    a H = 2s en σ)—. Léela contra las EXPECTATIVAS declaradas en el nodo
+    dominio y decide con el formato fijo (docstring de guion_node), con
+    criterio="dominio" | "estadístico" | "uso". Guardas: sólo entre candidatos
+    ADECUADOS (si uno falla la diagnosis, manda la adecuación); PRESENTA
+    SIEMPRE LAS DOS lecturas; si la materialidad es < 0,25 σ di que la elección
+    es interpretativa; y un MA emparejado con su diferencia cerca de 1 no se
+    decide aquí: vuelve al nodo d (o D) con la ficha. El caso siguiente es el
+    EJEMPLO RESUELTO del procedimiento, no una regla aparte:
 
   ⚠ EL EMPATE AR(1) vs MA(1), Y CÓMO SE ROMPE. En un índice de precios en
     logaritmos con d=1 --la serie diferenciada ES la inflación-- la
@@ -7104,7 +7134,8 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
 def guion_node(guion_path: str, nodo: str, decidido: str,
                razon: str, evidencia: str = "",
                alternativas: str = "", decidido_por: str = "",
-               parent: int = -1) -> list:
+               parent: int = -1, expectativas: str = "",
+               criterio: str = "") -> list:
     """
     Record a DECISION NODE in the guion — a specification choice, not a model.
 
@@ -7136,6 +7167,26 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
     alternativas : what was considered and discarded, and why
     decidido_por : "analista+LLM" (guided) | "LLM" (autonomous) | "heurística"
     parent       : version this node descends from (-1 = the last one recorded).
+    expectativas : REQUIRED for nodo="dominio" (decided 2026-09-30): the dynamics
+                   the theory expects for this class of series, in terms of the
+                   process in levels — persistence, cycle (and its length), finite
+                   memory, mean reversion, a stochastic mean or seasonality — and
+                   why. Declared BEFORE the candidate orders are seen: a
+                   preregistration, so the story cannot be chosen after the model
+                   that won. «sin expectativa» is an honest answer for a rare class.
+    criterio     : for nodo="ordenes" (and any choice between tied candidates):
+                   "estadístico" | "dominio" | "uso". "dominio" requires a
+                   `dominio` node with expectations in this guion: the decision
+                   cites them. So these decisions can be audited and COUNTED.
+
+    THE DECISION BETWEEN TIED CANDIDATES (docs/DISENO-dominio-en-los-ordenes.md
+    §4.4), in `razon`, with this fixed format:
+        Los datos prefieren X por ΔAIC = … (ΔBIC = …).
+        X implica [dinámica]; Y implica [dinámica]   ← the card of implied dynamics
+        La expectativa declarada en el nodo dominio era […].
+        Elijo … porque …
+        Materialidad: la diferencia de previsión a H = 2s es … σ.
+        Esto cambiaría si … (what evidence would reverse it).
 
     WHEN TO SET `parent` EXPLICITLY. A node that records the REJECTION of a
     branch must not hang from the branch it rejects. If it does, abandoning that
@@ -7155,6 +7206,21 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
         if not razon or not razon.strip():
             return _err("`razon` es obligatoria: una decisión sin su razón es un "
                         "número, y un número no se puede discutir después.")
+        # The domain procedure (decided 2026-09-30): the expectations are
+        # mandatory in the `dominio` node, as `razon` is — measured, a required
+        # field is filled 95 % of the time and an optional one 0 %.
+        if nodo.strip().lower() == "dominio" and not expectativas.strip():
+            return _err(
+                "`expectativas` es obligatoria en el nodo `dominio`: qué dinámica "
+                "espera la teoría para esta clase de serie —persistencia, ciclo (y "
+                "su duración), memoria finita, reversión, media o estacionalidad "
+                "estocástica— y por qué, sobre el proceso EN NIVELES. Se declara "
+                "ANTES de ver los órdenes candidatos (es un preregistro). Si la "
+                "clase no tiene teoría conocida, «sin expectativa» es la respuesta "
+                "honesta.")
+        crit = criterio.strip().lower()
+        if crit and crit not in ("estadístico", "estadistico", "dominio", "uso"):
+            return _err("`criterio` es «estadístico», «dominio» o «uso».")
 
         gp = os.path.expanduser(guion_path)
         os.makedirs(os.path.dirname(gp) or ".", exist_ok=True)
@@ -7165,6 +7231,15 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
             g = Guion(series=serie or "serie", analyst="",
                       created=datetime.now().strftime("%Y-%m-%d"))
 
+        if crit == "dominio":
+            decl = [e for e in g.entries if getattr(e, "kind", "") == "node"
+                    and (e.node or {}).get("nodo") == "dominio"
+                    and (e.node or {}).get("expectativas")]
+            if not decl:
+                return _err("`criterio=\"dominio\"` cita las expectativas declaradas "
+                            "en el nodo `dominio`, y este guion no tiene ninguno con "
+                            "expectativas. Declaradas DESPUÉS de ver los candidatos no "
+                            "son un criterio: son la historia que mejor encaja.")
         version = (max(e.version for e in g.entries) + 1) if g.entries else 1
         entry = GuionEntry(
             version=version, name=nodo, inp_path="", 
@@ -7175,7 +7250,10 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
             parent=(int(parent) if parent >= 0 else infer_parent(g)),
             kind="node",
             node={"nodo": nodo, "decidido": decidido,
-                  "evidencia": evidencia, "alternativas": alternativas},
+                  "evidencia": evidencia, "alternativas": alternativas,
+                  **({"expectativas": expectativas.strip()} if expectativas.strip() else {}),
+                  **({"criterio": "estadístico" if crit == "estadistico" else crit}
+                     if crit else {})},
             decided_by=decidido_por,
         )
         g.entries.append(entry)
@@ -7186,6 +7264,8 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
             + f"\n   razón: {razon}"
             + (f"\n   evidencia: {evidencia}" if evidencia else "")
             + (f"\n   descartado: {alternativas}" if alternativas else "")
+            + (f"\n   expectativas: {expectativas.strip()}" if expectativas.strip() else "")
+            + (f"\n   criterio: {crit}" if crit else "")
             + f"\n\n*mapa:* `guion_map(\"{gp}\")`"))]
     except Exception:
         return _err(traceback.format_exc())

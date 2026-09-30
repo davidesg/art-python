@@ -1182,6 +1182,8 @@ Show the analysis as a MAP: what descends from what, what was adopted, and
 | `alternativas` | string | no | `` |
 | `decidido_por` | string | no | `` |
 | `parent` | integer | no | `-1` |
+| `expectativas` | string | no | `` |
+| `criterio` | string | no | `` |
 
 Record a DECISION NODE in the guion — a specification choice, not a model.
 
@@ -1213,6 +1215,26 @@ Record a DECISION NODE in the guion — a specification choice, not a model.
     alternativas : what was considered and discarded, and why
     decidido_por : "analista+LLM" (guided) | "LLM" (autonomous) | "heurística"
     parent       : version this node descends from (-1 = the last one recorded).
+    expectativas : REQUIRED for nodo="dominio" (decided 2026-09-30): the dynamics
+                   the theory expects for this class of series, in terms of the
+                   process in levels — persistence, cycle (and its length), finite
+                   memory, mean reversion, a stochastic mean or seasonality — and
+                   why. Declared BEFORE the candidate orders are seen: a
+                   preregistration, so the story cannot be chosen after the model
+                   that won. «sin expectativa» is an honest answer for a rare class.
+    criterio     : for nodo="ordenes" (and any choice between tied candidates):
+                   "estadístico" | "dominio" | "uso". "dominio" requires a
+                   `dominio` node with expectations in this guion: the decision
+                   cites them. So these decisions can be audited and COUNTED.
+
+    THE DECISION BETWEEN TIED CANDIDATES (docs/DISENO-dominio-en-los-ordenes.md
+    §4.4), in `razon`, with this fixed format:
+        Los datos prefieren X por ΔAIC = … (ΔBIC = …).
+        X implica [dinámica]; Y implica [dinámica]   ← the card of implied dynamics
+        La expectativa declarada en el nodo dominio era […].
+        Elijo … porque …
+        Materialidad: la diferencia de previsión a H = 2s es … σ.
+        Esto cambiaría si … (what evidence would reverse it).
 
     WHEN TO SET `parent` EXPLICITLY. A node that records the REJECTION of a
     branch must not hang from the branch it rejects. If it does, abandoning that

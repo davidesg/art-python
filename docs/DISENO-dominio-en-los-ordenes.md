@@ -2,7 +2,8 @@
 
 Documento de diseño. Abierto 2026-09-24, a partir de la charla sobre el
 protocolo y del recuento de los nodos de órdenes de SF_MEG y de la réplica del
-TFM. **No hay nada implementado**; las decisiones abiertas están en §10.
+TFM. **No hay nada implementado**; las decisiones de §10 se tomaron el
+2026-09-30 (§10.bis).
 
 ---
 
@@ -419,3 +420,24 @@ dato, aunque sea por poco.
 Las cifras de §1, §5 y §7 salen de los guiones y `.out` citados; el recuento de §1
 se hizo con un script de lectura sobre `*/guion*.json`, deduplicado por
 contenido, y la clasificación de «argumento económico» se revisó a mano.
+
+---
+
+## 10.bis Decisions (2026-09-30)
+
+1. **The expectations are mandatory** in the `dominio` node, declared before
+   the candidates are seen, as `razon` is.
+2. **The card is generated automatically** on a genuine tie: inside the
+   identification when the identifier's tie band (BUG-0198: within 0.04 of the
+   best similarity) holds more than one candidate, and in the comparison of
+   estimated models (ΔAIC < 2).
+3. **Materiality**: the study's proposal as the starting convention — the
+   largest forecast difference at H = 2s under 0.25 σ reads «interpretative
+   choice» — to be calibrated with E1.
+4. **An MA paired with a difference near 1** is not decided in the orders
+   node: the search goes back to the d node or the seasonality node, with the
+   card attached (§5.3).
+
+Context: the identifier now ranks by the pattern and breaks ties by
+parsimony (fewer parameters, pure before mixed) and then AICc, which it shows
+as information (BUG-0198, option B). The tie band is §4.2's condition 1.
