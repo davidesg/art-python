@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**195 report(s), 8 open.**
+**195 report(s), 7 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -14,7 +14,6 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0147](BUG-0147-la-figura-se-escribe-y-no-se-dice-donde.md) | open | medium | mcp-tools | Seis herramientas escriben su figura y no dicen dónde — el otro medio BUG-0122, y sólo se ve cruzando la frontera | — |
 | [BUG-0151](BUG-0151-la-covarianza-del-out-conserva-la-semilla-del-bf.md) | open | high | estimation | La covarianza del .out conserva la semilla del BFGS en direcciones ROTADAS — ningún detector por parámetro la ve | — |
 | [BUG-0186](BUG-0186-la-lista-de-objetivos-se-sigue-reformulando.md) | open | medium | protocolo | La lista de objetivos se sigue reformulando con BUG-0183 dentro — el protocolo no basta, porque la pregunta se hace con la herramienta del cliente antes de llamar a art | — |
-| [BUG-0198](BUG-0198-el-identificador-no-ve-el-ciclo-de-la-rata-almizclera.md) | open | high | identification | El identificador no ve el ciclo de la rata almizclera — con la FAP significativa en 2 y 6 y la FAS oscilante, ni el AR(2) ni el AR(6) de Jenkins y Alavi están entre los cinco primeros; propone AR(1), ARMA(1,2) y MA(1) | — |
 | [BUG-0011](BUG-0011-dcd-overdiff-recommends-d2-on-seasonal-price-index.md) | in-progress | medium | formal-tests | dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
@@ -201,6 +200,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0195](BUG-0195-dos-q-con-el-mismo-nombre-y-distinto-p.md) | fixed | high | diagnosis | Dos Ljung-Box con el mismo rótulo «Q(39)» y veredictos opuestos — el escaneo de anómalos no descuenta los parámetros ARMA (p = 0,179, «pasa») y la diagnosis sí (p = 0,043, «falla») pero lo rotula por el retardo, no por los grados de libertad | 0.2.3.dev0 |
 | [BUG-0196](BUG-0196-la-estacionalidad-se-contrasta-en-datos-anuales.md) | fixed | medium | identification | La estacionalidad se contrasta en datos anuales — con freq=1 no hay frecuencias estacionales, y el nodo 3 publica un F(0,60)=0, p=1, una figura vacía y las rutas B1/B2 | 0.2.3.dev0 |
 | [BUG-0197](BUG-0197-el-nodo-3-recomienda-d-2-y-d-1-a-la-vez.md) | fixed | medium | identification | El nodo 3 recomienda d=2 y d=1 en la misma salida — «Considera d=2», «Punto de partida recomendado d=1, no 2» y «La evidencia apunta a d=2. Reentra con d=2» salen de tres sitios distintos del código | 0.2.3.dev0 |
+| [BUG-0198](BUG-0198-el-identificador-no-ve-el-ciclo-de-la-rata-almizclera.md) | fixed | high | identification | El identificador no ve el ciclo de la rata almizclera — con la FAP significativa en 2 y 6 y la FAS oscilante, ni el AR(2) ni el AR(6) de Jenkins y Alavi están entre los cinco primeros; propone AR(1), ARMA(1,2) y MA(1) | 0.2.3.dev0 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 
