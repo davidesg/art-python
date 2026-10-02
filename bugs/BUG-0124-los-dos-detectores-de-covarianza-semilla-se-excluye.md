@@ -1,11 +1,11 @@
 ---
 id: BUG-0124
 title: Los dos detectores de covarianza-semilla se excluyen mutuamente — con degeneración PARCIAL el aviso cuenta sólo las coincidencias exactas y calla las que están a 0,02 % de la semilla
-status: open
+status: fixed
 severity: high
 component: diagnosis
 found_in: 0.2.1
-fixed_in:
+fixed_in: 0.2.3
 reported: 2026-09-09
 reporter: David
 tags:
@@ -109,3 +109,28 @@ convierte en alternativas cuando son **complementarios**.
 *(pendiente)* Repro sintético con degeneración parcial; y una prueba que exija
 que el número del texto coincida con el número de ✗ de la ecuación, que es la
 discrepancia observada.
+
+---
+
+## Fixed (2026-10-02)
+
+One list instead of two detectors in `if`/`else`:
+`diagnosis.seed_contaminated_indices` joins
+- the exact seed (`degenerate_variance_indices`),
+- the near seed (`near_seed_variance_indices`),
+- and the rotated seed of BUG-0151 (`seed_directions`).
+
+Three things now come from that list:
+- the warning's count in `_equation_for_prompt`;
+- the equation's ✗ marks (`describe.model_equation`, by value through
+  `seed_contaminated_se`), so the count and the marks agree by construction;
+- the correlation tool's warning.
+
+**With fdhess (fue ≥ 0.1.17) the list is empty.** The covariance is then the
+curvature at the optimum and there is no seed. The defect therefore lives only
+where fue falls back to the BFGS and says so in `se_method`.
+
+Tests: `tests/test_bug_0124_0151_one_seed_list.py`:
+- the report's synthetic repro (one exact and three at 2e-4: 4, not 1);
+- the RATIO_m50 diagonal as measured;
+- that the warning's number equals the number of ✗.

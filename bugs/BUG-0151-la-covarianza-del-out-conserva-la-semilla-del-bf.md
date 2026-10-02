@@ -1,11 +1,11 @@
 ---
 id: BUG-0151
 title: La covarianza del .out conserva la semilla del BFGS en direcciones ROTADAS — ningún detector por parámetro la ve
-status: open
+status: fixed
 severity: high
 component: estimation
 found_in: 0.2.2
-fixed_in: 
+fixed_in: 0.2.3
 reported: 2026-09-10
 reporter: David — corrida guiada fase 1, ITCER
 tags:
@@ -112,3 +112,29 @@ Dos niveles:
 bloque por debajo de 0,1. Y una prueba de la clase: modelo de regresión pura sin
 ARMA, donde la covarianza exacta es σ̂²(X′X)⁻¹ en forma cerrada, contra la
 publicada.
+
+---
+
+## Fixed (2026-10-02)
+
+**Level 2, the root, is fue 0.1.17's** (fue BUG-0015): the standard errors come
+from `fdhess` at the optimum, not from the BFGS path. Re-estimating the
+report's models (`replica/fase1/ITCER`) meets this report's validation:
+
+| | ω₂₀₀₈ s.e. | block correlation | exact |
+|---|---|---|---|
+| m01, old `.out` (BFGS) | 1.74, 1.56, 2.28 | −0.98 | 2.316 |
+| m01, fdhess | **2.319, 2.317, 2.316** | ≤ 0.11 | 2.316 |
+| m02, old `.out` | 1.28 ×3 | ±0.99 | ≈2.18 |
+| m02, fdhess | **2.181 ×3** | ≤ 0.11 | ≈2.18 |
+
+**Level 1, detection, for the cases where fue falls back to the BFGS** (an
+optimum on the boundary, or a Hessian that is not positive definite):
+- `diagnosis.seed_directions` finds the covariance's eigenvalues within the
+  near-seed band of 2/n;
+- `seed_contaminated_indices` counts the parameters loading ≥ 0.30 on those
+  directions, in the same list as BUG-0124's.
+
+Test: a rotated seed with no diagonal near 2/n is seen.
+
+Released with fue 0.1.17 and art 0.2.3, both in running-in.

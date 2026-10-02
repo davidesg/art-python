@@ -445,6 +445,87 @@ def near_seed_distances(result) -> dict[int, float]:
     return {i: (d[i] - semilla) / semilla for i in near_seed_variance_indices(result)}
 
 
+def _cov2d(result):
+    cov = getattr(result, "cov_matrix", None) if result is not None else None
+    if cov is None:
+        return None
+    cov = np.asarray(cov, dtype=float)
+    if cov.ndim == 1:
+        k = int(round(cov.size ** 0.5))
+        if k * k != cov.size:
+            return None
+        cov = cov.reshape(k, k)
+    if cov.ndim != 2 or cov.shape[0] != cov.shape[1] or not np.all(np.isfinite(cov)):
+        return None
+    return (cov + cov.T) / 2.0
+
+
+# Carga mínima de un parámetro en una dirección-semilla para contarlo afectado.
+CARGA_SEMILLA = 0.30
+
+
+def seed_directions(result, tol: float = BANDA_CASI_SEMILLA) -> list:
+    """Direcciones de la covarianza que siguen en la semilla del BFGS, aunque
+    estén ROTADAS respecto de los ejes de los parámetros (BUG-0151).
+
+    El BFGS aprende la curvatura por direcciones, no por parámetros: una que no
+    exploró se queda en c·I, y si no coincide con ningún eje cada varianza de la
+    diagonal mezcla una dirección aprendida con otra que no, y ninguna «parece»
+    la semilla. Medido en ITCER (réplica, fase 1): el bloque ω de 2008 tenía un
+    autovalor 0.0175 (m01) y dos 0.0214 (m02) frente a una semilla 2/n = 0.024,
+    y ninguna varianza cerca de ella.
+
+    Devuelve [(autovalor, autovector)] de los autovalores a menos de `tol`
+    (relativo) de la semilla. Vacío con fdhess (fue ≥ 0.1.17): ahí la
+    covarianza es la curvatura en el óptimo y no hay semilla.
+    """
+    if result is None or se_del_hessiano(result):
+        return []
+    semilla = bfgs_seed_var(result)
+    cov = _cov2d(result)
+    if cov is None or semilla is None or semilla <= 0:
+        return []
+    w, V = np.linalg.eigh(cov)
+    return [(float(w[k]), V[:, k]) for k in range(len(w))
+            if abs(w[k] - semilla) <= tol * semilla]
+
+
+def seed_contaminated_indices(result, tol: float = BANDA_CASI_SEMILLA) -> list[int]:
+    """LA lista de parámetros cuyo error típico lleva semilla del BFGS — la
+    única de la que salen el recuento del aviso y las marcas ✗ (BUG-0124).
+
+    Une lo que antes contestaban por separado, y en `if`/`else`, tres detectores
+    que son complementarios:
+
+    * la semilla EXACTA (`degenerate_variance_indices`, BUG-0027);
+    * la CASI semilla de la diagonal (`near_seed_variance_indices`, BUG-0041):
+      «no aprendió nada» no deja el mismo bit —medido en RATIO_m50, niter = 1:
+      una varianza exacta y tres a 1e-4 de la semilla, y el aviso contaba una—;
+    * la semilla ROTADA (`seed_directions`, BUG-0151): los parámetros con carga
+      ≥ CARGA_SEMILLA en una dirección que no se aprendió.
+
+    Vacía con fdhess (fue ≥ 0.1.17).
+    """
+    if result is None or se_del_hessiano(result):
+        return []
+    out = set(degenerate_variance_indices(result))
+    out |= set(near_seed_variance_indices(result, tol))
+    for _w, v in seed_directions(result, tol):
+        out |= {i for i in range(len(v)) if abs(v[i]) >= CARGA_SEMILLA}
+    return sorted(out)
+
+
+def seed_contaminated_se(result, tol: float = BANDA_CASI_SEMILLA) -> list[float]:
+    """Los errores típicos (√var) de `seed_contaminated_indices`: el renderizado
+    de la ecuación marca por VALOR (su orden no es el del vector plano), y así
+    marca exactamente los mismos que cuenta el aviso."""
+    cov = _cov2d(result)
+    if cov is None:
+        return []
+    d = np.diag(cov)
+    return [float(np.sqrt(d[i])) for i in seed_contaminated_indices(result, tol) if d[i] > 0]
+
+
 def covariance_is_degenerate(result) -> bool:
     """¿Hay errores típicos que son la semilla del BFGS y no el hessiano? (BUG-0027)
 

@@ -6,6 +6,18 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### One list of seed-contaminated standard errors (BUG-0124, BUG-0151)
+
+- `diagnosis.seed_contaminated_indices` joins the exact seed, the near seed
+  and the ROTATED seed (`seed_directions`: covariance eigenvalues at 2/n; the
+  parameters loading on them). The warning's count, the equation's ✗ marks and
+  the correlation tool's warning all come from it, so they agree.
+- With fdhess (fue 0.1.17) the list is empty. On the BFGS fallback it is what
+  catches the partial degeneracy (RATIO_m50: four, not one) and the rotated one
+  (ITCER fase 1).
+- The root of BUG-0151 is fue 0.1.17's fdhess. Re-estimated, the report's ITCER
+  models meet its validation: ω s.e. 2.32 and 2.18, block correlation ≤ 0.11.
+
 ### The domain in the orders node (docs/DISENO-dominio-en-los-ordenes.md)
 
 - The procedure of the design study, with its decisions of 2026-09-30:

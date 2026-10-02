@@ -1397,28 +1397,49 @@ def _equation_for_prompt(ts, model) -> str:
         if se_ausentes(r):
             aviso = ("\n\n⚠ **Este modelo no tiene errores típicos**: "
                      + aviso_covarianza(r))
-        elif covariance_is_degenerate(r):
-            idx = degenerate_variance_indices(r)
-            npar = int(getattr(r, "npar", 0) or 0)
-            cuantos = ("TODOS los" if (not idx or len(idx) >= npar)
-                       else f"{len(idx)} de los {npar}")
-            aviso = (f"\n\n⚠ **{cuantos} errores típicos de arriba NO son válidos** "
-                     f"(niter={getattr(r, 'niter', '?')}): " + aviso_covarianza(r))
         else:
-            # BUG-0041: la degeneración EXACTA (niter=0) ya se avisa arriba, pero
-            # una dirección que se movió un 7% tampoco lleva información del
-            # hessiano y no disparaba nada. Es sospecha, no veredicto, y se
-            # publica con la distancia para que el lector juzgue.
-            casi = near_seed_variance_indices(r)
-            if casi:
+            # BUG-0124/0151: UNA lista —la semilla exacta, la casi exacta y la
+            # rotada— de la que salen el recuento y las ✗ de la ecuación. Antes
+            # eran dos detectores en if/else y el aviso contaba sólo las exactas.
+            from art.diagnosis import (seed_contaminated_indices, seed_directions,
+                                       bfgs_seed_var)
+            idx = seed_contaminated_indices(r)
+            npar = int(getattr(r, "npar", 0) or 0)
+            etiquetas = _param_labels_safe(model)
+
+            def _nom(i):
+                return etiquetas[i] if i < len(etiquetas) else f"par {i+1}"
+            if covariance_is_degenerate(r):
+                cuantos = ("TODOS los" if (not idx or len(idx) >= npar)
+                           else f"{len(idx)} de los {npar}")
+                aviso = (f"\n\n⚠ **{cuantos} errores típicos de arriba NO son válidos** "
+                         f"(niter={getattr(r, 'niter', '?')})"
+                         + (f": {', '.join(_nom(i) for i in idx)}" if idx and len(idx) < npar
+                            else "") + ". " + aviso_covarianza(r))
+            elif idx:
+                exactas = set(degenerate_variance_indices(r))
+                casi = set(near_seed_variance_indices(r))
                 dist = near_seed_distances(r)
-                etiquetas = _param_labels_safe(model)
-                detalle = ", ".join(
-                    f"{etiquetas[i] if i < len(etiquetas) else f'par {i+1}'} "
-                    f"({dist.get(i, 0.0)*100:+.1f}%)" for i in casi)
-                aviso = (f"\n\nℹ **Errores típicos sospechosos** "
-                         f"(niter={getattr(r, 'niter', '?')}): {detalle} "
-                         + AVISO_COV_CASI_SEMILLA)
+                rot = seed_directions(r)
+                partes = []
+                for i in idx:
+                    if i in exactas:
+                        partes.append(f"{_nom(i)} (la semilla)")
+                    elif i in casi:
+                        partes.append(f"{_nom(i)} ({dist.get(i, 0.0)*100:+.1f}% de la semilla)")
+                    else:
+                        partes.append(f"{_nom(i)} (en una dirección-semilla rotada)")
+                rot_txt = ""
+                if rot:
+                    sv = bfgs_seed_var(r)
+                    rot_txt = (f" {len(rot)} dirección(es) de la covarianza siguen en la "
+                               f"semilla 2/n = {sv:.4g} (autovalores "
+                               + ", ".join(f"{w:.4g}" for w, _v in rot)
+                               + "), mezcladas en varias varianzas: ninguna diagonal "
+                               "lo delata (BUG-0151).")
+                aviso = (f"\n\nℹ **{len(idx)} de los {npar} errores típicos llevan semilla "
+                         f"del BFGS** (niter={getattr(r, 'niter', '?')}): "
+                         + ", ".join(partes) + "." + rot_txt + " " + AVISO_COV_CASI_SEMILLA)
         # fue ≥ 0.1.17 que tuvo que caer al BFGS: el porqué, en una línea. Con
         # "fdhess" no se dice nada —es el caso normal y el silencio no cuesta
         # tokens—; con un fue anterior tampoco, porque no hay método que citar.
@@ -3614,10 +3635,10 @@ def overparameterization_analysis(inp_path: str, threshold: float = 0.7) -> list
         aviso_cov = ""
         try:
             from art.diagnosis import (covariance_is_degenerate,
-                                       degenerate_variance_indices)
+                                       seed_contaminated_indices)
             r = getattr(m, "_result", None)
-            if covariance_is_degenerate(r):
-                idx = degenerate_variance_indices(r)
+            idx = seed_contaminated_indices(r)        # BUG-0124/0151: una lista
+            if covariance_is_degenerate(r) or idx:
                 npar_r = int(getattr(r, "npar", 0) or 0)
                 afectados = [labels[i] if i < len(labels) else f"par {i+1}"
                              for i in idx]

@@ -1006,19 +1006,19 @@ def model_equation(ts, model) -> str:
     # `degenerate_variance_indices` van sobre el vector plano, cuyo orden no es
     # el de render (el propio módulo avisa de ese desajuste).
     try:
-        from art.diagnosis import bfgs_seed_var as _seed, se_del_hessiano
+        from art.diagnosis import seed_contaminated_se
         _r_eq = getattr(model, "_result", None)
-        # fue ≥ 0.1.17 con fdhess: no hay semilla que marcar (fue/BUG-0015).
-        _sv = None if se_del_hessiano(_r_eq) else _seed(_r_eq)
-        _se_semilla = (_sv ** 0.5) if _sv else None
+        # BUG-0124: las MISMAS que cuenta el aviso (exactas, casi y rotadas,
+        # BUG-0151), por valor; vacía con fdhess (fue/BUG-0015).
+        _se_semilla = seed_contaminated_se(_r_eq)
     except Exception:
-        _se_semilla = None
+        _se_semilla = []
     _hay_semilla = [False]
 
     def _es_semilla(se: float) -> bool:
-        if _se_semilla is None or not se:
+        if not _se_semilla or not se:
             return False
-        return abs(abs(se) - _se_semilla) <= 1e-4 * _se_semilla
+        return any(abs(abs(se) - v) <= 1e-6 * max(v, 1e-12) for v in _se_semilla)
 
     def _fse(se: float) -> str:
         a = abs(se)
@@ -1691,9 +1691,15 @@ def model_equation(ts, model) -> str:
     # BUG-0060: la leyenda del marcador y, cuando es calculable, el error típico
     # HONESTO — todo dentro del cerco, que es lo que el analista lee.
     if _hay_semilla[0]:
-        nota = ["", "  ✗ = error típico NO VÁLIDO: es la semilla del BFGS "
-                    f"(√(2/n) = {_se_semilla:.4f}), no el hessiano. "
-                    "No calcules t con él."]
+        try:
+            from art.diagnosis import bfgs_seed_var as _seedv
+            _sv = _seedv(getattr(model, "_result", None))
+            _semtxt = f" (√(2/n) = {_sv ** 0.5:.4f})" if _sv else ""
+        except Exception:
+            _semtxt = ""
+        nota = ["", "  ✗ = error típico NO VÁLIDO: lleva la semilla del BFGS"
+                    f"{_semtxt} — exacta, casi exacta o en una dirección rotada —, "
+                    "no el hessiano. No calcules t con él."]
         # Con μ libre y NINGÚN parámetro ARMA libre, la media es la media
         # muestral y su error típico exacto es σ̂ₐ/√n (BUG-0027).
         try:
@@ -1713,10 +1719,11 @@ def model_equation(ts, model) -> str:
                 nr = len(_np.asarray(r.residuals, dtype=float))
                 se_mu = _sqrt(r.sigma2) / _sqrt(nr)
                 mu_v = float(_reconstruct_params(model, list(model.params))[8])
+                se_pub = float(_np.asarray(r.std_errors, dtype=float).ravel()[-1])
                 nota.append(
                     f"  → μ sin ARMA libre: el error típico correcto es "
                     f"σ̂ₐ/√n = {se_mu:.4f}, luego t = {mu_v/se_mu:+.2f} "
-                    f"(no {mu_v/_se_semilla:+.2f}).")
+                    f"(no {mu_v/se_pub:+.2f}).")
         except Exception:
             pass
         lines += nota
