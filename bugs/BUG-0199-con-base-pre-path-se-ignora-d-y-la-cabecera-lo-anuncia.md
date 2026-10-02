@@ -1,11 +1,11 @@
 ---
 id: BUG-0199
 title: Con base_pre_path, confirm_and_estimate ignora la d pedida y conserva la del .pre — pero la cabecera anuncia la d pedida, así que el analista lee un ARIMA(0,2,2) que en realidad es un ARIMA(0,1,2)
-status: open
+status: fixed
 severity: high
 component: estimation
 found_in: 0.2.3.dev0
-fixed_in:
+fixed_in: 0.2.3.dev0
 reported: 2026-10-02
 reporter: David / Claude — evaluación del carril autónomo (IPC_ES del pass-through)
 tags:
@@ -68,3 +68,34 @@ argumentos.
 
 Un test que encadene con d distinta y exija (1) el rechazo o (2) que la
 ecuación lleve la d pedida; y que la cabecera y el estado digan lo mismo.
+
+## Resolution (2026-10-02)
+
+**Fix: option 2 for d, option 1 for λ and D.**
+
+- `lam`, `d` and `D` default to `None`. Chaining from a `.pre`, `None`
+  inherits the `.pre`'s value. On a fresh model, `None` gives the old
+  defaults (λ=0, d=1, D=0).
+- **A different d is APPLIED** (`_build_arma_on_model(d=)`). This is the d+1
+  candidate the protocol asks for, and the deterministic terms are kept. The
+  `.pre`'s mean is not inherited, because the mean of ∇^d is a different
+  quantity. Without `estimate_mu=True` the model has no μ; with it, μ is
+  re-seeded on the new d. The output says so: «d cambiada: 1 → 2».
+- **A different λ or D is REFUSED**, with «es REFORMULAR, no encadenar», and
+  nothing is written. λ rescales every ω; D clashes with the inherited
+  harmonics and `ifadf`.
+- The header, the scan and the guion read d and D from the ESTIMATED model, as
+  λ already did.
+
+An existing test (`test_bugs_0169_0170…`) passed `lam=0.0` while chaining from
+a levels `.pre`. That is this bug's very pattern, ignored until now. The test
+now inherits.
+
+**Validation:** `tests/test_bug_0199_d_al_encadenar.py`, 7 tests:
+- d applied and header in agreement;
+- μ not inherited across a d change;
+- d inherited when omitted;
+- the same d is not a change;
+- λ and D refused;
+- the fresh defaults kept.
+

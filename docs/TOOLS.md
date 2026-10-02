@@ -274,9 +274,9 @@ Compare two estimated models: spec diff, stats table, nested LR test.
 |---|---|---|---|
 | `inp_path` | string | yes | — |
 | `output_path` | string | yes | — |
-| `lam` | number | no | `0.0` |
-| `d` | integer | no | `1` |
-| `D` | integer | no | `0` |
+| `lam` | — | no | `None` |
+| `d` | — | no | `None` |
+| `D` | — | no | `None` |
 | `p` | — | no | `0` |
 | `q` | integer | no | `1` |
 | `ar_seeds` | — | no | `None` |
@@ -317,9 +317,20 @@ Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
     inp_path        : source .inp/.pre (series data and name; spec ignored
                       unless base_pre_path is given)
     output_path     : path to write the new .inp
-    lam             : Box-Cox lambda (0.0=log, 1.0=identity)
-    d               : regular differencing order
-    D               : seasonal differencing order (0=B1 harmonics, 1=B2 multiplicative)
+    lam             : Box-Cox lambda (0.0=log, 1.0=identity). Fresh model:
+                      default 0.0. With base_pre_path: default = the .pre's;
+                      a DIFFERENT λ is refused (BUG-0199) — it rescales every
+                      ω, so it is a reformulation: build from the .inp.
+    d               : regular differencing order. Fresh model: default 1.
+                      With base_pre_path: default = the .pre's, and a
+                      different d IS APPLIED (BUG-0199) — the d±1 candidate
+                      keeping the deterministic terms. The .pre's mean is then
+                      NOT inherited (the mean of ∇^d is another quantity):
+                      pass estimate_mu=True to fit one on the new d.
+    D               : seasonal differencing order (0=B1 harmonics, 1=B2
+                      multiplicative). Fresh model: default 0. With
+                      base_pre_path: default = the .pre's; a different D is
+                      refused (it clashes with inherited harmonics/ifadf).
     p               : regular AR order — an INT or a LIST OF ORDERS PER FACTOR.
                       `fue` estimates the regular AR as a PRODUCT of factors, and
                       that is how this school reads an operator: each factor has

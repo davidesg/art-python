@@ -136,7 +136,9 @@ def _ce(src, out, **kw):
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return fn(src, out, lam=0.0, d=1, D=0, p=1, q=0, n_harmonics=3, **kw)
+        # λ, d y D se heredan del .pre (BUG-0199): el testigo está en niveles,
+        # y pasar lam=0.0 —que antes se ignoraba en silencio— hoy se rechaza.
+        return fn(src, out, p=1, q=0, n_harmonics=3, **kw)
 
 
 def test_easter_llega_al_modelo_ENCADENADO(base_pre):

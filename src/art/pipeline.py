@@ -966,7 +966,8 @@ def _mu_seed(ts, lam, d, D, estimate_mu, refactor=_RESCALE_FACTOR):
 
 def _build_arma_on_model(m_base, p: int, q: int,
                          P: int = 0, Q: int = 0,
-                         estimate_mu=None, easter: bool = False):
+                         estimate_mu=None, easter: bool = False,
+                         d: int | None = None):
     """
     Return a new unfitted fue.Model that keeps all interventions and harmonics
     from m_base but replaces the ARMA specification with (p, q, P, Q).
@@ -1029,6 +1030,16 @@ def _build_arma_on_model(m_base, p: int, q: int,
 
     Se AÑADE, no se sustituye: si el base ya lo trae, se hereda como todo lo
     demás y no se duplica.
+
+    **`d` cambia el orden de integración — BUG-0199.** `None` (por defecto) lo
+    hereda del base. Un valor distinto es el candidato d±1 que pide el
+    protocolo («antes de mover d, estima el candidato d+1»), conservando los
+    deterministas: antes se ignoraba en silencio y la cabecera anunciaba la d
+    pedida. Con otra d la media NO se hereda —la media de ∇^d deja de ser la
+    misma cantidad—: sin `estimate_mu` explícito no se estima, y con
+    `estimate_mu=True` se siembra de nuevo sobre la d nueva. λ y D no se
+    cambian aquí (λ cambia la escala de todos los ω; D choca con los armónicos
+    o el `ifadf` del base): eso lo rechaza el llamador.
     """
     import fue
     import numpy as np
@@ -1076,12 +1087,14 @@ def _build_arma_on_model(m_base, p: int, q: int,
     # the mean -- the seed before a fit, the estimate after one -- so inheriting
     # it is inheriting the optimum. A fresh seed is computed only when the base
     # has no mean at all and the caller asked for one.
-    base_est = bool(getattr(m_base, "estimate_mu", False))
+    d_new = int(m_base.d) if d is None else int(d)
+    otra_d = d_new != int(m_base.d)
+    base_est = bool(getattr(m_base, "estimate_mu", False)) and not otra_d
     est_mu = base_est if estimate_mu is None else bool(estimate_mu)
     if est_mu and base_est:
         mu_val = float(getattr(m_base, "mu0", 0.0) or 0.0)
     elif est_mu:
-        mu_val = _mu_seed(m_base.series, m_base.boxlam, m_base.d, m_base.D,
+        mu_val = _mu_seed(m_base.series, m_base.boxlam, d_new, m_base.D,
                           True, m_base.refactor)
     else:
         mu_val = 0.0
@@ -1095,7 +1108,7 @@ def _build_arma_on_model(m_base, p: int, q: int,
 
     return fue.Model(
         m_base.series,
-        d=m_base.d, D=m_base.D, boxlam=m_base.boxlam,
+        d=d_new, D=m_base.D, boxlam=m_base.boxlam,
         ar=ar,       ar_free=ar_f       if ar   else None,
         ma=ma,       ma_free=ma_f       if ma   else None,
         ar_s=ar_s_val,  ar_s_free=ar_sf_val if ar_s_val  else None,

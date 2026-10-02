@@ -6329,7 +6329,8 @@ def _orden_ar(p):
 
 @mcp.tool()
 def confirm_and_estimate(inp_path: str, output_path: str,
-                          lam: float = 0.0, d: int = 1, D: int = 0,
+                          lam: float | None = None, d: int | None = None,
+                          D: int | None = None,
                           p: int | list[int] = 0, q: int = 1,
                           ar_seeds: list | None = None,
                           ar_f_freqs: list | None = None,
@@ -6368,9 +6369,20 @@ def confirm_and_estimate(inp_path: str, output_path: str,
     inp_path        : source .inp/.pre (series data and name; spec ignored
                       unless base_pre_path is given)
     output_path     : path to write the new .inp
-    lam             : Box-Cox lambda (0.0=log, 1.0=identity)
-    d               : regular differencing order
-    D               : seasonal differencing order (0=B1 harmonics, 1=B2 multiplicative)
+    lam             : Box-Cox lambda (0.0=log, 1.0=identity). Fresh model:
+                      default 0.0. With base_pre_path: default = the .pre's;
+                      a DIFFERENT λ is refused (BUG-0199) — it rescales every
+                      ω, so it is a reformulation: build from the .inp.
+    d               : regular differencing order. Fresh model: default 1.
+                      With base_pre_path: default = the .pre's, and a
+                      different d IS APPLIED (BUG-0199) — the d±1 candidate
+                      keeping the deterministic terms. The .pre's mean is then
+                      NOT inherited (the mean of ∇^d is another quantity):
+                      pass estimate_mu=True to fit one on the new d.
+    D               : seasonal differencing order (0=B1 harmonics, 1=B2
+                      multiplicative). Fresh model: default 0. With
+                      base_pre_path: default = the .pre's; a different D is
+                      refused (it clashes with inherited harmonics/ifadf).
     p               : regular AR order — an INT or a LIST OF ORDERS PER FACTOR.
                       `fue` estimates the regular AR as a PRODUCT of factors, and
                       that is how this school reads an operator: each factor has
@@ -6517,12 +6529,36 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             _, m_base = _load_ts_model(base_pre_path)
             ts_b = m_base.series
             _exige_la_misma_serie(ts, ts_b, inp_path, base_pre_path)
+            # BUG-0199. Antes λ, d y D se IGNORABAN aquí en silencio —el modelo
+            # heredaba los del .pre— y la cabecera anunciaba los del argumento:
+            # el analista leía un ARIMA(0,2,2) que era un ARIMA(0,1,2). Ahora
+            # `None` hereda; una d distinta se aplica (es el candidato d+1 que
+            # pide el protocolo); λ o D distintas se rechazan.
+            _lb, _Db = float(m_base.boxlam), int(m_base.D)
+            if lam is not None and abs(float(lam) - _lb) > 1e-12:
+                return _err(
+                    f"λ={float(lam):g} distinta de la del .pre (λ={_lb:g}). "
+                    f"Cambiar λ reescala todos los ω de las intervenciones: es "
+                    f"REFORMULAR, no encadenar. Estima desde el .inp sin "
+                    f"base_pre_path, u omite lam para heredar la del .pre.")
+            if D is not None and int(D) != _Db:
+                return _err(
+                    f"D={int(D)} distinta de la del .pre (D={_Db}). Cambiar D "
+                    f"choca con los armónicos/ifadf heredados: es REFORMULAR. "
+                    f"Estima desde el .inp sin base_pre_path, u omite D.")
+            d_base = int(m_base.d)
             # BUG-0170: `easter` llega hasta aquí. Antes se aceptaba el
             # argumento y se descartaba en silencio al encadenar.
+            # Con otra d, estimate_mu=True siembra una media NUEVA sobre ∇^d:
+            # la del .pre no es la misma cantidad y no se hereda.
             m = _build_arma_on_model(m_base, p=p, q=q, P=P, Q=Q,
-                                     estimate_mu=estimate_mu, easter=easter)
+                                     estimate_mu=estimate_mu, easter=easter,
+                                     d=d)
             _write_inp(ts, m, output_path)
         else:
+            lam = 0.0 if lam is None else float(lam)
+            d = 1 if d is None else int(d)
+            D = 0 if D is None else int(D)
             m_fresh = _make_model(ts, lam=lam, d=d, D=D, p=p, q=q,
                                   n_harmonics=n_harmonics, P=P, Q=Q,
                                   estimate_mu=estimate_mu, seasonal=seasonal,
@@ -6547,6 +6583,19 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         # guiado.
         lam = float(getattr(m, "boxlam", lam) if getattr(m, "boxlam", None)
                     is not None else lam)
+        # Lo mismo con d y D (BUG-0199): la cabecera, el escaneo y el guion
+        # describen el modelo ESTIMADO, no los argumentos.
+        d, D = int(m.d), int(m.D)
+        aviso_d = ""
+        if base_pre_path and d != d_base:
+            aviso_d = (
+                f"\n\n> **d cambiada: {d_base} → {d}** respecto de "
+                f"`{os.path.basename(base_pre_path)}`. Se conservan los "
+                f"deterministas; la media del .pre NO se hereda (la de "
+                f"∇^{d} es otra cantidad)"
+                + (": se estima una nueva." if m.estimate_mu else
+                   ": el modelo va SIN μ — pasa estimate_mu=True si la "
+                   "deriva de la serie diferenciada lo pide."))
 
         # Parameter table
         if base_pre_path:
@@ -6680,6 +6729,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                        f"`{os.path.basename(base_pre_path)}`: se conservan sus "
                        f"intervenciones y armónicos, y se sustituye el ARMA.*"
                        if base_pre_path else "")
+                    + aviso_d
                     # Encadenar desde un `.pre` hereda sus intervenciones, y
                     # una rampa heredada sigue fijando la previsión (BUG-0182).
                     + aviso_rampa(m)),

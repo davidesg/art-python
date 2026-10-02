@@ -6,6 +6,17 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### Chaining from a .pre applies the requested d (BUG-0199)
+
+- `confirm_and_estimate` with `base_pre_path` used to keep the `.pre`'s d while
+  the header printed the requested one. Now `lam`, `d` and `D` default to
+  `None`, which means inherit when chaining and the old defaults on a fresh
+  model.
+- A different d is applied, with the deterministic terms kept and the mean not
+  inherited. The output says so.
+- A different λ or D is refused: that is a reformulation.
+- The header, the scan and the guion read d and D from the estimated model.
+
 ### The guion records where the analyst corrected the assistant (BUG-0110)
 
 - Each node carries `propuesta` (what the assistant proposed) and `coincide`
