@@ -226,6 +226,15 @@ class GuionEntry:
     kind: str = "model"                # model | node
     node: dict[str, Any] | None = None  # {nodo, decidido, evidencia, alternativas}
     decided_by: str = ""               # "analista+LLM" | "LLM" | "heurística"
+    # BUG-0110: `decided_by` sale del MODO y es constante en cada guion (81 de
+    # 81 en el corpus): registra el carril, no quién decidió cada nodo. Lo que
+    # dice dónde el analista corrige al asistente es comparar lo que el
+    # asistente PROPUSO con lo que se decidió, nodo a nodo:
+    #   propuesta — lo que el asistente propuso en ese nodo (en guiado);
+    #   coincide  — True si se decidió lo propuesto, False si el analista lo
+    #               corrigió, None si no se registró (los guiones antiguos).
+    propuesta: str = ""
+    coincide: bool | None = None
 
     # ── El mapa del laberinto ────────────────────────────────────────────
     # Sin estos tres campos el guion es un REGISTRO: dice dónde se ha estado,
@@ -356,12 +365,17 @@ class Guion:
     analyst: str
     created: str
     entries: list[GuionEntry] = field(default_factory=list)
+    #: El carril de la sesión — "guiado" | "autonomo" — una vez, en la cabecera
+    #: (BUG-0110): es constante, y repetirlo en cada entrada lo hacía pasar por
+    #: quién decidió cada nodo.
+    carril: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "series": self.series,
             "analyst": self.analyst,
             "created": self.created,
+            "carril": self.carril,
             "entries": [e.to_dict() for e in self.entries],
         }
 
@@ -373,6 +387,7 @@ class Guion:
             analyst=d.get("analyst", ""),
             created=d.get("created", ""),
             entries=entries,
+            carril=d.get("carril", ""),
         )
 
 
@@ -1523,6 +1538,11 @@ def export_guion_html(guion: Guion) -> str:
                     lines.append(f"<p><b>Descartado:</b> {nd['alternativas']}</p>")
                 if e.decided_by:
                     lines.append(f"<p class='meta'>Decidido por: {e.decided_by}</p>")
+                if getattr(e, "propuesta", ""):
+                    lines.append(
+                        f"<p><b>Propuesta del asistente:</b> {e.propuesta}"
+                        + (" — <b>corregida por el analista</b>" if e.coincide is False
+                           else " — tomada" if e.coincide else "") + "</p>")
                 if e.rationale:
                     lines.append(f"<p><b>Razón:</b> {e.rationale}</p>")
                 lines.append("</details>")

@@ -15,21 +15,23 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 from art.guion import Guion, GuionEntry, load_guion, save_guion  # noqa: E402
 
 
-def nodo(v, nombre, decidido, quien):
+def nodo(v, nombre, decidido, quien, propuesta=""):
     return GuionEntry(
         version=v, name=nombre, inp_path="", timestamp="t", spec={}, stats=None,
         equation="", decision=f"{nombre} = {decidido}", rationale="",
         problems_found="", next_version="", kind="node",
-        node={"nodo": nombre, "decidido": decidido}, decided_by=quien)
+        node={"nodo": nombre, "decidido": decidido}, decided_by=quien,
+        propuesta=propuesta, coincide=(propuesta == decidido) if propuesta else None)
 
 
 with tempfile.TemporaryDirectory() as d:
     g = Guion(series="S", analyst="", created="2026-01-01")
     # Una sesión GUIADA real: el analista no interviene en todos los nodos.
     g.entries += [
-        nodo(1, "lambda", "λ=0 CONTRA la recomendación", "analista+LLM"),
-        nodo(2, "d", "d=1, aceptada la propuesta", "analista+LLM"),
-        nodo(3, "ordenes", "AR(6) completo, CONTRA la propuesta", "analista+LLM"),
+        nodo(1, "lambda", "λ=0", "analista+LLM", propuesta="λ=1"),
+        nodo(2, "d", "d=1", "analista+LLM", propuesta="d=1"),
+        nodo(3, "ordenes", "AR(6) completo", "analista+LLM",
+             propuesta="AR(6) capado a los retardos 1 y 6"),
     ]
     gp = os.path.join(d, "S_guion.json")
     save_guion(g, gp)
@@ -49,6 +51,8 @@ with tempfile.TemporaryDirectory() as d:
     print(f"campos que registren la propuesta o el acuerdo: "
           f"{sorted(campos) or 'NINGUNO'}")
 
+    print("nodos corregidos por el analista:",
+          [e.name for e in gg.entries if e.coincide is False])
     if len(quienes) == 1 and not campos:
         print("\nFALLO: los tres nodos son indistinguibles. El registro dice que")
         print("el CARRIL fue guiado, no qué nodos decidió el analista contra la")

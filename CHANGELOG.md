@@ -6,6 +6,21 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### The guion records where the analyst corrected the assistant (BUG-0110)
+
+- Each node carries `propuesta` (what the assistant proposed) and `coincide`
+  (whether the decision took it); the lane goes once in the guion's header
+  (`carril`). `guion_node(propuesta=, coincide=)`.
+- `guion_map` marks corrected nodes with ✎ and counts them; the HTML says so.
+- The guided protocol asks for the proposal at every node. Old guiones load
+  with `coincide = None`.
+
+### Every figure says where it is (BUG-0147)
+
+- `_cita_figuras` cites each figure's path in the envelope's text, before the
+  end-of-turn marker. The six tools that composed their envelope by hand
+  return through it; the frontier test passes across the MCP boundary.
+
 ### One list of seed-contaminated standard errors (BUG-0124, BUG-0151)
 
 - `diagnosis.seed_contaminated_indices` joins the exact seed, the near seed

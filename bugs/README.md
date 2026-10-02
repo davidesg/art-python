@@ -4,14 +4,14 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**195 report(s), 4 open.**
+**195 report(s), 2 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
-| [BUG-0110](BUG-0110-decided-by-registra-el-carril-no-quien-decidio-cada-nodo.md) | open | medium | guion | decided_by registra el CARRIL y no quién decidió cada nodo — no se puede saber dónde el analista corrigió al asistente, que es la información que el guion existe para conservar | — |
+| [BUG-0110](BUG-0110-decided-by-registra-el-carril-no-quien-decidio-cada-nodo.md) | fixed | medium | guion | decided_by registra el CARRIL y no quién decidió cada nodo — no se puede saber dónde el analista corrigió al asistente, que es la información que el guion existe para conservar | 0.2.3 |
 | [BUG-0116](BUG-0116-la-descripcion-de-la-herramienta-no-sobrevive-al-cliente.md) | open | high | mcp-tools | La descripción de las herramientas no sobrevive al cliente — lo que DECIDE está detrás del recorte, y easter, ar_f_freqs y Shin-Fuller se pierden | — |
 | [BUG-0124](BUG-0124-los-dos-detectores-de-covarianza-semilla-se-excluye.md) | fixed | high | diagnosis | Los dos detectores de covarianza-semilla se excluyen mutuamente — con degeneración PARCIAL el aviso cuenta sólo las coincidencias exactas y calla las que están a 0,02 % de la semilla | 0.2.3 |
-| [BUG-0147](BUG-0147-la-figura-se-escribe-y-no-se-dice-donde.md) | open | medium | mcp-tools | Seis herramientas escriben su figura y no dicen dónde — el otro medio BUG-0122, y sólo se ve cruzando la frontera | — |
+| [BUG-0147](BUG-0147-la-figura-se-escribe-y-no-se-dice-donde.md) | fixed | medium | mcp-tools | Seis herramientas escriben su figura y no dicen dónde — el otro medio BUG-0122, y sólo se ve cruzando la frontera | 0.2.3 |
 | [BUG-0151](BUG-0151-la-covarianza-del-out-conserva-la-semilla-del-bf.md) | fixed | high | estimation | La covarianza del .out conserva la semilla del BFGS en direcciones ROTADAS — ningún detector por parámetro la ve | 0.2.3 |
 | [BUG-0186](BUG-0186-la-lista-de-objetivos-se-sigue-reformulando.md) | open | medium | protocolo | La lista de objetivos se sigue reformulando con BUG-0183 dentro — el protocolo no basta, porque la pregunta se hace con la herramienta del cliente antes de llamar a art | — |
 | [BUG-0011](BUG-0011-dcd-overdiff-recommends-d2-on-seasonal-price-index.md) | in-progress | medium | formal-tests | dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so | — |

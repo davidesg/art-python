@@ -1184,6 +1184,8 @@ Show the analysis as a MAP: what descends from what, what was adopted, and
 | `parent` | integer | no | `-1` |
 | `expectativas` | string | no | `` |
 | `criterio` | string | no | `` |
+| `propuesta` | string | no | `` |
+| `coincide` | string | no | `` |
 
 Record a DECISION NODE in the guion — a specification choice, not a model.
 
@@ -1222,6 +1224,12 @@ Record a DECISION NODE in the guion — a specification choice, not a model.
                    why. Declared BEFORE the candidate orders are seen: a
                    preregistration, so the story cannot be chosen after the model
                    that won. «sin expectativa» is an honest answer for a rare class.
+    propuesta    : GUIDED lane — what YOU (the assistant) proposed at this node,
+                   before the analyst decided (BUG-0110). With `coincide` it is
+                   what tells where the analyst corrected the assistant; the
+                   lane alone (`decidido_por`) cannot.
+    coincide     : "sí" if the analyst took your proposal, "no" if they decided
+                   otherwise. Empty: derived from `propuesta` == `decidido`.
     criterio     : for nodo="ordenes" (and any choice between tied candidates):
                    "estadístico" | "dominio" | "uso". "dominio" requires a
                    `dominio` node with expectations in this guion: the decision

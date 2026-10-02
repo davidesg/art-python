@@ -1,11 +1,11 @@
 ---
 id: BUG-0110
 title: decided_by registra el CARRIL y no quién decidió cada nodo — no se puede saber dónde el analista corrigió al asistente, que es la información que el guion existe para conservar
-status: open
+status: fixed
 severity: medium
 component: guion
 found_in: 0.2.0.dev0
-fixed_in:
+fixed_in: 0.2.3
 reported: 2026-09-07
 reporter: David — al medir dónde hace falta el ojo entrenado, para Econometría Aplicada
 tags:
@@ -98,3 +98,25 @@ Los 81 guiones ya escritos. Su atribución seguirá siendo inferible sólo del
 texto, y las mediciones hechas sobre ellos —incluida la nota docente— siguen
 siendo estimaciones con esa advertencia. El arreglo sirve para lo que se registre
 a partir de ahora, que es precisamente el material de las sesiones de clase.
+
+---
+
+## Fixed (2026-10-02)
+
+What the fix proposed, applied:
+- `GuionEntry.propuesta` records what the assistant proposed at the node.
+- `GuionEntry.coincide` records whether the decision took it: `True`, `False`,
+  or `None` when not recorded, as in old guiones, which still load.
+- `Guion.carril` holds the lane once, in the header (from the first node's
+  `decidido_por`), instead of repeated as if it said who decided each node.
+- `guion_node(propuesta=, coincide="sí"|"no")`. An empty `coincide` is derived
+  from `propuesta == decidido`.
+- `guion_map` marks the corrected nodes with ✎, shows the proposal, and counts
+  them ("el analista corrigió 2: n1 lambda, n3 ordenes"). The HTML says
+  "corregida por el analista".
+- The guided lane's protocol asks for the proposal at every node.
+
+The repro exits 0. Tests: `tests/test_bug_0110_propuesta_y_coincide.py`.
+
+As the report says, the 81 guiones already written keep their inferred
+attribution.

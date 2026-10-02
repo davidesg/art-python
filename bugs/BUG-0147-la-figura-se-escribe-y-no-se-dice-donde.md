@@ -1,11 +1,11 @@
 ---
 id: BUG-0147
 title: Seis herramientas escriben su figura y no dicen dónde — el otro medio BUG-0122, y sólo se ve cruzando la frontera
-status: open
+status: fixed
 severity: medium
 component: mcp-tools
 found_in: 0.2.2
-fixed_in:
+fixed_in: 0.2.3
 reported: 2026-09-10
 reporter: la prueba de frontera de ORDEN 0.1, en su primera ejecución
 tags:
@@ -83,3 +83,24 @@ hay que quitarlo: ésa es la señal de que la capa hizo su trabajo.
 ## Validation
 
 `tests/test_frontera_mcp.py::test_una_herramienta_con_figura_devuelve_imagen_Y_ruta`
+
+---
+
+## Fixed (2026-10-02)
+
+This report waited for `ORDEN.md` 2.2 (the `render` layer), and that plan was
+reverted with phase 1. Fixed here instead with one helper,
+`_cita_figuras(items)`:
+- every figure of the envelope is cited in its text, by the path `_imagen`
+  wrote;
+- the citation goes before the guided lane's end-of-turn marker
+  (`_con_nota_figura`), once per figure;
+- an envelope with no text gets one.
+
+The six tools of the report return through it: `preliminary_outlier_scan`,
+`residual_outlier_scan`, `model_histogram`, `record_version`,
+`overparameterization_analysis` and `compare_versions`.
+
+The frontier test `test_una_herramienta_con_figura_devuelve_imagen_Y_ruta`
+loses its `xfail`: across the MCP boundary the text now cites the `.png`.
+Tests: `tests/test_bug_0147_la_figura_dice_donde.py`.

@@ -116,8 +116,6 @@ def test_un_recurso_contesta_con_contenido():
 # ────────── lo que sólo se ve cruzando ──────────
 
 @pytest.mark.skipif(not CASO.exists(), reason="el caso del repro no está")
-@pytest.mark.xfail(strict=True, reason="BUG-0147 — la figura se escribe y no se "
-                                       "dice dónde; cae en ORDEN 2.2, con `render`")
 def test_una_herramienta_con_figura_devuelve_imagen_Y_ruta():
     """BUG-0122, en su terreno. Quince herramientas devolvían la figura sólo
     como `ImageContent` —sin fichero, sin ruta y sin ventana— y reportaban

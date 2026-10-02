@@ -500,6 +500,13 @@ ANTES DE LA LLAMADA 1 — EL NODO DOMINIO (obligatorio desde 2026-09-30):
   es un criterio. «Sin expectativa» es una respuesta honesta para una clase
   sin teoría conocida; entonces, en un empate, manda el dato.
 
+CADA NODO DEL CARRIL GUIADO SE REGISTRA CON TU PROPUESTA (BUG-0110):
+      guion_node(guion_path, nodo=…, decidido="<lo que decidió el analista>",
+                 razon="…", decidido_por="analista+LLM",
+                 propuesta="<lo que TÚ propusiste>", coincide="sí" | "no")
+  Es lo único que dice dónde el analista corrige al asistente: el carril es
+  constante y no lo dice. Si el analista decide otra cosa, coincide="no".
+
 LLAMADA 1 — guided_identification(inp_path)   [lam=-1 por defecto]
   Devuelve: gráfico Box-Cox (media vs desviación típica)
   Lee con el usuario:
@@ -1170,6 +1177,35 @@ def _imagen(b64: str, etiqueta: str = "art"):
     from mcp.types import ImageContent
     _show_fig(b64, etiqueta)
     return ImageContent(type="image", data=b64, mimeType="image/png")
+
+
+def _cita_figuras(items: list) -> list:
+    """Que el texto DIGA dónde está cada figura del sobre — BUG-0147.
+
+    `_imagen` escribe siempre el fichero (BUG-0122), pero sólo `_result` citaba
+    la ruta; las herramientas que componen su sobre a mano devolvían la imagen y
+    callaban dónde quedó. Ésta la cita en el primer texto del sobre, delante de
+    la marca de fin de turno (`_con_nota_figura`), una vez por figura; si el
+    sobre no tiene texto, lo crea. Se aplica al devolver."""
+    from mcp.types import TextContent, ImageContent
+    rutas = []
+    for c in items:
+        if isinstance(c, ImageContent):
+            r = _FIGURAS.get(_huella_figura(c.data), "") or _escribe_fig(c.data)
+            if r and r not in rutas:
+                rutas.append(r)
+    if not rutas:
+        return items
+    k = next((i for i, c in enumerate(items) if isinstance(c, TextContent)), None)
+    if k is None:
+        items.insert(0, TextContent(type="text", text=""))
+        k = 0
+    txt = items[k].text
+    for r in rutas:
+        if r not in txt:
+            txt = _con_nota_figura(txt, r)
+    items[k] = TextContent(type="text", text=txt.lstrip("\n"))
+    return items
 
 
 def _result(desc) -> list:
@@ -3197,7 +3233,7 @@ def preliminary_outlier_scan(inp_path: str, d: int, D: int,
         items = [TextContent(type="text", text=text)]
         if desc.figure_b64:
             items.append(_imagen(desc.figure_b64, "preliminary_outlier_scan"))
-        return items
+        return _cita_figuras(items)
     except Exception:
         return _err(traceback.format_exc())
 
@@ -3346,7 +3382,7 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER,
                              + "\n\n---\n" + desc.recommendation + cal_txt)]
         if desc.figure_b64:
             items.append(_imagen(desc.figure_b64, "residual_outlier_scan"))
-        return items
+        return _cita_figuras(items)
     except Exception:
         return _err(traceback.format_exc())
 
@@ -3577,7 +3613,7 @@ def model_histogram(inp_path: str) -> list:
         b64 = desc.data.get("hist_b64") or desc.figure_b64
         if b64 is None:
             return _err("No se pudo generar el histograma de residuos.")
-        return [_imagen(b64, "model_histogram")]
+        return _cita_figuras([_imagen(b64, "model_histogram")])
     except Exception:
         return _err(traceback.format_exc())
 
@@ -3769,7 +3805,7 @@ def overparameterization_analysis(inp_path: str, threshold: float = 0.7) -> list
         items = [TextContent(type="text", text=text)]
         if b64:
             items.append(_imagen(b64, "overparameterization_analysis"))
-        return items
+        return _cita_figuras(items)
 
     except Exception:
         return _err(traceback.format_exc())
@@ -6782,7 +6818,7 @@ def record_version(inp_path: str,
         items = [TextContent(type="text", text=texto)]
         if b64:
             items.append(_imagen(b64, "record_version"))
-        return items
+        return _cita_figuras(items)
 
     except Exception:
         return _err(traceback.format_exc())
@@ -6867,8 +6903,13 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                 # un nodo DESPUÉS de un modelo es una reformulación.
                 nd = e.node or {}
                 quien = f" [{e.decided_by}]" if e.decided_by else ""
+                # BUG-0110: dónde el analista corrigió al asistente
+                corr = (" ✎ corregido" if getattr(e, "coincide", None) is False else "")
                 lines.append(f"{sangria}{rama}◆ n{e.version} {nd.get('nodo', e.name)}"
-                             f" = {_rec(nd.get('decidido', ''), 190)}{quien}")
+                             f" = {_rec(nd.get('decidido', ''), 190)}{quien}{corr}")
+                if getattr(e, "coincide", None) is False and getattr(e, "propuesta", ""):
+                    lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
+                                 f"el asistente propuso: {_rec(e.propuesta)}")
                 if nd.get("evidencia"):
                     lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
                                  f"evidencia: {_rec(nd['evidencia'])}")
@@ -6901,7 +6942,16 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
         for i, r in enumerate(raices):
             dibuja(r, "", i == len(raices) - 1)
 
-        lines += ["", "◆ nodo de decisión · ✓ adoptada · ✗ callejón sin salida · · en exploración"]
+        lines += ["", "◆ nodo de decisión · ✓ adoptada · ✗ callejón sin salida · · en exploración"
+                  " · ✎ el analista corrigió la propuesta del asistente"]
+        _con = [e for e in g.entries if getattr(e, "coincide", None) is not None]
+        if _con:
+            _corr = [e for e in _con if e.coincide is False]
+            lines.append(f"Propuestas registradas: {len(_con)} nodos; el analista corrigió "
+                         f"{len(_corr)}" + (": " + ", ".join(
+                             f"n{e.version} {(e.node or {}).get('nodo', e.name)}"
+                             for e in _corr) if _corr else "") + "."
+                         + (f" Carril: {g.carril}." if getattr(g, "carril", "") else ""))
 
         # LA CUENTA DE ITERACIONES. Un modelo estimado cierra una iteración; los
         # nodos que lo preceden son su etapa 1. Sin esto, «¿cuántas iteraciones
@@ -7156,7 +7206,8 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                razon: str, evidencia: str = "",
                alternativas: str = "", decidido_por: str = "",
                parent: int = -1, expectativas: str = "",
-               criterio: str = "") -> list:
+               criterio: str = "", propuesta: str = "",
+               coincide: str = "") -> list:
     """
     Record a DECISION NODE in the guion — a specification choice, not a model.
 
@@ -7195,6 +7246,12 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                    why. Declared BEFORE the candidate orders are seen: a
                    preregistration, so the story cannot be chosen after the model
                    that won. «sin expectativa» is an honest answer for a rare class.
+    propuesta    : GUIDED lane — what YOU (the assistant) proposed at this node,
+                   before the analyst decided (BUG-0110). With `coincide` it is
+                   what tells where the analyst corrected the assistant; the
+                   lane alone (`decidido_por`) cannot.
+    coincide     : "sí" if the analyst took your proposal, "no" if they decided
+                   otherwise. Empty: derived from `propuesta` == `decidido`.
     criterio     : for nodo="ordenes" (and any choice between tied candidates):
                    "estadístico" | "dominio" | "uso". "dominio" requires a
                    `dominio` node with expectations in this guion: the decision
@@ -7242,6 +7299,12 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
         crit = criterio.strip().lower()
         if crit and crit not in ("estadístico", "estadistico", "dominio", "uso"):
             return _err("`criterio` es «estadístico», «dominio» o «uso».")
+        co = coincide.strip().lower()
+        if co and co not in ("sí", "si", "no"):
+            return _err("`coincide` es «sí» o «no» (vacío: se deduce de `propuesta`).")
+        prop = propuesta.strip()
+        coinc = (True if co in ("sí", "si") else False if co == "no" else
+                 (prop == decidido.strip()) if prop else None)
 
         gp = os.path.expanduser(guion_path)
         os.makedirs(os.path.dirname(gp) or ".", exist_ok=True)
@@ -7276,12 +7339,19 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                   **({"criterio": "estadístico" if crit == "estadistico" else crit}
                      if crit else {})},
             decided_by=decidido_por,
+            propuesta=prop, coincide=coinc,
         )
+        if not g.carril and decidido_por:
+            g.carril = ("autonomo" if decidido_por.strip() == "LLM" else
+                        "guiado" if "analista" in decidido_por else "")
         g.entries.append(entry)
         save_guion(g, gp)
         return [TextContent(type="text", text=(
             f"◆ nodo n{version} registrado: **{nodo} = {decidido}**"
             + (f"  [{decidido_por}]" if decidido_por else "")
+            + (f"\n   propuesta del asistente: {prop} — "
+               + ("el analista la tomó" if coinc else "**el analista la CORRIGIÓ**")
+               if prop else "")
             + f"\n   razón: {razon}"
             + (f"\n   evidencia: {evidencia}" if evidencia else "")
             + (f"\n   descartado: {alternativas}" if alternativas else "")
@@ -7869,7 +7939,7 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
         items = [TextContent(type="text", text="\n".join(lines))]
         if b64:
             items.append(_imagen(b64, "compare_versions"))
-        return items
+        return _cita_figuras(items)
 
     except Exception:
         return _err(traceback.format_exc())
