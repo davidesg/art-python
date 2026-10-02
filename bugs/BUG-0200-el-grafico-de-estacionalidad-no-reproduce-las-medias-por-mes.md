@@ -1,11 +1,11 @@
 ---
 id: BUG-0200
 title: El gráfico de estacionalidad no reproduce las medias por mes de calendario — en el IPC español pinta enero −0.87, julio −0.22 y diciembre −0.76 donde las medias son −1.15, −0.81 y −0.11
-status: open
+status: fixed
 severity: medium
 component: seasonality
 found_in: 0.2.3.dev0
-fixed_in:
+fixed_in: 0.2.3.dev0
 reported: 2026-10-02
 reporter: David / Claude — evaluación del carril autónomo (IPC_ES del pass-through)
 tags:
@@ -69,3 +69,42 @@ no empiece en enero.
 
 Test: serie sintética con patrón conocido que empieza en un mes distinto de
 enero; las barras deben reproducirlo.
+
+## Resolution (2026-10-02)
+
+**Root cause, measured: two things, only one of them a defect.**
+
+1. **Phase (the defect).** `detect_seasonality` returned the effects in
+   SAMPLE order: `dummies[i]` belongs to time t=i+1, the period in which the
+   series starts. `plot_seasonality` labelled them Jan…Dec. IPC_ES starts in
+   02/2002, so every bar was one month off: the bar labelled «Jan −0.87» was
+   February.
+2. **What the bars measure (not a defect).** The regression uses harmonics in
+   LEVELS, differenced with the series, so the bars are the seasonal effect
+   on the level 100·ln y, estimated on ∇^d. They are not the means of ∇ by
+   month; the means are the differences between consecutive bars.
+
+Once rotated, IPC_ES reads:
+
+| Jan | Feb | Mar | Apr | May | Jun | Jul | Aug | Sep | Oct | Nov | Dec |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| −0.76 | −0.87 | −0.47 | +0.44 | +0.54 | +0.54 | −0.27 | −0.22 | −0.22 | +0.41 | +0.49 | +0.38 |
+
+This matches a regression on calendar dummies exactly. The report's
+expectations come back as differences:
+- Jan − Dec = −1.14 (∇ mean −1.15): the January sales;
+- Jul − Jun = −0.81 (∇ mean −0.81): the July sales;
+- Apr − Mar = +0.91 (∇ mean +0.90).
+
+**Fix.**
+- `detect_seasonality` rotates `dummies` and `dummy_se` to calendar order,
+  using `ts.start[1]`, so every consumer reads them alike. It falls back to
+  sample order when the start is unknown.
+- The title says «Seasonal effect on the level».
+
+**Validation:** `tests/test_bug_0200_fase_del_grafico_estacional.py`:
+- a known level pattern, starting in Jan, Feb, Jul and Dec, with d=0 and
+  d=1, is recovered in calendar order;
+- the reported case starts in February;
+- the title says «level».
+

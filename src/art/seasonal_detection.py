@@ -50,8 +50,9 @@ class SeasonalDetectionResult:
     seasonal_detected: bool
     f_stat: float
     p_value: float
-    dummies: np.ndarray    # shape (s,) — dummy effects in 100*log units (≈ %)
-    dummy_se: np.ndarray   # shape (s,) — OLS-based standard errors
+    dummies: np.ndarray    # shape (s,) — LEVEL effects in 100*log units (≈ %),
+                           # in CALENDAR order (Jan..Dec), BUG-0200
+    dummy_se: np.ndarray   # shape (s,) — OLS-based standard errors, same order
     harmonic_coeffs: np.ndarray  # shape (s-1,) — harmonic γ coefficients
     freq_results: list[FreqResult]  # per-frequency HAC Wald tests
     n_obs: int             # observations after differencing
@@ -157,6 +158,15 @@ def _generate_A0_matrix(s: int) -> np.ndarray:
                 A0[i, col] = math.cos(angle)
         col += (2 if freq < s // 2 else 1)
     return A0
+
+
+def _periodo_inicial(ts, s: int) -> int:
+    """Periodo (1..s) de la primera observación; 1 si no se sabe."""
+    try:
+        p0 = int(ts.start[1])
+    except (TypeError, ValueError, IndexError, AttributeError):
+        return 1
+    return p0 if 1 <= p0 <= s else 1
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +291,17 @@ def detect_seasonality(
     se_last  = math.sqrt(max(var_last, 1e-12))
     dummy_se = np.append(se_first, se_last)
 
+    # BUG-0200. Los efectos salen en el orden de la MUESTRA: dummies[i] es el
+    # del tiempo t=i+1, el periodo en que empieza la serie. El gráfico los
+    # rotulaba Jan…Dec, así que una serie que empieza en febrero (el IPC
+    # español del pass-through) salía desplazada un mes: la barra «Jan» era
+    # febrero. Se rotan aquí, al orden de calendario, para que todo consumidor
+    # los lea igual.
+    p0 = _periodo_inicial(ts, s)
+    if p0 != 1:
+        orden = (np.arange(s) - (p0 - 1)) % s
+        dummies, dummy_se = dummies[orden], dummy_se[orden]
+
     # --- Per-frequency HAC Wald tests ---
     freq_results: list[FreqResult] = []
     col_idx = 0
@@ -380,7 +401,8 @@ def plot_seasonality(result: SeasonalDetectionResult) -> plt.Figure:
     status = "DETECTED" if result.seasonal_detected else "not detected"
     lam_str = "100·log" if result.lam == 0.0 else f"λ={result.lam}"
     ax.set_title(
-        f"{result.name}  [{lam_str}, d={result.d}]  —  Seasonal pattern  ({status})\n"
+        f"{result.name}  [{lam_str}, d={result.d}]  —  Seasonal effect on the level"
+        f"  ({status})\n"
         f"HAC  F({result.freq - 1}, {result.n_obs - result.freq}) = {result.f_stat:.3f}"
         f"   p = {result.p_value:.4f}",
         fontsize=10, pad=6,

@@ -6,6 +6,15 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### The seasonal plot is in calendar order (BUG-0200)
+
+- `detect_seasonality` returned the effects in sample order, and the plot
+  labelled them Jan…Dec. A series starting in February came out one month
+  off. The effects are now rotated to calendar order from `ts.start`.
+- The title says what the bars are: the seasonal effect on the level (in
+  100·ln y), estimated on ∇^d. The means of ∇ by month are the differences
+  between consecutive bars.
+
 ### Chaining from a .pre applies the requested d (BUG-0199)
 
 - `confirm_and_estimate` with `base_pre_path` used to keep the `.pre`'s d while
