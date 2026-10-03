@@ -3130,19 +3130,15 @@ def _acf_outlier_contributions(
 def _rejilla_estacional(ax, freq: int, n_lags: int) -> None:
     """Las líneas verticales y los ticks del canónico — BUG-0132.
 
-    Copiado de `fue.plots._draw_acf_panel`, que es lo que dibuja la ACF/PACF de
-    la figura canónica de diagnosis. Ésta —el gráfico de calibración de
-    distorsiones— se lee AL LADO de aquélla: si los retardos no coinciden y las marcas
-    estacionales no están en el mismo sitio, comparar las dos exige contar
-    barras a mano.
+    Las marcas estacionales salen de pyfug (`panels.seasonal_lags`), la misma
+    regla que la ACF/PACF de la figura canónica de diagnosis. Ésta —el gráfico
+    de calibración de distorsiones— se lee AL LADO de aquélla: si los retardos
+    no coinciden y las marcas estacionales no están en el mismo sitio, comparar
+    las dos exige contar barras a mano. Antes era una copia de
+    `fue.plots._draw_acf_panel`.
     """
-    if freq > 1:
-        grid = [freq * m for m in range(1, 4) if freq * m <= n_lags]
-    elif n_lags > 9:
-        gap = round(n_lags / 3)
-        grid = [gap * m for m in range(1, 4) if gap * m <= n_lags]
-    else:
-        grid = [x for x in (3, 6, 9) if x <= n_lags]
+    from pyfug.graphics.panels import seasonal_lags
+    grid = seasonal_lags(freq, n_lags)
     for xv in grid:
         ax.axvline(xv, color="0.5", lw=0.8, zorder=1)
     if grid:

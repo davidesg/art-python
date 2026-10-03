@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 from scipy import stats as sp_stats
 
 from fue import TimeSeries
-from fue.plots import _tj_spines
+from pyfug.graphics.panels import tj_spines as _tj_spines
 
 
 # ---------------------------------------------------------------------------

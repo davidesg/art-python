@@ -7752,7 +7752,7 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
         from art.describe import _fig_b64
         from art.identification import _default_lags_fug
         from fue.diagnostics import acf as _fue_acf, pacf as _fue_pacf
-        from fue.plots import _draw_acf_panel, _snap_cmax, _tj_spines
+        from pyfug.statistics import acf_pacf_max as _snap_cmax
         import numpy as np
         import scipy.stats as sp_stats
         import matplotlib.pyplot as plt

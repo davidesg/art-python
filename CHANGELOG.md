@@ -6,6 +6,14 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### No more fue.plots
+
+`model_detection.py`, `seasonal_detection.py` and `mcp_server.py` take their
+axes-level pieces from pyfug (`pyfug.graphics.panels`,
+`pyfug.statistics.acf_pacf_max`). `describe._rejilla_estacional` uses pyfug's
+`seasonal_lags` instead of a copy of `fue.plots._draw_acf_panel`. art no
+longer imports `fue.plots`.
+
 ### One graphics engine: the identification and diagnosis figures are pyfug's
 
 - The HTML identification report (`save_identification_report`,

@@ -26,7 +26,8 @@ import matplotlib.pyplot as plt
 
 from fue import TimeSeries
 from fue.diagnostics import acf as _fue_acf, pacf as _fue_pacf
-from fue.plots import _draw_acf_panel, _snap_cmax, _tj_spines
+from pyfug.graphics.panels import corr_on_axes, tj_spines as _tj_spines
+from pyfug.statistics import acf_pacf_max as _snap_cmax
 
 from ._acf_teorica import acf_pacf as _acf_pacf_bj
 
@@ -1238,8 +1239,8 @@ def plot_model_comparison(
         for row, sp in enumerate(specs, start=1)
     ]):
         ax_acf, ax_pacf = axes[row]
-        _draw_acf_panel(ax_acf,  lag_x, acf_v,  band, cmax, s, lags, '', lw=lw)
-        _draw_acf_panel(ax_pacf, lag_x, pacf_v, band, cmax, s, lags, '', lw=lw)
+        corr_on_axes(ax_acf,  acf_v,  band, cmax, s, lw=lw)
+        corr_on_axes(ax_pacf, pacf_v, band, cmax, s, lw=lw)
         ax_acf.set_title(title, fontsize=9.5, pad=4, color=color if row > 0 else 'k')
         ax_acf.set_ylabel('acf',  fontsize=9)
         ax_pacf.set_ylabel('pacf', fontsize=9)
