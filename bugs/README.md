@@ -4,14 +4,12 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**200 report(s), 5 open.**
+**200 report(s), 3 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
 | [BUG-0116](BUG-0116-la-descripcion-de-la-herramienta-no-sobrevive-al-cliente.md) | open | high | mcp-tools | La descripción de las herramientas no sobrevive al cliente — lo que DECIDE está detrás del recorte, y easter, ar_f_freqs y Shin-Fuller se pierden | — |
 | [BUG-0186](BUG-0186-la-lista-de-objetivos-se-sigue-reformulando.md) | open | medium | protocolo | La lista de objetivos se sigue reformulando con BUG-0183 dentro — el protocolo no basta, porque la pregunta se hace con la herramienta del cliente antes de llamar a art | — |
-| [BUG-0202](BUG-0202-todos-los-errores-tipicos-no-validos-sin-parametros.md) | open | low | diagnosis | «TODOS los errores típicos de arriba NO son válidos» en un modelo que no tiene ningún parámetro | — |
-| [BUG-0203](BUG-0203-la-linea-de-la-media-del-listado-se-contradice.md) | open | low | identification | La línea de la media del listado se contradice — «t=+0.83 → Sí, estimate_mu=True» — porque el «sí» viene de que el modelo base ya lleva μ, no del t que imprime | — |
 | [BUG-0011](BUG-0011-dcd-overdiff-recommends-d2-on-seasonal-price-index.md) | in-progress | medium | formal-tests | dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
@@ -206,6 +204,8 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0199](BUG-0199-con-base-pre-path-se-ignora-d-y-la-cabecera-lo-anuncia.md) | fixed | high | estimation | Con base_pre_path, confirm_and_estimate ignora la d pedida y conserva la del .pre — pero la cabecera anuncia la d pedida, así que el analista lee un ARIMA(0,2,2) que en realidad es un ARIMA(0,1,2) | 0.2.3.dev0 |
 | [BUG-0200](BUG-0200-el-grafico-de-estacionalidad-no-reproduce-las-medias-por-mes.md) | fixed | medium | seasonality | El gráfico de estacionalidad no reproduce las medias por mes de calendario — en el IPC español pinta enero −0.87, julio −0.22 y diciembre −0.76 donde las medias son −1.15, −0.81 y −0.11 | 0.2.3.dev0 |
 | [BUG-0201](BUG-0201-la-escalera-de-ockham-informa-valores-que-no-son-del-ajuste.md) | fixed | medium | interventions | La escalera de Ockham informa de un AIC y un ω que no son los del ajuste final — y con ese ω de signo cambiado avisa de «una caída permanente» donde hay una subida | 0.2.3.dev0 |
+| [BUG-0202](BUG-0202-todos-los-errores-tipicos-no-validos-sin-parametros.md) | fixed | low | diagnosis | «TODOS los errores típicos de arriba NO son válidos» en un modelo que no tiene ningún parámetro | 0.2.3.dev0 |
+| [BUG-0203](BUG-0203-la-linea-de-la-media-del-listado-se-contradice.md) | fixed | low | identification | La línea de la media del listado se contradice — «t=+0.83 → Sí, estimate_mu=True» — porque el «sí» viene de que el modelo base ya lleva μ, no del t que imprime | 0.2.3.dev0 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 

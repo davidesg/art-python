@@ -1849,6 +1849,27 @@ def es_guiado(modo: str) -> bool:
     return "guiad" in (modo or "").lower()
 
 
+def _mu_del_base(model):
+    """(μ̂, SE, t) de la media estimada de un modelo, en la escala de la serie.
+
+    μ es el último parámetro libre (`diagnosis._build_param_labels`). `None` si
+    el modelo no la estima o no hay error típico utilizable (BUG-0203).
+    """
+    import numpy as _np
+    r = getattr(model, "_result", None)
+    if r is None or not getattr(model, "estimate_mu", False):
+        return None
+    try:
+        mu = float(_np.asarray(r.params, dtype=float)[-1])
+        se = float(_np.asarray(r.std_errors, dtype=float)[-1])
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not _np.isfinite(se) or se <= 0:
+        return None
+    rf = float(getattr(model, "refactor", None) or 1.0)
+    return mu / rf, se / rf, mu / se
+
+
 def _reformulacion_desde(diag, guion_next: str = "") -> str:
     """La 4ª etapa, deducida de la diagnosis y de lo que declare el analista.
 
@@ -5416,13 +5437,32 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                     f"residuos de `{os.path.basename(pre_path)}`: si ese modelo ya "
                     f"lleva μ, sus residuos tienen media cero por construcción y "
                     f"la pregunta se contestaría sola. Ver BUG-0013.)*")
+        # BUG-0203. Con μ en el base la decisión es ESA μ, y la línea citaba el
+        # t de la serie diferenciada: «t=+0.83 → Sí» sobre WTI, una regla
+        # (|t|>2) contradicha por su propio número. Son dos medidas distintas
+        # —la μ del base es la deriva que queda DESPUÉS de sus deterministas
+        # (t=2.28 en WTI, con las caídas intervenidas)— y cada una va con su
+        # nombre.
+        if _mu_in_base:
+            _mu_b = _mu_del_base(m_pre)
+            _t_txt = (f"μ̂={_mu_b[0]:.4f}, SE={_mu_b[1]:.4f}, t={_mu_b[2]:+.2f}"
+                      if _mu_b else "su t no está disponible")
+            _cab_mu = (
+                f"\n\n**¿Incluir media (μ)?** **Sí, `estimate_mu=True`** — el "
+                f"modelo base `{os.path.basename(pre_path)}` ya la lleva "
+                f"estimada ({_t_txt}) y se hereda al encadenar por "
+                f"`base_pre_path`.\n*Contexto: la deriva de {_label_mu} sin el "
+                f"resto del modelo da μ̄={_mu_bar:.4f}, SE={_se_mu:.4f}, "
+                f"t={_t_mu:+.2f}. No es la misma medida: la del base es la "
+                f"deriva que queda una vez puestos sus deterministas.*")
+        else:
+            _cab_mu = (
+                f"\n\n**¿Incluir media (μ)?** Deriva de {_label_mu}: "
+                f"μ̄={_mu_bar:.4f}, SE={_se_mu:.4f}, t={_t_mu:+.2f} → "
+                + ("**Sí, `estimate_mu=True`** (|t|>2)" if _rec_mu
+                   else "**No, `estimate_mu=False`** (|t|≤2, sin deriva)"))
         mu_decision = (
-            f"\n\n**¿Incluir media (μ)?** Deriva de {_label_mu}: "
-            f"μ̄={_mu_bar:.4f}, SE={_se_mu:.4f}, t={_t_mu:+.2f} → "
-            + ("**Sí, `estimate_mu=True`** — el modelo base ya la lleva estimada "
-               "y se hereda al encadenar por `base_pre_path`" if _mu_in_base
-               else "**Sí, `estimate_mu=True`** (|t|>2)" if _rec_mu
-               else "**No, `estimate_mu=False`** (|t|≤2, sin deriva)")
+            _cab_mu
             + "\n*(En un índice de precios μ ES la tasa de inflación: si sale "
               "significativa, omitirla deja la deriva en los residuos.)*"
             + _nota_mu

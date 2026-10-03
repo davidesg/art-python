@@ -6,6 +6,13 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### The mean line cites the measure that decides (BUG-0203)
+
+- With μ in the base model, `guided_identification` decided by that μ but
+  printed the t of the differenced series: «t=+0.83 → Sí». It now cites the
+  base's μ̂, SE and t, and gives the series' drift as context on its own
+  line.
+
 ### No covariance warning on a model with no parameters (BUG-0202)
 
 - An ARIMA(0,1,0) without μ, the base model of any analysis, came out with
