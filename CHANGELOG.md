@@ -6,6 +6,18 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### The Ockham ladder judges the scalar rungs at the event date (BUG-0201)
+
+- Aligned with the mechanism's configuration (BUG-0156), the ladder put
+  rungs 1a and 1b at the configuration's start. `suggest_intervention_form`
+  then built the chosen scalar intervention at the requested date. The
+  reported AIC and ω, and the domain warning, belonged to another model:
+  on the 09/2012 VAT rise in Spain's CPI, a «permanent fall» was reported
+  for a rise.
+- `escalera_de_ockham(at_simple=, fecha_simple=)` puts the scalar rungs at
+  the event: the requested date, or the episode's first extreme by default.
+  Rung 2 stays the configuration. The report states both dates.
+
 ### The seasonal plot is in calendar order (BUG-0200)
 
 - `detect_seasonality` returned the effects in sample order, and the plot

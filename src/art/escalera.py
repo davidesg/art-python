@@ -219,6 +219,10 @@ class Escalera:
     fecha_arranque: str = ""
     alineada_con_configuracion: bool = False   # el llamante pasó el arranque
     desplazada_del_episodio: bool = False      # …y NO es el primer extremo
+    # DÓNDE CAEN LOS PELDAÑOS ESCALARES — BUG-0201. No en el arranque del
+    # mecanismo: en la fecha del suceso, que es donde se construyen.
+    at_simple: int = -1
+    fecha_simple: str = ""
 
     def por_nivel(self, nivel: str) -> Peldano | None:
         return next((p for p in self.peldanos if p.nivel == nivel), None)
@@ -311,7 +315,9 @@ def _estructurales(model):
 def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
                        umbral_vecino: float = 0.0,
                        at: int | None = None, n_alto: int = 0,
-                       fecha_arranque: str = "") -> Escalera:
+                       fecha_arranque: str = "",
+                       at_simple: int | None = None,
+                       fecha_simple: str = "") -> Escalera:
     # `umbral_vecino=0` significa «usa el de la política» —el mismo idioma que
     # `ventana=0` en este nodo—. Estaba clavado a 3.0, que es el umbral de los
     # anómalos SUELTOS, y dejaba ciego el tramo (2, 3)σ justo donde la regla de
@@ -336,6 +342,12 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
                  ganadora — que es lo que hace que la escalera conteste a la
                  única pregunta que le queda: ¿hace falta tanto?
     fecha_arranque : etiqueta del arranque, sólo para el informe.
+    at_simple  : 0-based en la SERIE donde caen los peldaños ESCALARES (1a, 1b).
+                 Por defecto el primer extremo del episodio; el llamante que
+                 construye el peldaño en otra fecha (la que pide el analista)
+                 la pasa aquí. **No sigue a `at`** (BUG-0201): el arranque del
+                 mecanismo es la forma del peldaño 2, no la fecha del suceso.
+    fecha_simple : etiqueta de `at_simple`, sólo para el informe.
     """
     import fue
     from art.interventions import check_intervention_fit, test_intervention
@@ -349,6 +361,15 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
     alineada = at is not None
     desplazada = alineada and int(at) != _at_episodio
     at = _at_episodio if at is None else int(at)
+    # BUG-0201. Los escalares caían en `at`, el arranque del MECANISMO. Sobre
+    # el IVA de 09/2012 del IPC español el mecanismo arranca en 05/2012 (cinco
+    # escalones), así que el «1a» era un escalón cuatro meses antes del único
+    # extremo —ω=−0.43, AIC 77.44— mientras la herramienta construía el de
+    # 09/2012 —ω=+0.88, AIC 69.90—. Y el aviso de dominio («caída permanente»)
+    # salía del ω equivocado. El peldaño escalar es UNA intervención en la
+    # fecha del suceso; está anidado en el peldaño 2, que es uno de sus
+    # escalones, así que la comparación sigue siendo de modelos anidados.
+    at_1 = _at_episodio if at_simple is None else int(at_simple)
     L = episodio.duracion_nivel
     _n_alto = int(n_alto) if n_alto else L + 1
     # BUG-0150: se heredan las intervenciones YA ESTIMADAS del base; sólo se
@@ -356,10 +377,10 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
     base_itvs, _retiradas = hereda_del_base(model_base, at_estudiado=at,
                                             ventana=max(1, int(L)))
 
-    def construye(nivel, nombre, tipo, n_om):
+    def construye(nivel, nombre, tipo, n_om, at_p):
         p = Peldano(nivel=nivel, nombre=nombre, tipo=tipo, n_omega=n_om)
         try:
-            itv = fue.Intervention(tipo, at=at, omega=[0.0] * n_om,
+            itv = fue.Intervention(tipo, at=at_p, omega=[0.0] * n_om,
                                    omega_free=[True] * n_om)
             m = _clona_con(model_base, base_itvs + [itv])
             m.fit()
@@ -388,8 +409,8 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
         return p
 
     peldanos = [
-        construye("1a", "escalón en el nivel (permanente)", "step", 1),
-        construye("1b", "impulso en el nivel (transitorio)", "impulse", 1),
+        construye("1a", "escalón en el nivel (permanente)", "step", 1, at_1),
+        construye("1b", "impulso en el nivel (transitorio)", "impulse", 1, at_1),
     ]
     # El peldaño 2 sólo tiene sentido si el episodio dura más de un período o si
     # el 1 no se sostiene: la forma general de un episodio de L es L+1 escalones.
@@ -397,7 +418,7 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
         "2", (f"episodio de {L} período(s) — {_n_alto} escalones en el nivel"
               if not alineada else
               f"la configuración del mecanismo — {_n_alto} escalones en el nivel"),
-        "step", _n_alto))
+        "step", _n_alto, at))
 
     # ── por qué subir, o por qué no ─────────────────────────────────────
     p1a, p1b, p2 = (peldanos[0], peldanos[1], peldanos[2])
@@ -462,7 +483,8 @@ def escalera_de_ockham(model_base, episodio, dominio: str = "generic",
                     criterio_simple=criterio_simple,
                     at_arranque=at, fecha_arranque=fecha_arranque,
                     alineada_con_configuracion=alineada,
-                    desplazada_del_episodio=desplazada)
+                    desplazada_del_episodio=desplazada,
+                    at_simple=at_1, fecha_simple=fecha_simple)
 
 
 # ---------------------------------------------------------------------------
@@ -568,12 +590,17 @@ def describe_escalera(escalera: "Escalera"):
     # configuraciones se publicaban juntas arrancando en fechas distintas, y sus
     # ganadoras se leían como dos recomendaciones rivales cuando ni siquiera
     # hablaban del mismo suceso.
-    if escalera.alineada_con_configuracion and escalera.desplazada_del_episodio:
-        L += [f"*Los peldaños parten de **{escalera.fecha_arranque}**, el "
-              "arranque que el MECANISMO admite, y **no** del primer extremo "
-              "del episodio: así los tres comparan la misma fecha que las "
-              "configuraciones y la única pregunta que queda es cuánta forma "
-              "hace falta.*", ""]
+    if escalera.alineada_con_configuracion and \
+            escalera.at_simple != escalera.at_arranque:
+        # BUG-0201: los escalares caen en la fecha del suceso, no en el
+        # arranque del mecanismo, y el informe tiene que decir las dos.
+        _f1 = escalera.fecha_simple or "el primer extremo del episodio"
+        L += [f"*El peldaño 1 cae en **{_f1}**, la fecha del suceso. El "
+              f"peldaño 2 es la configuración del MECANISMO, que parte de "
+              f"**{escalera.fecha_arranque}** y **no** del primer extremo del "
+              "episodio; el escalón del peldaño 1 es uno de sus escalones, así "
+              "que la única pregunta que queda es cuánta forma hace falta.*",
+              ""]
     elif escalera.alineada_con_configuracion:
         L += [f"*Los peldaños parten de **{escalera.fecha_arranque}**, que es a "
               "la vez el primer extremo del episodio y el arranque que el "

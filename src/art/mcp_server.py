@@ -8820,7 +8820,12 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                 # y el primero quedaba a 6,15 puntos de AIC del segundo. Eran
                 # dos respuestas a la misma pregunta sin árbitro.
                 n_esc, at_esc, nota_cfg = ep.n_escalones, at_0, ""
-                _al_esc: dict = {}
+                # BUG-0201: los peldaños escalares se juzgan donde se
+                # CONSTRUYEN si se eligen —la fecha pedida—, no en el arranque
+                # del mecanismo, que es sólo la forma del peldaño 2.
+                _al_esc: dict = dict(
+                    at_simple=at_0,
+                    fecha_simple=(date.strip() or auto_date))
                 try:
                     import numpy as _np
                     from art.configuracion import (arranques_candidatos,
@@ -8838,7 +8843,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                     if _mejor is not None and _mejor.estimado:
                         n_esc = _mejor.n_escalones
                         at_esc = _mejor.arranque_resid - 1 + _desfase
-                        _al_esc = dict(at=at_esc, n_alto=n_esc,
+                        _al_esc.update(at=at_esc, n_alto=n_esc,
                                        fecha_arranque=_mejor.fecha)
                         if not _conj.identificado:
                             nota_cfg = (
