@@ -142,3 +142,20 @@ def test_el_mapa_avisa_de_entradas_sin_version(tmp_path):
     assert "No todo se calculó con el mismo instrumento" in txt
     assert "sin registrar" in txt
     assert "0.0.1+viejo" in txt
+
+
+# ───────────────── con QUÉ motor de fue (fue BUG-0024) ─────────────────
+
+def test_el_instrumento_dice_la_version_de_fue_y_su_motor():
+    import fue
+    v = version_instrumento()
+    assert f" · fue {fue.__version__}" in v
+    if hasattr(fue, "engine_backend"):
+        esperado = "(motor C)" if fue.engine_backend() == "c" else "(motor Python)"
+        assert v.endswith(esperado), v
+
+
+def test_si_fue_estima_en_python_el_guion_lo_dice(monkeypatch):
+    import fue
+    monkeypatch.setattr(fue, "engine_backend", lambda: "python", raising=False)
+    assert version_instrumento().endswith("(motor Python)")

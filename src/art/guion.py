@@ -1274,7 +1274,27 @@ def version_instrumento() -> str:
     out = f"art {v}"
     if sha:
         out += f" @{sha}" + ("+sucio" if sucio else "")
-    return out
+    return out + _motor_fue()
+
+
+def _motor_fue() -> str:
+    """« · fue 0.1.17 (motor C)»: con qué fue, y con qué MOTOR, se estimó.
+
+    fue BUG-0024. Si la extensión en C no carga, fue estima con su puerto en
+    Python: el mismo modelo, otro optimizador, otra velocidad y, con una
+    verosimilitud poco nítida, quizá otro óptimo (fue BUG-0005). Un guion que no
+    lo dice no explica por qué un resultado no se reproduce en otra máquina.
+    fue < 0.1.17 no expone el motor: entonces sólo su versión. Nunca levanta.
+    """
+    try:
+        import fue
+        out = f" · fue {getattr(fue, '__version__', '?')}"
+        backend = getattr(fue, "engine_backend", None)
+        if backend is not None:
+            out += " (motor C)" if backend() == "c" else " (motor Python)"
+        return out
+    except Exception:
+        return ""
 
 
 # ---------------------------------------------------------------------------

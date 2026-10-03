@@ -6,6 +6,14 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### The guion says which fue engine estimated (fue BUG-0024)
+
+- `version_instrumento()` appends fue's version and its engine, for example
+  «art 0.2.3 @abc · fue 0.1.17 (motor C)». It says «(motor Python)» when
+  the C extension did not load and fue fell back to its Python port.
+- With fue < 0.1.17, which does not expose the engine, the seal carries only
+  fue's version.
+
 ### No more fue.plots
 
 `model_detection.py`, `seasonal_detection.py` and `mcp_server.py` take their
