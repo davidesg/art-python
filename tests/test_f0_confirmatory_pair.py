@@ -85,8 +85,12 @@ def test_both_paper_caveats_are_stated():
     """No basta con reportar el par: los dos límites conocidos del cálculo en
     f=0 tienen que salir, porque son los que explican el número."""
     s = _report(_ipc()).summary
-    assert "RESONANTE" in s and "0.927" in s      # crítico: ley desnuda + resonancia
-    assert "salto errático" in s                   # ℓ(θ=1) en la frontera
+    # crítico: ley desnuda y lo medido para el candidato del IPC (sólo
+    # armónicos, sin media): no resuenan en f=0, crítico ≈2.15 (BUG-0011)
+    assert "DESNUDA" in s and "no resuenan" in s and "2.15" in s
+    # ℓ(θ=1): fue coincide con la verosimilitud exacta (BUG-0011, medido), así
+    # que la salvedad ya no habla de un salto de fue sino de persistencia real
+    assert "PERSISTENTE" in s and "salto errático" not in s
 
 
 # ── el control: cuando NO discrepan, nada de esto debe aparecer ────────────

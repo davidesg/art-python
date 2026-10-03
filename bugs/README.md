@@ -4,13 +4,12 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**201 report(s), 3 open.**
+**201 report(s), 2 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
 | [BUG-0116](BUG-0116-la-descripcion-de-la-herramienta-no-sobrevive-al-cliente.md) | open | high | mcp-tools | La descripción de las herramientas no sobrevive al cliente — lo que DECIDE está detrás del recorte, y easter, ar_f_freqs y Shin-Fuller se pierden | — |
 | [BUG-0186](BUG-0186-la-lista-de-objetivos-se-sigue-reformulando.md) | open | medium | protocolo | La lista de objetivos se sigue reformulando con BUG-0183 dentro — el protocolo no basta, porque la pregunta se hace con la herramienta del cliente antes de llamar a art | — |
-| [BUG-0011](BUG-0011-dcd-overdiff-recommends-d2-on-seasonal-price-index.md) | in-progress | medium | formal-tests | dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
 | [BUG-0003](BUG-0003-display-tools-no-persist.md) | fixed | medium | mcp-tools | Clean estimation display-tools do not persist .pre/.out (only confirm_and_estimate does, and it carries BUG-0001) | 0.1.2 |
@@ -21,6 +20,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0008](BUG-0008-forecast-table-builds-the-95-band-as-level-1-96-.md) | fixed | medium | mcp-tools | _forecast_table builds the 95% band as level +- 1.96*level_std, but level_std is RELATIVE for Box-Cox lam=0 models: bands come out ~100x too narrow | 0.1.3 |
 | [BUG-0009](BUG-0009-dcd-overdiff-regular-overwrites-nyquist-witness.md) | fixed | medium | formal-tests | dcd_overdiff_regular overwrites the Nyquist witness (both are regular MA(1) but measure opposite roots) and reports a spurious d+1 | 0.1.11 (unreleased) |
 | [BUG-0010](BUG-0010-pruning-harmonics-voids-the-meg-sweep.md) | fixed | high | formal-tests | Pruning a non-significant harmonic pair silently voids the ENTIRE MEG sweep, and the report then closes with "el modelo es adecuado" | 0.1.11 (unreleased) |
+| [BUG-0011](BUG-0011-dcd-overdiff-recommends-d2-on-seasonal-price-index.md) | fixed | medium | formal-tests | dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so | 0.2.3.dev0 |
 | [BUG-0012](BUG-0012-ifadf-factors-rendered-outside-the-mu-parenthesis.md) | fixed | medium | describe/equation | ifadf differencing factors are rendered OUTSIDE the μ parenthesis, so the printed equation is not the model that was fitted | 0.1.11 (unreleased) |
 | [BUG-0013](BUG-0013-autonomous-pipeline-can-never-estimate-mu.md) | fixed | high | pipeline | The autonomous pipeline can NEVER estimate mu — run_full builds ModelSpec without it, the policy has no mu logic, and the diagnosis approves the model anyway | 0.1.11 (unreleased) |
 | [BUG-0014](BUG-0014-the-pre-contract-is-not-honoured-when-adding-arma.md) | fixed | high | pipeline | The .pre contract is not honoured when adding ARMA — base_pre_path is unreachable from the instructions, and mu is discarded even when it is used | 0.1.11 (unreleased) |

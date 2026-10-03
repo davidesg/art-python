@@ -6,6 +6,18 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### The f=0 DCD caveats say what was measured (BUG-0011)
+
+- The over-differencing DCD at f=0 is the regular MA(1) DCD. Its candidate
+  drops the mean and keeps the harmonics, which do not resonate at f=0: the
+  5 % critical value is ≈2.15 at n=216 (exact engine, 4000 replications),
+  not the resonance collapse the caveat implied.
+- fue's ℓ(θ=1) agrees with the exact banded likelihood: in 500 simulations
+  under H0 and on the real IPC_ES (LR 18.638 with both). The caveat about
+  fue's boundary jump is replaced by what the number means: θ̂ near 1 but
+  invertible is real persistence.
+- Validation script: `research/sf_meg/validate_f0_boundary.py`.
+
 ### The guion says which fue engine estimated (fue BUG-0024)
 
 - `version_instrumento()` appends fue's version and its engine, for example

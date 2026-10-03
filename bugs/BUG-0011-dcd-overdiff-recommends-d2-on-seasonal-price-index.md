@@ -1,11 +1,11 @@
 ---
 id: BUG-0011
 title: dcd_overdiff_regular at f=0 uses the BARE null law and FUE's boundary likelihood — both are wrong there, and the paper says so
-status: in-progress
+status: fixed
 severity: medium
 component: formal-tests
 found_in: 0.1.4
-fixed_in:
+fixed_in: 0.2.3.dev0
 reported: 2026-08-08
 reporter: David / IPC_ES passthrough
 tags:
@@ -471,3 +471,73 @@ ahí — y el propio artículo lo dice.
 
 Lo que NO se ha hecho es recortar el estado a `fixed`: sería declarar cerrado lo
 que no lo está, que es peor que un índice en rojo.
+
+## RESOLUTION (2026-10-03) — the two calibration items, measured
+
+Both "still open" items were measured with the exact banded engine of the study
+(`research/sf_meg`). Neither turns out to be what this report expected.
+
+**At f=0 this is the DCD of a regular MA(1).** The over-differencing
+candidate's witness is (1 − θB) and the boundary is θ = 1, which is Davis,
+Chen and Dunsmuir's MA(1) non-invertibility test with its s=1 law. The only
+thing specific to the case is what sits in front of the witness.
+
+### Item 2 — the critical value: ≈2.15, not a resonance collapse
+
+The candidate DROPS the mean (∇μ = 0) and keeps the harmonics. The Monte
+Carlo used `deterministic_effect.py`'s engine, f=0, n=216, 4000 replications:
+
+| regressors in front of the witness | pile-up | crit 10/5/1 % |
+|---|---|---|
+| none (bare) | 0.657 | 0.96 / 1.90 / 4.51 |
+| mean only | 0.949 | 0.00 / 0.02 / 1.68 |
+| mean + harmonics | 0.937 | 0.00 / 0.27 / 2.22 |
+| **harmonics, no mean (the candidate)** | **0.635** | 1.20 / **2.15** / 5.08 |
+
+The collapse comes from the MEAN, and the candidate does not carry it. The
+harmonics do not resonate at f=0: the critical value rises modestly, to ≈2.15.
+The 0.927 pile-up quoted from the paper is the case with a mean, not this one.
+
+### Item 1 — fue's boundary likelihood: it agrees with the exact one
+
+`research/sf_meg/validate_f0_boundary.py` simulates H0 (d=1 true), with
+n=216, 11 harmonics, no AR and 500 replications:
+- **the LR from fue and the exact LR agree in every replication** (max
+  |diff| 0.000; same pile-up, 0.670);
+- size at 2.15 is 5.2 % for both, and at 1.94 it is 5.6 %;
+- on the real IPC_ES data (11 harmonics, no AR) the LR is **18.638 with
+  fue and 18.638 exact**.
+
+fue's profile does not jump at the boundary in these models, so the
+appendix's warning does not bite here. The "identity" with the drift model
+was checked too: as a REML identity, as written, it does not hold, because
+the gap varies with the data (sd 1.11). It is not used.
+
+### What it means
+
+With the critical value right and the boundary likelihood right, the LR on
+IPC_ES is **real evidence**. After one extra difference the witness stays at
+θ̂ ≈ 0.86–0.97: ∇ln IPC_ES (inflation) is highly persistent, near a unit
+root. That is the quasi-cancellation band the f=0 pair already reports.
+Shin-Fuller says d=1 suffices and the DCD sees the persistence; both are
+right. It is not a computational artefact to fix.
+
+### Changes (2026-10-03)
+
+- The f=0 caveat no longer quotes the 0.927 pile-up. It says the critical
+  value is the bare law and that the candidate carries no mean.
+  - With harmonics: they do not resonate at f=0, and the measured critical
+    value is ≈2.15 (`_CRIT_ARMONICOS_F0`).
+  - With low-frequency deterministics (steps, ramps…): they can resonate,
+    and their effect is not measured.
+- The headline of the verdict says the same.
+- The caveat that ℓ(θ=1) is computed "where fue's profile jumps" is gone.
+  It now says θ̂ near 1 but invertible is real persistence of ∇^d y, and
+  that with AR in the model this was not checked against the exact engine.
+- Tests updated: `test_f0_confirmatory_pair.py`,
+  `test_bug_0038_overdiff_caveats_need_no_pair.py` and
+  `test_bug_0054_0055_avisos_legibles.py`.
+
+**Not done:** the exact engine has no AR, so models with AR(1), like
+IPC_ES_m10, are not validated against it.
+

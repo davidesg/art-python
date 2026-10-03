@@ -52,6 +52,13 @@ except ImportError:
     _PYFUG = False
 
 
+
+#: BUG-0011. Crítico al 5 % del DCD de sobre-diferenciación en f=0 cuando el
+#: candidato lleva los armónicos estacionales y no la media, medido con el
+#: motor exacto bandeado del estudio (research/sf_meg/deterministic_effect.py:
+#: f=0, n=216, 4000 réplicas; pile-up 0.635, 10/5/1 % = 1.20/2.15/5.08).
+_CRIT_ARMONICOS_F0 = 2.15
+
 def _pyfug_ts(data, freq: int, start: tuple, name: str = "") -> "_Tseries":
     """Wrap a numpy array (or fue TimeSeries .data) as a pyfug Tseries."""
     arr = np.asarray(data, dtype=float)
@@ -2364,6 +2371,13 @@ def describe_formal_tests(model, run_meg: bool = True,
         # Ahora las salvedades se calculan ANTES y el titular las lleva dentro.
         # Un veredicto no puede afirmar lo que el párrafo siguiente retira.
         _n_det   = len(model.interventions or [])
+        # BUG-0011: no todos los deterministas pesan igual en f=0. Los
+        # armónicos no resuenan con la raíz unitaria de frecuencia cero; los de
+        # baja frecuencia (escalón, rampa…) sí pueden, como la media —que el
+        # candidato no lleva: la ∇ extra la elimina—.
+        _armon = sum(1 for i in (model.interventions or [])
+                     if getattr(i, "type", "") in ("cos", "sin", "alter"))
+        _otros = _n_det - _armon
         _sin_par = sf_res is None
         _salvedades = bool(_n_det) or _sin_par
 
@@ -2372,9 +2386,13 @@ def describe_formal_tests(model, run_meg: bool = True,
                        "→ d confirmado ✓")
         elif _salvedades:
             _por = []
-            if _n_det:
-                _por.append("el crítico impreso está SUBESTIMADO (deterministas "
-                            "resonantes en f=0)")
+            if _otros:
+                _por.append("el crítico impreso puede estar SUBESTIMADO "
+                            "(deterministas de baja frecuencia, resonantes en "
+                            "f=0)")
+            elif _armon:
+                _por.append(f"el crítico impreso es algo bajo (≈"
+                            f"{_CRIT_ARMONICOS_F0:.2f} con armónicos, n=216)")
             if _sin_par:
                 _por.append("falta el lado AR del par")
             verdict = ("testigo invertible → **este lado, POR SÍ SOLO, apuntaría "
@@ -2407,21 +2425,42 @@ def describe_formal_tests(model, run_meg: bool = True,
         # LR=2.576 contra un crítico impreso de 1.94. Sin aviso, se lee como
         # "hay una raíz unitaria más" y se toma d=2. Con el aviso, se lee como lo
         # que es: marginal contra un umbral que se sabe subestimado.
-        n_det = len(model.interventions or [])
-        if n_det:
-            lines.append(
-                f"  ℹ El crítico usado ({c5:.2f}) es el de la ley "
-                f"DESNUDA s=1. Este modelo lleva {n_det} deterministas, y en f=0 "
-                "el regresor constante es RESONANTE con la raíz unitaria — el "
-                "paper mide pile-up 0.927 en esa configuración frente a 0.6575 "
-                "desnudo. El crítico correcto ahí es mayor, así que un LR apenas "
-                "por encima del impreso NO es evidencia de d+1.")
+        # BUG-0011. Esto citaba el pile-up 0.927 del paper, que es el del
+        # modelo con MEDIA, y el candidato no la lleva. Medido con el motor
+        # exacto del estudio (research/sf_meg/deterministic_effect.py, f=0,
+        # n=216, 4000 réplicas): con sólo armónicos el pile-up es 0.635 y el
+        # crítico al 5 % ≈2.15, frente a 1.90 desnudo. Los armónicos no
+        # resuenan en f=0; lo que hunde los críticos es la media.
+        if _n_det:
+            _txt = (f"  ℹ El crítico usado ({c5:.2f}) es el de la ley DESNUDA "
+                    "s=1, y el candidato NO lleva media (la ∇ extra la elimina).")
+            if _armon:
+                _txt += (f" Lleva {_armon} armónicos, que no resuenan en f=0: "
+                         "medido con el motor exacto del estudio (n=216), el "
+                         f"crítico al 5 % sube a ≈{_CRIT_ARMONICOS_F0:.2f}. Un LR "
+                         "por encima de eso no se explica por el crítico.")
+            if _otros:
+                _txt += (f" Lleva {_otros} determinista(s) de baja frecuencia "
+                         "(escalón, rampa, impulso…), que SÍ pueden resonar en "
+                         "f=0 como la media; su efecto sobre el crítico no está "
+                         "medido. Un LR apenas por encima del impreso NO es "
+                         "evidencia de d+1.")
+            lines.append(_txt)
+        # BUG-0011. Aquí se avisaba de que ℓ(θ=1) la calcula fue «justo donde
+        # su perfil da un salto errático». Medido contra la verosimilitud exacta
+        # bandeada del estudio (research/sf_meg/validate_f0_boundary.py): en
+        # 500 simulaciones bajo H₀ con los armónicos, y en el IPC_ES real
+        # (LR 18.638 con los dos), fue y el motor exacto COINCIDEN. El LR no es
+        # un artefacto de cálculo: un θ̂ cerca de 1 pero invertible es
+        # persistencia real de ∇^d y.
         if abs(abs(od_res.coef_free) - 1.0) > 1e-6:
             lines.append(
-                "  ℹ θ̂ no se apila en la frontera, así que el LR usa ℓ(θ=1) "
-                "calculada por fue justo donde su perfil da un salto errático "
-                "(SF_MEG, apéndice de la verosimilitud de frontera). La decisión "
-                "debería revisarse con la verosimilitud exacta bandeada.")
+                "  ℹ θ̂ se queda dentro, cerca de la frontera: ∇^d y es "
+                "PERSISTENTE, no un error de cálculo (ℓ(θ=1) de fue coincide con "
+                "la verosimilitud exacta del estudio, medido sin AR). Esa "
+                "persistencia es la que el par en f=0 tiene que leer."
+                + ("" if not (model.ar or []) else
+                   " Con AR en el modelo esa comprobación no está hecha."))
         if sf_res is None:
             lines.append(
                 "  ⚠ **Sin par confirmatorio.** "
@@ -2602,9 +2641,8 @@ def describe_formal_tests(model, run_meg: bool = True,
                         "compáralo por diagnosis y criterios de información.",
                         "  Causas que hay que descartar en este orden: modelo "
                         "todavía inadecuado (los contrastes no son legibles), "
-                        "deterministas resonantes en f=0 que suben el crítico "
-                        "real del lado MA, y el testigo evaluado donde el perfil "
-                        "de verosimilitud salta.",
+                        "y deterministas de baja frecuencia (escalones) que "
+                        "pueden subir el crítico real del lado MA.",
                     ]
         else:
             # BUG-0069: con el testigo fuera del eje, «coinciden» no confirma

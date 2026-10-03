@@ -59,7 +59,9 @@ def test_the_bare_law_caveat_appears_without_a_pair(tmp_path):
     assert "DESNUDA" in txt, (
         "el veredicto sobre d se publica sin decir que el crítico impreso está "
         "subestimado para un modelo con deterministas resonantes en f=0")
-    assert "RESONANTE" in txt
+    # BUG-0011: la salvedad distingue armónicos (no resuenan en f=0, crítico
+    # medido ≈2.15) de los deterministas de baja frecuencia (pueden resonar).
+    assert ("pueden resonar" in txt) or ("no resuenan" in txt)
 
 
 def test_the_missing_pair_is_stated(tmp_path):

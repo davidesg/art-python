@@ -78,4 +78,6 @@ def test_el_titular_no_afirma_lo_que_el_bloque_retira():
 
 def test_el_titular_nombra_por_que_no_concluye():
     tit = _titular_dcd_sobre(_modelo("PGAS_m04.pre"))
-    assert "SUBESTIMADO" in tit or "par" in tit
+    # BUG-0011: con sólo armónicos el crítico es «algo bajo» (medido ≈2.15);
+    # con deterministas de baja frecuencia, «puede estar SUBESTIMADO».
+    assert "SUBESTIMADO" in tit or "algo bajo" in tit or "par" in tit
