@@ -135,8 +135,9 @@ def test_la_semilla_va_en_cero_y_eso_esta_MEDIDO():
     ts0 = _serie()
     ts = fue.TimeSeries(np.round(ts0.data, 6).tolist(), freq=ts0.freq,
                         start=ts0.start, name=ts0.name)
-    res = {}
-    for semilla in (0.0, 0.9):
+    import warnings
+
+    def _ajusta(semilla, reinicios=None):
         d = tempfile.mkdtemp()
         f = os.path.join(d, "D.inp")
         _write_inp(ts, fue.Model(
@@ -145,12 +146,29 @@ def test_la_semilla_va_en_cero_y_eso_esta_MEDIDO():
             interventions=[fue.Intervention(
                 "impulse", at=_T, omega=[0.0], omega_free=[True],
                 delta=[semilla], delta_free=[True])]), f)
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            res[semilla] = estimar(f)[1]
-    assert res[0.0].aic < res[0.9].aic - 100, (
+        antes = getattr(fue.Model, "MAX_REINICIOS", None)
+        try:
+            if reinicios is not None and antes is not None:
+                fue.Model.MAX_REINICIOS = reinicios
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                return estimar(f)[1]
+        finally:
+            if antes is not None:
+                fue.Model.MAX_REINICIOS = antes
+
+    # La PRIMERA pasada, sin reinicios: el testigo tal como se midió.
+    buena, mala = _ajusta(0.0, reinicios=0), _ajusta(0.9, reinicios=0)
+    assert buena.aic < mala.aic - 100, (
         "el testigo dejó de valer: la semilla mala ya no es mala")
+    # fue BUG-0005: Model.fit reinicia un ajuste que para sin anular el
+    # gradiente, y la semilla mala llega entonces al mismo óptimo — pero sólo
+    # reiniciando. La semilla 0 converge a la primera: sigue siendo la buena.
+    if hasattr(fue.Model, "MAX_REINICIOS"):
+        b2, m2 = _ajusta(0.0), _ajusta(0.9)
+        assert b2._result.restarts == 0
+        assert m2._result.restarts >= 1
+        assert m2.aic == pytest.approx(b2.aic, abs=1e-3)
 
     from tests._fuente import cuerpo_de
     c = cuerpo_de(srv.suggest_intervention_form)
