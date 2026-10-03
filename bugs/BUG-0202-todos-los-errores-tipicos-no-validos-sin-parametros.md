@@ -1,11 +1,11 @@
 ---
 id: BUG-0202
 title: «TODOS los errores típicos de arriba NO son válidos» en un modelo que no tiene ningún parámetro
-status: open
+status: fixed
 severity: low
 component: diagnosis
 found_in: 0.2.3.dev0
-fixed_in:
+fixed_in: 0.2.3.dev0
 reported: 2026-10-02
 reporter: David / Claude — evaluación del carril autónomo (WTI del pass-through)
 tags:
@@ -45,3 +45,23 @@ Con `npar == 0` no hay aviso de covarianza.
 ## Validation
 
 Test: modelo sin parámetros, sin aviso.
+
+## Resolution (2026-10-03)
+
+**Fix at the source.** `covariance_is_degenerate` returns False when the
+result has no parameters (`npar`, or `len(params)`, is 0), before any seed
+check. The five callers inherit it:
+- the equation's warning;
+- the correlation tool;
+- `test_intervention`, twice;
+- the summary.
+
+The cause was as the report says: fue returns `niter=None` (read as 0) and
+`cov_matrix=[]` (empty, but not `None`) for a model with nothing to
+estimate.
+
+**Validation:** `tests/test_bug_0202_sin_parametros_sin_aviso.py`:
+- with no parameters the covariance is not degenerate;
+- the BUG-0027 gate still fires with parameters and `niter=0`;
+- the WTI base model, ARIMA(0,1,0) without μ, comes out without the warning.
+

@@ -6,6 +6,12 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### No covariance warning on a model with no parameters (BUG-0202)
+
+- An ARIMA(0,1,0) without μ, the base model of any analysis, came out with
+  «TODOS los errores típicos de arriba NO son válidos» over an empty table.
+  `covariance_is_degenerate` now returns False when there are no parameters.
+
 ### The Ockham ladder judges the scalar rungs at the event date (BUG-0201)
 
 - Aligned with the mechanism's configuration (BUG-0156), the ladder put

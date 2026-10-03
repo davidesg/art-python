@@ -550,6 +550,15 @@ def covariance_is_degenerate(result) -> bool:
     """
     if result is None:
         return False
+    # BUG-0202. Sin parámetros no hay errores típicos que puedan ser la semilla:
+    # el ARIMA(0,1,0) sin μ —el modelo base de WTI— salía con «TODOS los
+    # errores típicos de arriba NO son válidos» sobre una tabla vacía. Es el
+    # primer modelo de cualquier análisis, y el aviso enseñaba a ignorarlo.
+    params = getattr(result, "params", None)
+    npar = int(getattr(result, "npar", 0) or 0) or (
+        len(params) if params is not None else 0)
+    if npar == 0:
+        return False
     # fue ≥ 0.1.17 dice qué hessiano usó: con fdhess `niter = 0` ya no significa
     # nada (arrancar en el óptimo da la misma curvatura), y sin errores típicos
     # ("none") la covarianza no sirve. Sólo sin método —fue anterior— o con la
