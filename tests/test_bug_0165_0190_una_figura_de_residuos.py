@@ -43,10 +43,13 @@ def _modelo(stem):
 
 
 def _etiqueta_q(fig):
-    """El rótulo de la Q: el xlabel del panel de la ACF que empieza por 'Q('."""
-    for ax in fig.axes:
-        lbl = ax.get_xlabel()
-        if lbl.startswith("Q"):
+    """El rótulo de la Q, sin espacios: «Q( 39 ) = …» -> «Q(39)=…».
+
+    Con la geometría de fug C (pyfug BUG-0007) la Q es un texto de la figura,
+    centrado bajo la ACF, y no el xlabel de su panel."""
+    for t in list(fig.texts) + [ax.xaxis.label for ax in fig.axes]:
+        lbl = t.get_text().replace(" ", "")
+        if lbl.startswith("Q("):
             return lbl
     raise AssertionError("la figura no rotula ninguna Q")
 
@@ -62,7 +65,7 @@ def test_la_q_de_la_figura_lleva_los_gl_del_modelo(stem, q):
     from art.diagnosis import figura_residuos
     fig = figura_residuos(_modelo(stem))
     try:
-        assert _etiqueta_q(fig).startswith(q + " ")
+        assert _etiqueta_q(fig).startswith(q + "=")
     finally:
         plt.close(fig)
 

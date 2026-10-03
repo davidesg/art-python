@@ -27,7 +27,6 @@ from .identification import (
     boxcox_selection, plot_boxcox_selection,
     identification_listing, save_identification_report,
     apply_differences, boxcox_transform, transform_label,
-    _listing_figure,
     unit_root_tests, recommended_d, UnitRootResult,
 )
 from .seasonal_detection import detect_seasonality, plot_seasonality
@@ -120,11 +119,7 @@ class Description:
 def describe_boxcox(ts) -> Description:
     """Compute Box-Cox selection and recommend lambda."""
     result = boxcox_selection(ts)
-    if _PYFUG:
-        pf = _pyfug_from_fue(ts)
-        fig = _pyfug_mdt_pair(pf, name=ts.name or "")
-    else:
-        fig = plot_boxcox_selection(ts)
+    fig = plot_boxcox_selection(ts)     # pyfug's m-dt pair
     b64 = _fig_b64(fig)
     plt.close(fig)
 
@@ -842,40 +837,28 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
             + seasonal_note
         )
 
-    # ACF/PACF figure at the chosen (d, D) level via pyfug (primary) or internal fallback.
-    # pyfug plot_combined operates on ser.data directly (no internal differencing), so we
-    # apply the transform and differences here and pass the already-differenced series.
+    # ACF/PACF figure at the chosen (d, D) level, drawn by pyfug. pyfug
+    # plot_combined operates on ser.data directly (no internal differencing), so
+    # we apply the transform and differences here. The series keeps the
+    # ORIGINAL start and the observations lost go in `timeout`, so the year
+    # axis starts where fug C starts it (pyfug BUG-0006).
     b64_ident = None
     try:
-        if _PYFUG:
-            z     = boxcox_transform(np.array(ts.data), lam)
-            w     = apply_differences(z, ts.freq, d, D)
-            # Compute start of differenced series
-            orig  = getattr(ts, "start", (1, 1))
-            n_skip = d + D * ts.freq          # observations lost
-            off    = (int(orig[1]) - 1) + n_skip
-            new_start = (int(orig[0]) + off // ts.freq, off % ts.freq + 1)
-            name_w = transform_label(lam, d, D, ts.freq, name=ts.name or "")
-            pf     = _pyfug_ts(w, ts.freq, new_start, name=name_w)
-            # `npar`: 0 sobre una serie; los ARMA estimados cuando `ts` son los
-            # RESIDUOS de un modelo (guided_identification con pre_path). Y los
-            # retardos, la regla de fug C, no la de pyfug (BUG-0190).
-            from fue.diagnostics import default_lags as _dl
-            fig    = _pyfug_combined(pf, npar=int(npar),
-                                     nlags=_dl(len(w), ts.freq), title=name_w)
-            b64_ident = _fig_b64(fig)
-            plt.close(fig)
-        else:
-            listing = identification_listing(ts, lam=lam, max_d=d, max_D=D)
-            start   = getattr(ts, "start", (1, 1))
-            if D == 0:
-                panels = listing.panels
-            else:
-                n_per_D = d + 1
-                panels  = listing.panels[n_per_D:]
-            fig = _listing_figure(listing, panels, start)
-            b64_ident = _fig_b64(fig)
-            plt.close(fig)
+        z     = boxcox_transform(np.array(ts.data), lam)
+        w     = apply_differences(z, ts.freq, d, D)
+        orig  = getattr(ts, "start", (1, 1))
+        n_skip = d + D * ts.freq          # observations lost
+        name_w = transform_label(lam, d, D, ts.freq, name=ts.name or "")
+        pf     = _pyfug_ts(w, ts.freq, orig, name=name_w)
+        # `npar`: 0 sobre una serie; los ARMA estimados cuando `ts` son los
+        # RESIDUOS de un modelo (guided_identification con pre_path). Y los
+        # retardos, la regla de fug C, no la de pyfug (BUG-0190).
+        from fue.diagnostics import default_lags as _dl
+        fig    = _pyfug_combined(pf, npar=int(npar), timeout=n_skip,
+                                 tsnobs=len(w) + n_skip,
+                                 nlags=_dl(len(w), ts.freq), title=name_w)
+        b64_ident = _fig_b64(fig)
+        plt.close(fig)
     except Exception:
         b64_ident = None
 

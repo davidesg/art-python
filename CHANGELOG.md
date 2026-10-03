@@ -6,6 +6,24 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### One graphics engine: the identification and diagnosis figures are pyfug's
+
+- The HTML identification report (`save_identification_report`,
+  `save_listing`) drew its own listing and Box-Cox figures, with its own
+  geometry and a year axis that followed none of fug's rules. Each row of
+  the listing is now pyfug's `plot_combined`, the figure of fug -c and of the
+  guided lane, and `plot_boxcox_selection` is pyfug's m-dt pair. The internal
+  `_listing_figure`, `_draw_series_standardized` and `_plot_mdt` are gone.
+- `plot_diagnosis` and `plot_diagnosis_histogram` no longer go through
+  `fue.plots`. With a fitted model they are `figura_residuos` and pyfug's
+  histogram; without one, pyfug draws the undated residuals.
+  `identification.py` and `diagnosis.py` stop importing `fue.plots`.
+- The guided identification figure (`_plot_series_at_d`) and
+  `describe_identification` pass pyfug the series' original start, with the
+  lost observations in `timeout`, so the year axis starts where fug C starts
+  it. They also pass fug C's lag rule (BUG-0190); the guided figure used
+  pyfug's default.
+
 ### With form="auto", the ladder's rung 2 is built whole (BUG-0204)
 
 - When the Ockham ladder chose rung 2 (N steps), `suggest_intervention_form`

@@ -24,11 +24,6 @@ from fue.diagnostics import (
     ljung_box,
     jarque_bera,
 )
-try:
-    from fue.plots import _draw_acf_panel, _snap_cmax, _tj_spines
-    _FUE_PLOTS = True
-except ImportError:
-    _FUE_PLOTS = False
 
 from .identification import _default_lags_fug
 from .seasonal_detection import detect_seasonality, SeasonalDetectionResult
@@ -1041,14 +1036,9 @@ def figura_residuos(model, title: str | None = None):
       grados de libertad; con `npar=0` rotulaba los retardos;
     * `nlags` = la regla de fug C, la misma del texto y del `.out`.
 
-    Sin pyfug, el respaldo es `fue.plots` (`plot_diagnosis`), que desde fue
-    BUG-0023 da los MISMOS números.
     """
     from fue.diagnostics import default_lags, free_arma_count
-    try:
-        from pyfug.graphics import plot_combined
-    except ImportError:
-        return plot_diagnosis(diagnose(model), model)
+    from pyfug.graphics import plot_combined
     serie = serie_residuos_pyfug(model, title)
     n_arma = free_arma_count(model)
     return plot_combined(serie, npar=n_arma,
@@ -1072,71 +1062,32 @@ def serie_residuos_pyfug(model, title: str | None = None):
 
 
 def plot_diagnosis(result: DiagnosisResult, model=None) -> plt.Figure:
-    """Treadway-Jenkins diagnostic panel (fue layout).
+    """The residuals + acf/pacf figure, drawn by pyfug.
 
-    When *model* is fitted, delegates to fue.plots.plot_model_diagnostics which
-    produces the canonical layout: residuals time-series (left, full height) +
-    stacked ACF/PACF (right).  This is the basic diagnostic module; the
-    histogram is a separate optional figure (see plot_diagnosis_histogram).
+    With a fitted *model* it is `figura_residuos`, the one constructor of this
+    figure (BUG-0165). Without one, the residuals of *result* are drawn
+    undated. It used to delegate to `fue.plots.plot_model_diagnostics`, or draw
+    its own 2×2 panel: two more geometries of the same figure.
     """
-    if not _FUE_PLOTS:
-        raise ImportError("fue.plots is not available; diagnosis graphics require the fue package with plots support")
-
     if model is not None and getattr(model, "_result", None) is not None:
-        from fue.plots import plot_model_diagnostics
-        fig, _ = plot_model_diagnostics(model)
-        return fig
-
-    # Fallback when no fitted model object is available (should not happen in
-    # normal ART usage, but kept for defensive completeness).
-    r    = result.residuals
-    n    = result.nobs
-    lags = len(result.acf)
-    band = 1.96 / math.sqrt(n)
-    s    = 1
-    if model is not None and model.series is not None:
+        return figura_residuos(model)
+    from pyfug.core import Tseries
+    from pyfug.graphics import plot_combined
+    s = 1
+    if model is not None and getattr(model, "series", None) is not None:
         s = model.series.freq
-
-    fig, axes = plt.subplots(2, 2, figsize=(13, 7))
-    fig.suptitle(f"Diagnosis: {result.label}", fontweight='bold', fontsize=13)
-
-    ax = axes[0, 0]
-    ax.axhline(0, color='black', lw=0.8)
-    ax.axhline(+2, color='red', lw=0.6, ls='--')
-    ax.axhline(-2, color='red', lw=0.6, ls='--')
-    ax.plot(np.arange(n), r, color='#333333', lw=0.8)
-    for obs, z in result.extreme:
-        ax.scatter(obs - 1, z, color='red', s=20, zorder=5)
-    ax.set_title("Residuals"); _tj_spines(ax)
-
-    ax = axes[0, 1]
-    (osm, osr), (slope, intercept, _) = sp_stats.probplot(r, dist='norm')
-    ax.plot(osm, osr, 'o', ms=2.5, color='#333333', alpha=0.7)
-    ax.plot([osm[0], osm[-1]],
-            [slope * osm[0] + intercept, slope * osm[-1] + intercept],
-            color='red', lw=1.2)
-    ax.set_title("QQ Normal"); _tj_spines(ax)
-
-    lag_x = np.arange(1, lags + 1)
-    cmax  = max(float(np.abs(result.acf).max()),
-                float(np.abs(result.pacf).max())) * 1.15 + 0.05
-    _draw_acf_panel(axes[1, 0], lag_x, result.acf,  band=band,
-                    cmax=cmax, freq=s, lags=lags, label="ACF")
-    _draw_acf_panel(axes[1, 1], lag_x, result.pacf, band=band,
-                    cmax=cmax, freq=s, lags=lags, label="PACF")
-
-    fig.tight_layout()
-    return fig
+    r = np.asarray(result.residuals, dtype=float)
+    serie = Tseries(name=result.label or "", freq=s, nobs=len(r),
+                    begyear=1, begtime=1, data=r)
+    return plot_combined(serie, nlags=len(result.acf), title=serie.name)
 
 
 def plot_diagnosis_histogram(model) -> plt.Figure:
-    """Residuals histogram with normal overlay (optional complement to
-    plot_diagnosis).  Delegates to fue.plots.plot_model_diagnostics fig2."""
-    if not _FUE_PLOTS:
-        raise ImportError("fue.plots is not available; diagnosis graphics require the fue package with plots support")
-    from fue.plots import plot_model_diagnostics
-    _, fig_hist = plot_model_diagnostics(model)
-    return fig_hist
+    """Residuals histogram with its normal density, drawn by pyfug
+    (`plot_histogram`). It used to come from `fue.plots`."""
+    from pyfug.graphics import plot_histogram
+    serie = serie_residuos_pyfug(model)
+    return plot_histogram(serie, d=0, title=f"Histograma {serie.name}".strip())
 
 
 # ---------------------------------------------------------------------------

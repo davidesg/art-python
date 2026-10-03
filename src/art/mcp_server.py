@@ -2390,12 +2390,15 @@ def _plot_series_at_d(ts, lam: float, d: int) -> str | None:
         z = boxcox_transform(data, lam)
         w = apply_differences(z, freq, d, 0)   # D=0: calls 2 and 3 never use seasonal diff
 
-        off       = (int(start[1]) - 1) + d
-        new_start = (int(start[0]) + off // freq, off % freq + 1)
         title     = transform_label(lam, d, 0, freq, name=ts.name or "")
 
-        pf  = _pyfug_ts(w, freq, new_start, name=title)
-        fig = _pyfug_combined(pf, title=title)
+        # The ORIGINAL start with the d lost observations in `timeout`, so
+        # the year axis starts where fug C starts it (pyfug BUG-0006); and the
+        # lags of fug C's rule, not pyfug's default (BUG-0190).
+        from fue.diagnostics import default_lags as _dl
+        pf  = _pyfug_ts(w, freq, start, name=title)
+        fig = _pyfug_combined(pf, timeout=d, tsnobs=len(w) + d,
+                              nlags=_dl(len(w), freq), title=title)
         b64 = _fig_b64(fig)
         plt.close(fig)
         return b64

@@ -18,15 +18,9 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 
 from fue import TimeSeries
 from fue.diagnostics import acf as _fue_acf, pacf as _fue_pacf, ljung_box as _fue_ljung_box
-from fue.plots import (
-    plot_residuals_ts as _fue_plot_series,
-    _draw_acf_panel, _snap_cmax, _obs_to_decimal_year, _tj_spines,
-    _snap_series_max, _layout_params,
-)
 from .seasonal_detection import detect_seasonality, plot_seasonality
 
 
@@ -438,102 +432,15 @@ def recommended_d(results: list[UnitRootResult]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Plotting — style mirrors fue.plots (Treadway-Jenkins design)
+# Plotting — the figures are drawn by pyfug (_listing_figures, plot_boxcox_selection)
 # ---------------------------------------------------------------------------
 
-def _draw_series_standardized(ax: plt.Axes, w: np.ndarray, label: str,
-                               freq: int, start: tuple) -> None:
-    """Standardised series plot — shared by Box-Cox selection and identification listing."""
-    n = len(w)
-    mu    = w.mean()
-    sigma = w.std(ddof=0)
-    z     = (w - mu) / sigma if sigma > 1e-10 else w - mu
-    abs_max = _snap_series_max(float(np.abs(z).max()))
-
-    xs = _obs_to_decimal_year(n, start[0], start[1], freq)
-
-    _tj_spines(ax)
-    ax.plot(xs, z, color='k', linewidth=0.9,
-            marker='o', markersize=4.5, markerfacecolor='k',
-            markeredgewidth=0, zorder=3)
-    ax.axhline(0,  color='k',   lw=0.8, zorder=2)
-    ax.axhline( 2, color='0.3', lw=1.0, linestyle='--', zorder=2)
-    ax.axhline(-2, color='0.3', lw=1.0, linestyle='--', zorder=2)
-
-    if freq > 1:
-        x0, x1 = xs[0], xs[-1]
-        step = 2 if (x1 - x0) > 5 else 1
-        for yr in range(int(np.ceil(x0 - 1e-9)), int(x1) + 2, step):
-            if x0 < yr <= x1 + 1.0 / freq:
-                ax.axvline(yr, color='k', lw=0.5, zorder=1)
-
-    y_max = int(abs_max)
-    ax.set_ylim(-y_max - 0.15, y_max + 0.15)
-    ax.set_yticks(range(-y_max, y_max + 1, 2))
-    ax.tick_params(axis='both', direction='out', labelsize=9)
-    ax.set_xlim(xs[0] - 0.3 / freq, xs[-1] + 0.3 / freq)
-
-    se = sigma / math.sqrt(n)
-    ax.set_xlabel(
-        f"$\\bar{{w}}$ = {mu:.4f}  ({se:.4f})    $\\hat{{\\sigma}}_w$ = {sigma:.4f}",
-        fontsize=10,
-    )
-    ax.set_title(label, fontweight='bold', fontsize=12)
 
 
-def _draw_series_row(ax_ser: plt.Axes, panel: Panel,
-                     freq: int, start: tuple) -> None:
-    _draw_series_standardized(ax_ser, panel.w, panel.label, freq, start)
 
 
-def _draw_acf_pacf_row(ax_acf: plt.Axes, ax_pacf: plt.Axes,
-                       panel: Panel, freq: int) -> None:
-    """Stacked ACF + PACF — right column of a listing row.
-
-    Labels centered over each panel; Q statistic as a visible subtitle
-    below the ACF title so it is never hidden by the PACF panel above.
-    """
-    st    = panel.stats
-    n     = st.n
-    lags  = st.lags
-    band  = 2.0 / math.sqrt(n)
-    cmax  = _snap_cmax(st.acf, st.pacf)
-    lag_x = np.arange(1, lags + 1)
-
-    _draw_acf_panel(ax_acf,  lag_x, st.acf,  band, cmax, freq, lags, '', lw=3.2)
-    _draw_acf_panel(ax_pacf, lag_x, st.pacf, band, cmax, freq, lags, '', lw=3.2)
-
-    ax_acf.set_title('acf', loc='center', fontsize=11, pad=4)
-    ax_pacf.set_title('pacf', loc='center', fontsize=11, pad=4)
-    ax_acf.set_xlabel(
-        f"Q({st.lags} lags, {st.ljung_box_df} df) = {st.ljung_box_stat:.1f}",
-        fontsize=10, labelpad=4,
-    )
-    ax_pacf.set_xlabel('')
 
 
-def _plot_mdt(ax: plt.Axes, mdt: MeanStdData, name: str) -> None:
-    """Mean–standard deviation scatter (Box-Cox adequacy, fug graph_m_dt style)."""
-    _tj_spines(ax, sides=('left', 'bottom', 'right', 'top'))
-    ax.scatter(mdt.means_std, mdt.stds_std,
-               s=30, color='k', zorder=3)
-    ax.axhline(0, color='k', lw=0.7, zorder=2)
-    ax.axvline(0, color='k', lw=0.7, zorder=2)
-
-    lim = max(float(np.abs(mdt.means_std).max()),
-              float(np.abs(mdt.stds_std).max())) * 1.15
-    lim = max(lim, 1.0)
-    ax.set_xlim(-lim, lim)
-    ax.set_ylim(-lim, lim)
-    ax.set_aspect('equal')
-    ax.set_xlabel("Mean (std.)",       fontsize=11)
-    ax.set_ylabel("Std. Dev. (std.)",  fontsize=11)
-    ax.set_title(
-        f"Mean–Std  (nog={mdt.nog}, ng={mdt.ng})",
-        fontweight='bold', fontsize=12,
-    )
-    ax.tick_params(direction='out', labelsize=9)
-    ax.grid(True, lw=0.4, alpha=0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -569,47 +476,20 @@ def boxcox_selection(ts: TimeSeries, nog: int | None = None) -> BoxCoxSelection:
 
 
 def plot_boxcox_selection(ts: TimeSeries, nog: int | None = None) -> plt.Figure:
-    """
-    Two-row figure for Box-Cox lambda selection.
+    """The m-dt figure for choosing λ: level (λ=1) beside log (λ=0).
 
-    Row 1: original series (λ=1, no transform) + mean-std scatter
-    Row 2: log series (λ=0)                    + mean-std scatter
-
-    A positive slope in the m-dt scatter (std rises with mean) indicates
-    variance depends on level — the log stabilises it.
+    Drawn by pyfug (`plot_mean_deviation_pair`), the one Jenkins-Treadway
+    graphics engine. art used to draw its own version here, with a series
+    panel whose year axis followed none of fug's rules.
     """
-    bcs   = boxcox_selection(ts, nog)
+    from pyfug.core import Tseries as _Tseries
+    from pyfug.graphics import plot_mean_deviation_pair
+    bcs = boxcox_selection(ts, nog)
     start = getattr(ts, 'start', (1, 1))
-
-    fig = plt.figure(figsize=(13.0, 6.5))
-    fig.suptitle(
-        f"{bcs.name}  —  Box-Cox selection  (nog={bcs.nog})",
-        fontsize=12, fontweight='bold',
-    )
-
-    outer = gridspec.GridSpec(
-        2, 1, figure=fig,
-        left=0.05, right=0.98,
-        top=0.91, bottom=0.07,
-        hspace=0.60,
-    )
-
-    rows = [
-        (bcs.y_raw, bcs.mdt_raw, 'original  (λ=1)'),
-        (bcs.y_log, bcs.mdt_log, 'log  (λ=0)'),
-    ]
-    for i, (y_t, mdt, label) in enumerate(rows):
-        inner = gridspec.GridSpecFromSubplotSpec(
-            1, 2, subplot_spec=outer[i],
-            width_ratios=[2.2, 1.0],
-            wspace=0.28,
-        )
-        ax_ser = fig.add_subplot(inner[0, 0])
-        ax_mdt = fig.add_subplot(inner[0, 1])
-        _draw_series_standardized(ax_ser, y_t, label, bcs.freq, start)
-        _plot_mdt(ax_mdt, mdt, bcs.name)
-
-    return fig
+    pf = _Tseries(name=bcs.name or "", freq=ts.freq, nobs=len(ts.data),
+                  begyear=int(start[0]), begtime=int(start[1]),
+                  data=np.asarray(ts.data, dtype=float))
+    return plot_mean_deviation_pair(pf, nog=bcs.nog, name=bcs.name or "")
 
 
 def save_boxcox_selection(ts: TimeSeries, path: str, nog: int | None = None) -> None:
@@ -639,54 +519,31 @@ def save_boxcox_selection(ts: TimeSeries, path: str, nog: int | None = None) -> 
         f.write(html)
 
 
-def _listing_figure(listing: IdentificationListing,
-                    panels: list[Panel],
-                    start: tuple = (1, 1)) -> plt.Figure:
+def _listing_figures(listing: IdentificationListing,
+                     panels: list[Panel],
+                     start: tuple = (1, 1)) -> list[plt.Figure]:
+    """One figure per panel of the listing: the transformed and differenced
+    series with its acf/pacf, drawn by pyfug's `plot_combined` — the same
+    figure as fug -c and the guided lane.
+
+    The series keeps the ORIGINAL start and the observations lost to
+    differencing go in `timeout`, so the year axis starts where fug C starts
+    it (BUG-0006 of pyfug). It used to be one tall figure drawn here, with its
+    own geometry and year axis.
     """
-    Listing figure: one row per transformation.
-    Each row: series (left, ~65%) | stacked ACF/PACF (right, ~35%).
-    Style matches fue.plots (Treadway-Jenkins).
-    """
-    n_rows  = len(panels)
-    freq    = listing.freq
-    row_h   = 4.0          # inches per row
-    fig_h   = row_h * n_rows + 0.6
-    fig_w   = 15.0
-
-    _, h_acf, h_pacf = _layout_params(False, panels[0].stats.lags)
-
-    fig = plt.figure(figsize=(fig_w, fig_h))
-    fig.suptitle(
-        f"{listing.name}   [{boxcox_label(listing.lam) or 'no transform'}]"
-        f"   freq={listing.freq}",
-        fontsize=12, fontweight='bold', y=1.0,
-    )
-
-    outer = gridspec.GridSpec(
-        n_rows, 1,
-        figure=fig,
-        left=0.05, right=0.98,
-        top=0.97, bottom=0.03,
-        hspace=0.70,
-    )
-
-    for idx, panel in enumerate(panels):
-        inner = gridspec.GridSpecFromSubplotSpec(
-            2, 2,
-            subplot_spec=outer[idx],
-            width_ratios=[1.8, 1.0],   # series wider, ACF/PACF get real space
-            height_ratios=[h_acf, h_pacf],
-            wspace=0.30,
-            hspace=1.10,               # room for ACF xlabel (Q stat) above PACF title
-        )
-        ax_ser  = fig.add_subplot(inner[:, 0])
-        ax_acf  = fig.add_subplot(inner[0, 1])
-        ax_pacf = fig.add_subplot(inner[1, 1])
-
-        _draw_series_row(ax_ser, panel, freq, start)
-        _draw_acf_pacf_row(ax_acf, ax_pacf, panel, freq)
-
-    return fig
+    from pyfug.core import Tseries as _Tseries
+    from pyfug.graphics import plot_combined
+    figs = []
+    for p in panels:
+        lost = int(p.nrdiff) + int(p.nadiff) * int(listing.freq)
+        name = transform_label(listing.lam, p.nrdiff, p.nadiff, listing.freq,
+                               name=listing.name or "")
+        pf = _Tseries(name=name, freq=listing.freq, nobs=len(p.w),
+                      begyear=int(start[0]), begtime=int(start[1]),
+                      data=np.asarray(p.w, dtype=float))
+        figs.append(plot_combined(pf, timeout=lost, tsnobs=len(p.w) + lost,
+                                  nlags=int(p.stats.lags), title=name))
+    return figs
 
 
 # ---------------------------------------------------------------------------
@@ -777,8 +634,8 @@ def save_listing(listing: IdentificationListing, path: str,
     chunks = [panels[i:i+6] for i in range(0, len(panels), 6)]
     pages_b64 = []
     for chunk in chunks:
-        fig = _listing_figure(listing, chunk, start=start)
-        pages_b64.append(fig_to_b64(fig))
+        for fig in _listing_figures(listing, chunk, start=start):
+            pages_b64.append(fig_to_b64(fig))
 
     mdt_b64 = None  # m-dt belongs to the Box-Cox selection step, not here
 
@@ -942,9 +799,9 @@ def save_identification_report(
         # Decision A: single block, 3 panels
         panels_A = listing.panels          # all D=0
         img_A = (
-            f'<img src="data:image/png;base64,'
-            f'{fig_to_b64(_listing_figure(listing, panels_A, start=start))}"'
-            f' style="max-width:100%;margin-bottom:16px"><br>'
+            "".join(f'<img src="data:image/png;base64,{fig_to_b64(fg)}"'
+                    f' style="max-width:100%;margin-bottom:16px"><br>'
+                    for fg in _listing_figures(listing, panels_A, start=start))
         )
         listing_html = f"""
 <h2>{listing_sec} &nbsp; Identification listing &nbsp; [{lam_str}]</h2>
@@ -958,14 +815,14 @@ def save_identification_report(
         panels_B1 = listing.panels[:n_d]   # D=0
         panels_B2 = listing.panels[n_d:]   # D=1
         img_B1 = (
-            f'<img src="data:image/png;base64,'
-            f'{fig_to_b64(_listing_figure(listing, panels_B1, start=start))}"'
-            f' style="max-width:100%;margin-bottom:16px"><br>'
+            "".join(f'<img src="data:image/png;base64,{fig_to_b64(fg)}"'
+                    f' style="max-width:100%;margin-bottom:16px"><br>'
+                    for fg in _listing_figures(listing, panels_B1, start=start))
         )
         img_B2 = (
-            f'<img src="data:image/png;base64,'
-            f'{fig_to_b64(_listing_figure(listing, panels_B2, start=start))}"'
-            f' style="max-width:100%;margin-bottom:16px"><br>'
+            "".join(f'<img src="data:image/png;base64,{fig_to_b64(fg)}"'
+                    f' style="max-width:100%;margin-bottom:16px"><br>'
+                    for fg in _listing_figures(listing, panels_B2, start=start))
         )
         listing_html = f"""
 <h2>{listing_sec} &nbsp; Identification listing &nbsp; [{lam_str}]</h2>
