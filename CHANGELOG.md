@@ -6,6 +6,14 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### With form="auto", the ladder's rung 2 is built whole (BUG-0204)
+
+- When the Ockham ladder chose rung 2 (N steps), `suggest_intervention_form`
+  built one step with a single ω. `n_omega=0` was normalised to 1 before it
+  was read as «requested», so the BUG-0079 override always fired. On WTI
+  12/2014: chosen AIC 1482.95, built 1497.90.
+- The request is now read first. An explicit `n_omega` still wins.
+
 ### The mean line cites the measure that decides (BUG-0203)
 
 - With μ in the base model, `guided_identification` decided by that μ but

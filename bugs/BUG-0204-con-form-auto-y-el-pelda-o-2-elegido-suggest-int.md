@@ -1,11 +1,11 @@
 ---
 id: BUG-0204
 title: Con form=auto y el peldaño 2 elegido, suggest_intervention_form construye un escalón de UN ω — n_omega=0 se convierte en 1 antes de leerse como «pedido» y pisa los escalones de la configuración
-status: open
+status: fixed
 severity: high
 component: interventions
 found_in: 0.2.3.dev0
-fixed_in: 
+fixed_in: 0.2.3.dev0
 reported: 2026-10-03
 reporter: David / Claude — carril autónomo de WTI para los fixtures de drtran
 tags:
@@ -131,3 +131,21 @@ modelo construido lleva `n_esc` ω en `at_esc` y su AIC es el del peldaño.
 
 El script de arriba: «built: … with 3 omega(s); AIC 1482.95». Y que
 `n_omega=3` explícito con `form="auto"` siga mandando (BUG-0079).
+
+## Resolution (2026-10-03)
+
+**Fix.** `_n_omega_pedido` is now read before `n_omega` is normalised, so the
+BUG-0079 override only fires when the analyst actually passes `n_omega`.
+
+The report's script now prints:
+
+    built: step at obs 154 with 3 omega(s); AIC 1482.95
+
+**Validation:** `tests/test_bug_0204_el_peldano_2_se_construye_entero.py`:
+- on a synthetic three-quarter fall, the ladder picks rung 2 and the built
+  model carries its N ω and its AIC;
+- an explicit `n_omega=1` still wins (BUG-0079);
+- the WTI 12/2014 case from the passthrough CSV (skipped without the CSV).
+
+With the old line order, the first and third tests fail.
+

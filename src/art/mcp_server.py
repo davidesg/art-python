@@ -8818,8 +8818,12 @@ def suggest_intervention_form(inp_path: str, output_path: str,
 
         # BUG-0079. `n_omega` explícito manda sobre todo lo demás: es la puerta
         # que faltaba para construir la FLT que el diagnóstico identifica.
-        n_omega = max(1, int(n_omega)) if n_omega else 1
+        # BUG-0204: el pedido se lee ANTES de normalizar. Leído después,
+        # `n_omega=0` («no pedido») ya valía 1, la cláusula de BUG-0079 se
+        # disparaba siempre, y el peldaño 2 de la escalera —N escalones— se
+        # construía con UN ω: lo juzgado no era lo construido.
         _n_omega_pedido = int(n_omega) if n_omega else 0
+        n_omega = max(1, int(n_omega)) if n_omega else 1
         escalera_txt = ""
         escalera_alt = ""
         if form == "auto":
