@@ -178,9 +178,20 @@ def detect_seasonality(
     d: int = 1,
     lam: float = 0.0,
     significance: float = 0.05,
+    test: str = "hac",
 ) -> SeasonalDetectionResult:
     """
     Detect seasonality via harmonic regression with HAC F-test.
+
+    `test` picks the covariance of the F (BUG-0206, research/seasonal_test):
+      "hac" (default): Newey-West. For IDENTIFICATION, on the series: more
+            power, and liberal under white-noise or MA differences (12-28% at
+            a nominal 5%); in a screening step a false positive is pruned
+            later in the model, a false negative is not.
+      "ols": the plain OLS F. For the RESIDUALS of a model: there H0 is
+            white noise, HAC's worst case (18% false alarms at n=216), and the
+            whiteness is judged apart by Ljung-Box; the OLS F has the right
+            size there.
 
     Parameters
     ----------
@@ -265,8 +276,10 @@ def detect_seasonality(
     max_lags = 1 if n <= 100 else (2 if n <= 200 else 3)
     cov_hac  = _newey_west_hac(X, residuals, max_lags)
 
-    # --- HAC F-test on harmonic coefficients (joint H0: γ = 0) ---
-    V_gamma = cov_hac[1:, 1:]
+    # --- F-test on harmonic coefficients (joint H0: γ = 0): HAC or OLS ---
+    if test not in ("hac", "ols"):
+        raise ValueError(f"test must be 'hac' or 'ols', not {test!r}")
+    V_gamma = (cov_hac if test == "hac" else cov_ols)[1:, 1:]
     try:
         f_stat = float(gamma @ np.linalg.inv(V_gamma) @ gamma) / n_terminos_estacionales
     except np.linalg.LinAlgError:
@@ -326,7 +339,8 @@ def detect_seasonality(
 
     msg = (
         f"Seasonality {'detected' if detected else 'not detected'} "
-        f"(s={s}): HAC F={f_stat:.3f} (p={p_value:.4f}), d={d}"
+        f"(s={s}): {'HAC' if test == 'hac' else 'OLS'} F={f_stat:.3f} "
+        f"(p={p_value:.4f}), d={d}"
     )
     return SeasonalDetectionResult(
         name=name, freq=s, d=d, lam=lam,

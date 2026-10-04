@@ -6,6 +6,18 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### The seasonality test: the HAC F to identify, the OLS F on residuals (BUG-0206)
+
+- A size-and-power study (`research/seasonal_test`) of six tests, under 16
+  ARMA dynamics and three sample sizes. No test dominates. The HAC F has
+  more power and is liberal on white-noise or MA differences.
+- Identification keeps the HAC F: it is a screening step, and a false
+  positive is pruned later in the model.
+- `detect_seasonality(..., test="ols")`, and the residual diagnosis uses it.
+  There H0 is white noise, where the HAC F gave 18% false alarms at n=216
+  (30% at n=120) and stopped models from coming out "clean". Test:
+  `tests/test_bug_0206_contraste_estacional.py`.
+
 ### `art-mcp --help` and `--version` answer and exit (drvarma BUG-0014)
 
 - They used to start the stdio server, so the command seemed to hang.

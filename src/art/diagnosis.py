@@ -966,7 +966,10 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
     seasonal = None
     if s > 1:
         try:
-            seasonal = detect_seasonality(r_ts, d=0, lam=1.0)
+            # BUG-0206: on residuals the OLS F. Their H0 is white noise, the
+            # HAC F's worst case (18% false alarms at n=216, 30% at n=120),
+            # and this verdict stops the outlier loop and makes "clean".
+            seasonal = detect_seasonality(r_ts, d=0, lam=1.0, test="ols")
         except Exception:
             pass
 
