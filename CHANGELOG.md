@@ -6,6 +6,11 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### `art-mcp --help` and `--version` answer and exit (drvarma BUG-0014)
+
+- They used to start the stdio server, so the command seemed to hang.
+  Test: `tests/test_cli_help.py`.
+
 ### The f=0 DCD caveats say what was measured (BUG-0011)
 
 - The over-differencing DCD at f=0 is the regular MA(1) DCD. Its candidate

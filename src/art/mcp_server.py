@@ -10896,7 +10896,32 @@ def guion_evidencia(guion_path: str, version: int = 0,
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _cli_flags():
+    """-h/--help and --version answer and exit; without them `art-mcp` would
+    start the stdio server and seem to hang (drvarma BUG-0014)."""
+    import sys
+    args = sys.argv[1:]
+    if any(a in ("-h", "--help") for a in args):
+        print("usage: art-mcp [-h] [--version]\n\n"
+              "art-mcp: the MCP server for univariate Box-Jenkins-Treadway analysis (engine: fue).\n"
+              "Speaks MCP over stdio: an MCP client (Claude Code, Claude Desktop)\n"
+              "starts it; run by hand it waits for a client on stdin.\n\n"
+              "options:\n"
+              "  -h, --help  show this message and exit\n"
+              "  --version   show the version and exit")
+        sys.exit(0)
+    if "--version" in args:
+        from importlib.metadata import PackageNotFoundError, version
+        try:
+            v = version("art-tseries")
+        except PackageNotFoundError:
+            v = "unknown"
+        print(f"art-mcp (art-tseries) {v}")
+        sys.exit(0)
+
+
 def main():
+    _cli_flags()
     # BUG-0111. Dejar constancia de que se corre COMO SERVIDOR es lo que
     # permite a `_show_fig` no abrir el visor aquí y sí abrirlo cuando el
     # módulo se usa como biblioteca. Va antes de `mcp.run()`, que no devuelve.
