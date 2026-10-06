@@ -2568,8 +2568,10 @@ def describe_formal_tests(model, run_meg: bool = True,
                     "una raíz tan cerca de −1 es el factor (1 + B) de Nyquist "
                     "y no tiene nada que ver con `d`. Lo que le corresponde son "
                     "los contrastes en Nyquist (MEG / DCD en π), no éste.")
-        except Exception:
-            pass
+        except Exception as _ne:                        # BUG-0160: no en silencio
+            import sys as _sys
+            print(f"⚠ [art] nota de la raíz negativa (Nyquist): "
+                  f"{type(_ne).__name__}: {_ne}", file=_sys.stderr)
 
     # DCD
     if dcd_res:
