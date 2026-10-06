@@ -1028,7 +1028,7 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
 # Model equation (Bloque O)
 # ---------------------------------------------------------------------------
 
-def model_equation(ts, model, errores_tipicos: bool = True) -> str:
+def model_equation(ts, model, errores_tipicos: "bool | list" = True) -> str:
     """
     Render the estimated model as two polynomial-operator equations (Unicode).
 
@@ -1040,8 +1040,9 @@ def model_equation(ts, model, errores_tipicos: bool = True) -> str:
     Returns plain text ready for Claude Code chat (monospace rendering).
 
     `errores_tipicos=False` da los mismos coeficientes SIN la línea de errores
-    típicos: es la ecuación de las herramientas que sólo MIRAN un `.pre` y no
-    pueden prometer la covarianza (BUG-0090, BUG-0216).
+    típicos. Una LISTA son los errores típicos que hay que poner, en el orden de
+    `model.params`: los del `.out` para las herramientas que sólo MIRAN un
+    `.pre` y no pueden sacarlos de su covarianza (BUG-0090, BUG-0216).
     """
     import numpy as np
     from math import gcd
@@ -1055,9 +1056,13 @@ def model_equation(ts, model, errores_tipicos: bool = True) -> str:
     # positional cursor desynced e.g. AR_f-before-MA, or omega/delta interleaving).
     # See ART_MCP_REVIEW.md §1.
     vals = _reconstruct_params(model, list(model.params))
-    sers = _reconstruct_params(
-        model, list(model.std_errors) if errores_tipicos
-        else [0.0] * len(list(model.params)))
+    if isinstance(errores_tipicos, (list, tuple)):
+        _se = [float(x) for x in errores_tipicos]
+    elif errores_tipicos:
+        _se = list(model.std_errors)
+    else:
+        _se = [0.0] * len(list(model.params))
+    sers = _reconstruct_params(model, _se)
 
     def _flags(obj, attr, n):
         fl = getattr(obj, attr, None)

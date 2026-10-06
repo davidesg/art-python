@@ -4,7 +4,8 @@ Un (0,1,0) se escribe en el `.inp` con un AR de relleno `[0.0]` FIJO. La
 ecuación de `confirm_and_estimate` lo imprimía como «(1 − 0·B)», y la forma del
 guion lo contaba como p=1: «∇[ln y_t] = μ + [1-φ(B)]⁻¹·a_t». Además
 `record_version` daba sólo esa forma, sin un coeficiente: ahora da la ecuación
-estimada (sin errores típicos, porque mira un `.pre`) y la forma corregida.
+estimada, con los errores típicos LEÍDOS DEL `.out` (mira un `.pre`, y de su
+covarianza no se pueden sacar, BUG-0090), y la forma corregida.
 """
 import json
 import os
@@ -63,8 +64,11 @@ def test_record_version_da_la_ecuacion_estimada(paseo):
     sec2 = t.split("## 2")[1].split("## 3")[0]
     assert "MODELO ESTIMADO" in sec2 and re.search(r"∇Nₜ − \d+\.\d+", sec2)
     assert "φ(B)" not in sec2, "la forma cuenta un AR que el modelo no tiene"
-    # Mira un `.pre`: los coeficientes sí, los errores típicos no (BUG-0090).
-    assert not re.search(r"^\s+\(\d+\.\d+\)\s*$", sec2, re.M)
+    # Mira un `.pre`: los errores típicos, del `.out` (BUG-0090, BUG-0216).
+    from art.outfile import lee_out
+    se = lee_out(pre[:-4] + ".out").parametros[0].se
+    assert "leídos del `.out`" in sec2
+    assert re.search(r"\(\s*%.4f\s*\)" % se, sec2), sec2
     eq_guion = json.load(open(g))["entries"][-1]["equation"]
     assert "φ(B)" not in eq_guion and "μ" in eq_guion, eq_guion
 
@@ -80,3 +84,15 @@ def test_un_ar_real_sigue_en_la_forma(paseo):
     from art.pipeline import mirar
     _, m = mirar(str(d / "w1.pre"))
     assert "φ(B)" in srv._forma_estructural(m, 0.0)
+
+
+def test_sin_out_lo_dice_y_no_inventa_errores(paseo, tmp_path):
+    import shutil
+    d, _, pre = paseo
+    solo = str(tmp_path / "solo.pre")
+    shutil.copy(pre, solo)                      # un `.pre` sin su `.out`
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        t = _T(_fn(srv.record_version)(solo, str(tmp_path / "g.json")))
+    sec2 = t.split("## 2")[1].split("## 3")[0]
+    assert "Sin errores típicos" in sec2 and "solo.out" in sec2

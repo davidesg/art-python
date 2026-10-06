@@ -351,14 +351,14 @@ def test_record_version_NO_muestra_esa_ecuacion_y_es_correcto():
     fiables (BUG-0090/0091), así que no usa la ecuación del prompt.
 
     Desde BUG-0216 da la MISMA ecuación con sus coeficientes —en un `.pre`
-    son exactos— pero SIN la línea de errores típicos, y la forma estructural
-    del guion debajo.
+    son exactos— y los errores típicos LEÍDOS DEL `.out`, el registro de la
+    estimación; sin `.out`, lo dice. Y la forma estructural del guion debajo.
 
     Se fija aquí para que un futuro «arreglo» de la asimetría no la rompa."""
     from tests._fuente import fuente_de
     rv = getattr(srv.record_version, "fn", srv.record_version)
     src = fuente_de(rv)
-    assert "errores_tipicos=False" in src and "_forma_estructural" in src
+    assert "_errores_del_out(" in src and "_forma_estructural" in src
     assert "_equation_for_prompt" not in src
 
 

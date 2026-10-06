@@ -1512,6 +1512,30 @@ def _warn(context: str, exc: "Exception | None" = None) -> None:
     print(f"⚠ [art] {context}{detail}", file=sys.stderr)
 
 
+def _errores_del_out(inp_path: str, model) -> "tuple[list | None, str]":
+    """Los errores típicos del `.out` hermano, en el orden de `model.params`.
+
+    Para las herramientas que MIRAN un `.pre` (BUG-0090): la covarianza no se
+    saca reestimando desde el óptimo; el `.out` la registró cuando se estimó.
+    Sólo se usan si el `.out` es de ESTE modelo: mismos parámetros, mismos
+    valores. Devuelve `(lista, "")` o `(None, por qué no)` — BUG-0216."""
+    from art.outfile import lee_out
+    ruta = os.path.splitext(os.path.expanduser(inp_path))[0] + ".out"
+    if not os.path.exists(ruta):
+        return None, f"no hay `{os.path.basename(ruta)}` junto al modelo"
+    try:
+        pars = lee_out(ruta).parametros
+    except Exception as e:
+        _warn("lectura del .out para los errores típicos", e)
+        return None, f"`{os.path.basename(ruta)}` no se pudo leer"
+    vals = [float(x) for x in model.params]
+    if len(pars) != len(vals) or any(
+            abs(p.valor - v) > 1e-5 * max(1.0, abs(v)) for p, v in zip(pars, vals)):
+        return None, (f"`{os.path.basename(ruta)}` no es de estos valores "
+                      "(¿se reestimó o se editó el modelo?)")
+    return [float(p.se) for p in pars], ""
+
+
 def _forma_estructural(model, lam: float) -> str:
     """La FORMA del modelo en una línea —la del guion—, sin factores vacíos.
 
@@ -7690,11 +7714,19 @@ def record_version(inp_path: str,
         # `.pre`— y no promete la covarianza (BUG-0090/0091): va la ecuación de
         # `confirm_and_estimate` con los VALORES, que en un `.pre` son exactos,
         # y SIN la línea de errores típicos, que se leen del `.out`.
+        #
+        # Y CON sus errores típicos: una ecuación sin ellos no dice qué
+        # coeficiente se sostiene. No se sacan del `.pre` —reestimar desde el
+        # óptimo deja la covarianza en la semilla—, se LEEN del `.out`, el
+        # registro de la estimación, si sus valores son los del modelo.
         try:
             from art.describe import model_equation as _model_eq
-            eq_rv = ("```\n" + _model_eq(m.series, m, errores_tipicos=False)
-                     + "\n```\n\n*Errores típicos: en el `.out` —"
-                     "`get_out_report`—; esta vía sólo mira el modelo.*")
+            _se_out, _por_que = _errores_del_out(inp_path, m)
+            eq_rv = ("```\n" + _model_eq(m.series, m,
+                                          errores_tipicos=_se_out or False)
+                     + "\n```"
+                     + ("\n\n*Errores típicos leídos del `.out`.*" if _se_out
+                        else f"\n\n⚠ *Sin errores típicos: {_por_que}.*"))
         except Exception as _e:
             eq_rv = f"⚠ *[equation error: {_e}]*"
         try:
