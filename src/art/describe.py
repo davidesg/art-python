@@ -640,13 +640,26 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2,
 # ---------------------------------------------------------------------------
 
 def describe_identification(ts, d: int, D: int, lam: float = 0.0,
-                            npar: int = 0) -> Description:
-    """Generate identification listing and suggest ARMA orders with per-candidate reasoning."""
+                            npar: int = 0,
+                            estacional: bool | None = None) -> Description:
+    """Generate identification listing and suggest ARMA orders with per-candidate reasoning.
+
+    `estacional` is node 3's decision when D=0 (BUG-0209): False = Decision A
+    (no seasonality: no seasonal P/Q candidates, no harmonics subtracted, no
+    harmonics advised); True = route B1; None = unknown (the old wording,
+    which names both)."""
     import numpy as np
+    # BUG-0209. Con D=0 y SIN estacionalidad (Decisión A) el listado proponía
+    # (0,1,1)(0,0,1)₁₂ y compañía —y el primero por AICc era estacional— sobre
+    # una serie de la que el nodo anterior acababa de decir que no tiene
+    # estacionalidad; y le quitaba armónicos que el modelo no va a llevar. Lo
+    # decidido en el nodo 3 acota aquí el espacio de búsqueda.
+    _sin_est = (estacional is False and D == 0)
+    _kw_est = dict(P_max=0, Q_max=0, n_harmonics=0) if _sin_est else {}
     # `incluir_dispersos=True` aquí y sólo aquí: la presentación es el único
     # sitio donde tiene sentido enseñarlos, y los enseña APARTE (BUG-0095).
     specs = suggest_orders(ts, d=d, D=D, lam=lam, top_n=5,
-                           incluir_dispersos=True)
+                           incluir_dispersos=True, **_kw_est)
 
     s = ts.name or "series"
 
@@ -708,7 +721,20 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
         )
 
     altos = [sp for sp in completos if sp.p >= 4]
-    if altos:
+    if altos and _sin_est:
+        # BUG-0209: con el F-HAC sin rechazar, «estacionalidad híbrida» es
+        # justo lo que el nodo 3 descartó. La barra aislada se dice como lo que
+        # es; qué frecuencia esconde lo cuentan sus raíces.
+        lines += ["",
+                  f"**AR de orden alto** (p = {', '.join(str(sp.p) for sp in altos)}): "
+                  "se propone porque la FAP tiene una barra AISLADA en ese retardo. "
+                  "El nodo 3 no detectó estacionalidad (Decisión A), así que no se "
+                  "lee de entrada como estacionalidad: puede ser un ciclo o un resto "
+                  "que el contraste no alcanza. Se propone el polinomio COMPLETO, sin "
+                  "ceros impuestos: estímalo y factorízalo (`ar_factorization`) para "
+                  "ver qué frecuencia esconde el factor; si cae en una frecuencia "
+                  "estacional, el **MEG** dirá qué hacer con ella."]
+    elif altos:
         # BUG-0194: an AR of high order is proposed as the COMPLETE polynomial
         # (no zeros imposed, BUG-0095); what it hides is read in its roots.
         lines += ["",
@@ -809,6 +835,14 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
     if _freq <= 1:
         # BUG-0196: annual data have no seasonal frequencies — no harmonics.
         seasonal_note = "Datos anuales: sin armónicos (n_harmonics=0, seasonal=False)."
+    elif _sin_est:
+        # BUG-0209: node 3's Decision A, said as such — no «add n_harmonics=5».
+        seasonal_note = ("Decisión A del nodo 3 (sin estacionalidad): sin armónicos "
+                         "(n_harmonics=0, seasonal=False).")
+    elif D == 0 and estacional:
+        seasonal_note = (
+            "El nodo 3 detectó estacionalidad (ruta B1): añade armónicos cos/sin "
+            f"(n_harmonics={max(_freq // 2 - 1, 0)}) en confirm_and_estimate.")
     elif D == 0:
         # BUG-0196: D=0 is both route B1 (harmonics) and Decision A (no
         # seasonality); this listing does not know which node 3 took.
@@ -829,7 +863,7 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
         sp0, sp1 = specs[0], specs[1]
         rec = (
             (f"Decisión ambigua entre ARIMA({sp0.p},{d},{sp0.q}) y "
-             f"ARIMA({sp1.p},{d},{sp1.q}). " if _freq <= 1 else
+             f"ARIMA({sp1.p},{d},{sp1.q}). " if _freq <= 1 or _sin_est else
              f"Decisión ambigua entre SARIMA({sp0.p},{d},{sp0.q})({sp0.P},{D},{sp0.Q}) y "
              f"SARIMA({sp1.p},{d},{sp1.q})({sp1.P},{D},{sp1.Q}). ")
             + f"Estima ambos y elige por AIC/BIC y diagnosis de residuos. "
@@ -837,7 +871,7 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
         )
     else:
         rec = (
-            (f"Confirma ARIMA({rec_p},{d},{rec_q})" if _freq <= 1 else
+            (f"Confirma ARIMA({rec_p},{d},{rec_q})" if _freq <= 1 or _sin_est else
              f"Confirma SARIMA({rec_p},{d},{rec_q})({rec_P},{D},{rec_Q})_{specs[0].s if specs else ''}")
             + " como punto de partida. "
             f"Revisa la figura ACF/PACF antes de estimar. "
@@ -877,6 +911,7 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
             "d": d, "D": D, "lam": lam,
             "ambiguous": ambiguous,
             "top_gap": top_gap,
+            "estacional": estacional,       # decisión del nodo 3 (BUG-0209)
             "tie": [(sp.p, sp.q, sp.P, sp.Q) for sp in tied] if len(tied) >= 2 else [],
             "card": card_text,
             "suggestions": [

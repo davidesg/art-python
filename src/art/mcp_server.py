@@ -5492,7 +5492,21 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                                                  npar=_fac(m_pre))
             data_label = f"residuos de `{os.path.basename(pre_path)}`"
         else:
-            ident      = describe_identification(ts, d=d, D=D, lam=lam)
+            # BUG-0209. Sin `pre_path` y con D=0 este nodo no sabía qué había
+            # decidido el 3 —ruta B1 o Decisión A— y proponía para los dos:
+            # candidatos (P,0,Q)₁₂ y `n_harmonics=5` sobre una serie
+            # desestacionalizada (IPC_US, F-HAC p=0,78). Se repite el MISMO
+            # contraste del nodo 3 (`describe_seasonality` → `detect_seasonality`
+            # con sus valores por defecto), así que la decisión es la misma.
+            _estacional = None
+            if D == 0 and int(ts.freq or 1) > 1:
+                try:
+                    from art.seasonal_detection import detect_seasonality as _ds
+                    _estacional = bool(_ds(ts).seasonal_detected)
+                except Exception as _e_sd:
+                    _warn("seasonality check at node 4 failed", _e_sd)
+            ident      = describe_identification(ts, d=d, D=D, lam=lam,
+                                                 estacional=_estacional)
             data_label = f"∇^{d}∇_s^{D} y(λ={lam})"
 
         _ruta_fig = _escribe_fig(ident.figure_b64, "identification")   # BUG-0113
@@ -5644,9 +5658,13 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                     + nota_inc
                 )
             else:
+                # BUG-0209: con la Decisión A del nodo 3, sin armónicos.
+                _armonicos = ("n_harmonics=0, seasonal=False"
+                              if ident.data.get("estacional") is False
+                              else f"n_harmonics={n_harm}")
                 next_call = (
                     f"Llama a `confirm_and_estimate` con\n"
-                    f"`lam={lam}, d={d}, D=0, p=<p>, q=<q>, n_harmonics={n_harm}"
+                    f"`lam={lam}, d={d}, D=0, p=<p>, q=<q>, {_armonicos}"
                     f", estimate_mu={'True' if _rec_mu else 'False'}`\n"
                     f"*(Sugerencia: p={rec_p}, q={rec_q})*"
                 )
