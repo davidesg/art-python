@@ -1061,7 +1061,7 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
 # Model equation (Bloque O)
 # ---------------------------------------------------------------------------
 
-def model_equation(ts, model) -> str:
+def model_equation(ts, model, errores_tipicos: bool = True) -> str:
     """
     Render the estimated model as two polynomial-operator equations (Unicode).
 
@@ -1071,6 +1071,10 @@ def model_equation(ts, model) -> str:
 
     Each estimated parameter shows SE aligned below it (\\est{}{} equivalent).
     Returns plain text ready for Claude Code chat (monospace rendering).
+
+    `errores_tipicos=False` da los mismos coeficientes SIN la línea de errores
+    típicos: es la ecuación de las herramientas que sólo MIRAN un `.pre` y no
+    pueden prometer la covarianza (BUG-0090, BUG-0216).
     """
     import numpy as np
     from math import gcd
@@ -1084,7 +1088,9 @@ def model_equation(ts, model) -> str:
     # positional cursor desynced e.g. AR_f-before-MA, or omega/delta interleaving).
     # See ART_MCP_REVIEW.md §1.
     vals = _reconstruct_params(model, list(model.params))
-    sers = _reconstruct_params(model, list(model.std_errors))
+    sers = _reconstruct_params(
+        model, list(model.std_errors) if errores_tipicos
+        else [0.0] * len(list(model.params)))
 
     def _flags(obj, attr, n):
         fl = getattr(obj, attr, None)
@@ -1336,6 +1342,11 @@ def model_equation(ts, model) -> str:
             if free:
                 v, se = pi.pop()
             else:
+                # Un coeficiente FIJO a cero no es un término del modelo: es
+                # un hueco (un retardo saltado) o el relleno que se escribe
+                # para un ARMA(0,0). Imprimirlo daba «(1 − 0·B)» (BUG-0216).
+                if abs(float(v0)) < 1e-12:
+                    continue
                 v, se = v0, 0.0
             sign  = _sign_arma(v)
             v_str = _fv(abs(v))
@@ -1480,6 +1491,10 @@ def model_equation(ts, model) -> str:
         frees = (free_lists if free_lists is not None
                  else [[True] * len(f) for f in factors])
         for factor, freel in zip(factors, frees):
+            # Un factor sin ningún término —todo fijo a cero, el relleno del
+            # `.inp` de un (0,d,0)— es el operador 1: se omite (BUG-0216).
+            if not any(fr or abs(float(v)) >= 1e-12 for v, fr in zip(factor, freel)):
+                continue
             target.append(_fmt_poly(factor, freel, lag_mult))
 
     def _add_fixed_freq(target, ff_list):

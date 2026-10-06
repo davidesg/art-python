@@ -1512,6 +1512,33 @@ def _warn(context: str, exc: "Exception | None" = None) -> None:
     print(f"⚠ [art] {context}{detail}", file=sys.stderr)
 
 
+def _forma_estructural(model, lam: float) -> str:
+    """La FORMA del modelo en una línea —la del guion—, sin factores vacíos.
+
+    `_extract_spec` cuenta p, q, P y Q por la longitud del factor, y el `.inp`
+    de un (0,d,0) lleva un AR de relleno `[0.0]` FIJO: la forma salía
+    «∇[ln y_t] = μ + [1-φ(B)]⁻¹·a_t» para un modelo que no tiene AR
+    (BUG-0216). Aquí sólo se corrige el recuento para ESCRIBIR la forma; el
+    spec que se guarda —la identidad de estado del guion— no se toca.
+    """
+    from art.guion import _build_equation, _extract_spec
+    spec = dict(_extract_spec(model, lam))
+
+    def _efectivo(factores, libres):
+        if not factores:
+            return 0
+        f, fl = list(factores[0]), (list(libres[0]) if libres else [True] * len(factores[0]))
+        if not any(fr or abs(float(v)) >= 1e-12 for v, fr in zip(f, fl)):
+            return 0
+        return len(f)
+
+    spec["p"] = _efectivo(model.ar, getattr(model, "ar_free", None))
+    spec["q"] = _efectivo(model.ma, getattr(model, "ma_free", None))
+    spec["P"] = _efectivo(model.ar_s, getattr(model, "ar_s_free", None))
+    spec["Q"] = _efectivo(model.ma_s, getattr(model, "ma_s_free", None))
+    return _build_equation(spec, model.series.freq)
+
+
 def _equation_for_prompt(ts, model) -> str:
     """The estimated-model equation wrapped for the prompt: a meta-directive to
     Claude + the authoritative equation in a code fence to be shown VERBATIM.
@@ -6823,7 +6850,8 @@ def _record_to_guion(
     if dominio:
         spec["dominio"] = dominio
     stats = _extract_stats(model, diag_result)
-    eq    = _build_equation(spec, model.series.freq)
+    # Sin factores vacíos: un (0,d,0) no se registra con un AR (BUG-0216).
+    eq    = _forma_estructural(model, lam)
     # BUG-0207 D4. Lo que la diagnosis VE va a la ficha de SU versión. Sólo se
     # escribía si el llamante lo pasaba, y los problemas de un modelo
     # descartado acababan en la versión siguiente o en ninguna parte. Lo del
@@ -7561,18 +7589,24 @@ def record_version(inp_path: str,
             f"**Q-pass** = {diag_result.white_noise} | **JB-pass** = {diag_result.normal}",
             f"**Anomalías** = {len(diag_result.extreme)}",
         ]
-        # La ecuación ESTRUCTURAL, la del guion, no la del prompt. `record_version`
-        # MIRA —abre con `_mirar`, que acepta un `.pre`— y la ecuación del prompt
-        # imprime cada coeficiente con su error típico debajo. Desde un `.pre`
-        # esos errores no son fiables (BUG-0090/0091: la covarianza es un
-        # subproducto del camino del optimizador, no del óptimo), así que
-        # imprimirlos aquí sería contradecir el contrato que esta herramienta
-        # respeta. La estructural dice la FORMA sin inventar precisión.
+        # LA ECUACIÓN ESTIMADA, con sus coeficientes (BUG-0216). Aquí iba sólo
+        # la ESTRUCTURAL —«∇²[ln y_t] = [1-φ(B)]⁻¹·[1-θ(B)]·a_t», sin un
+        # número—, y la versión que se registra no se podía leer sin abrir el
+        # `.out`. Pero `record_version` MIRA —abre con `_mirar`, que acepta un
+        # `.pre`— y no promete la covarianza (BUG-0090/0091): va la ecuación de
+        # `confirm_and_estimate` con los VALORES, que en un `.pre` son exactos,
+        # y SIN la línea de errores típicos, que se leen del `.out`.
         try:
-            from art.guion import _build_equation, _extract_spec
-            eq_rv = _build_equation(_extract_spec(m, lam), m.series.freq)
+            from art.describe import model_equation as _model_eq
+            eq_rv = ("```\n" + _model_eq(m.series, m, errores_tipicos=False)
+                     + "\n```\n\n*Errores típicos: en el `.out` —"
+                     "`get_out_report`—; esta vía sólo mira el modelo.*")
         except Exception as _e:
             eq_rv = f"⚠ *[equation error: {_e}]*"
+        try:
+            eq_rv += f"\n\n**Forma (guion):** `{_forma_estructural(m, lam)}`"
+        except Exception as _e:
+            _warn("forma estructural en record_version", _e)
         texto = envuelve_iteracion(
             nombre=name or os.path.splitext(os.path.basename(inp_path))[0],
             especificacion=(f"Registro de `{os.path.basename(inp_path)}` tal como "
@@ -8588,8 +8622,8 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
 
         spec_a = _extract_spec(ma, lam=lam_a)
         spec_b = _extract_spec(mb, lam=lam_b)
-        eq_a   = _build_equation(spec_a, ma.series.freq)
-        eq_b   = _build_equation(spec_b, mb.series.freq)
+        eq_a   = _forma_estructural(ma, lam_a)      # BUG-0216
+        eq_b   = _forma_estructural(mb, lam_b)
 
         diag_a = diagnose(ma)
         diag_b = diagnose(mb)

@@ -348,14 +348,17 @@ def test_record_version_NO_muestra_esa_ecuacion_y_es_correcto():
     """La sexta envuelta sale con CERO, y no es un defecto: `record_version`
     abre con `_mirar` —acepta un `.pre`— y la ecuación del prompt imprime cada
     coeficiente con su error típico debajo. Desde un `.pre` esos errores no son
-    fiables (BUG-0090/0091), así que usa la ecuación ESTRUCTURAL del guion, que
-    dice la FORMA sin inventar precisión.
+    fiables (BUG-0090/0091), así que no usa la ecuación del prompt.
+
+    Desde BUG-0216 da la MISMA ecuación con sus coeficientes —en un `.pre`
+    son exactos— pero SIN la línea de errores típicos, y la forma estructural
+    del guion debajo.
 
     Se fija aquí para que un futuro «arreglo» de la asimetría no la rompa."""
     from tests._fuente import fuente_de
     rv = getattr(srv.record_version, "fn", srv.record_version)
     src = fuente_de(rv)
-    assert "_build_equation" in src
+    assert "errores_tipicos=False" in src and "_forma_estructural" in src
     assert "_equation_for_prompt" not in src
 
 
