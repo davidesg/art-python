@@ -135,7 +135,11 @@ def test_formal_tests_no_applicable_ripc1():
     from art.mcp_server import formal_tests
     result = formal_tests(_inp(_RIPC1), run_meg=False)
     assert result[0].type == "text"
-    assert "Ningún contraste aplicable" in result[0].text
+    # BUG-0215: sin AR ni MA el DCD de sobrediferenciación SÍ es aplicable y
+    # se imprime; decir a continuación «ningún contraste aplicable» era la
+    # contradicción del informe.
+    assert "DCD sobre-diferenciación regular" in result[0].text
+    assert "Ningún contraste aplicable" not in result[0].text
 
 
 def test_formal_tests_dcd_po3():

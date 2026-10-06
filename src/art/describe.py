@@ -2492,6 +2492,16 @@ def describe_formal_tests(model, run_meg: bool = True,
                 f"ENCIMA de la nula ρₘ={sf_res.phi_null:.4f}: los datos son al "
                 f"menos tan integrados como H₀. Un Φ̂₁ᵤ grande aquí mide "
                 f"distancia, no estacionariedad.")
+        elif sf_res.phi_dominant is not None and sf_res.phi_dominant < 0:
+            # BUG-0215: se leía |φ̂| y una raíz en −1 pasaba por una en +1.
+            lines.append(
+                f"  ℹ La raíz real del AR más cercana a +1 es NEGATIVA "
+                f"(φ̂={sf_res.phi_dominant:.4f}, frecuencia π): no hay raíz "
+                f"cerca de la frecuencia cero, y el contraste lo dice. "
+                + ("Una raíz tan cerca de −1 es el factor (1 + B) de Nyquist: "
+                   "eso no dice nada sobre `d` — lo mira el contraste en π "
+                   "(MEG / DCD en Nyquist), no éste."
+                   if sf_res.phi_dominant <= -0.9 else ""))
         elif sf_res.phi_dominant is not None:
             lines.append(
                 f"  ℹ Raíz dominante φ̂={sf_res.phi_dominant:.4f} "
@@ -2576,6 +2586,31 @@ def describe_formal_tests(model, run_meg: bool = True,
                      "de integración (testigo θ⁰=+0.85, H₀: θ=1, ley s=1)")
         lines.append(f"- θ̂={od_res.coef_free:+.4f}, LR={od_res.lr:.3f} "
                      f"(crít 5%={c5:.2f}) → {verdict}")
+        # QUÉ QUEDA EN EL CANDIDATO — BUG-0215. El testigo se estima sobre
+        # ∇^(d+1) con el AR del modelo base DENTRO (reestimado), su MA regular
+        # sustituido por el testigo y sin media. Así que θ̂ es la persistencia
+        # de ∇^d y que ESE AR no explica, y cambia con el modelo base: sobre
+        # Salamanca, 0,93 con el AR(4) y 0,81 con el ARMA(1,1). El texto decía
+        # «medido sin AR» —que era de la validación de fue, no de esta
+        # corrida— y se leía como si el testigo no dependiera del AR.
+        # Los coeficientes LIBRES: el AR(1) fijado en cero que escribe
+        # `_write_inp` cuando no hay ARMA (fue/BUG-0013) no es un AR.
+        def _libres(fs, frees):
+            return sum(sum(1 for j in range(len(f))
+                           if not frees or i >= len(frees) or frees[i][j])
+                       for i, f in enumerate(fs or []))
+        _p_ar = _libres(model.ar, model.ar_free)
+        _n_ma = _libres(model.ma, model.ma_free)
+        lines.append(
+            f"  ℹ Candidato: ∇^{int(getattr(model, 'd', 0)) + 1}"
+            + (f", con el AR regular del modelo (AR({_p_ar}), reestimado) dentro"
+               if _p_ar else ", sin AR regular")
+            + (f", su MA regular ({_n_ma} coef.) sustituido por el testigo"
+               if _n_ma else "")
+            + ", sin media. θ̂ mide la persistencia de ∇^d y que "
+            + ("ESE AR no explica: depende del modelo base, y sobre otro AR "
+               "sale otro θ̂." if _p_ar else "nada más explica.")
+        )
 
         # BUG-0038: estos dos avisos vivían DENTRO del bloque del par
         # confirmatorio, y el par sólo se forma cuando Shin-Fuller es aplicable —
@@ -2627,10 +2662,12 @@ def describe_formal_tests(model, run_meg: bool = True,
             lines.append(
                 "  ℹ θ̂ se queda dentro, cerca de la frontera: ∇^d y es "
                 "PERSISTENTE, no un error de cálculo (ℓ(θ=1) de fue coincide con "
-                "la verosimilitud exacta del estudio, medido sin AR). Esa "
-                "persistencia es la que el par en f=0 tiene que leer."
+                "la verosimilitud exacta del estudio; esa validación se hizo "
+                "sobre candidatos SIN AR). Esa persistencia es la que el par en "
+                "f=0 tiene que leer."
                 + ("" if not (model.ar or []) else
-                   " Con AR en el modelo esa comprobación no está hecha."))
+                   " Este candidato lleva el AR del modelo, y con AR esa "
+                   "validación de fue no está hecha."))
         if sf_res is None:
             lines.append(
                 "  ⚠ **Sin par confirmatorio.** "
@@ -2641,7 +2678,7 @@ def describe_formal_tests(model, run_meg: bool = True,
                    "lo contrastan el MEG y el DCD_f."
                    if "raíz REAL" in sf_motivo else
                    "Este modelo no tiene AR regular libre, así que Shin-Fuller "
-                   "no es aplicable")
+                   "no es aplicable.")
                 + (" El lado AR —la nula opuesta— no está disponible "
                    "DIRECTAMENTE, y los contrastes de frontera se leen en "
                    "pareja. Se recupera abajo por sobreajuste."
@@ -2700,6 +2737,10 @@ def describe_formal_tests(model, run_meg: bool = True,
     # en esa banda (SF_MEG, tabla `tab:compare`). Reportarlos por separado
     # invitaba a leer «considera d+1» como una conclusión.
     quasi_cancellation = False
+    # BUG-0215: en qué sentido discrepa el par, para que el CIERRE lo lea —
+    # «sf_d+1» (SF no rechaza, el DCD dice que basta) o «dcd_d+1» (SF dice que
+    # basta, el DCD pide d+1). None si coinciden o el testigo está fuera del eje.
+    par_discrepa = None
     if sf_res is not None and od_res is not None:
         od_says_more = od_res.lr >= od_res._crit['5%']
         sf_says_enough = sf_res.stationary
@@ -2763,7 +2804,48 @@ def describe_formal_tests(model, run_meg: bool = True,
                     "  Lectura directa que sí vale: si ∇^d y tiene ACF(1) "
                     "claramente POSITIVA, la diferencia no sobra.",
                 ]
+            elif not sf_says_enough:
+                # EL OTRO SENTIDO — BUG-0215. Shin-Fuller NO rechaza la raíz
+                # unitaria y el testigo se apila en θ=+1: la ∇ extra sobra. Esta
+                # rama caía en la de abajo, y con θ̂≈1 la distancia es ≈0, así que
+                # se afirmaba la banda de cuasi-cancelación con el texto al revés
+                # —«el lado MA detecta r<1 y el lado AR ve un proceso casi
+                # estacionario»—, que es justo lo contrario de lo que dicen.
+                par_discrepa = "sf_d+1"
+                _pd = getattr(sf_res, "phi_dominant", None)
+                en_la_banda = dist <= BANDA_CUASI_CANCELACION
+                quasi_cancellation = en_la_banda
+                lines += [
+                    "",
+                    "  ⚠ **DISCREPAN: NINGUNO rechaza su nula.** El lado AR "
+                    "(Shin-Fuller) **no rechaza** la raíz unitaria"
+                    + (f" (raíz dominante φ̂={_pd:.4f})" if _pd is not None else "")
+                    + " y por eso apunta a d+1; el lado MA **no rechaza** θ=1 "
+                    f"(θ̂={od_res.coef_free:+.4f}, LR={od_res.lr:.3f} < "
+                    f"{od_res._crit['5%']:.2f}): la ∇ extra se cancela y d basta.",
+                ]
+                if en_la_banda:
+                    lines += [
+                        f"  Con el testigo a {dist:.4f} de la frontera es la "
+                        "**banda de cuasi-cancelación** vista desde el lado sin "
+                        "potencia: el AR (1 − φ̂B) sobre ∇^d y la ∇ extra con su "
+                        "(1 − θ̂B) son casi la misma representación, y son "
+                        "**equivalentes en previsión**. Un no-rechazo de "
+                        "Shin-Fuller no demuestra la raíz unitaria.",
+                        "  **No subas `d` con esta evidencia**: decide por "
+                        "parsimonia (quédate con la actual) o comparando "
+                        "previsiones fuera de muestra.",
+                    ]
+                else:
+                    lines += [
+                        f"  Con el testigo a {dist:.4f} de la frontera NO es la "
+                        "banda de cuasi-cancelación. Un no-rechazo de "
+                        "Shin-Fuller no demuestra la raíz unitaria: antes de "
+                        "mover `d`, estima el candidato d+1 y compáralo por "
+                        "diagnosis y criterios de información.",
+                    ]
             else:
+                par_discrepa = "dcd_d+1"
                 # BUG-0024. La banda de cuasi-cancelación se afirmaba SÓLO porque
                 # los dos lados discreparan, sin mirar nunca a qué distancia de
                 # la frontera está el testigo. Y el rótulo que emite es concreto:
@@ -2938,20 +3020,39 @@ def describe_formal_tests(model, run_meg: bool = True,
                "estacional, arriba.*" if dcds_res else "")
         )
 
+    # BUG-0215: la lista no contaba los DCD de sobre- y sub-diferenciación ni
+    # el Shin-Fuller por sobreajuste, así que sobre un (0,1,0) con μ el informe
+    # daba el DCD y A CONTINUACIÓN «ningún contraste aplicable». Se cuentan
+    # todos los que pueden haberse impreso arriba.
     if (sf_res is None and not dcd_res and not dcds_res and not dcd_f_res
-            and not rv_res and not meg_res):
+            and not rv_res and not meg_res and od_res is None
+            and ud_res is None
+            and not (sf_sobre is not None and sf_sobre.convergido)):
         lines.append("*Ningún contraste aplicable a esta especificación.*")
 
     # Build recommendation
     issues = []
+    # BUG-0215: lo que NO pide reformular pero impide cerrar «el modelo es
+    # adecuado» — un par que discrepa no es una orden de cambiar nada, y
+    # tampoco es una conclusión.
+    pendientes = []
     if quasi_cancellation:
         # En la banda, el par NO da una acción sobre d: da un diagnóstico. Emitir
         # "considera d+1" aquí es justo lo que el paper dice que no se haga.
-        issues.append(
-            f"**Banda de cuasi-cancelación en f=0** (θ̂={od_res.coef_free:+.4f}): "
+        # BUG-0215: quién dice qué depende del sentido del desacuerdo; la frase
+        # fija «SF dice que d basta» lo invertía cuando era SF quien no
+        # rechazaba la raíz unitaria.
+        _quien = (
             f"Shin-Fuller dice que d basta (Φ̂₁ᵤ={sf_res.phi_1u:.3f}) y el DCD de "
             f"sobrediferenciación dice d+1 (LR={od_res.lr:.3f}). Los dos tienen "
-            "razón: es la banda donde las dos representaciones son equivalentes "
+            "razón"
+            if par_discrepa == "dcd_d+1" else
+            f"Shin-Fuller no rechaza la raíz unitaria (Φ̂₁ᵤ={sf_res.phi_1u:.3f}) "
+            f"y el DCD de sobrediferenciación no rechaza θ=1 (LR="
+            f"{od_res.lr:.3f}): ninguno de los dos tiene potencia aquí")
+        issues.append(
+            f"**Banda de cuasi-cancelación en f=0** (θ̂={od_res.coef_free:+.4f}): "
+            + _quien + ": es la banda donde las dos representaciones son equivalentes "
             "en previsión. NO cambies d con esta evidencia — decide por "
             "parsimonia (quédate con la actual) o compara previsiones fuera de "
             "muestra. Ver SF_MEG, tabla `tab:compare`."
@@ -2967,10 +3068,44 @@ def describe_formal_tests(model, run_meg: bool = True,
             "compitiendo) y, mientras tanto, decide d por el signo de la ACF(1) "
             "de ∇^d y: positiva ⇒ la diferencia no sobra."
         )
+    elif par_discrepa == "sf_d+1":
+        # BUG-0215: el DCD dice que la ∇ extra sobra; «considera aumentar d»
+        # contradecía la mitad del par que se acababa de imprimir.
+        pendientes.append(
+            f"**El par en f=0 discrepa**: Shin-Fuller no rechaza la raíz unitaria "
+            f"(Φ̂₁ᵤ={sf_res.phi_1u:.3f} ≤ {sf_res.crit_5pct:.2f}) y el DCD de "
+            f"sobrediferenciación dice que la ∇ extra sobra (θ̂="
+            f"{od_res.coef_free:+.4f}, LR={od_res.lr:.3f}). No es la banda de "
+            "cuasi-cancelación. No subas d por Shin-Fuller solo; si quieres "
+            "despejarlo, estima el candidato d+1 y compáralo por diagnosis y "
+            "criterios de información."
+        )
+    elif par_discrepa == "dcd_d+1":
+        # BUG-0215: discrepan FUERA de la banda (Latina AR(4)) y el cierre
+        # decía «no detectan problemas. El modelo es adecuado».
+        pendientes.append(
+            f"**El par en f=0 discrepa fuera de la banda de cuasi-cancelación**: "
+            f"Shin-Fuller dice que d basta (Φ̂₁ᵤ={sf_res.phi_1u:.3f}) y el DCD de "
+            f"sobrediferenciación pide d+1 (LR={od_res.lr:.3f}, θ̂="
+            f"{od_res.coef_free:+.4f}, a {1.0 - od_res.coef_free:.4f} de la "
+            "frontera). El orden de integración no queda fijado: estima el "
+            "candidato d+1 y compáralo por diagnosis y criterios de información."
+        )
     elif sf_res is not None and not sf_res.stationary:
         issues.append(
             f"Shin-Fuller no rechaza H₀ (Φ̂₁ᵤ={sf_res.phi_1u:.3f} ≤ {sf_res.crit_5pct:.2f}): "
             "posible raíz unitaria en el componente AR. Considera aumentar d en 1."
+        )
+    elif (sf_res is None and od_res is not None
+          and od_res.lr >= od_res._crit['5%']
+          and not (sf_sobre is not None and sf_sobre.convergido)):
+        # Un solo lado apuntando a d+1: el bloque ya dice que no es
+        # concluyente, y el cierre no puede decir «adecuado» encima.
+        pendientes.append(
+            f"El DCD de sobrediferenciación apunta a d+1 (LR={od_res.lr:.3f}) y "
+            "no hay lado AR con que emparejarlo: un solo lado no fija d. Estima "
+            "el candidato d+1 y compáralo por diagnosis y criterios de "
+            "información."
         )
     non_invertible_ma = [r for r in dcd_res if r.lr < 1.94]
     for r in non_invertible_ma:
@@ -3022,6 +3157,13 @@ def describe_formal_tests(model, run_meg: bool = True,
 
     if issues:
         rec = "Reformulación necesaria:\n" + "\n".join(f"  • {i}" for i in issues)
+        if pendientes:
+            rec += "\nY queda abierto:\n" + "\n".join(f"  • {i}" for i in pendientes)
+    elif pendientes:
+        # BUG-0215: el cierre lee el par. Con los dos lados discrepando no se
+        # puede decir «no detectan problemas».
+        rec = ("Los contrastes formales no piden reformular, pero **no cierran** "
+               "el modelo:\n" + "\n".join(f"  • {i}" for i in pendientes))
     else:
         rec = "Los contrastes formales no detectan problemas. El modelo es adecuado."
 
@@ -3059,13 +3201,16 @@ def describe_formal_tests(model, run_meg: bool = True,
                  "dcd_lr": od_res.lr,
                  "dcd_theta": od_res.coef_free,
                  "dcd_crit_5pct": od_res._crit['5%'],
-                 "quasi_cancellation": quasi_cancellation}
+                 "quasi_cancellation": quasi_cancellation,
+                 "discrepa": par_discrepa}                      # BUG-0215
                 if (sf_res is not None and od_res is not None) else None
             ),
             # BUG-0025: el estado de la adecuación, para quien lea la estructura
             # en vez del texto.
             "diagnosis_ok": not _dg_fallos,
             "diagnosis_failures": list(_dg_fallos),
+            # BUG-0215: lo que impide cerrar sin pedir reformular.
+            "pendientes": list(pendientes),
         },
     )
 

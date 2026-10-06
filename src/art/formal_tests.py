@@ -464,13 +464,29 @@ def shin_fuller(model) -> ShinFullerResult:
     # LA RAÍZ QUE SE AÍSLA: la REAL más cercana al círculo unidad, en cualquier
     # factor. Tiene que ser real porque la reparametrización del paper la exige:
     # (m − ρ)·A(m) con ρ ∈ (−1, 1].
+    #
+    # LA MÁS CERCANA A +1, CON SIGNO — BUG-0215. La nula es ρ = ρₘ = 1 − 4/n,
+    # una raíz cerca de **+1**: la de la frecuencia cero, la que gobierna `d`.
+    # Se tomaba la raíz real de menor MÓDULO y se comparaba |φ̂| con ρₘ, así que
+    # un AR(1) con φ̂ = −0,9855 (raíz en B = −1/0,9855, frecuencia π) se leía
+    # como φ̂ = +0,9855: por encima de ρₘ, estadístico a cero y «raíz unitaria —
+    # considerar d+1» (Moncloa, ARIMA(1,2,2)). Una raíz cerca de −1 es el
+    # factor (1 + B) de Nyquist y no dice nada sobre `d`.
+    #
+    # Se aísla la raíz real de φ MAYOR con su signo: si hay alguna positiva, es
+    # la positiva más cercana a +1; si todas son negativas, la menos negativa,
+    # y entonces φ̂ < 0 < ρₘ: la dirección es la buena y el contraste dice lo
+    # que debe —que no hay raíz en +1—. No se descartan las negativas: un
+    # ARIMA(1,1,0) con φ̂ = −0,3 es un caso corriente y su lado AR existe (en
+    # la reparametrización del paper ρ ∈ (−1, 1]).
     TOL = 1e-8
     cand = None
     for i, f in enumerate(facs):
         for z in _raices(f):
             if abs(z.imag) <= TOL * max(1.0, abs(z.real)) and z.real != 0:
-                if cand is None or abs(z.real) < cand[0]:
-                    cand = (abs(z.real), i, float(z.real))
+                phi = 1.0 / float(z.real)
+                if cand is None or phi > cand[0]:
+                    cand = (phi, i, float(z.real))
     if cand is None:
         raise ValueError(
             "Shin-Fuller no aplica: el AR no tiene ninguna raíz REAL que aislar. "
@@ -480,8 +496,7 @@ def shin_fuller(model) -> ShinFullerResult:
             "estacionariedad en una frecuencia ω≠0: eso lo contrastan el MEG y "
             "el DCD_f, no este test.")
 
-    _mod, dom, raiz_dom = cand
-    phi_dom = 1.0 / _mod
+    phi_dom, dom, raiz_dom = cand                 # φ̂ CON signo (BUG-0215)
 
     nuevos_f, nuevos_l = [], []
     for i, f in enumerate(facs):
@@ -647,9 +662,10 @@ def shin_fuller_sobreajuste(model) -> SobreajusteSFResult:
     sf = shin_fuller(mc)                          # ahora sí hay raíz real
 
     raices_amp = _np.roots([-c for c in reversed(mc.ar[0])] + [1.0])
-    reales = [abs(z.real) for z in raices_amp
-              if abs(z.imag) <= 1e-8 * max(1.0, abs(z.real))]
-    phi_real = (1.0 / min(reales)) if reales else None
+    # La que `shin_fuller` aísla: la de φ mayor, con signo (BUG-0215).
+    reales = [1.0 / z.real for z in raices_amp
+              if abs(z.imag) <= 1e-8 * max(1.0, abs(z.real)) and z.real != 0]
+    phi_real = max(reales) if reales else None
 
     return SobreajusteSFResult(
         sf=sf,
