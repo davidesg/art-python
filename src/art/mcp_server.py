@@ -6160,7 +6160,8 @@ def _state_footer(model, inp_path: str, guion_note: str = "",
     nota = ""
     if n_ext:
         pe = max(diag_result.extreme, key=lambda t: abs(t[1]))
-        nota = f"{n_ext} anómalo{'s' if n_ext > 1 else ''} (obs {pe[0]}, z={pe[1]:+.2f})"
+        nota = (f"{n_ext} anómalo{'s' if n_ext > 1 else ''}, el mayor "
+                f"{diag_result.etiqueta_extremo(pe[0], pe[1])}")
 
     limpio = q_ok and jb_ok and centrado and seas_ok
     base = _os.path.splitext(inp_path)[0]
@@ -6418,7 +6419,7 @@ def _round_problems_text(rd) -> str:
         partes.append(f"JB={dg.jb_stat:.1f} (p={dg.jb_pvalue:.4f})")
     if dg.extreme:
         partes.append("extremos: " + ", ".join(
-            f"obs {o} (z={z:+.2f})" for o, z in dg.extreme[:4]))
+            dg.etiqueta_extremo(o, z) for o, z in dg.extreme[:4]))
     return " · ".join(partes)
 
 
@@ -10372,7 +10373,8 @@ def build_model(inp_path: str, output_path: str, max_rounds: int = 5,
             jb_str = "✓" if rdiag.normal else f"✗ JB={rdiag.jb_stat:.1f}"
             n_ext  = len(rdiag.extreme)
             ext_str = (
-                "  ".join(f"obs {obs} (z={z:+.2f})" for obs, z in rdiag.extreme[:4])
+                "  ".join(rdiag.etiqueta_extremo(obs, z)
+                          for obs, z in rdiag.extreme[:4])
                 if rdiag.extreme else "—"
             )
             log.append(

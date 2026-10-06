@@ -67,6 +67,17 @@ class DiagnosisResult:
     # The ARMA parameters the Q discounts (fue's free_arma_count): the
     # degrees of freedom are lag - q_df_correction (BUG-0166, BUG-0195).
     q_df_correction: int = 0
+    # La FECHA de cada residuo extremo, por su índice 1-based sobre los
+    # residuos (BUG-0218). El índice cambia con d —con d=2 todo se corre una
+    # observación— y el enunciado pide fechas; vacío si no se pudo fechar.
+    extreme_dates: dict = field(default_factory=dict)
+
+    def etiqueta_extremo(self, obs: int, z: float | None = None) -> str:
+        """«11/2008 (obs 82, z=-5.50)»: la fecha primero; el índice y la z,
+        los de la tabla del `.out`, detrás."""
+        f = self.extreme_dates.get(int(obs))
+        zs = f", z={z:+.2f}" if z is not None else ""
+        return f"{f} (obs {obs}{zs})" if f else f"obs {obs}" + (f" ({zs[2:]})" if zs else "")
 
     # EL CANCERBERO — decisión del analista, 11-sep-2026.
     #
@@ -226,7 +237,7 @@ class DiagnosisResult:
         if self.extreme:
             lines.append(f"  Extreme residuals (|z|>3): {len(self.extreme)}")
             for obs, z in self.extreme[:5]:
-                lines.append(f"    obs {obs}: z={z:.3f}")
+                lines.append(f"    {self.etiqueta_extremo(obs)}: z={z:.3f}")
         if self.seasonal:
             lines.append(f"  Seasonal in residuals: {self.seasonal.seasonal_detected} "
                          f"(p={self.seasonal.p_value:.4f})")
@@ -993,9 +1004,28 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
     mean_t = (float(r_mean) / (r_std / np.sqrt(len(r)))) if (r_std > 0 and len(r) > 1) else 0.0
 
     # --- Extreme residuals (compare standardized residuals against threshold) ---
-    r_z    = (r - r_mean) / r_std if r_std > 0 else r
+    # La z del `.out` (BUG-0218): la tabla «Table of standardized values» de
+    # `fue` divide por la desviación típica POBLACIONAL (ddof=0). Con la
+    # muestral salía 3,56 donde el `.out` dice 3,57 — dos cifras para el mismo
+    # anómalo. El contraste de la media (arriba) sigue con ddof=1.
+    r_sd0  = r.std(ddof=0) if len(r) > 1 else 0.0
+    r_z    = (r - r_mean) / r_sd0 if r_sd0 > 0 else r
     extreme = [(i + 1, float(z)) for i, z in enumerate(r_z) if abs(z) > z_threshold]
     extreme.sort(key=lambda x: abs(x[1]), reverse=True)
+
+    # Y su FECHA: el índice es sobre los residuos, que empiezan tras lo que
+    # consume la diferenciación (`desfase_observaciones`, BUG-0172/0185).
+    extreme_dates = {}
+    try:
+        from .guion import _at_to_date
+        from .identification import desfase_observaciones
+        _ser = model.series
+        _des = desfase_observaciones(model)
+        for o, _z in extreme:
+            extreme_dates[o] = _at_to_date(o - 1 + _des, int(_ser.start[0]),
+                                           int(_ser.start[1]), int(_ser.freq))
+    except Exception:
+        extreme_dates = {}
 
     # --- Seasonal detection on residuals ---
     # Use lam=1.0 (identity, no Box-Cox): residuals are already transformed.
@@ -1031,6 +1061,7 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
         mean=float(r_mean),
         mean_t=float(mean_t),
         extreme=extreme,
+        extreme_dates=extreme_dates,
         acf=acf_r,
         pacf=pacf_r,
         seasonal=seasonal,

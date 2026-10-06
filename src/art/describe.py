@@ -2084,7 +2084,9 @@ def describe_diagnosis(model) -> Description:
     if result.extreme:
         lines.append(
             f"- Residuos extremos (|z|>3): {len(result.extreme)} — "
-            + ", ".join(f"obs {o} (z={z:+.2f})" for o, z in result.extreme[:5])
+            # con FECHA y la z del `.out` (BUG-0218)
+            + ", ".join(result.etiqueta_extremo(o, z)
+                        for o, z in result.extreme[:5])
         )
 
     # Intervention form hints from extreme residuals
@@ -2108,7 +2110,7 @@ def describe_diagnosis(model) -> Description:
         lines.append("")
         lines.append("**Intervenciones sugeridas:**")
         for obs, z, hint in intervention_hints:
-            lines.append(f"  - obs {obs} (z={z:+.2f}): {hint}")
+            lines.append(f"  - {result.etiqueta_extremo(obs, z)}: {hint}")
         if any("step" in h for _, _, h in intervention_hints):
             lines.append(
                 "  ℹ Un step indica un cambio de nivel permanente; "
@@ -2329,7 +2331,9 @@ def describe_diagnosis(model) -> Description:
             # (BUG-0105).
             "nobs": int(getattr(getattr(model, "series", None), "nobs", 0) or 0),
             "intervention_hints": [
-                {"obs": o, "z": z, "form": h} for o, z, h in intervention_hints
+                {"obs": o, "z": z, "form": h,
+                 "date": result.extreme_dates.get(o)}       # BUG-0218
+                for o, z, h in intervention_hints
             ],
             "high_corr_pairs": [
                 {"i": i, "j": j, "corr": r_val, "label_i": li, "label_j": lj}
@@ -2433,8 +2437,8 @@ def describe_formal_tests(model, run_meg: bool = True,
         if _dg.extreme:
             _peor = max(_dg.extreme, key=lambda t: abs(t[1]))
             _dg_avisos.append(
-                f"{len(_dg.extreme)} residuo(s) extremo(s), el mayor obs "
-                f"{_peor[0]} con z = {_peor[1]:+.2f}")
+                f"{len(_dg.extreme)} residuo(s) extremo(s), el mayor "
+                f"{_dg.etiqueta_extremo(_peor[0])} con z = {_peor[1]:+.2f}")
 
     # BUG-0070: hay DOS motivos distintos por los que Shin-Fuller puede faltar
     # --sin AR libre, o sin raíz REAL que aislar (BUG-0065)-- y el informe daba
