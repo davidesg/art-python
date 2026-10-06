@@ -1209,6 +1209,100 @@ def _cita_figuras(items: list) -> list:
     return items
 
 
+def _figuras_del_carril(items: list, modo: str, con_figuras: bool,
+                        modelo: str) -> list:
+    """En AUTÓNOMO la figura se GUARDA junto al modelo y no viaja — BUG-0208.
+
+    En el carril guiado el analista decide mirando las figuras; en el autónomo
+    el analista es el LLM y no las mira, pero cada `ImageContent` le costaba
+    ≈ 58 KB de base64 por llamada, reenviados en todos los turnos siguientes.
+    Las figuras van con los modelos —son parte de su registro—, así que no se
+    dejan de hacer: se escriben como hermanas de la terna
+    (`<stem>__<huella>.png` junto al `.inp/.out/.pre`, la misma huella que la
+    copia de `ART_FIG_DIR` y que las del guion, BUG-0119) y el texto dice
+    dónde, en UNA línea. `con_figuras=True` las devuelve igual que en guiado.
+
+    Si no hay imágenes, o el carril es guiado, devuelve `items` tal cual.
+    """
+    from mcp.types import TextContent, ImageContent
+    if es_guiado(modo) or con_figuras or not isinstance(items, list):
+        return items
+    imgs = [c for c in items if isinstance(c, ImageContent)]
+    if not imgs:
+        return items
+    import base64
+    modelo = os.path.abspath(os.path.expanduser(modelo or "art"))
+    raiz = os.path.dirname(modelo)
+    stem = os.path.splitext(os.path.basename(modelo))[0] or "art"
+    rutas, temporales = [], []
+    for c in imgs:
+        h = _huella_figura(c.data)
+        ruta = os.path.join(raiz, f"{stem}__{h}.png")
+        try:
+            if not os.path.exists(ruta):
+                with open(ruta, "wb") as fh:
+                    fh.write(base64.b64decode(c.data))
+        except Exception as e:
+            # Sin fichero junto al modelo la figura se perdería: mejor que
+            # viaje como siempre a que desaparezca en silencio.
+            _warn("no se pudo guardar la figura junto al modelo", e)
+            return items
+        if ruta not in rutas:
+            rutas.append(ruta)
+        t = _FIGURAS.get(h, "")
+        if t:
+            temporales.append(t)
+    out = [c for c in items if not isinstance(c, ImageContent)]
+    k = next((i for i, c in enumerate(out) if isinstance(c, TextContent)), None)
+    if k is None:
+        out.insert(0, TextContent(type="text", text=""))
+        k = 0
+    txt = out[k].text
+    # La nota de la copia temporal (`_result`, `_cita_figuras`) se sustituye:
+    # dos rutas para la misma figura es el BUG-0119 otra vez.
+    for t in temporales:
+        txt = re.sub(r"\n*\*Figura: `" + re.escape(t) + r"`\*[^\n]*", "", txt)
+    nota = ("*Figura" + ("s" if len(rutas) > 1 else "")
+            + " guardada" + ("s" if len(rutas) > 1 else "")
+            + " (autónomo: no se devuelve como imagen; `con_figuras=True` la "
+            "devuelve): " + " · ".join(f"`{r}`" for r in rutas) + "*")
+    i = txt.rfind(FIN_DE_TURNO_GUIADO)
+    if i < 0:
+        txt = txt.rstrip() + "\n\n" + nota
+    else:
+        txt = txt[:i].rstrip() + "\n\n" + nota + "\n\n" + txt[i:]
+    out[k] = TextContent(type="text", text=txt.lstrip("\n"))
+    return out
+
+
+def _figuras_por_carril(fn):
+    """Aplica `_figuras_del_carril` a la salida de una herramienta con `modo`.
+
+    Decorador, y no un cambio en cada `return`: las herramientas con carril
+    tienen varias salidas cada una, y un `return` que se olvide es una figura
+    que vuelve a viajar. Va DEBAJO de `@mcp.tool()`; `functools.wraps` conserva
+    la firma, que es de donde FastMCP saca el esquema.
+    """
+    import functools
+    import inspect
+    sig = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    def envoltura(*args, **kwargs):
+        res = fn(*args, **kwargs)
+        try:
+            a = sig.bind_partial(*args, **kwargs)
+            a.apply_defaults()
+            p = a.arguments
+            return _figuras_del_carril(
+                res, p.get("modo", "guiado"), bool(p.get("con_figuras")),
+                p.get("output_path") or p.get("inp_path") or "")
+        except Exception as e:
+            _warn("figuras del carril autónomo", e)
+            return res
+    return envoltura
+
+
 def _result(desc) -> list:
     """Convert a Description to MCP content list (text + optional image).
 
@@ -3447,6 +3541,7 @@ def model_equation_display(inp_path: str) -> list:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@_figuras_por_carril
 def estimate_and_diagnose(inp_path: str, output_path: str = "",
                           base_pre_path: str = "",
                           guion_path: str = "",
@@ -3456,6 +3551,7 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
                           guion_problems: str = "",
                           guion_next: str = "",
                           include_histogram: bool = False,
+                          con_figuras: bool = False,
                           modo: _Modo = "guiado") -> list:
     """
     Fit the model specified in an .inp file and run diagnosis.
@@ -3480,6 +3576,10 @@ def estimate_and_diagnose(inp_path: str, output_path: str = "",
                   eres tú —el LLM—, así que no hay a quién esperar y la salida
                   NO para: pásalo en cada llamada del carril autónomo
                   (BUG-0180, BUG-0181).
+    con_figuras : en AUTÓNOMO las figuras se guardan junto al modelo
+                  (`<stem>__<huella>.png`) y NO se devuelven como imagen;
+                  el texto dice la ruta (BUG-0208). True las devuelve.
+                  En guiado no cambia nada.
     include_histogram : devolver además el histograma de residuos (por defecto
                   False, igual que en `confirm_and_estimate`). El histograma NO
                   es parte del módulo básico de diagnosis: se pide (BUG-0129).
@@ -6372,6 +6472,7 @@ def _orden_ar(p):
 
 
 @mcp.tool()
+@_figuras_por_carril
 def confirm_and_estimate(inp_path: str, output_path: str,
                           lam: float | None = None, d: int | None = None,
                           D: int | None = None,
@@ -6392,6 +6493,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                           guion_rationale: str = "",
                           guion_problems: str = "",
                           guion_next: str = "",
+                          con_figuras: bool = False,
                           modo: _Modo = "guiado") -> list:
     """
     Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
@@ -6548,6 +6650,10 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                       la confirma eres tú —el LLM hace de analista—: no hay a
                       quién esperar y la salida NO para. Pásalo en cada llamada
                       del carril autónomo (BUG-0180, BUG-0181).
+    con_figuras     : en AUTÓNOMO las figuras se guardan junto al modelo
+                      (`<stem>__<huella>.png`) y NO se devuelven como imagen;
+                      el texto dice la ruta (BUG-0208). True las devuelve.
+                      En guiado no cambia nada.
     """
     try:
         from mcp.types import TextContent, ImageContent
@@ -8044,6 +8150,7 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@_figuras_por_carril
 def guided_intervention(inp_path: str,
                         escalera: bool = False,
                         date: str = "",
@@ -8066,6 +8173,7 @@ def guided_intervention(inp_path: str,
                         guion_rationale: str = "",
                         guion_problems: str = "",
                         guion_next: str = "",
+                        con_figuras: bool = False,
                         modo: _Modo = "guiado") -> list:
     """
     Sequential INTERVENTION — ONE decision node per call.
@@ -8116,6 +8224,10 @@ def guided_intervention(inp_path: str,
     modo          : "guiado" (por defecto) | "autonomo". En AUTÓNOMO la rampa
                     se rechaza (BUG-0182); se pasa tal cual a
                     `suggest_intervention_form`, que es quien la construye.
+    con_figuras   : en AUTÓNOMO las figuras se guardan junto al modelo
+                    (`<stem>__<huella>.png`) y NO se devuelven como imagen;
+                    el texto dice la ruta (BUG-0208). True las devuelve.
+                    En guiado no cambia nada.
     n_delta       : nº de coeficientes δ del denominador. 0 = sin denominador.
                     Con `form="impulse"` y `n_delta=1` es la FORMA RACIONAL
                     ω₀/(1−δB) — salta y decae, dos parámetros (BUG-0161).
@@ -8244,7 +8356,8 @@ def guided_intervention(inp_path: str,
                           guion_decision=guion_decision,
                           guion_rationale=guion_rationale,
                           guion_problems=guion_problems,
-                          guion_next=guion_next, modo=modo)
+                          guion_next=guion_next, modo=modo,
+                          con_figuras=con_figuras)
             texto = "\n".join(getattr(c, "text", "") for c in partes)
             if texto.startswith("❌"):
                 return partes
@@ -8631,6 +8744,7 @@ def guided_intervention(inp_path: str,
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@_figuras_por_carril
 def suggest_intervention_form(inp_path: str, output_path: str,
                                date: str = "",
                                form: str = "auto",
@@ -8645,6 +8759,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                                guion_rationale: str = "",
                                guion_problems: str = "",
                                guion_next: str = "",
+                               con_figuras: bool = False,
                                modo: _Modo = "guiado") -> list:
     """
     Add an intervention to the .inp, re-estimate and show updated diagnosis.
@@ -8692,6 +8807,10 @@ def suggest_intervention_form(inp_path: str, output_path: str,
                         nivel es una tendencia determinista desde su fecha, y
                         fija para siempre la pendiente de la previsión. Es
                         instrumento de usuario avanzado, del carril guiado.
+    con_figuras       : en AUTÓNOMO las figuras se guardan junto al modelo
+                        (`<stem>__<huella>.png`) y NO se devuelven como imagen;
+                        el texto dice la ruta (BUG-0208). True las devuelve.
+                        En guiado no cambia nada.
     form              : "pulse", "step", "ramp" — o **"auto"**, que corre la
                         ESCALERA DE OCKHAM: estima los peldaños en orden (1a
                         escalón permanente, 1b impulso transitorio, 2 episodio
