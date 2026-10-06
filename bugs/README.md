@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**201 report(s), 2 open.**
+**219 report(s), 2 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -207,6 +207,24 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0202](BUG-0202-todos-los-errores-tipicos-no-validos-sin-parametros.md) | fixed | low | diagnosis | «TODOS los errores típicos de arriba NO son válidos» en un modelo que no tiene ningún parámetro | 0.2.3.dev0 |
 | [BUG-0203](BUG-0203-la-linea-de-la-media-del-listado-se-contradice.md) | fixed | low | identification | La línea de la media del listado se contradice — «t=+0.83 → Sí, estimate_mu=True» — porque el «sí» viene de que el modelo base ya lleva μ, no del t que imprime | 0.2.3.dev0 |
 | [BUG-0204](BUG-0204-con-form-auto-y-el-pelda-o-2-elegido-suggest-int.md) | fixed | high | interventions | Con form=auto y el peldaño 2 elegido, suggest_intervention_form construye un escalón de UN ω — n_omega=0 se convierte en 1 antes de leerse como «pedido» y pisa los escalones de la configuración | 0.2.3.dev0 |
+| [BUG-0206](BUG-0206-el-contraste-f-hac-de-estacionalidad-rechaza-de-mas.md) | fixed | high | seasonal_detection | El contraste F HAC de estacionalidad (detect_seasonality) rechaza de más bajo H0 — 19-28 % al 5 % nominal en series mensuales sin estacionalidad; un estudio de tamaño y potencia, compartido con drvarma | 0.2.3.dev0 |
+| [BUG-0207](BUG-0207-el-guion-del-carril-guiado-no-se-escribe-solo.md) | fixed | high | guion | El guion del carril guiado no se escribe solo — la identificación no deja nodos, el veredicto de Q(39) aprueba lo que la Q(12) rechaza, lo que ve la diagnosis no llega a la versión, el padre de una alternativa se infiere mal y no se puede adoptar | 0.2.3.dev0 |
+| [BUG-0208](BUG-0208-el-modo-autonomo-dibuja-las-figuras.md) | fixed | medium | figuras | Qué hacer con las figuras en el modo autónomo — hoy se dibujan, se escriben y se devuelven como imagen en cada llamada, aunque nadie las mire; ART_NO_VIEWER sólo cierra la ventana (A DISCUTIR) | 0.2.3.dev0 |
+| [BUG-0209](BUG-0209-tras-decidir-sin-estacionalidad-el-paso-4-la-propone.md) | fixed | medium | identification | Tras decidir «sin estacionalidad» (D=0, sin armónicos), el paso 4 de guided_identification propone candidatos SARIMA estacionales y sugiere n_harmonics=5 | 0.2.3.dev0 |
+| [BUG-0210](BUG-0210-el-nodo-d-dice-ambiguo-y-consenso.md) | fixed | low | identification | Nodo d: la tabla ADF+KPSS marca «ambiguo» y el resumen dice «primera diferencia con consenso»; y textos que contradicen sus p-valores | 0.2.3.dev0 |
+| [BUG-0211](BUG-0211-veredictos-contradictorios-en-la-misma-salida.md) | fixed | medium | diagnosis | confirm_and_estimate da en la misma salida «REVISAR ✗ / reformulación necesaria» y «No procede reformular: el modelo se sostiene» | 0.2.3.dev0 |
+| [BUG-0212](BUG-0212-el-escaneo-latente-de-anomalos-se-contradice.md) | fixed | medium | calibracion | El escaneo latente de anómalos se contradice: «distorsión leve, ACF_max=0 %» y «SÍ cambian la identificación… NO fijes p y q»; «distorsión fuerte» por retardos dentro de banda; cambios de veredicto por cruces mínimos de banda | 0.2.3.dev0 |
+| [BUG-0213](BUG-0213-la-q-de-12-leida-como-el-retardo-12.md) | fixed | medium | diagnosis | «La Q falla en el retardo 12» se lee como «falta estructura estacional»: la Q(12) acumula los retardos 1-12, y lo que falla es el 1 | 0.2.3.dev0 |
+| [BUG-0214](BUG-0214-el-jb-de-la-diagnosis-no-es-el-del-out.md) | fixed | low | diagnosis | El Jarque-Bera de la diagnosis no coincide con el del .out del mismo modelo (367,74 frente a 359,19) | 0.2.3.dev0 |
+| [BUG-0215](BUG-0215-formal-tests-raiz-negativa-y-cierres.md) | fixed | medium | formal-tests | formal_tests: una raíz AR en −0,99 se lee como raíz unitaria en +1; cierra «el modelo es adecuado» con el par discrepando; «ningún contraste aplicable» tras dar el DCD; «medido sin AR» con un testigo que depende del AR | 0.2.3.dev0 |
+| [BUG-0216](BUG-0216-ecuaciones-que-no-son-el-modelo.md) | fixed | low | describe/equation | Ecuaciones que no son el modelo estimado: «(1 − 0·B)» en un (0,1,0), y record_version escribe una ecuación genérica sin coeficientes, con μ o un AR que el modelo no tiene | 0.2.3.dev0 |
+| [BUG-0217](BUG-0217-guion-node-coincide-por-cadenas.md) | fixed | medium | guion | guion_node: `coincide` se deduce comparando cadenas («λ=0» frente a «0 (logaritmos)» ⇒ «el analista la CORRIGIÓ»), no admite «parcial», y parent=-1 cuelga el nodo de una versión abandonada | 0.2.3.dev0 |
+| [BUG-0218](BUG-0218-anomalos-sin-fecha-y-numeracion-que-cambia.md) | fixed | low | diagnosis | Los anómalos de la diagnosis van sin fecha y con un número de observación relativo a los residuos, que cambia con d; y su z difiere del .out en el segundo decimal | 0.2.3.dev0 |
+| [BUG-0219](BUG-0219-escalas-y-rotulos.md) | fixed | low | figuras | Escalas y rótulos: la media de ln z se presenta en % («w̄ = 429,39 %») y el histograma de residuos rotula «%» un eje que es una densidad (barras de más del 100 %) | 0.2.3.dev0 |
+| [BUG-0220](BUG-0220-aic-entre-d-distintos.md) | fixed | low | diagnosis | Se compara el AIC de modelos con distinta d sin advertir que no son comparables | 0.2.3.dev0 |
+| [BUG-0221](BUG-0221-guion-map-especificada-sin-estimar.md) | fixed | low | guion | guion_map afirma «1 especificada sin estimar» cuando todas las versiones están estimadas | 0.2.3.dev0 |
+| [BUG-0222](BUG-0222-get-out-report-resumido.md) | fixed | low | mcp-tools | Mejora: get_out_report devuelve el .out entero (≈ 40 KB); falta un modo resumido para el carril autónomo | 0.2.3.dev0 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
+| [BUG-0205](BUG-0205-el-intervalo-de-prevision-sale-simetrico-en-nivel.md) | wontfix | low | mcp-tools | El intervalo al 95 % de la tabla de previsión sale simétrico en nivel en modelos en logaritmos — es la aproximación del método delta, no exp(ŷ ± 1,96 s); a 24 meses del airline, [383, 668] frente a [401, 689] | — |
 

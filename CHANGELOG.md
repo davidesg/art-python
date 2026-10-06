@@ -6,6 +6,113 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### The guided lane writes its own guion (BUG-0207)
+
+- `guided_identification(guion_path=…)` writes each node (λ, d, seasonality,
+  orders) pending with the tool's proposal; the next call confirms it, and
+  `coincide` compares values. Call 1 writes the `dominio` node, or asks for
+  its `expectativas`. `confirm_and_estimate` closes the orders node.
+- A model that passes Q(3s+3) and rejects at s or 2s is drawn `Q⚠(12,24)`,
+  not Q✓, and its conclusion says so.
+- The diagnosis findings go to `problems_found` of their own version.
+  New `guion_annotate` appends to a recorded entry.
+- `parent=` in `confirm_and_estimate` and `record_version`.
+- New `guion_adopt`: ✓ without duplicating the entry.
+- The instrument warning of `guion_map` ignores decision nodes.
+  Test: `tests/test_bug_0207_el_guion_del_carril_guiado.py`.
+
+### guion_node compares values, not strings (BUG-0217)
+
+- «λ=0» and «0 (logaritmos)» are the same decision; an incomparable pair
+  is left unrecorded instead of counted as a correction.
+- `coincide="parcial"` is accepted.
+- `parent=-1` skips abandoned entries.
+  Test: `tests/test_bug_0217_coincide_y_parent.py`.
+
+### guion_map: "sin estimar" only for real specifications (BUG-0221)
+
+- A trailing node that specifies nothing (forecast, conclusion) is no
+  longer reported as a model specified and not estimated.
+  Test: `tests/test_bug_0221_especificada_sin_estimar.py`.
+
+### The autonomous lane saves its figures next to the model instead of returning them (BUG-0208)
+
+- With `modo="autonomo"`, `estimate_and_diagnose`, `confirm_and_estimate`,
+  `guided_intervention` and `suggest_intervention_form` write each figure as
+  `<stem>__<hash>.png` next to the `.inp/.out/.pre`. They return one line with
+  the path instead of the image: about 58 KB less context per call. The guided
+  lane is unchanged, and `con_figuras=True` returns the images in autonomous
+  mode too. Test: `tests/test_bug_0208_figuras_del_autonomo.py`.
+
+### `get_out_report(resumen=True)`: the .out in ~1 KB for the autonomous lane (BUG-0222)
+
+- The full `.out` is ~40 KB, and the autonomous lane read it dozens of times
+  for a few numbers. `resumen=True` returns parameters with s.e. and t,
+  σ̂ₐ, ℓ/AIC/BIC, high correlations, roots, Q at 12/24/36/39 with d.f. and
+  p, JB and dated outliers: 1.2 KB against 39–42 KB on the P02 series. The
+  default is still the verbatim `.out`.
+- The `.out` reader took the residual count from the date ("from 2/2011"
+  gave n = 2); fixed. Test: `tests/test_bug_0222_get_out_report_resumido.py`.
+
+### Step 4 respects step 3's "no seasonality" (BUG-0209)
+
+- With D=0 and no seasonality detected, `guided_identification` step 4 no longer
+  lists seasonal (P,0,Q)_s candidates or suggests `n_harmonics=5`. It repeats
+  step 3's test and passes `estacional=` to `describe_identification`. Test:
+  `tests/test_bug_0209_sin_estacionalidad_sin_candidatos_estacionales.py`.
+
+### The d node no longer says "consenso" over an ambiguous row (BUG-0210)
+
+- The unit-root summary reads the verdict of its row: an ambiguous row says
+  which test disagrees and where the consensus is. The ADF sentence of the
+  seasonality support reads its own p. Test:
+  `tests/test_bug_0210_ambiguo_no_es_consenso.py`.
+- Step 2 gives the d the analysis starts from, and when the trend rule sets it,
+  it says so: the trend in the plot decides, and the ADF has no power there.
+
+### No % on a log level; the residual histogram is a density (BUG-0219)
+
+- The step 2/3 series figure no longer shows the mean of ln y (or of an
+  unlogged series) in % ("w̄ = 429,39 %"). The residual histogram's axis is
+  "densidad", not "%", through pyfug 2.0.2's `percent=` and `density=`
+  (pyfug BUG-0008), in every series and residual figure. Requires
+  `pyfug>=2.0.2`. Test: `tests/test_bug_0219_escalas_y_rotulos.py`.
+
+### The latent outlier scan gives one verdict (BUG-0212)
+
+- A lag changes verdict only if it crosses the band by a margin: from
+  |r| > 1.25·band to |r| < 0.75·band, one standard error of r(k). Smaller
+  crossings are named but decide nothing. Only the lags that identify the
+  model decide: 1–12 and, with seasonality, s, 2s, 3s. The verdict names
+  that window.
+- The distortion level is reconciled with the calibration: "leve" never
+  goes with "cambia la identificación", "fuerte" never with "no cambia".
+  The scan's band is 2/√n, the calibration's.
+- With ARMA already estimated the latent line no longer says "NO fijes p y
+  q". Test: `tests/test_bug_0212_el_escaneo_latente_no_se_contradice.py`.
+
+### formal_tests: the root's sign, the pair's closing (BUG-0215)
+
+- Shin-Fuller only tests a positive real AR root, the one closest to +1. A
+  root near −1 (frequency π) was read as one near +1 and gave "considerar
+  d+1". With no positive real root there is no statistic: in f=0 the DCD
+  decides alone, and the closing says it is one-sided.
+- The f=0 pair says which side says what in both directions, and the
+  closing reads it: a discrepant pair no longer ends in "El modelo es
+  adecuado".
+- No "Ningún contraste aplicable" after a printed DCD. The DCD states that
+  the base model's AR stays in its candidate. Test:
+  `tests/test_bug_0215_formal_tests_raiz_negativa_y_cierres.py`.
+
+### The diagnosis says one thing, about the model it estimated (BUG-0211, 0213, 0214, 0216, 0218, 0220)
+
+- The diagnosis verdict, the §3 conclusion and the §4 reformulation read one predicate (`clean`): a REVISAR caused by the residual mean or by residual seasonality no longer ends in «No procede reformular: el modelo se sostiene» (BUG-0211). Test: `tests/test_bug_0211_veredictos_contradictorios.py`.
+- The reformulation alternative is chosen by the out-of-band residual ACF/PACF bars, not by the lag of the rejecting Q (which accumulates 1…k): ES_CORE m01 now proposes the regular part (BUG-0213). Test: `tests/test_bug_0213_la_q_de_12_no_es_el_retardo_12.py`.
+- One Jarque-Bera everywhere: fue used ⌊n/6⌋ (copied from the old C) and now uses n/6 like the current C, scipy, pyfug and art (fue BUG-0026), so the diagnosis and the `.out` agree (BUG-0214). Test: `tests/test_bug_0214_el_jb_de_la_diagnosis_y_el_del_out.py`.
+- Equations are the estimated model: no «(1 − 0·B)» for the (0,d,0) AR placeholder, no phantom φ(B) in the guion's form, and record_version shows the coefficients with their standard errors, read from the `.out` (BUG-0216). Test: `tests/test_bug_0216_ecuaciones_que_no_son_el_modelo.py`.
+- The diagnosis's extreme residuals carry their date and the .out's z (population SD): «11/2008 (obs 82, z=-5.50)»; the date does not move with d (BUG-0218). Test: `tests/test_bug_0218_anomalos_con_fecha.py`.
+- guion_map warns when its versions differ in d, D, λ or ifadf and groups them: logL/AIC/BIC compare only within a group (BUG-0220; compare_versions already did, BUG-0051). Test: `tests/test_bug_0220_aic_entre_d_distintos.py`.
+
 ### The seasonality test: the HAC F to identify, the OLS F on residuals (BUG-0206)
 
 - A size-and-power study (`research/seasonal_test`) of six tests, under 16
