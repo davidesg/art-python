@@ -376,6 +376,20 @@ def describe_seasonality(ts) -> Description:
         ]
 
     if not d_ok:
+        # BUG-0210: «el ADF no rechaza» se decía siempre que fallara ALGUNO de
+        # los dos, también con ADF p=0,031 (Salamanca) o p=0,000 (IPC_ES), donde
+        # quien discrepa es el KPSS. La frase lee su propio p.
+        _ser = "∇log(y)" if all(v > 0 for v in ts.data) else "∇y"
+        if not adf_ok:
+            _que_dicen = (f"El ADF sobre {_ser} no rechaza la raíz unitaria "
+                          f"(p={adf_p:.4f})"
+                          + ("" if kpss_ok else
+                             f" y el KPSS rechaza la estacionariedad "
+                             f"(p={kpss_p:.4f})"))
+        else:
+            _que_dicen = (f"El ADF sobre {_ser} rechaza la raíz unitaria "
+                          f"(p={adf_p:.4f}), pero el KPSS rechaza la "
+                          f"estacionariedad (p={kpss_p:.4f})")
         if det:
             # BUG-0023: la estacionalidad acaba de detectarse TRES LÍNEAS más
             # arriba, en este mismo bloque. La regresión del ADF no lleva
@@ -386,10 +400,10 @@ def describe_seasonality(ts) -> Description:
             # contaminación por evidencia.
             lines += [
                 "",
-                "ℹ El ADF sobre ∇y no rechaza, pero **eso no es evidencia de "
+                f"ℹ {_que_dicen}, pero **eso no es evidencia de "
                 "d=2 aquí**: la estacionalidad que se acaba de detectar no entra "
-                "en la regresión del ADF, cae en su varianza residual y sesga el "
-                "contraste hacia no rechazar. Primero se trata la estacionalidad "
+                "en las regresiones de los contrastes, cae en su varianza residual "
+                "y los sesga hacia «diferencia otra vez». Primero se trata la estacionalidad "
                 "(D y/o armónicos); el orden de integración se decide después, y "
                 "el contraste que vale sobre el modelo estimado es Shin-Fuller.",
             ]
@@ -399,7 +413,7 @@ def describe_seasonality(ts) -> Description:
             # a second instruction here («Considera d=2») contradicted it.
             lines += [
                 "",
-                "⚠ El ADF sobre ∇log(y) no rechaza la raíz unitaria: queda abierta "
+                f"⚠ {_que_dicen}: queda abierta "
                 "la pregunta de una diferencia más. Se contesta con ADF+KPSS en "
                 "d+1 y, sobre el modelo estimado, con Shin-Fuller y el DCD de "
                 "sobrediferenciación — no con este contraste solo.",
@@ -520,12 +534,46 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2,
     _rec_pol = _decide_d({"recommended_d": rec_d, "trend_r2": trend_r2},
                          seasonal=None, current_d=0, max_step=1)
 
-    _que_es = ("serie ya estacionaria en niveles" if rec_d == 0 else
-               "primera diferencia con consenso" if rec_d == 1 else
-               f"{rec_d} diferencias hasta el consenso")
+    # BUG-0210. Esto era una plantilla por valor de d: «primera diferencia con
+    # consenso» debajo de una fila d=1 marcada «ambiguo ⚠» (Retiro, Salamanca),
+    # y «serie ya estacionaria en niveles» con d=0 ambiguo y d=2 la única fila
+    # con consenso (IPC_ES). `recommended_d` toma la primera fila en la que el
+    # ADF rechaza, diga lo que diga el KPSS (BUG-0002): esa d se mantiene, pero
+    # la frase lee el VEREDICTO de su fila y dice dónde está el consenso.
+    _fila = next((r for r in results if r.d == rec_d), None)
+    if _fila is None or _fila.verdict == "stationary":
+        _que_es = ("serie ya estacionaria en niveles" if rec_d == 0 else
+                   "primera diferencia con consenso" if rec_d == 1 else
+                   f"{rec_d} diferencias hasta el consenso")
+    else:
+        if _fila.verdict == "ambiguous":
+            _que_es = (
+                f"la primera fila en la que el ADF rechaza la raíz unitaria "
+                f"(p={_fila.adf_pvalue:.4f}), pero el KPSS rechaza la "
+                f"estacionariedad (p={_fila.kpss_pvalue:.4f}): fila **ambigua**, "
+                f"**sin consenso**"
+                if _fila.adf_rejects else
+                f"el último orden de la tabla; ninguno es concluyente y en éste "
+                f"el ADF no rechaza (p={_fila.adf_pvalue:.4f}) ni el KPSS "
+                f"rechaza (p={_fila.kpss_pvalue:.4f}): fila **ambigua**, "
+                f"**sin consenso**")
+        else:
+            _que_es = ("el último orden de la tabla: en ninguno se rechaza la "
+                       "raíz unitaria, **sin consenso**")
+        _cons = [r.d for r in results if r.verdict == "stationary"]
+        if len(_cons) == 1:
+            _que_es += (f"; el único orden con consenso de los dos contrastes "
+                        f"es d={_cons[0]}")
+        elif _cons:
+            _que_es += (f"; los órdenes con consenso de los dos contrastes son "
+                        f"d={', '.join(str(c) for c in _cons)}")
+        else:
+            _que_es += "; ningún orden de la tabla tiene el consenso de los dos"
     lines += [
         "",
-        f"**Lo que encuentran los contrastes**: d = {rec_d} ({_que_es}).",
+        f"**Lo que encuentran los contrastes**: d = {rec_d} ({_que_es})."
+        if _fila is None or _fila.verdict == "stationary" else
+        f"**Lo que encuentran los contrastes**: d = {rec_d} — {_que_es}.",
     ]
     # BUG-0197: the «starting point» advice answers the question asked FROM
     # THE LEVEL. At d > 0 the caller asks «one more?» and gives the one verdict
