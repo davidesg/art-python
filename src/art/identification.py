@@ -542,7 +542,9 @@ def _listing_figures(listing: IdentificationListing,
                       begyear=int(start[0]), begtime=int(start[1]),
                       data=np.asarray(p.w, dtype=float))
         figs.append(plot_combined(pf, timeout=lost, tsnobs=len(p.w) + lost,
-                                  nlags=int(p.stats.lags), title=name))
+                                  nlags=int(p.stats.lags), title=name,
+                                  percent=(float(listing.lam) == 0.0
+                                           and lost > 0)))   # BUG-0219
     return figs
 
 

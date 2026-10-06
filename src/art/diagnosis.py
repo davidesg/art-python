@@ -1111,9 +1111,11 @@ def figura_residuos(model, title: str | None = None):
     from pyfug.graphics import plot_combined
     serie = serie_residuos_pyfug(model, title)
     n_arma = free_arma_count(model)
+    # En % sólo los residuos de un modelo en log, que son tasas (BUG-0219).
     return plot_combined(serie, npar=n_arma,
                          nlags=q_figure_lags(serie.nobs, serie.freq, n_arma),
-                         title=serie.name)
+                         title=serie.name,
+                         percent=float(getattr(model, "boxlam", 1.0)) == 0.0)
 
 
 def serie_residuos_pyfug(model, title: str | None = None):
@@ -1156,10 +1158,9 @@ def plot_diagnosis_histogram(model) -> plt.Figure:
     """Residuals histogram with its normal density, drawn by pyfug
     (`plot_histogram`). It used to come from `fue.plots`."""
     from pyfug.graphics import plot_histogram
-    from art.describe import _histograma_en_densidad
     serie = serie_residuos_pyfug(model)
-    fig = plot_histogram(serie, d=0, title=f"Histograma {serie.name}".strip())
-    _histograma_en_densidad(fig)                          # BUG-0219: densidad, no «%»
+    fig = plot_histogram(serie, d=0, title=f"Histograma {serie.name}".strip(),
+                         density=True)                    # BUG-0219: densidad, no «%»
     return fig
 
 

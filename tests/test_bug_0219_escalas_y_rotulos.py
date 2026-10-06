@@ -44,7 +44,7 @@ def test_nivel_en_log_sin_porcentaje(monkeypatch):
     t = _linea_w(monkeypatch, 0.0, 0)
     assert "%" not in t
     z = np.log(np.asarray(_ts().data))
-    assert f"{z.mean():.2f}" in t                    # ≈4.6, no 460 %
+    assert f"{z.mean():.4g}" in t                    # ≈4.6, no 460 %
 
 
 def test_la_tasa_sigue_en_porcentaje(monkeypatch):
@@ -91,3 +91,21 @@ def test_histograma_de_la_diagnosis_en_densidad(modelo, monkeypatch):
 def test_plot_diagnosis_histogram_en_densidad(modelo):
     from art.diagnosis import plot_diagnosis_histogram
     _comprueba_densidad(plot_diagnosis_histogram(modelo))
+
+
+def _linea(fig):
+    return [t.get_text() for t in fig.texts if r"\bar{w}" in t.get_text()][0]
+
+
+def test_residuos_de_un_modelo_en_log_en_porcentaje(modelo):
+    from art.diagnosis import figura_residuos
+    assert "%" in _linea(figura_residuos(modelo))
+
+
+def test_residuos_de_un_modelo_sin_log_sin_porcentaje(tmp_path):
+    from art.diagnosis import figura_residuos
+    ts = _ts()
+    f = str(tmp_path / "N.inp")
+    _write_inp(ts, fue.Model(ts, d=1, boxlam=1.0), f, refactor=1)
+    _, m = estimar(f)
+    assert "%" not in _linea(figura_residuos(m))

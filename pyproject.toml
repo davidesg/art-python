@@ -54,7 +54,9 @@ dependencies = [
     # >=2.0.1: la 2.0.0 lanza UnboundLocalError en `plot_combined` con TODA
     # serie anual (pyfug/BUG-0002), que es la figura de identificación y la de
     # residuos de art: con una serie anual, art se quedaba sin figuras.
-    "pyfug>=2.0.1",
+    # >=2.0.2: `percent=` y `density=` (pyfug/BUG-0008), sin los que el nivel
+    # en log sale en % y el histograma rotula «%» una densidad (art/BUG-0219).
+    "pyfug>=2.0.2",
     "numpy>=1.24",
     "matplotlib>=3.7",
     "scipy>=1.10",
