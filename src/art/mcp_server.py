@@ -7877,10 +7877,18 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
         # Sólo lo que de verdad espera estimación: un nodo final que no
         # especifica nada (la previsión) no es un modelo pendiente (BUG-0221).
         abiertas = especificadas_sin_estimar(g)
+        # «Especificada sin estimar» sugería un modelo escrito y no estimado; lo
+        # que queda abierto es una DECISIÓN sin modelo detrás —en Moncloa, la
+        # reformulación que deja pendientes tres intervenciones—, y se dice
+        # cuál, con lo decidido para que se vea qué falta.
         if abiertas:
-            lines.append(f"   {len(abiertas)} especificada(s) sin estimar: "
+            _n = len(abiertas)
+            lines.append(f"   {_n} decisi{'ón' if _n == 1 else 'ones'} sin modelo "
+                         f"estimado detrás: "
                          + "; ".join(", ".join(
                              f"n{e.version} {(e.node or {}).get('nodo', e.name)}"
+                             + (f" ({_rec((e.node or {}).get('decidido', ''), 150)})"
+                                if (e.node or {}).get("decidido") else "")
                              for e in i.especificacion) for i in abiertas) + ".")
 
         # ¿ESTÁ COMPLETO EL REGISTRO? El guion no tenía forma de saberse

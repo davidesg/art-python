@@ -50,7 +50,7 @@ def test_un_nodo_final_que_no_especifica_no_es_un_modelo_pendiente(tmp_path):
                _nodo(3, "ordenes", 2), _modelo(4, 3), _modelo(5, 4),
                _nodo(6, "prevision", 5))
     assert especificadas_sin_estimar(g) == []
-    assert "sin estimar" not in _mapa(g, tmp_path)
+    assert "sin modelo estimado" not in _mapa(g, tmp_path)
 
 
 def test_una_especificacion_pendiente_si_se_cuenta_y_se_nombra(tmp_path):
@@ -59,7 +59,8 @@ def test_una_especificacion_pendiente_si_se_cuenta_y_se_nombra(tmp_path):
     abiertas = especificadas_sin_estimar(g)
     assert len(abiertas) == 1
     m = _mapa(g, tmp_path)
-    assert "1 especificada(s) sin estimar" in m and "n3 ordenes" in m
+    assert "1 decisión sin modelo estimado detrás" in m and "n3 ordenes" in m
+    assert "especificada" not in m
 
 
 def test_el_guion_de_la_P04_no_tiene_ninguna(tmp_path):
@@ -72,4 +73,4 @@ def test_el_guion_de_la_P04_no_tiene_ninguna(tmp_path):
                _nodo(12, "prevision", 11))
     g.entries[10].re_registro_de = 8
     assert especificadas_sin_estimar(g) == []
-    assert "sin estimar" not in _mapa(g, tmp_path)
+    assert "sin modelo estimado" not in _mapa(g, tmp_path)

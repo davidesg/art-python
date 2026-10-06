@@ -2,7 +2,7 @@
 
 *Generated from the docstrings by `tools/gen_tools_md.py`. Do not edit by hand — edit the docstring.*
 
-**48 tools.** In an MCP server the docstring is what the model reads, so this page and the instruction the model receives are the same text by construction.
+**50 tools.** In an MCP server the docstring is what the model reads, so this page and the instruction the model receives are the same text by construction.
 
 ---
 
@@ -21,10 +21,12 @@
 | [`formal_tests`](#formal-tests) | Run formal hypothesis tests on a fitted model. |
 | [`full_report`](#full-report) | Generate a complete HTML report for a fitted model and save it to disk. |
 | [`generate_forecast`](#generate-forecast) | Generate L-step-ahead forecasts from a fitted model. |
-| [`get_out_report`](#get-out-report) | Return the full fue .out ASCII report for an estimated model. |
+| [`get_out_report`](#get-out-report) | Return the fue .out report for an estimated model — entero, o RESUMIDO. |
 | [`guided_identification`](#guided-identification) | Sequential identification — ONE decision node per call. |
 | [`guided_intervention`](#guided-intervention) | Sequential INTERVENTION — ONE decision node per call. |
 | [`guion_abandon`](#guion-abandon) | Mark a version as a DEAD END, with the reason — and cascade to what descends |
+| [`guion_adopt`](#guion-adopt) | Mark a MODEL as ADOPTED (✓ in the map), with the reason. The symmetric of |
+| [`guion_annotate`](#guion-annotate) | APPEND text to a field of an entry already in the guion — e.g. what was |
 | [`guion_diff`](#guion-diff) | Compare two analyses NODE BY NODE, with the reasoning of each side. |
 | [`guion_evidencia`](#guion-evidencia) | La EVIDENCIA de un nodo del guion: ecuación, diagnosis y figuras. |
 | [`guion_map`](#guion-map) | Show the analysis as a MAP: what descends from what, what was adopted, and |
@@ -296,6 +298,8 @@ Compare two estimated models: spec diff, stats table, nested LR test.
 | `guion_rationale` | string | no | `` |
 | `guion_problems` | string | no | `` |
 | `guion_next` | string | no | `` |
+| `parent` | integer | no | `-1` |
+| `con_figuras` | boolean | no | `False` |
 | `modo` | string | no | `guiado` |
 
 Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
@@ -429,6 +433,11 @@ Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
     guion_path      : (optional) path to guion.json — records this version
     guion_name      : version name (e.g. "PC3"); auto-assigned if empty
     guion_decision  : brief description of what this model tests or concludes
+    parent          : guion version this model COMES FROM (-1 = inferred: the
+                      last live entry). Pass it for a sibling — a second
+                      overparametrisation of m02 hangs from m02, not from the
+                      first one (BUG-0207). `base_pre_path` does not say it in
+                      a fresh model: it switches to incremental mode.
     objetivo        : what the model is FOR — "univariante" (forecasting the
                       series itself), "multivariante" (it enters a system: VECM,
                       transfer function) or "estructural" (read the components).
@@ -452,6 +461,10 @@ Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
                       la confirma eres tú —el LLM hace de analista—: no hay a
                       quién esperar y la salida NO para. Pásalo en cada llamada
                       del carril autónomo (BUG-0180, BUG-0181).
+    con_figuras     : en AUTÓNOMO las figuras se guardan junto al modelo
+                      (`<stem>__<huella>.png`) y NO se devuelven como imagen;
+                      el texto dice la ruta (BUG-0208). True las devuelve.
+                      En guiado no cambia nada.
 
 ---
 
@@ -507,6 +520,7 @@ Create a .inp file from raw time series data.
 | `guion_problems` | string | no | `` |
 | `guion_next` | string | no | `` |
 | `include_histogram` | boolean | no | `False` |
+| `con_figuras` | boolean | no | `False` |
 | `modo` | string | no | `guiado` |
 
 Fit the model specified in an .inp file and run diagnosis.
@@ -531,6 +545,10 @@ Fit the model specified in an .inp file and run diagnosis.
                   eres tú —el LLM—, así que no hay a quién esperar y la salida
                   NO para: pásalo en cada llamada del carril autónomo
                   (BUG-0180, BUG-0181).
+    con_figuras : en AUTÓNOMO las figuras se guardan junto al modelo
+                  (`<stem>__<huella>.png`) y NO se devuelven como imagen;
+                  el texto dice la ruta (BUG-0208). True las devuelve.
+                  En guiado no cambia nada.
     include_histogram : devolver además el histograma de residuos (por defecto
                   False, igual que en `confirm_and_estimate`). El histograma NO
                   es parte del módulo básico de diagnosis: se pide (BUG-0129).
@@ -802,8 +820,17 @@ Generate L-step-ahead forecasts from a fitted model.
 | name | type | required | default |
 |---|---|---|---|
 | `inp_path` | string | yes | — |
+| `resumen` | boolean | no | `False` |
 
-Return the full fue .out ASCII report for an estimated model.
+Return the fue .out report for an estimated model — entero, o RESUMIDO.
+
+    `resumen=True` (≈ 2 KB en vez de ≈ 40 KB; úsalo en el carril AUTÓNOMO, que
+    lo lee muchas veces): parámetros con e.t. y t, σ̂ₐ, ℓ/AIC/BIC,
+    correlaciones |ρ| ≥ 0.7, raíces de cada factor, Q de Ljung-Box (12/24/36/39
+    en mensual) con g.l. y p, Jarque-Bera con p, y anómalos con fecha. Las
+    mismas cifras del mismo `.out`, sin la serie tipificada, el histograma, los
+    gráficos de ACF/PACF ni la calibración de la FAS (BUG-0222).
+    `resumen=False` (por defecto): el `.out` entero, verbatim.
 
     Produces the same output as the C 'fue' binary: parameter estimates with
     standard errors, AR/MA polynomials, sigma, log-likelihood, AIC/BIC,
@@ -829,6 +856,7 @@ Return the full fue .out ASCII report for an estimated model.
     ----------
     inp_path : ruta del `.inp`, `.pre` o `.out`. La terna comparte basename, así
                que se busca el `.out` hermano.
+    resumen  : True → sólo las cifras que deciden un nodo (ver arriba).
 
 ---
 
@@ -845,8 +873,19 @@ Return the full fue .out ASCII report for an estimated model.
 | `pre_path` | string | no | `` |
 | `objetivo` | string | no | `univariante` |
 | `domain` | string | no | `` |
+| `guion_path` | string | no | `` |
+| `expectativas` | string | no | `` |
+| `razon` | string | no | `` |
 
 Sequential identification — ONE decision node per call.
+
+    With `guion_path`, EACH CALL WRITES ITS NODE in the guion (BUG-0207): the
+    node it shows (λ, d, estacionalidad, ordenes) is left PENDING with the
+    tool's proposal, and the next call — which carries the chosen value —
+    confirms it and records whether it matches the proposal. Call 1 also writes
+    the `dominio` node from `domain` + `expectativas` (asks for them if
+    missing). `razon`: why the value passed in THIS call was chosen (it closes
+    the previous node). `confirm_and_estimate(guion_path=…)` closes `ordenes`.
 
     DECISION TREE — call in this sequence, one at a time:
 
@@ -909,6 +948,10 @@ Sequential identification — ONE decision node per call.
                is precisely where the purpose matters.
     pre_path : path to fitted .pre (Call 4, B1): ARMA identified on
                its residuals instead of the raw transformed series.
+    guion_path   : guion.json where the nodes are written (see above).
+    expectativas : Call 1 — the dynamics the theory expects for this class of
+                   series (the `dominio` node; see guion_node).
+    razon        : why the value(s) passed in this call were chosen.
 
 ---
 
@@ -940,6 +983,7 @@ Sequential identification — ONE decision node per call.
 | `guion_rationale` | string | no | `` |
 | `guion_problems` | string | no | `` |
 | `guion_next` | string | no | `` |
+| `con_figuras` | boolean | no | `False` |
 | `modo` | string | no | `guiado` |
 
 Sequential INTERVENTION — ONE decision node per call.
@@ -990,6 +1034,10 @@ Sequential INTERVENTION — ONE decision node per call.
     modo          : "guiado" (por defecto) | "autonomo". En AUTÓNOMO la rampa
                     se rechaza (BUG-0182); se pasa tal cual a
                     `suggest_intervention_form`, que es quien la construye.
+    con_figuras   : en AUTÓNOMO las figuras se guardan junto al modelo
+                    (`<stem>__<huella>.png`) y NO se devuelven como imagen;
+                    el texto dice la ruta (BUG-0208). True las devuelve.
+                    En guiado no cambia nada.
     n_delta       : nº de coeficientes δ del denominador. 0 = sin denominador.
                     Con `form="impulse"` y `n_delta=1` es la FORMA RACIONAL
                     ω₀/(1−δB) — salta y decae, dos parámetros (BUG-0161).
@@ -1061,6 +1109,60 @@ Mark a version as a DEAD END, with the reason — and cascade to what descends
     version    : version to abandon
     why        : why this branch is a dead end (required)
     cascade    : also abandon its descendants (default True, and normally right)
+
+---
+
+## `guion_adopt`
+
+**Arguments**
+
+| name | type | required | default |
+|---|---|---|---|
+| `guion_path` | string | yes | — |
+| `version` | integer | yes | — |
+| `why` | string | yes | — |
+
+Mark a MODEL as ADOPTED (✓ in the map), with the reason. The symmetric of
+    guion_abandon. Changes the entry's status; it creates no new entry
+    (re-recording it with record_version duplicated it — BUG-0207).
+
+    `why` is required. Nodes and dead ends cannot be adopted. The other models
+    still «exploring» are listed, not touched: close each with guion_abandon
+    and its own reason, or leave it open knowingly.
+
+    Parameters
+    ----------
+    guion_path : path to guion.json
+    version    : model version to adopt
+    why        : why this model is adopted (required)
+
+---
+
+## `guion_annotate`
+
+**Arguments**
+
+| name | type | required | default |
+|---|---|---|---|
+| `guion_path` | string | yes | — |
+| `version` | integer | yes | — |
+| `campo` | string | yes | — |
+| `texto` | string | yes | — |
+
+APPEND text to a field of an entry already in the guion — e.g. what was
+    found after recording it. Never overwrites: the new text goes on its own
+    dated line (BUG-0207).
+
+    campo: "problems_found" | "rationale" | "decision" | "next_version"
+    (aliases: problemas, razon, siguiente); for a NODE also "evidencia" |
+    "alternativas".
+
+    Parameters
+    ----------
+    guion_path : path to guion.json
+    version    : entry to annotate
+    campo      : field (see above)
+    texto      : what to add
 
 ---
 
@@ -1227,7 +1329,8 @@ Record a DECISION NODE in the guion — a specification choice, not a model.
                    "ADF p=0.013, KPSS p=0.09", "F-HAC=50.2")
     alternativas : what was considered and discarded, and why
     decidido_por : "analista+LLM" (guided) | "LLM" (autonomous) | "heurística"
-    parent       : version this node descends from (-1 = the last one recorded).
+    parent       : version this node descends from (-1 = the last LIVE one:
+                   a dead end is skipped).
     expectativas : REQUIRED for nodo="dominio" (decided 2026-09-30): the dynamics
                    the theory expects for this class of series, in terms of the
                    process in levels — persistence, cycle (and its length), finite
@@ -1240,7 +1343,9 @@ Record a DECISION NODE in the guion — a specification choice, not a model.
                    what tells where the analyst corrected the assistant; the
                    lane alone (`decidido_por`) cannot.
     coincide     : "sí" if the analyst took your proposal, "no" if they decided
-                   otherwise. Empty: derived from `propuesta` == `decidido`.
+                   otherwise, "parcial" if they took part of it. Empty: derived
+                   by comparing VALUES («λ=0» = «0 (logaritmos)»); when they
+                   cannot be compared it stays unrecorded — pass it.
     criterio     : for nodo="ordenes" (and any choice between tied candidates):
                    "estadístico" | "dominio" | "uso". "dominio" requires a
                    `dominio` node with expectations in this guion: the decision
@@ -1844,8 +1949,12 @@ Preview the contents of an Excel or CSV file before loading.
 | `problems_found` | string | no | `` |
 | `next_version` | string | no | `` |
 | `base_pre_path` | string | no | `` |
+| `parent` | integer | no | `-1` |
 
 Load, fit and record a model version in guion.json.
+
+    To ADOPT a model already in the guion use `guion_adopt`: re-recording it
+    with decision="adoptado" duplicates it (BUG-0207).
 
     Loads the model from inp_path, fits it, extracts stats (loglik, AIC, BIC,
     Q-test, JB-test, extreme residuals) and appends an entry to guion.json.
@@ -1864,6 +1973,8 @@ Load, fit and record a model version in guion.json.
                      Sin esto el padre es «la última entrada registrada», que es
                      una conjetura y en el run 4 fue falsa tres veces: declara
                      de dónde viene y el árbol lo dibuja bien (BUG-0176).
+    parent         : la versión del guion de la que sale (-1 = inferida). Manda
+                     sobre `base_pre_path` (BUG-0207 D5).
 
 ---
 
@@ -2119,6 +2230,7 @@ Generate a sequential prediction (SPS) dashboard for all series in a directory.
 | `guion_rationale` | string | no | `` |
 | `guion_problems` | string | no | `` |
 | `guion_next` | string | no | `` |
+| `con_figuras` | boolean | no | `False` |
 | `modo` | string | no | `guiado` |
 
 Add an intervention to the .inp, re-estimate and show updated diagnosis.
@@ -2166,6 +2278,10 @@ Add an intervention to the .inp, re-estimate and show updated diagnosis.
                         nivel es una tendencia determinista desde su fecha, y
                         fija para siempre la pendiente de la previsión. Es
                         instrumento de usuario avanzado, del carril guiado.
+    con_figuras       : en AUTÓNOMO las figuras se guardan junto al modelo
+                        (`<stem>__<huella>.png`) y NO se devuelven como imagen;
+                        el texto dice la ruta (BUG-0208). True las devuelve.
+                        En guiado no cambia nada.
     form              : "pulse", "step", "ramp" — o **"auto"**, que corre la
                         ESCALERA DE OCKHAM: estima los peldaños en orden (1a
                         escalón permanente, 1b impulso transitorio, 2 episodio
