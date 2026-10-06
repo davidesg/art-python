@@ -29,9 +29,17 @@ def _ar1_con_atipico(phi=0.6, n=200, at=100, golpe=-6.0, semilla=7):
 # ───────────────── lo que la herramienta tiene que ver ─────────────────
 
 def test_detecta_que_el_atipico_cambia_la_identificacion():
-    cal = calibra_correlograma(_ar1_con_atipico(), umbral=2.5)
-    assert cal.extremos, "el golpe de 6σ tiene que salir"
+    # BUG-0212: el AR(1) con un golpe de 6σ sólo «cambiaba» por cruces
+    # mínimos del borde (r(5) de 0,072 a 0,148 con banda ±0,141); con el
+    # margen ya no cuentan. El testigo es ahora un episodio de tres
+    # observaciones seguidas sobre ruido blanco, que FABRICA r(1) de verdad.
+    rng = np.random.default_rng(7)
+    x = rng.standard_normal(200)
+    x[100:103] += 6.0
+    cal = calibra_correlograma(x, umbral=2.5)
+    assert cal.extremos, "el episodio de 6σ tiene que salir"
     assert cal.cambia_la_identificacion
+    assert any(d.lag == 1 and d.acf_flip == "fabricada" for d in cal.flips_ma)
 
 
 def test_sin_atipicos_no_hay_nada_que_calibrar():

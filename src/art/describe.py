@@ -3556,7 +3556,11 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
     from .identification import _default_lags_fug
     n_lags = min(_default_lags_fug(len(w_std), int(freq)), max(1, len(w_std) - 2))
     acf_full   = _sample_acf_raw(w_std, n_lags)
-    ci_val     = 1.96 / np.sqrt(len(w_std))
+    # LA MISMA BANDA QUE LA CALIBRACIÓN — BUG-0212. Aquí había 1,96/√n y en
+    # `calibracion` 2/√n: un retardo entre las dos líneas contaba como «fuera»
+    # para el ACF_max —y empujaba a «distorsión fuerte»— y como «dentro» para
+    # el veredicto de la tabla de al lado.
+    ci_val     = 2.0 / np.sqrt(len(w_std))
 
     outl_idx = [i for i, _, _ in outliers]
     # BUG-0143: `contribs` reparte POR anómalo y `resto` cierra la identidad
@@ -3863,6 +3867,7 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
     var_max = 0.0
     max_acf_pct = 0.0
     distortion_level = "none"
+    _cal, cambia = None, False          # BUG-0212: la calibración que decide
     if not outliers:
         lines.append("- **Sin observaciones extremas.** Las ACF/PACF reflejan fielmente la estructura ARMA.")
         rec = (
@@ -3971,35 +3976,74 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         intervene_strong = var_max > 15.0 or max_acf_pct > 30.0
         intervene_mild   = var_max > 5.0  or max_acf_pct > 10.0
 
-        distortion_level = ("strong" if intervene_strong
-                            else "moderate" if intervene_mild else "light")
+        nivel_magnitud = ("strong" if intervene_strong
+                          else "moderate" if intervene_mild else "light")
+
+        # UN SOLO VEREDICTO — BUG-0212. La magnitud (var_outlier, ACF_max) y la
+        # pregunta que decide —¿cambia algún retardo de veredicto al omitir los
+        # anómalos?— se contestaban por separado, y salían «distorsión leve,
+        # razonable pasar a ARMA» y «cambia la identificación, interviene
+        # antes» en la MISMA salida de `residual_outlier_scan`. La calibración
+        # se hace aquí, sobre la misma serie y los mismos omitidos, y el nivel
+        # se reconcilia con ella: cambia ⇒ nunca «leve»; no cambia ⇒ nunca
+        # «fuerte».
+        from art.calibracion import calibra_correlograma, nivel_coherente
+        try:
+            _cal = calibra_correlograma(
+                w_std, umbral=threshold,
+                omitir={int(i) for i, _z, _d in outliers}, top_pares=0)
+        except Exception:
+            _cal = None
+        distortion_level = nivel_coherente(nivel_magnitud, _cal)
+        cambia = bool(_cal is not None and _cal.cambia_la_identificacion)
+        _flips = ([f"PACF({x.lag})" for x in _cal.flips_ar]
+                  + [f"ACF({x.lag})" for x in _cal.flips_ma]) if cambia else []
+        _cifras = f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%)"
 
         # Tratar los anómalos ANTES de ARMA es un PUNTO DE DECISIÓN del analista.
         # ART calibra la distorsión y SUGIERE; la decisión es del analista.
-        if intervene_strong:
+        if distortion_level == "strong":
             verdict = (
-                "**Distorsión fuerte sobre la ACF/PACF** "
-                f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%): los anómalos "
-                "están distorsionando con fuerza la identificación, y las ACF/PACF no son "
-                "robustas a outliers.\n"
+                f"**Distorsión fuerte sobre la ACF/PACF** {_cifras}: los anómalos "
+                "están distorsionando con fuerza la identificación —al omitirlos, "
+                f"{', '.join(_flips)} cambia(n) de veredicto— y las ACF/PACF no "
+                "son robustas a outliers.\n"
                 "→ **Sugerencia:** tratar los anómalos con intervenciones antes de "
                 "especificar ARMA.\n"
                 "→ **Punto de decisión del analista:** confirma si intervenir ahora o "
                 "pasar directamente a ARMA."
             )
-        elif intervene_mild:
+        elif distortion_level == "moderate" and cambia:
+            # Magnitud pequeña pero decisiva: ACF_max mide lo que el anómalo
+            # AÑADE a retardos ya fuera de banda; una señal que el anómalo
+            # TAPA, o un cambio en la PACF, no entra en esa cifra.
             verdict = (
-                "**Distorsión moderada sobre la ACF/PACF** "
-                f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%).\n"
-                "→ **Sugerencia:** puede merecer la pena intervenir, pero también es "
-                "razonable pasar a ARMA y revisar los residuos.\n"
-                "→ **Punto de decisión del analista:** observa si las ACF/PACF muestran "
-                "estructura clara y decide."
+                f"**Distorsión moderada sobre la ACF/PACF** {_cifras}, pero "
+                f"**decisiva**: al omitir los anómalos {', '.join(_flips)} "
+                "cambia(n) de veredicto (ACF_max sólo mide lo que el anómalo "
+                "añade a retardos ya significativos, no lo que tapa ni la PACF).\n"
+                "→ **Sugerencia:** intervenir antes de fijar los órdenes de esos "
+                "retardos.\n"
+                "→ **Punto de decisión del analista:** confirma si intervenir ahora."
+            )
+        elif distortion_level == "moderate":
+            # La calibración mira los retardos que deciden p y q (1..K); el
+            # ACF_max puede venir de uno más alto (Villaverde m07: k=28, 97 %).
+            _K = len(_cal.distorsiones) if _cal is not None else 0
+            _grande = (" La magnitud es grande, pero al" if nivel_magnitud == "strong"
+                       else " Al")
+            verdict = (
+                f"**Distorsión moderada sobre la ACF/PACF** {_cifras}.{_grande} "
+                f"omitir los anómalos **ningún retardo de 1 a {_K} cambia de "
+                "veredicto** en la ACF ni en la PACF: no deciden los órdenes.\n"
+                "→ **Sugerencia:** razonable pasar a ARMA; intervenir sigue siendo "
+                "opción por adecuación, normalidad o por el suceso en sí.\n"
+                "→ **Punto de decisión del analista:** la decisión de intervenir sigue "
+                "siendo tuya."
             )
         else:
             verdict = (
-                "**Distorsión leve sobre la ACF/PACF** "
-                f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%).\n"
+                f"**Distorsión leve sobre la ACF/PACF** {_cifras}.\n"
                 "→ **Sugerencia:** no hay evidencia clara de distorsión; razonable pasar a "
                 "ARMA.\n"
                 "→ **Punto de decisión del analista:** la decisión de intervenir sigue "
@@ -4009,21 +4053,28 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         lines += ["", verdict]
 
         dates = [date for _, _, date in outliers]
-        if intervene_strong:
+        if distortion_level == "strong":
             rec = (
                 f"PUNTO DE DECISIÓN (analista): {len(outliers)} anómalo(s) grande(s) en "
                 f"{', '.join(dates)} distorsionan FUERTEMENTE la ACF/PACF "
-                f"(var_outlier={var_max:.1f}%, ACF_max={max_acf_pct:.0f}%). "
+                f"{_cifras} y cambian el veredicto de {', '.join(_flips)}. "
                 "Claude debe SUGERIR tratarlos con intervenciones (pulse/step) antes de "
                 "identificar (p, q), explicando la distorsión calibrada — pero la decisión "
                 "de intervenir ahora vs. pasar a ARMA la confirma el analista."
             )
-        elif intervene_mild:
+        elif distortion_level == "moderate" and cambia:
             rec = (
                 f"PUNTO DE DECISIÓN (analista): {len(outliers)} anómalo(s) en "
-                f"{', '.join(dates)} con distorsión moderada. "
-                "Claude puede sugerir intervenir, pero también es válido pasar a ARMA y ver "
-                "si los residuos quedan limpios. Decide el analista."
+                f"{', '.join(dates)}: distorsión moderada pero decisiva — "
+                f"{', '.join(_flips)} cambia(n) de veredicto al omitirlos. "
+                "Claude puede sugerir intervenir antes de fijar esos órdenes. "
+                "Decide el analista."
+            )
+        elif distortion_level == "moderate":
+            rec = (
+                f"Los anómalos en {', '.join(dates)} distorsionan moderadamente la "
+                "ACF/PACF pero no cambian el veredicto de ningún retardo. "
+                "Razonable pasar a ARMA; la decisión de intervenir es del analista."
             )
         else:
             rec = (
@@ -4051,6 +4102,20 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
             "var_outlier_pct": var_max,        # % varianza del mayor anómalo
             "acf_max_pct": max_acf_pct,         # % distorsión ACF en el retardo más afectado
             "distortion_level": distortion_level,  # none|light|moderate|strong
+            # BUG-0212: el veredicto de la calibración con el que se ha
+            # reconciliado el nivel, para que quien lo presente no calibre
+            # por su cuenta y llegue a otro.
+            # (None: había anómalos y la calibración no se pudo hacer)
+            "cambia_la_identificacion": (None if (outliers and _cal is None)
+                                         else cambia),
+            "flips_ar": [x.lag for x in _cal.flips_ar] if cambia else [],
+            "flips_ma": [x.lag for x in _cal.flips_ma] if cambia else [],
+            "flips_fabricados": ([x.lag for x in _cal.distorsiones
+                                  if "fabricada" in (x.acf_flip, x.pacf_flip)]
+                                 if cambia else []),
+            "flips_enmascarados": ([x.lag for x in _cal.distorsiones
+                                    if "enmascarada" in (x.acf_flip, x.pacf_flip)]
+                                   if cambia else []),
             # BUG-0153: la lectura de la Q, una sola, la misma que el pie de la
             # figura. Y su p, que es lo que nadie miraba.
             "q_stat": q_obs, "q_lag": q_lag, "q_pvalue": q_p,

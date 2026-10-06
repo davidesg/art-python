@@ -112,7 +112,7 @@ from typing import Sequence
 import numpy as np
 
 __all__ = ["Distorsion", "CalibracionCorrelograma", "calibra_correlograma",
-           "describe_calibracion"]
+           "describe_calibracion", "nivel_coherente", "MARGEN_CRUCE"]
 
 
 def _durbin_levinson(r: np.ndarray) -> np.ndarray:
@@ -221,6 +221,25 @@ def _acf_pacf(x: np.ndarray, K: int,
 CUOTA_PAR_DOMINANTE = 0.25
 
 
+# Margen del cruce de banda — BUG-0212. Un retardo sólo CAMBIA DE VEREDICTO si
+# pasa de CLARAMENTE fuera a CLARAMENTE dentro (o al revés), no si roza el
+# borde: fuera es |r| > banda·(1+MARGEN), dentro es |r| < banda·(1−MARGEN).
+#
+# Por qué 0,25. La banda es 2/√n y el error típico de r(k) bajo H0 es 1/√n,
+# media banda. Con ±banda/4 a cada lado, para contar como cruce el retardo
+# tiene que moverse al menos banda/2 = 1/√n: **un error típico entero a través
+# del borde**. Menos que eso es ruido de muestreo alrededor de una línea que ya
+# es aproximada (Bartlett), y el relleno con ceros encoge además |r| en la
+# fracción omitida —ver la cabecera—, que basta para «meter» en banda un
+# retardo que la rozaba.
+#
+# Los casos que lo pidieron (P02): r(5) de 0,157 a 0,118 con banda ±0,136
+# (IPC_ES_SA) y r(12) de 0,161 a 0,143 con banda ±0,146 (Salamanca). Los dos se
+# movían menos de un tercio de error típico y dictaban «interviene antes de
+# identificar» sobre modelos adecuados.
+MARGEN_CRUCE = 0.25
+
+
 def _pares_dominantes(x: np.ndarray, K: int,
                       top: int = 4) -> "list[list[tuple[int, int, float]]]":
     """Los PARES de fechas que más pesan en cada r(k) — BUG-0144.
@@ -323,11 +342,31 @@ class Distorsion:
                           → el anómalo la fabricaba; el orden SOBRA
             enmascarada   dentro de banda y al calibrar sale
                           → el anómalo la enmascaraba; el orden FALTA
+
+        Con MARGEN — BUG-0212: «fuera» y «dentro» son CLARAMENTE fuera y
+        claramente dentro (`MARGEN_CRUCE`). Un cruce mínimo del borde no es un
+        cambio de veredicto; queda en `_cruce_marginal`, que lo nombra sin
+        que decida nada.
         """
-        fo, fc = abs(obs) > banda, abs(cal) > banda
-        if fo == fc:
-            return None
-        return "fabricada" if fo and not fc else "enmascarada"
+        alto, bajo = banda * (1 + MARGEN_CRUCE), banda * (1 - MARGEN_CRUCE)
+        if abs(obs) > alto and abs(cal) < bajo:
+            return "fabricada"
+        if abs(obs) < bajo and abs(cal) > alto:
+            return "enmascarada"
+        return None
+
+    @staticmethod
+    def _cruce_marginal(obs: float, cal: float, banda: float) -> bool:
+        """Cruza el borde de la banda, pero sin el margen: NO cambia el
+        veredicto — BUG-0212."""
+        return ((abs(obs) > banda) != (abs(cal) > banda)
+                and Distorsion._flip(obs, cal, banda) is None)
+
+    @property
+    def cruce_marginal(self) -> bool:
+        """La ACF o la PACF cruzan el borde por menos del margen."""
+        return (self._cruce_marginal(self.acf_obs, self.acf_cal, self.banda)
+                or self._cruce_marginal(self.pacf_obs, self.pacf_cal, self.banda))
 
     @property
     def acf_flip(self) -> str | None:
@@ -410,6 +449,12 @@ class CalibracionCorrelograma:
         return bool(self.flips_ar or self.flips_ma)
 
     @property
+    def cruces_marginales(self) -> list[Distorsion]:
+        """Retardos que rozan el borde sin cruzarlo con margen — BUG-0212.
+        Se nombran para que nadie los lea en la figura como un cambio."""
+        return [d for d in self.distorsiones if d.cruce_marginal]
+
+    @property
     def flips_opuestos(self) -> list["Distorsion"]:
         """Retardos donde la ACF y la PACF cambian de veredicto en sentidos
         CONTRARIOS. Es la prueba de que una no sustituye a la otra."""
@@ -425,6 +470,34 @@ class CalibracionCorrelograma:
         if not self.cambia_la_identificacion:
             return "no cambia la identificación"
         return "cambia la identificación"
+
+
+_NIVELES = ("light", "moderate", "strong")
+
+
+def nivel_coherente(nivel: str, cal: "CalibracionCorrelograma | None") -> str:
+    """El nivel de distorsión, reconciliado con el veredicto de la calibración
+    — BUG-0212.
+
+    El escaneo mide la distorsión por su MAGNITUD (var_outlier, ACF_max) y la
+    calibración contesta la pregunta que decide —¿cambia algún retardo de
+    veredicto?—. Por separado daban «distorsión leve (ACF_max=0 %)» y «SÍ
+    cambian la identificación» en la misma línea, o «distorsión fuerte» sin un
+    solo retardo que cambiase. Una salida, un veredicto:
+
+        cambia      →  nunca «leve»: «moderada», o «fuerte» si la magnitud
+                       también lo es
+        no cambia   →  nunca «fuerte»: como mucho «moderada», porque una
+                       distorsión que no mueve ningún orden no está
+                       distorsionando *la identificación*
+
+    Sin calibración (`None`, o sin extremos) el nivel queda como estaba.
+    """
+    if cal is None or not cal.extremos or nivel not in _NIVELES:
+        return nivel
+    if cal.cambia_la_identificacion:
+        return "strong" if nivel == "strong" else "moderate"
+    return "moderate" if nivel == "strong" else nivel
 
 
 def calibra_correlograma(residuals: Sequence[float],
@@ -625,7 +698,10 @@ def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = "",
     # Reproduce el bloque «Calibration of distortions of the ACF» del `.out`,
     # con su mismo criterio de selección: los pares que HACEN el retardo, no
     # los mayores en valor absoluto.
-    _prio = [d for d in cal.distorsiones if d.acf_flip or d.pacf_flip]
+    # Los cruces marginales (BUG-0212) también: no deciden, pero rozan el
+    # borde, y saber qué fechas los empujan es justo lo que hay que mirar.
+    _prio = [d for d in cal.distorsiones
+             if d.acf_flip or d.pacf_flip or d.cruce_marginal]
     if not _prio:
         _prio = sorted((d for d in cal.distorsiones
                         if abs(d.acf_obs) > cal.banda),
@@ -661,6 +737,17 @@ def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = "",
               "", "Eso no dice que no haya que intervenirlo *después* —por "
               "adecuación, por normalidad o porque el suceso importe en sí—, "
               "sino que **no es un requisito previo a elegir p y q**."]
+        _marg = cal.cruces_marginales
+        if _marg:
+            # BUG-0212: se nombran, para que nadie los lea en la figura como
+            # el cambio que el veredicto acaba de negar.
+            L += ["", f"*{', '.join(f'r({d.lag})' for d in _marg)}: roza(n) "
+                  f"el borde de la banda (±{cal.banda:.3f}) sin cruzarlo con "
+                  f"margen — un cruce cuenta sólo de |r| > "
+                  f"{cal.banda * (1 + MARGEN_CRUCE):.3f} a |r| < "
+                  f"{cal.banda * (1 - MARGEN_CRUCE):.3f} o al revés, un error "
+                  "típico entero a través del borde. Moverse menos es ruido "
+                  "de muestreo, no un orden que entra o sale.*"]
     else:
         L += ["#### Veredicto — **cambia la identificación**", ""]
         # Y se dice UNA vez. Llevaba el rótulo entre paréntesis y la frase
@@ -702,6 +789,8 @@ def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = "",
             extremos=[dict(obs=o, z=z) for o, z in cal.extremos],
             flips_ar=[d.lag for d in cal.flips_ar],
             flips_ma=[d.lag for d in cal.flips_ma],
+            cruces_marginales=[d.lag for d in cal.cruces_marginales],
+            margen_cruce=MARGEN_CRUCE,
             distorsiones=[dict(lag=d.lag, acf_obs=d.acf_obs, acf_cal=d.acf_cal,
                                pacf_obs=d.pacf_obs, pacf_cal=d.pacf_cal,
                                acf_flip=d.acf_flip, pacf_flip=d.pacf_flip,

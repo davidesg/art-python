@@ -5007,42 +5007,65 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
             # Ya no se afirma nada: se CALIBRA. La pregunta «¿distorsiona?» es
             # «¿cambia algún retardo de dentro a fuera de banda, en la ACF o en
             # la PACF?», y eso se calcula.
-            try:
-                from art.calibracion import calibra_correlograma
-                _f = int(getattr(ts, "freq", 1) or 1)
-                cal = calibra_correlograma(
-                    m._result.residuals, umbral=_autoscan_z,
-                    freq=_f, start=getattr(ts, "start", ()),
-                    desfase=_desfase_obs(m))              # BUG-0172
-            except Exception:
-                cal = None
+            #
+            # UN SOLO VEREDICTO — BUG-0212. La calibración la hace ya el
+            # escaneo, sobre los mismos residuos y los mismos omitidos, y su
+            # nivel viene reconciliado con ella (cambia ⇒ nunca «leve»; no
+            # cambia ⇒ nunca «fuerte»). Calibrar aquí otra vez era la vía por
+            # la que salía «distorsión leve (ACF_max=0 %) — SÍ cambian la
+            # identificación» en la misma línea.
+            sd = scan.data or {}
+            cambia = sd.get("cambia_la_identificacion")
             lvl = "moderada" if level == "moderate" else "leve"
             cab = (f"anómalos revisados ({n_out}): distorsión {lvl} "
                    f"(var_outlier={var_o:.1f}%, ACF_max={acf_o:.0f}%)")
-            if cal is None:
+            if cambia is None:
                 cuerpo = (cab + " — no se pudo calibrar el correlograma; "
                           "llama a `residual_outlier_scan` antes de fijar órdenes")
-            elif cal.cambia_la_identificacion:
-                ar = ", ".join(f"PACF({d.lag})" for d in cal.flips_ar)
-                ma = ", ".join(f"ACF({d.lag})" for d in cal.flips_ma)
+                nxt = ("procede a la identificación ARMA" if not has_arma
+                       else "procede a contrastes formales")
+            elif cambia:
+                ar = ", ".join(f"PACF({k})" for k in sd.get("flips_ar", []))
+                ma = ", ".join(f"ACF({k})" for k in sd.get("flips_ma", []))
                 que = " y ".join(x for x in (ar, ma) if x)
-                cuerpo = (f"⚠ {cab} — **SÍ cambian la identificación**: al "
-                          f"calibrarlos, {que} cambia(n) de veredicto dentro/"
-                          "fuera de banda. Los órdenes que elegirías ahora no "
-                          "son los del proceso → `residual_outlier_scan` "
-                          "para verlo, e interviene ANTES de identificar")
+                if not has_arma:
+                    # Sin ARMA, el correlograma residual ES el de identificar:
+                    # aquí sí se van a elegir p y q, y sobre él no se debe.
+                    cuerpo = (f"⚠ {cab}, pero **decisiva**: al omitirlos, {que} "
+                              "cambia(n) de veredicto dentro/fuera de banda. Los "
+                              "órdenes que elegirías ahora no son los del proceso "
+                              "→ `residual_outlier_scan` para verlo, e interviene "
+                              "ANTES de identificar")
+                    nxt = "NO fijes p y q todavía"
+                elif sd.get("flips_enmascarados"):
+                    # Con p y q ya estimados, lo que importa es si el anómalo
+                    # TAPA estructura residual: podría faltar un orden.
+                    cuerpo = (f"⚠ {cab}: al omitirlos, {que} cambia(n) de "
+                              "veredicto, y en "
+                              + ", ".join(f"r({k})" for k in sd["flips_enmascarados"])
+                              + " el anómalo **tapa** señal residual: podría "
+                              "faltar un orden que con él no se ve → "
+                              "`residual_outlier_scan` para verlo")
+                    nxt = ("revísalo antes de dar los órdenes por buenos; "
+                           "intervenir es decisión del analista")
+                else:
+                    # Sólo fabricadas: el pico residual es del anómalo. No pide
+                    # añadir ningún orden — los ya estimados no se tocan.
+                    cuerpo = (f"{cab}: al omitirlos, {que} vuelve(n) a la banda "
+                              "— ese pico residual **lo fabrica el anómalo**, no "
+                              "pide añadir ningún orden. Los órdenes estimados se "
+                              "mantienen; intervenir es opción del analista por "
+                              "adecuación o por el suceso en sí")
+                    nxt = "procede a contrastes formales"
             else:
                 cuerpo = (cab + " — calibrado: **ningún retardo cambia de "
                           "veredicto** en la ACF ni en la PACF, así que no "
                           "deciden los órdenes. Intervenir aquí sería "
                           "sobre-intervenir; sigue siendo opción del analista "
                           "por adecuación o por el suceso en sí")
-            # El siguiente paso depende del veredicto, no del sitio del flujo:
-            # decir "interviene ANTES de identificar → procede a identificar"
-            # sería la misma contradicción que este arreglo viene a quitar.
-            if cal is not None and cal.cambia_la_identificacion:
-                nxt = "NO fijes p y q todavía"
-            else:
+                # El siguiente paso depende del veredicto, no del sitio del
+                # flujo: decir "interviene ANTES de identificar → procede a
+                # identificar" sería la misma contradicción.
                 nxt = ("procede a la identificación ARMA" if not has_arma
                        else "procede a contrastes formales")
             return ("\n\n---\n\n*Escaneo de anómalos (latente): " + cuerpo
