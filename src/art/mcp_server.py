@@ -1531,6 +1531,27 @@ def _forma_estructural(model, lam: float) -> str:
     return _build_equation(spec, model.series.freq)
 
 
+def _grupos_de_operador(entries) -> dict:
+    """Versiones del guion agrupadas por la variable dependiente que explican.
+
+    `{«λ=0, d=1, D=0»: [1, 2], «λ=0, d=2, D=0»: [3]}`. ℓ, AIC y BIC sólo se
+    comparan dentro de un grupo: el mismo criterio que `compare_versions`
+    (BUG-0051) —λ, d, D e `ifadf`—, aplicado al guion entero (BUG-0220).
+    Las entradas sin spec (nodos de decisión) no cuentan.
+    """
+    grupos: dict = {}
+    for e in entries:
+        sp = getattr(e, "spec", None) or {}
+        if not sp or getattr(e, "stats", None) is None:
+            continue
+        etq = (f"λ={float(sp.get('lam', 0.0) or 0.0):g}, d={sp.get('d', 0)}, "
+               f"D={sp.get('D', 0)}")
+        if any(sp.get("ifadf") or []):
+            etq += f", ifadf={list(sp.get('ifadf'))}"
+        grupos.setdefault(etq, []).append(e.version)
+    return grupos
+
+
 def _orden_efectivo(factores, libres) -> int:
     """El orden del primer factor, 0 si es el relleno —todo fijo a cero— que el
     `.inp` lleva para un ARMA(0,0) (BUG-0216)."""
@@ -7946,6 +7967,24 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                     lines.append(f"   · … y {len(entre) - 12} más")
         except Exception as e:
             _warn("no se pudo comprobar la muestra de cada entrada", e)
+
+        # NI ENTRE OPERADORES DISTINTOS — BUG-0220. La n del guion es la de la
+        # SERIE, así que un ARIMA(1,2,1) junto a los de d=1 no salta arriba; y
+        # su ℓ y su AIC son de OTRA variable dependiente (∇² frente a ∇), con
+        # otra muestra efectiva. Puestos en la misma columna invitan a decidir
+        # d por el AIC, que es justo lo que no se puede hacer así.
+        try:
+            grupos = _grupos_de_operador(g.entries)
+            if len(grupos) > 1:
+                lines += ["", "⚠ **El árbol mezcla operadores de "
+                              "diferenciación** — `logL`, AIC y BIC sólo se "
+                              "comparan DENTRO de cada grupo:"]
+                for etq, vs in grupos.items():
+                    lines.append(f"   · {etq}: " + ", ".join(f"v{v}" for v in vs))
+                lines.append("   El orden de integración lo deciden los "
+                             "contrastes formales (`formal_tests`), no el AIC.")
+        except Exception as e:
+            _warn("no se pudo comprobar el operador de cada entrada", e)
 
         # El guion guarda VEREDICTOS, y un veredicto sólo significa algo junto al
         # instrumento que lo produjo. Si alguna entrada se calculó con otra
