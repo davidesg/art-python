@@ -232,9 +232,10 @@ class GuionEntry:
     # asistente PROPUSO con lo que se decidió, nodo a nodo:
     #   propuesta — lo que el asistente propuso en ese nodo (en guiado);
     #   coincide  — True si se decidió lo propuesto, False si el analista lo
+    #               corrigió, "parcial" si tomó una parte (BUG-0217),
     #               corrigió, None si no se registró (los guiones antiguos).
     propuesta: str = ""
-    coincide: bool | None = None
+    coincide: bool | str | None = None
 
     # ── El mapa del laberinto ────────────────────────────────────────────
     # Sin estos tres campos el guion es un REGISTRO: dice dónde se ha estado,
@@ -450,7 +451,67 @@ def infer_parent(guion: "Guion", base_pre_path: str = "",
         # 2º: sin huellas que comparar, la ruta es lo único que hay.
         if homonimos:
             return homonimos[0].version
-    return guion.entries[-1].version
+    # 3º: la última entrada VIVA (BUG-0217). Colgar algo nuevo de un callejón
+    # es afirmar que desciende de una decisión ya descartada —en Salamanca, n15
+    # quedó bajo la v14 abandonada— y una cascada posterior lo barrería. Se sube
+    # desde la última por sus padres hasta el primer lugar seguro.
+    seguro = safe_ancestor(guion)
+    if seguro is not None:
+        return seguro
+    vivas = [e.version for e in guion.entries if e.status != "dead-end"]
+    return vivas[-1] if vivas else guion.entries[-1].version
+
+
+_SINONIMOS_LAMBDA = {
+    "log": "0", "logs": "0", "ln": "0", "logaritmo": "0", "logaritmos": "0",
+    "logarítmica": "0", "logaritmica": "0",
+    "nivel": "1", "niveles": "1", "identidad": "1", "sin transformar": "1",
+    "original": "1",
+}
+
+
+def mismo_valor(propuesta: str, decidido: str, nodo: str = "") -> bool | None:
+    """¿Dicen lo mismo la propuesta y lo decidido? — BUG-0217.
+
+    Se comparaban como cadenas: `"λ=0"` frente a `"0 (logaritmos)"` salía
+    «el analista la CORRIGIÓ», y el recuento de correcciones —lo que interesa en
+    docencia— salía inflado. Ahora, por orden:
+
+    1. Se quita el prefijo `nombre=` y los comentarios entre paréntesis
+       finales; en el nodo λ, «log», «logaritmos», «niveles»… son su número.
+       Si las dos son NÚMEROS se comparan como números.
+    2. Si no, sin espacios ni mayúsculas: iguales ⇒ True.
+    3. Mismo esqueleto con otras cifras («ARMA(1,1)» / «ARMA(1,2)», «B1» /
+       «B2») ⇒ False: eso sí es una corrección.
+    4. Lo demás ⇒ None. No se sabe, y no se inventa: se pide `coincide`.
+    """
+    import re as _re
+
+    def _limpia(t: str) -> str:
+        t = (t or "").strip().lower()
+        t = _re.sub(r"^[^\s=()]{1,20}\s*=\s*", "", t)       # «λ=0» → «0»
+        return t.strip()
+
+    def _numero(t: str):
+        sin_coment = _re.sub(r"\s*\([^)]*\)\s*$", "", t).strip()
+        if (nodo or "").strip().lower() == "lambda":
+            sin_coment = _SINONIMOS_LAMBDA.get(sin_coment, sin_coment)
+        try:
+            return float(sin_coment.replace(",", "."))
+        except ValueError:
+            return None
+
+    a, b = _limpia(propuesta), _limpia(decidido)
+    na, nb = _numero(a), _numero(b)
+    if na is not None and nb is not None:
+        return abs(na - nb) < 1e-9
+    ca, cb = _re.sub(r"\s+", "", a), _re.sub(r"\s+", "", b)
+    if ca == cb:
+        return True
+    esq = lambda t: _re.sub(r"\d+(?:[.,]\d+)?", "#", t)
+    if esq(ca) == esq(cb):
+        return False
+    return None
 
 
 def linaje_dudoso(guion: "Guion") -> list[tuple[int, str]]:
@@ -1746,6 +1807,7 @@ def export_guion_html(guion: Guion) -> str:
                     lines.append(
                         f"<p><b>Propuesta del asistente:</b> {e.propuesta}"
                         + (" — <b>corregida por el analista</b>" if e.coincide is False
+                           else " — tomada en parte" if e.coincide == "parcial"
                            else " — tomada" if e.coincide else "") + "</p>")
                 if e.rationale:
                     lines.append(f"<p><b>Razón:</b> {e.rationale}</p>")

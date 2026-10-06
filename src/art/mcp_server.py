@@ -506,7 +506,7 @@ PASA guion_path A guided_identification (BUG-0207): cada llamada deja su nodo
   si coincide. La llamada 1 escribe el nodo dominio con `domain` +
   `expectativas`; confirm_and_estimate(guion_path=…) cierra el de los órdenes.
   Una alternativa que sale de un modelo anterior se declara con `parent=N` en
-  confirm_and_estimate: el padre inferido es la última entrada.
+  confirm_and_estimate: el padre inferido es la última entrada viva.
 
 LO QUE DECIDAS FUERA DE ESA PUERTA, CON TU PROPUESTA (BUG-0110):
       guion_node(guion_path, nodo=…, decidido="<lo que decidió el analista>",
@@ -7622,13 +7622,15 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                 nd = e.node or {}
                 quien = f" [{e.decided_by}]" if e.decided_by else ""
                 # BUG-0110: dónde el analista corrigió al asistente
-                corr = (" ✎ corregido" if getattr(e, "coincide", None) is False else "")
+                corr = (" ✎ corregido" if getattr(e, "coincide", None) is False else
+                        " ≈ parcial" if getattr(e, "coincide", None) == "parcial" else "")
                 # Un nodo que el carril guiado dejó PENDIENTE (BUG-0207 D1).
                 _val = (f"⏳ pendiente (propuesta: {e.propuesta or '—'})"
                         if nd.get("pendiente") else _rec(nd.get('decidido', ''), 190))
                 lines.append(f"{sangria}{rama}◆ n{e.version} {nd.get('nodo', e.name)}"
                              f" = {_val}{quien}{corr}")
-                if getattr(e, "coincide", None) is False and getattr(e, "propuesta", ""):
+                if getattr(e, "coincide", None) in (False, "parcial") \
+                        and getattr(e, "propuesta", ""):
                     lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
                                  f"el asistente propuso: {_rec(e.propuesta)}")
                 if nd.get("evidencia"):
@@ -7668,7 +7670,8 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
             dibuja(r, "", i == len(raices) - 1)
 
         lines += ["", "◆ nodo de decisión · ✓ adoptada · ✗ callejón sin salida · · en exploración"
-                  " · ✎ el analista corrigió la propuesta del asistente"]
+                  " · ✎ el analista corrigió la propuesta del asistente"
+                  " · ≈ la tomó en parte"]
         if any(q_marca(e.stats).startswith("Q⚠") for e in g.entries
                if e.stats is not None):
             lines.append("Q⚠(lags): pasa el retardo que decide (3s+3) y RECHAZA "
@@ -7676,10 +7679,14 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
         _con = [e for e in g.entries if getattr(e, "coincide", None) is not None]
         if _con:
             _corr = [e for e in _con if e.coincide is False]
+            _parc = [e for e in _con if e.coincide == "parcial"]
             lines.append(f"Propuestas registradas: {len(_con)} nodos; el analista corrigió "
                          f"{len(_corr)}" + (": " + ", ".join(
                              f"n{e.version} {(e.node or {}).get('nodo', e.name)}"
-                             for e in _corr) if _corr else "") + "."
+                             for e in _corr) if _corr else "")
+                         + (f"; en parte {len(_parc)}: " + ", ".join(
+                             f"n{e.version} {(e.node or {}).get('nodo', e.name)}"
+                             for e in _parc) if _parc else "") + "."
                          + (f" Carril: {g.carril}." if getattr(g, "carril", "") else ""))
 
         # LA CUENTA DE ITERACIONES. Un modelo estimado cierra una iteración; los
@@ -7974,7 +7981,8 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                    "ADF p=0.013, KPSS p=0.09", "F-HAC=50.2")
     alternativas : what was considered and discarded, and why
     decidido_por : "analista+LLM" (guided) | "LLM" (autonomous) | "heurística"
-    parent       : version this node descends from (-1 = the last one recorded).
+    parent       : version this node descends from (-1 = the last LIVE one:
+                   a dead end is skipped).
     expectativas : REQUIRED for nodo="dominio" (decided 2026-09-30): the dynamics
                    the theory expects for this class of series, in terms of the
                    process in levels — persistence, cycle (and its length), finite
@@ -7987,7 +7995,9 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                    what tells where the analyst corrected the assistant; the
                    lane alone (`decidido_por`) cannot.
     coincide     : "sí" if the analyst took your proposal, "no" if they decided
-                   otherwise. Empty: derived from `propuesta` == `decidido`.
+                   otherwise, "parcial" if they took part of it. Empty: derived
+                   by comparing VALUES («λ=0» = «0 (logaritmos)»); when they
+                   cannot be compared it stays unrecorded — pass it.
     criterio     : for nodo="ordenes" (and any choice between tied candidates):
                    "estadístico" | "dominio" | "uso". "dominio" requires a
                    `dominio` node with expectations in this guion: the decision
@@ -8036,11 +8046,17 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
         if crit and crit not in ("estadístico", "estadistico", "dominio", "uso"):
             return _err("`criterio` es «estadístico», «dominio» o «uso».")
         co = coincide.strip().lower()
-        if co and co not in ("sí", "si", "no"):
-            return _err("`coincide` es «sí» o «no» (vacío: se deduce de `propuesta`).")
+        if co and co not in ("sí", "si", "no", "parcial"):
+            return _err("`coincide` es «sí» o «no», o «parcial» si tomó una "
+                        "parte (vacío: se deduce comparando `propuesta` con "
+                        "`decidido`).")
         prop = propuesta.strip()
+        # BUG-0217: se comparan VALORES, no cadenas; lo que no se puede
+        # comparar queda sin constar en vez de contarse como corrección.
+        from art.guion import mismo_valor
         coinc = (True if co in ("sí", "si") else False if co == "no" else
-                 (prop == decidido.strip()) if prop else None)
+                 "parcial" if co == "parcial" else
+                 mismo_valor(prop, decidido, nodo) if prop else None)
 
         gp = os.path.expanduser(guion_path)
         os.makedirs(os.path.dirname(gp) or ".", exist_ok=True)
@@ -8086,7 +8102,11 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
             f"◆ nodo n{version} registrado: **{nodo} = {decidido}**"
             + (f"  [{decidido_por}]" if decidido_por else "")
             + (f"\n   propuesta del asistente: {prop} — "
-               + ("el analista la tomó" if coinc else "**el analista la CORRIGIÓ**")
+               + ("el analista la tomó en parte" if coinc == "parcial" else
+                  "el analista la tomó" if coinc else
+                  "**el analista la CORRIGIÓ**" if coinc is False else
+                  "no se puede comparar con lo decidido: pasa "
+                  "`coincide=\"sí\"|\"no\"|\"parcial\"` para que conste")
                if prop else "")
             + f"\n   razón: {razon}"
             + (f"\n   evidencia: {evidencia}" if evidencia else "")
