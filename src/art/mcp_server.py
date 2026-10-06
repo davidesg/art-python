@@ -5270,6 +5270,22 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             # que este mismo nodo no ofrece como continuación.
             urt       = describe_unit_root(ts, lam=lam, max_d=1)
             rec_d     = urt.data.get("recommended_d", 1)
+            # BUG-0210: la línea de recomendación citaba la d CRUDA de los
+            # contrastes (0 en IPC_ES_SA) debajo de un «punto de partida d=1»
+            # de la política. Se da la d de la política; la cruda queda como
+            # dato, con su nombre.
+            pol_d     = int(urt.data.get("recommended_d_policy", rec_d))
+            _linea_d  = (f"**Recomendación ADF+KPSS:** d = {rec_d}. "
+                         if pol_d == rec_d else
+                         f"**Recomendación:** d = {pol_d} (la tabla ADF+KPSS, "
+                         f"sola, apuntaría a d={rec_d}: es apoyo, no veredicto). ")
+            _llamadas = [
+                f"- ¿Hay tendencia? → `guided_identification(inp_path, lam={lam}, d=1)`",
+                f"- ¿Sin tendencia? → `guided_identification(inp_path, lam={lam}, d=0, D=0)`",
+            ]
+            if pol_d == 0:
+                _llamadas.reverse()
+            _llamadas[0] += "  ← **recomendado**"
 
             text = (
                 f"## Paso 2 — Serie transformada ({lam_str}), nivel d=0\n\n"
@@ -5278,15 +5294,14 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 "- **Sin tendencia aparente** → posiblemente d=0 es suficiente\n\n"
                 "---\n\n"
                 + urt.summary + "\n\n"
-                + f"**Recomendación ADF+KPSS:** d = {rec_d}. {urt.recommendation}\n\n"
+                + _linea_d + f"{urt.recommendation}\n\n"
                 "---\n\n"
                 "**Instrumentos de este nodo** (si quieres mirar más a fondo): "
                 f"`unit_root_analysis(inp_path, lam={lam})` para la tabla ADF/KPSS "
                 f"sola · `identification_analysis(inp_path, d=…, D=0, lam={lam})` "
                 "para la ACF/PACF a un orden concreto sin avanzar el flujo.\n\n"
                 "**Confirma d y llama al paso 3:**\n"
-                f"- ¿Hay tendencia? → `guided_identification(inp_path, lam={lam}, d=1)`\n"
-                f"- ¿Sin tendencia? → `guided_identification(inp_path, lam={lam}, d=0, D=0)`"
+                + "\n".join(_llamadas)
                 + _nota_figura(_ruta_fig)                     # BUG-0113
             )
             items = [TextContent(type="text", text=text)]

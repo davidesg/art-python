@@ -75,7 +75,7 @@ def _estadisticos_sin_porcentaje(fig, data) -> None:
     """BUG-0219. pyfug (`fugplot.statistics`) escribe «w̄ (σ̂w̄) = m% (se%)
     σ̂w = sd%» multiplicando por 100: el convenio de fug, en el que lo que se
     dibuja es una TASA (∇ln y). Sobre un nivel en log eso da «w̄ = 429,39 %»
-    para ln IPC_ES, y sobre una serie en niveles, cualquier cosa. Aquí se
+    para ln IPC_ES_SA, y sobre una serie en niveles, cualquier cosa. Aquí se
     reescribe esa línea con las mismas cuentas (σ̂ con ddof=0, σ̂w̄ = σ̂/√n) en
     la escala de la serie, sin %. Si pyfug cambia el rótulo, no se toca nada."""
     import math
@@ -426,7 +426,7 @@ def describe_seasonality(ts) -> Description:
 
     if not d_ok:
         # BUG-0210: «el ADF no rechaza» se decía siempre que fallara ALGUNO de
-        # los dos, también con ADF p=0,031 (Salamanca) o p=0,000 (IPC_ES), donde
+        # los dos, también con ADF p=0,031 (Salamanca) o p=0,000 (IPC_ES_SA), donde
         # quien discrepa es el KPSS. La frase lee su propio p.
         _ser = "∇log(y)" if all(v > 0 for v in ts.data) else "∇y"
         if not adf_ok:
@@ -579,14 +579,17 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2,
     # enterarse, y vuelve a caer en el salto d=0→2 que BUG-0016 y BUG-0023
     # arreglaron aguas abajo. Sobre RATIO: d=0 con raíz unitaria, d=1 AMBIGUO,
     # d=2 estacionaria → recomendaba 2, saltándose la duda entera.
-    from art.policy import decide_d as _decide_d
+    from art.policy import decide_d as _decide_d, razon_d as _razon_d, THRESHOLDS as _TH
     _rec_pol = _decide_d({"recommended_d": rec_d, "trend_r2": trend_r2},
                          seasonal=None, current_d=0, max_step=1)
+    # BUG-0210 (2): QUÉ regla movió la d, para decir ésa y no otra.
+    _razon = _razon_d({"recommended_d": rec_d, "trend_r2": trend_r2},
+                      seasonal=None, current_d=0, max_step=1)
 
     # BUG-0210. Esto era una plantilla por valor de d: «primera diferencia con
     # consenso» debajo de una fila d=1 marcada «ambiguo ⚠» (Retiro, Salamanca),
     # y «serie ya estacionaria en niveles» con d=0 ambiguo y d=2 la única fila
-    # con consenso (IPC_ES). `recommended_d` toma la primera fila en la que el
+    # con consenso (IPC_ES_SA). `recommended_d` toma la primera fila en la que el
     # ADF rechaza, diga lo que diga el KPSS (BUG-0002): esa d se mantiene, pero
     # la frase lee el VEREDICTO de su fila y dice dónde está el consenso.
     _fila = next((r for r in results if r.d == rec_d), None)
@@ -596,19 +599,19 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2,
                    f"{rec_d} diferencias hasta el consenso")
     else:
         if _fila.verdict == "ambiguous":
+            # Una fila que se contradice no es un hallazgo de estacionariedad:
+            # es el aspecto que tiene la falta de potencia.
             _que_es = (
-                f"la primera fila en la que el ADF rechaza la raíz unitaria "
-                f"(p={_fila.adf_pvalue:.4f}), pero el KPSS rechaza la "
-                f"estacionariedad (p={_fila.kpss_pvalue:.4f}): fila **ambigua**, "
-                f"**sin consenso**"
+                f"**sin consenso**. En d={rec_d} el ADF rechaza la raíz unitaria "
+                f"(p={_fila.adf_pvalue:.4f}) y el KPSS rechaza la estacionariedad "
+                f"(p={_fila.kpss_pvalue:.4f}): fila **ambigua**, se contradicen"
                 if _fila.adf_rejects else
-                f"el último orden de la tabla; ninguno es concluyente y en éste "
-                f"el ADF no rechaza (p={_fila.adf_pvalue:.4f}) ni el KPSS "
-                f"rechaza (p={_fila.kpss_pvalue:.4f}): fila **ambigua**, "
-                f"**sin consenso**")
+                f"**sin consenso**. El ADF no rechaza en ningún orden, y en "
+                f"d={rec_d}, el último, tampoco el KPSS (p={_fila.adf_pvalue:.4f}, "
+                f"p={_fila.kpss_pvalue:.4f}): fila **ambigua**")
         else:
-            _que_es = ("el último orden de la tabla: en ninguno se rechaza la "
-                       "raíz unitaria, **sin consenso**")
+            _que_es = ("**sin consenso**: en ningún orden de la tabla se rechaza "
+                       "la raíz unitaria")
         _cons = [r.d for r in results if r.verdict == "stationary"]
         if len(_cons) == 1:
             _que_es += (f"; el único orden con consenso de los dos contrastes "
@@ -622,12 +625,37 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2,
         "",
         f"**Lo que encuentran los contrastes**: d = {rec_d} ({_que_es})."
         if _fila is None or _fila.verdict == "stationary" else
-        f"**Lo que encuentran los contrastes**: d = {rec_d} — {_que_es}.",
+        f"**Lo que encuentran los contrastes**: {_que_es}.",
     ]
     # BUG-0197: the «starting point» advice answers the question asked FROM
     # THE LEVEL. At d > 0 the caller asks «one more?» and gives the one verdict
     # itself; repeating «d = 1, no 2» there was a second, contradicting voice.
-    if _rec_pol != rec_d and current_d == 0:
+    if _rec_pol != rec_d and current_d == 0 and _razon == "tendencia":
+        # BUG-0210. La d=1 la pone la regla de la TENDENCIA, no el tope de un
+        # paso: la plantilla de abajo («un paso cada vez», «saltar a d=…», «la
+        # estacionalidad sesga el ADF hacia NO rechazar») hablaba de otra cosa,
+        # y aquí el ADF ha RECHAZADO. Medido sobre IPC_ES_SA (el IPC desestacionalizado
+        # de la P02): ADF con constante p=0,036 en niveles —la serie es cóncava,
+        # crece 3,3→1,6→0,7 %/año—, con tendencia p=0,87; una recta explica el
+        # 91 % del nivel.
+        lines += [
+            "",
+            f"> ⚠ **Punto de partida: d = {_rec_pol}.** La serie tiene una "
+            f"tendencia clara —una recta explica el **{100 * trend_r2:.0f} %** del "
+            f"nivel (más del {100 * _TH['trend_dominates']:.0f} %)— y eso, con una "
+            f"ACF que decae despacio, es lo que decide d. La tabla es apoyo, y aquí "
+            f"el ADF no tiene potencia: su regresión lleva constante pero no "
+            f"tendencia, y basta una curvatura —un crecimiento que se frena— para "
+            f"que rechace."
+            + (" Que ADF y KPSS se contradigan es el aspecto que tiene esa falta "
+               "de potencia, no un hallazgo de estacionariedad."
+               if _fila is not None and _fila.verdict == "ambiguous" else ""),
+            ">",
+            "> No se pierde nada empezando en d=1: esto es especificación INICIAL. "
+            "Si sobra la diferencia, lo dirá el DCD de sobrediferenciación sobre "
+            "el modelo estimado, en `formal_tests`.",
+        ]
+    elif _rec_pol != rec_d and current_d == 0:
         _salto = [r.verdict for r in results if 0 < r.d < rec_d]
         lines += [
             "",
@@ -678,7 +706,16 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2,
 
     # --- recommendation ---------------------------------------------------
     verdicts = {r.d: r.verdict for r in results}
-    if rec_d == 0 and verdicts.get(0) == "stationary":
+    if _razon == "tendencia":
+        # BUG-0210: «Procede con d=0» / «confirmar d=0» bajo un punto de
+        # partida d=1 eran dos instrucciones contrarias.
+        rec_text = (
+            f"Punto de partida d={_rec_pol}: la serie tiene una tendencia clara "
+            f"(una recta explica el {100 * trend_r2:.0f} % del nivel) y el ADF, "
+            f"sin término de tendencia, no tiene potencia aquí. El orden de "
+            f"integración se contrasta en `formal_tests`, sobre el modelo estimado."
+        )
+    elif rec_d == 0 and verdicts.get(0) == "stationary":
         rec_text = (
             "La serie en niveles (d=0) es estacionaria según ADF y KPSS. "
             "Procede con d=0."

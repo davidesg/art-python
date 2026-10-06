@@ -372,6 +372,28 @@ def decide_d(unit_root_data: dict, seasonal: bool | None = None,
     return max(d, 0)
 
 
+def razon_d(unit_root_data: dict, seasonal: bool | None = None,
+            current_d: int = 0, max_step: int | None = 1) -> str:
+    """WHICH rule of `decide_d` moved d away from `recommended_d` (BUG-0210).
+
+    Returns "" (none: d is the tests' own), "tendencia" (a 0 raised to 1
+    because a line explains more than `THRESHOLDS["trend_dominates"]` of the
+    level), "paso" (the one-step cap) or "estacionalidad" (the seasonal cap).
+    It mirrors `decide_d` step by step and decides nothing: `decide_d` is left
+    untouched, and the text that explains its d says the rule that set it —
+    not the step-cap template over a d that the trend rule raised."""
+    rec0 = int(unit_root_data.get("recommended_d", 1))
+    rec = rec0
+    razon = ""
+    if rec == 0 and float(unit_root_data.get("trend_r2", 0.0)) > THRESHOLDS["trend_dominates"]:
+        rec, razon = 1, "tendencia"
+    if max_step is not None and rec > int(current_d) + int(max_step):
+        rec, razon = int(current_d) + int(max_step), "paso"
+    if seasonal and rec > 1:
+        rec, razon = 1, "estacionalidad"
+    return razon if max(rec, 0) != rec0 else ""
+
+
 def decide_seasonal_structure(seasonality_data: dict, freq: int) -> tuple[int, str, int]:
     """Seasonal structure from describe_seasonality(...).data.
 
