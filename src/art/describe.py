@@ -2140,9 +2140,17 @@ def describe_diagnosis(model) -> Description:
     else:
         parts = []
         if not result.white_noise and not result.extreme:
+            # BUG-0213: «falla en lags: 12, 24» se leía como «fallan los
+            # retardos 12 y 24». Son las Q que rechazan, y cada una acumula los
+            # retardos 1…k; qué retardo falla lo dicen las barras.
+            _qr = ', '.join(f"Q({l})" for l, p in zip(result.q_lags, result.q_pvalues)
+                            if p < 0.05)
+            _fu = sorted(set(result.fas_fuera) | set(result.fap_fuera))
             parts.append(
                 "los residuos no son ruido blanco — considera añadir términos ARMA "
-                f"(falla en lags: {', '.join(str(l) for l, *_ in [(l,q,p) for l,q,p in zip(result.q_lags, result.q_stats, result.q_pvalues) if p < 0.05])})"
+                f"(rechaza {_qr}, y cada Q(k) acumula los retardos 1…k; barras "
+                f"FAS/FAP fuera de ±{result.banda:.3f}: "
+                f"{', '.join(map(str, _fu)) if _fu else 'ninguna'})"
             )
         elif not result.white_noise and result.extreme:
             parts.append(
@@ -2300,6 +2308,12 @@ def describe_diagnosis(model) -> Description:
                                       and result.seasonal.seasonal_detected),
             "seasonal_p": (float(result.seasonal.p_value)
                            if result.seasonal is not None else None),
+            # DÓNDE falla: las barras fuera de banda, no el retardo de la Q,
+            # que acumula 1…k (BUG-0213).
+            "fas_fuera": result.fas_fuera,
+            "fap_fuera": result.fap_fuera,
+            "banda": float(result.banda),
+            "freq": int(getattr(getattr(model, "series", None), "freq", 1) or 1),
             "jb_stat": result.jb_stat,
             "jb_pvalue": result.jb_pvalue,
             "q_fails": q_fails,

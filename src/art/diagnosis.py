@@ -114,6 +114,29 @@ class DiagnosisResult:
         return [(l, p) for l, p in zip(self.q_lags[:-1], self.q_pvalues[:-1])
                 if p <= 0.05]
 
+    # DÓNDE falla, que la Q no dice (BUG-0213). La Q(k) ACUMULA los retardos
+    # 1…k: una Q(12) que rechaza puede deberse entera a r₁. Se leía «la Q falla
+    # en el retardo 12» como «falta estructura estacional», y en ES_CORE m01
+    # (r₁=0,26, r₁₂=−0,07) se proponía P=1. Las barras fuera de banda de la
+    # FAS/FAP —la misma banda ±2/√n del gráfico de residuos— son las que dicen
+    # qué retardo falla.
+    @property
+    def banda(self) -> float:
+        n = len(self.residuals)
+        return 2.0 / np.sqrt(n) if n > 0 else float("inf")
+
+    @property
+    def fas_fuera(self) -> list[int]:
+        """Retardos (1-based) cuya autocorrelación residual sale de ±2/√n."""
+        return [k + 1 for k, v in enumerate(np.asarray(self.acf, dtype=float))
+                if abs(v) > self.banda]
+
+    @property
+    def fap_fuera(self) -> list[int]:
+        """Retardos (1-based) cuya autocorrelación parcial sale de ±2/√n."""
+        return [k + 1 for k, v in enumerate(np.asarray(self.pacf, dtype=float))
+                if abs(v) > self.banda]
+
     @property
     def normal(self) -> bool:
         """True if JB p-value > 0.05 (cannot reject normality)."""

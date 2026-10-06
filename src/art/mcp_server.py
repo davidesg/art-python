@@ -1524,19 +1524,23 @@ def _forma_estructural(model, lam: float) -> str:
     from art.guion import _build_equation, _extract_spec
     spec = dict(_extract_spec(model, lam))
 
-    def _efectivo(factores, libres):
-        if not factores:
-            return 0
-        f, fl = list(factores[0]), (list(libres[0]) if libres else [True] * len(factores[0]))
-        if not any(fr or abs(float(v)) >= 1e-12 for v, fr in zip(f, fl)):
-            return 0
-        return len(f)
-
-    spec["p"] = _efectivo(model.ar, getattr(model, "ar_free", None))
-    spec["q"] = _efectivo(model.ma, getattr(model, "ma_free", None))
-    spec["P"] = _efectivo(model.ar_s, getattr(model, "ar_s_free", None))
-    spec["Q"] = _efectivo(model.ma_s, getattr(model, "ma_s_free", None))
+    spec["p"] = _orden_efectivo(model.ar, getattr(model, "ar_free", None))
+    spec["q"] = _orden_efectivo(model.ma, getattr(model, "ma_free", None))
+    spec["P"] = _orden_efectivo(model.ar_s, getattr(model, "ar_s_free", None))
+    spec["Q"] = _orden_efectivo(model.ma_s, getattr(model, "ma_s_free", None))
     return _build_equation(spec, model.series.freq)
+
+
+def _orden_efectivo(factores, libres) -> int:
+    """El orden del primer factor, 0 si es el relleno —todo fijo a cero— que el
+    `.inp` lleva para un ARMA(0,0) (BUG-0216)."""
+    if not factores:
+        return 0
+    f = list(factores[0])
+    fl = list(libres[0]) if libres else [True] * len(f)
+    if not any(fr or abs(float(v)) >= 1e-12 for v, fr in zip(f, fl)):
+        return 0
+    return len(f)
 
 
 def _equation_for_prompt(ts, model) -> str:
@@ -2109,6 +2113,24 @@ def umbral_extremo(n: int, prob: float = 0.90) -> float:
     return round((lo + hi) / 2.0, 2)
 
 
+def _donde_falla(d: dict, ts=None):
+    """Qué barras de la FAS/FAP residual salen de banda: `(bajos, estac, todas)`.
+
+    `bajos` son los retardos 1…3 (fuera de los estacionales), los que piden
+    orden REGULAR; `estac`, los s y 2s, los que piden estructura ESTACIONAL.
+    Sin barras en el dict (un `Description` antiguo) devuelve `([], [], None)`.
+    Es la lectura de BUG-0213: el retardo de la Q no dice dónde falla.
+    """
+    fas, fap = d.get("fas_fuera"), d.get("fap_fuera")
+    if fas is None and fap is None:
+        return [], [], None
+    fuera = sorted(set(fas or []) | set(fap or []))
+    s = int(getattr(ts, "freq", 0) or d.get("freq") or 1)
+    estac = [k for k in fuera if s > 1 and k in (s, 2 * s)]
+    bajos = [k for k in fuera if k <= 3 and k not in estac]
+    return bajos, estac, fuera
+
+
 def _conclusiones_desde(diag) -> str:
     """La 3ª sección: qué DICE la diagnosis, no qué números dio.
 
@@ -2153,9 +2175,22 @@ def _conclusiones_desde(diag) -> str:
         L.append("**El modelo NO se sostiene:** " + "; ".join(fallos) + ".")
         qf = d.get("q_fails") or []
         if qf:
-            L.append("Retardos donde la Q falla: " + "; ".join(str(x) for x in qf)
-                     + ". *Dónde falla dice QUÉ falta: un retardo estacional "
-                       "pide estructura estacional, uno bajo pide orden regular.*")
+            # BUG-0213: «la Q falla en el retardo 12» no existe. La Q(12)
+            # acumula los retardos 1…12 y puede rechazar entera por r₁; se
+            # leía como «falta estructura estacional». QUÉ falta lo dicen las
+            # barras fuera de banda.
+            bajos, estac, fuera = _donde_falla(d)
+            L.append("La Q rechaza en: " + "; ".join(str(x) for x in qf)
+                     + ". *Cada Q(k) acumula los retardos 1…k: dice CUÁNTO "
+                       "falla, no DÓNDE.*")
+            if fuera is not None:
+                L.append("Barras de la FAS/FAP de los residuos fuera de banda: "
+                         + (", ".join(map(str, fuera)) if fuera else "ninguna")
+                         + ". *Dónde falla dice QUÉ falta: un retardo bajo"
+                           + (f" ({', '.join(map(str, bajos))})" if bajos else "")
+                         + " pide orden regular; s o 2s"
+                           + (f" ({', '.join(map(str, estac))})" if estac else "")
+                         + ", estructura estacional.*")
     elif d.get("q_fails"):
         # BUG-0207 D3. Pasa el retardo que decide (3s+3) y rechaza en otro: la
         # salida lo llamaba salvedad y esta línea lo daba por bueno. Con
@@ -2166,6 +2201,12 @@ def _conclusiones_desde(diag) -> str:
                  + "; ".join(b for b in bien if not b.startswith("la Q"))
                  + ". *No es un aprobado limpio: dónde rechaza dice qué falta. "
                    "No lo adoptes sin haberlo mirado.*")
+        bajos, estac, fuera = _donde_falla(d)
+        if fuera:
+            L.append("Barras de la FAS/FAP de los residuos fuera de banda: "
+                     + ", ".join(map(str, fuera))
+                     + ". *Cada Q(k) acumula los retardos 1…k; QUÉ falta lo "
+                       "dicen las barras (BUG-0213).*")
     else:
         L.append("**El modelo se sostiene:** " + "; ".join(bien) + ".")
 
@@ -2303,29 +2344,50 @@ def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
               f"   `suggest_intervention_form(inp_path={ruta}, date=\"{f}\")` "
               f"→ y luego `guided_intervention(...)`")
 
-    # 2 · dónde falla la Q dice qué falta — también cuando sólo es salvedad
-    # (BUG-0207 D3): si no, la única alternativa que quedaba era «adoptar».
+    # 2 · dónde falla dice qué falta — y DÓNDE lo dicen las barras, no la Q.
+    #
+    # BUG-0213. Esto se decidía por el retardo de la Q que rechaza, y en
+    # mensual los retardos de la Q son 12, 24, 36 y 39: cualquier fallo salía
+    # «estacional». La Q(12) acumula los retardos 1…12; en ES_CORE m01
+    # (0,1,0)(0,1,1)₁₂ rechazaba por r₁=0,26 con r₁₂=−0,07, y se proponía P=1.
+    # Ahora deciden las barras de la FAS/FAP fuera de banda: retardos bajos ⇒
+    # parte regular; s, 2s ⇒ estacional. Las dos pueden salir, la regular
+    # primero: una estructura regular sin modelar contamina lo estacional.
+    # También cuando sólo es salvedad (BUG-0207 D3): si no, la única
+    # alternativa que quedaba era «adoptar».
     if d.get("white_noise") is False or d.get("q_fails"):
-        qf = " ".join(str(x) for x in (d.get("q_fails") or []))
-        estacional = ts is not None and any(
-            f" {k}" in qf for k in (str(int(ts.freq)), str(int(ts.freq) * 2)))
-        p_act = len((model.ar or [[]])[0]) if getattr(model, "ar", None) else 0
-        q_act = len((model.ma or [[]])[0]) if getattr(model, "ma", None) else 0
-        if estacional:
+        bajos, estac, fuera = _donde_falla(d, ts)
+        # El orden de HOY sin el AR de relleno de un (0,d,0): contado por la
+        # longitud, un (0,1,0) salía «hoy AR(1)» y se proponía p=2.
+        p_act = _orden_efectivo(getattr(model, "ar", None), getattr(model, "ar_free", None))
+        q_act = _orden_efectivo(getattr(model, "ma", None), getattr(model, "ma_free", None))
+        if bajos or not estac:
+            if bajos:
+                porque = (f"la FAS/FAP de los residuos sale de banda en el/los "
+                          f"retardo(s) {', '.join(map(str, bajos))}")
+            elif fuera:
+                porque = (f"ninguna barra baja ni estacional sale de banda "
+                          f"(fuera: {', '.join(map(str, fuera))}); la Q rechaza "
+                          f"por acumulación")
+            else:
+                porque = "la Q rechaza por acumulación"
             alts.append(
-                "**Añadir estructura ESTACIONAL** — la Q falla en un retardo "
-                "estacional, que es donde se ve lo que los armónicos no "
-                "absorben.\n"
-                f"   `confirm_and_estimate(inp_path={ruta}, P=1, ...)`, o "
-                f"`meg_frequency(...)` si sospechas raíz unitaria estacional")
-        else:
-            alts.append(
-                f"**Subir el orden regular** — hoy AR({p_act}) MA({q_act}). "
-                f"El correlograma de los residuos dice cuál de los dos.\n"
+                f"**Subir el orden regular** — hoy AR({p_act}) MA({q_act}); "
+                f"{porque}. Si corta la FAS, MA; si corta la FAP, AR.\n"
                 f"   `confirm_and_estimate(inp_path={ruta}, p={p_act + 1}, "
                 f"q={q_act}, ...)`  ó  `q={q_act + 1}`\n"
                 f"   `identification_analysis(inp_path={ruta})` para mirarlo "
                 f"antes de elegir")
+        if estac:
+            alts.append(
+                f"**Añadir estructura ESTACIONAL** — la FAS/FAP de los residuos "
+                f"sale de banda en el/los retardo(s) estacional(es) "
+                f"{', '.join(map(str, estac))}, que es donde se ve lo que los "
+                f"armónicos no absorben"
+                + (" (corrige antes la parte regular: arrastra lo estacional)"
+                   if bajos else "") + ".\n"
+                f"   `confirm_and_estimate(inp_path={ruta}, P=1, ...)`, o "
+                f"`meg_frequency(...)` si sospechas raíz unitaria estacional")
 
     # 2bis · LA SEMANA SANTA, que nadie ofrecía nunca.
     #
@@ -2362,7 +2424,10 @@ def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
             f"(t={float(d.get('mean_t') or 0):+.2f}): la deriva de la serie "
             f"está en los residuos. Ninguna intervención la absorbe.\n"
             f"   `confirm_and_estimate(inp_path={ruta}, estimate_mu=True, ...)`")
-    if d.get("seasonal_residual"):
+    # Sólo con la Q pasando: si rechaza, el contraste estacional sobre esos
+    # residuos no es leíble (BUG-0054) y lo estacional lo proponen las barras s
+    # y 2s, arriba (BUG-0213).
+    if d.get("seasonal_residual") and d.get("white_noise") is not False:
         alts.append(
             "**Tratar la estacionalidad residual** — el contraste sobre los "
             "residuos la detecta. Si la Q también rechaza, corrige antes el "

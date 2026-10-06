@@ -107,7 +107,11 @@ def test_lo_mas_obvio_primero(salida_guiada):
     todo lo demás, así que la intervención va antes que el orden ARMA."""
     i = salida_guiada.index("· DECISIÓN")
     bloque = salida_guiada[i:]
-    assert bloque.index("Intervenir") < bloque.index("ESTACIONAL")
+    # El orden ARMA que se proponga —regular o estacional— lo dicen las barras
+    # fuera de banda (BUG-0213); este caso, un par de anómalos en 60-61, falla
+    # en r₁ y antes salía «ESTACIONAL» sólo porque la Q(12) rechazaba.
+    arma = [bloque.index(k) for k in ("orden regular", "ESTACIONAL") if k in bloque]
+    assert arma and bloque.index("Intervenir") < min(arma)
 
 
 # ── el generador de alternativas, por casos ───────────────────────────
