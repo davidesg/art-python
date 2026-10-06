@@ -3638,7 +3638,8 @@ def _criterio_umbral(umbral: float, n: int) -> str:
 def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
                           threshold: float = 3.5,
                           omitir=None, motivo: str = "",
-                          q_model=None) -> Description:
+                          q_model=None, estacional: "int | None" = None
+                          ) -> Description:
     """
     Scan the differenced series for extreme observations BEFORE ARMA identification.
 
@@ -4178,11 +4179,37 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
         # se hace aquí, sobre la misma serie y los mismos omitidos, y el nivel
         # se reconcilia con ella: cambia ⇒ nunca «leve»; no cambia ⇒ nunca
         # «fuerte».
-        from art.calibracion import calibra_correlograma, nivel_coherente
+        from art.calibracion import (calibra_correlograma, nivel_coherente,
+                                     estacionalidad_del_modelo)
+        # LA VENTANA ESTACIONAL — BUG-0212. La calibración decide sobre los
+        # retardos 1..12 y, si hay estacionalidad, también s, 2s, 3s. De dónde
+        # sale «hay estacionalidad», por orden de limpieza:
+        #   1. `estacional` explícito, si quien llama ya lo sabe;
+        #   2. el MODELO escaneado (`q_model`): lo que él ya decidió —D, P/Q,
+        #      armónicos, ifadf—, que es la fuente más limpia;
+        #   3. sin modelo, D ≥ 1 pasado por quien llama;
+        #   4. sin modelo y con D=0, el mismo contraste que el paso de
+        #      identificación (`detect_seasonality`, F HAC sobre la serie).
+        _s_est = estacional
+        if _s_est is None:
+            try:
+                if q_model is not None:
+                    _s_est = estacionalidad_del_modelo(q_model)
+                elif int(freq) > 1 and int(D) >= 1:
+                    _s_est = int(freq)
+                elif int(freq) > 1:
+                    from art.seasonal_detection import detect_seasonality
+                    _sd = detect_seasonality(ts, d=max(int(d), 1), lam=lam)
+                    _s_est = int(freq) if _sd.seasonal_detected else 0
+                else:
+                    _s_est = 0
+            except Exception:
+                _s_est = 0
         try:
             _cal = calibra_correlograma(
                 w_std, umbral=threshold,
-                omitir={int(i) for i, _z, _d in outliers}, top_pares=0)
+                omitir={int(i) for i, _z, _d in outliers}, top_pares=0,
+                estacional=int(_s_est or 0))
         except Exception:
             _cal = None
         distortion_level = nivel_coherente(nivel_magnitud, _cal)
@@ -4218,15 +4245,17 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
                 "→ **Punto de decisión del analista:** confirma si intervenir ahora."
             )
         elif distortion_level == "moderate":
-            # La calibración mira los retardos que deciden p y q (1..K); el
-            # ACF_max puede venir de uno más alto (Villaverde m07: k=28, 97 %).
-            _K = len(_cal.distorsiones) if _cal is not None else 0
+            # La calibración mira los retardos que identifican el modelo
+            # (1..12 y, con estacionalidad, s, 2s, 3s); el ACF_max puede venir
+            # de otro (Villaverde m07: k=28, 97 %), que no decide.
+            _vent = _cal.ventana_texto if _cal is not None else "ningún retardo"
             _grande = (" La magnitud es grande, pero al" if nivel_magnitud == "strong"
                        else " Al")
             verdict = (
                 f"**Distorsión moderada sobre la ACF/PACF** {_cifras}.{_grande} "
-                f"omitir los anómalos **ningún retardo de 1 a {_K} cambia de "
-                "veredicto** en la ACF ni en la PACF: no deciden los órdenes.\n"
+                f"omitir los anómalos **ninguno de los retardos que identifican "
+                f"el modelo ({_vent}) cambia de veredicto** en la ACF ni en la "
+                "PACF: no deciden los órdenes.\n"
                 "→ **Sugerencia:** razonable pasar a ARMA; intervenir sigue siendo "
                 "opción por adecuación, normalidad o por el suceso en sí.\n"
                 "→ **Punto de decisión del analista:** la decisión de intervenir sigue "
@@ -4297,6 +4326,8 @@ def describe_prelim_scan(ts, d: int, D: int, lam: float = 0.0,
             # reconciliado el nivel, para que quien lo presente no calibre
             # por su cuenta y llegue a otro.
             # (None: había anómalos y la calibración no se pudo hacer)
+            "ventana": ([x.lag for x in _cal.distorsiones]
+                        if _cal is not None else []),          # BUG-0212
             "cambia_la_identificacion": (None if (outliers and _cal is None)
                                          else cambia),
             "flips_ar": [x.lag for x in _cal.flips_ar] if cambia else [],

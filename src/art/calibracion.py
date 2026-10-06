@@ -112,7 +112,8 @@ from typing import Sequence
 import numpy as np
 
 __all__ = ["Distorsion", "CalibracionCorrelograma", "calibra_correlograma",
-           "describe_calibracion", "nivel_coherente", "MARGEN_CRUCE"]
+           "describe_calibracion", "nivel_coherente", "MARGEN_CRUCE",
+           "estacionalidad_del_modelo"]
 
 
 def _durbin_levinson(r: np.ndarray) -> np.ndarray:
@@ -420,6 +421,25 @@ class CalibracionCorrelograma:
     freq: int = 0
     start: tuple = ()
     desfase: int = 0
+    # El período s cuyos retardos s, 2s, 3s entran en la ventana (0: sólo
+    # los regulares) — BUG-0212.
+    estacional: int = 0
+
+    @property
+    def ventana_texto(self) -> str:
+        """«retardos 1–12» o «retardos 1–12 y 24, 36»: los que deciden."""
+        lags = [d.lag for d in self.distorsiones]
+        if not lags:
+            return "ningún retardo"
+        # tramo regular: 1..K consecutivo
+        K = 0
+        while K + 1 in lags:
+            K += 1
+        resto = [k for k in lags if k > K]
+        txt = f"retardos 1–{K}" if K > 1 else "retardo 1"
+        if resto:
+            txt += " y " + ", ".join(str(k) for k in resto)
+        return txt
 
     def fecha(self, i0: int) -> str:
         """La fecha de la observación 0-based `i0` de los residuos, o su índice
@@ -507,7 +527,8 @@ def calibra_correlograma(residuals: Sequence[float],
                          top_pares: int = 4,
                          freq: int = 0,
                          start: Sequence[int] = (),
-                         desfase: int = 0) -> CalibracionCorrelograma:
+                         desfase: int = 0,
+                         estacional: int = 0) -> CalibracionCorrelograma:
     """Cuánto de la ACF y de la PACF se debe a los residuos extremos.
 
     Parameters
@@ -530,6 +551,17 @@ def calibra_correlograma(residuals: Sequence[float],
     if n < 8:
         raise ValueError(f"n={n}: hacen falta al menos 8 residuos para calibrar.")
     K = int(min(max_lag, max(1, n // 4)))
+    # LA VENTANA QUE DECIDE — BUG-0212 (decisión del mantenedor). Los retardos
+    # que identifican el modelo: los regulares 1..K y, SI HAY ESTACIONALIDAD
+    # (`estacional` = s > 1), los estacionales s, 2s, 3s, cada uno acotado por
+    # el retardo útil n/4. Un retardo fuera de esta ventana —el k=28 de
+    # Villaverde— no decide nunca «cambia la identificación».
+    _util = max(1, n // 4)
+    ventana = list(range(1, K + 1))
+    if int(estacional or 0) > 1:
+        ventana += [j * int(estacional) for j in (1, 2, 3)
+                    if K < j * int(estacional) <= _util]
+    K_calc = max(ventana)
 
     mu, sd = float(r.mean()), float(r.std(ddof=0))
     if sd < 1e-20:
@@ -551,12 +583,12 @@ def calibra_correlograma(residuals: Sequence[float],
         idx = [i for i in range(n) if abs(z[i]) > umbral]
     extremos = [(i + 1, float(z[i])) for i in idx]
 
-    a_obs, p_obs = _acf_pacf(r, K)
+    a_obs, p_obs = _acf_pacf(r, K_calc)
     if idx:
         # Relleno con ceros sobre las desviaciones (BUG-0142): quita la
         # contribución del anómalo a TODOS los retardos y deja una ACF
         # admisible, que es la única forma de que la PACF derivada sea una PACF.
-        a_cal, p_cal = _acf_pacf(r, K, omitir=set(idx))
+        a_cal, p_cal = _acf_pacf(r, K_calc, omitir=set(idx))
         keep = np.array([i for i in range(n) if i not in set(idx)])
         sigma_cal = float(r[keep].std(ddof=0))
     else:
@@ -569,18 +601,45 @@ def calibra_correlograma(residuals: Sequence[float],
     pd_ok = bool(np.all(np.isfinite(p_cal)) and np.max(np.abs(p_cal)) < 1.0)
 
     banda = 2.0 / np.sqrt(n)
-    pares = _pares_dominantes(r, K, top=top_pares) if top_pares else \
-        [[] for _ in range(K)]
-    dis = [Distorsion(lag=k + 1, banda=banda,
-                      acf_obs=float(a_obs[k]), acf_cal=float(a_cal[k]),
-                      pacf_obs=float(p_obs[k]), pacf_cal=float(p_cal[k]),
-                      pares=tuple(pares[k]))
-           for k in range(K)]
+    pares = _pares_dominantes(r, K_calc, top=top_pares) if top_pares else \
+        [[] for _ in range(K_calc)]
+    dis = [Distorsion(lag=k, banda=banda,
+                      acf_obs=float(a_obs[k - 1]), acf_cal=float(a_cal[k - 1]),
+                      pacf_obs=float(p_obs[k - 1]), pacf_cal=float(p_cal[k - 1]),
+                      pares=tuple(pares[k - 1]))
+           for k in ventana]
 
     return CalibracionCorrelograma(
         distorsiones=dis, extremos=extremos, n=n, banda=banda, umbral=umbral,
         sigma_obs=sd, sigma_cal=sigma_cal, por_omision=(omitir is not None),
-        freq=int(freq or 0), start=tuple(start), desfase=int(desfase))
+        freq=int(freq or 0), start=tuple(start), desfase=int(desfase),
+        estacional=int(estacional or 0) if len(ventana) > K else 0)
+
+
+def estacionalidad_del_modelo(m) -> int:
+    """El período s si el modelo lleva parte estacional, 0 si no — BUG-0212.
+
+    «Lleva parte estacional» es: D ≥ 1, AR o MA estacional, armónicos
+    (cos/sin/alter) o una diferencia estacional por factores (`ifadf`). Es lo
+    que el modelo ya ha decidido sobre la estacionalidad, y por eso es la
+    fuente más limpia para escanear sus residuos.
+    """
+    try:
+        s = int(getattr(getattr(m, "series", None), "freq", 0) or 0)
+    except Exception:
+        s = 0
+    if s <= 1:
+        return 0
+    if int(getattr(m, "D", 0) or 0) >= 1:
+        return s
+    if any(getattr(m, a, None) for a in ("ar_s", "ma_s")):
+        return s
+    if any(int(x or 0) for x in (getattr(m, "ifadf", None) or [])):
+        return s
+    if any(getattr(i, "type", "") in ("cos", "sin", "alter")
+           for i in (getattr(m, "interventions", None) or [])):
+        return s
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -730,7 +789,9 @@ def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = "",
 
     if not cal.cambia_la_identificacion:
         L += ["#### Veredicto — **no cambia la identificación**", "",
-              "Ningún retardo cambia de dentro a fuera de banda ni al revés. El "
+              f"Ningún retardo de los que identifican el modelo "
+              f"({cal.ventana_texto}) cambia de dentro a fuera de banda ni al "
+              "revés. El "
               "anómalo **no está decidiendo los órdenes**, así que intervenirlo "
               "antes de identificar no compra nada: sería gastar un parámetro y "
               "tocar la serie sin que la decisión de órdenes cambie.",
@@ -749,7 +810,8 @@ def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = "",
                   "típico entero a través del borde. Moverse menos es ruido "
                   "de muestreo, no un orden que entra o sale.*"]
     else:
-        L += ["#### Veredicto — **cambia la identificación**", ""]
+        L += ["#### Veredicto — **cambia la identificación**", "",
+              f"*Ventana que decide: {cal.ventana_texto}.*", ""]
         # Y se dice UNA vez. Llevaba el rótulo entre paréntesis y la frase
         # completa a continuación —«(fabricada) — una señal AR que el anómalo
         # fabricaba»—, que es la misma palabra dos veces en la misma línea.
@@ -783,6 +845,7 @@ def describe_calibracion(cal: "CalibracionCorrelograma", nombre: str = "",
         summary="\n".join(L), figure_b64=b64, recommendation=rec,
         data=dict(
             veredicto=cal.veredicto, n=cal.n, banda=cal.banda,
+            ventana=[d.lag for d in cal.distorsiones],  # BUG-0212
             umbral=cal.umbral, sigma_obs=cal.sigma_obs, sigma_cal=cal.sigma_cal,
             cambia_la_identificacion=cal.cambia_la_identificacion,
             flips_opuestos=[d.lag for d in cal.flips_opuestos],

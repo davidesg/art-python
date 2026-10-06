@@ -261,3 +261,79 @@ def test_el_escaneo_real_y_la_tabla_dicen_lo_mismo(modelo):
         assert "Distorsión leve" not in txt
     else:
         assert "Distorsión fuerte" not in txt
+
+
+# ═════════════════════ la ventana estacional ═════════════════════
+# Decisión del mantenedor: la calibración decide sobre los retardos que
+# identifican el modelo — 1..12 y, SI HAY ESTACIONALIDAD, s, 2s, 3s. Lo que
+# cae fuera (el k=28 de Villaverde m07) no decide nunca.
+
+def _con_pares(separacion, n=216, golpe=6.0, semilla=24):
+    """Ruido blanco con cuatro anómalos separados `separacion`: fabrican
+    r(separacion) y nada en los retardos 1..12."""
+    x = np.random.default_rng(semilla).standard_normal(n)
+    for t in (50, 50 + separacion, 50 + 2 * separacion, 50 + 3 * separacion):
+        x[t] += golpe
+    return x
+
+
+def test_un_flip_en_24_con_estacionalidad_cambia_la_identificacion():
+    cal = calibra_correlograma(_con_pares(24), umbral=3.0, estacional=12)
+    assert [d.lag for d in cal.distorsiones][-2:] == [24, 36]
+    assert cal.ventana_texto == "retardos 1–12 y 24, 36"
+    assert any(d.lag == 24 and d.acf_flip == "fabricada" for d in cal.flips_ma)
+    assert cal.cambia_la_identificacion
+    txt = describe_calibracion(cal, con_figura=False).summary
+    assert "retardos 1–12 y 24, 36" in txt
+
+
+def test_el_mismo_flip_sin_estacionalidad_no_decide():
+    cal = calibra_correlograma(_con_pares(24), umbral=3.0, estacional=0)
+    assert max(d.lag for d in cal.distorsiones) == 12
+    assert not cal.cambia_la_identificacion
+    assert "retardos 1–12" in describe_calibracion(cal, con_figura=False).summary
+
+
+def test_el_retardo_28_no_decide_nunca():
+    for s in (0, 12):
+        cal = calibra_correlograma(_con_pares(28), umbral=3.0, estacional=s)
+        assert 28 not in [d.lag for d in cal.distorsiones]
+        assert not cal.cambia_la_identificacion, s
+
+
+def test_los_retardos_estacionales_se_acotan_por_n_cuartos():
+    # n=100: retardo útil 25 → entran 24 pero no 36
+    cal = calibra_correlograma(np.random.default_rng(1).standard_normal(100),
+                               umbral=3.0, estacional=12)
+    assert [d.lag for d in cal.distorsiones][-1] == 24
+    # trimestral, n=120: 1..12 y 4, 8, 12 ya están dentro → sólo 1..12
+    cal = calibra_correlograma(np.random.default_rng(1).standard_normal(120),
+                               umbral=3.0, estacional=4)
+    assert [d.lag for d in cal.distorsiones] == list(range(1, 13))
+
+
+def test_la_estacionalidad_sale_del_modelo():
+    fue = pytest.importorskip("fue")
+    from art.calibracion import estacionalidad_del_modelo
+    ts = fue.TimeSeries(list(np.exp(np.cumsum(np.full(120, 0.01)))), freq=12,
+                        start=(2000, 1), name="S")
+    assert estacionalidad_del_modelo(fue.Model(ts, d=1)) == 0
+    assert estacionalidad_del_modelo(fue.Model(ts, d=1, D=1)) == 12
+    assert estacionalidad_del_modelo(
+        fue.Model(ts, d=1, ma_s=[[0.5]], ma_s_free=[[True]])) == 12
+
+
+def test_el_escaneo_sin_modelo_usa_la_D_que_le_pasan():
+    fue = pytest.importorskip("fue")
+    from art.describe import describe_prelim_scan
+    x = _con_pares(24)
+    ts = fue.TimeSeries(x.tolist(), freq=12, start=(2000, 1), name="X")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        con = describe_prelim_scan(ts, d=0, D=0, lam=1.0, threshold=3.0,
+                                   estacional=12)
+        sin = describe_prelim_scan(ts, d=0, D=0, lam=1.0, threshold=3.0,
+                                   estacional=0)
+    assert 24 in con.data["ventana"] and con.data["cambia_la_identificacion"]
+    assert 24 not in sin.data["ventana"]
+    assert not sin.data["cambia_la_identificacion"]

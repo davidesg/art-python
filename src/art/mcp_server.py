@@ -3659,7 +3659,8 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER,
         # opuestos en el mismo retardo.
         cal_txt, cal_b64 = "", None
         try:
-            from art.calibracion import calibra_correlograma, describe_calibracion
+            from art.calibracion import (calibra_correlograma, describe_calibracion,
+                                         estacionalidad_del_modelo)
             # BUG-0133. La tabla tiene que calibrar por el MISMO criterio que
             # la figura. Antes la figura omitía el incidente y la tabla seguía
             # con el umbral: dos calibraciones distintas en la misma pantalla, y
@@ -3675,7 +3676,8 @@ def residual_outlier_scan(inp_path: str, threshold: float = _Z_USER,
             _cal = calibra_correlograma(
                 m._result.residuals, umbral=threshold, omitir=_om,
                 freq=_f, start=getattr(ts, "start", ()),
-                desfase=_desfase_obs(m))                      # BUG-0172
+                desfase=_desfase_obs(m),                       # BUG-0172
+                estacional=estacionalidad_del_modelo(m))      # BUG-0212
             # BUG-0133: sólo la TABLA. La figura de esta llamada es la del
             # escaneo, que es el gráfico de calibración de distorsiones.
             _d = describe_calibracion(_cal, nombre=os.path.basename(inp_path),
@@ -5257,8 +5259,15 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
                               "adecuación o por el suceso en sí")
                     nxt = "procede a contrastes formales"
             else:
+                _v = sd.get("ventana") or []
+                _K = 0
+                while _K + 1 in _v:
+                    _K += 1
+                _vt = (f" (retardos 1–{_K}"
+                       + ("".join(f", {k}" for k in _v if k > _K) if _K else "")
+                       + ")") if _v else ""
                 cuerpo = (cab + " — calibrado: **ningún retardo cambia de "
-                          "veredicto** en la ACF ni en la PACF, así que no "
+                          f"veredicto**{_vt} en la ACF ni en la PACF, así que no "
                           "deciden los órdenes. Intervenir aquí sería "
                           "sobre-intervenir; sigue siendo opción del analista "
                           "por adecuación o por el suceso en sí")
@@ -9505,12 +9514,14 @@ def guided_intervention(inp_path: str,
                                                                else None))))
 
         # ═════════════════ LLAMADA 1 — ¿hay que intervenir? ═════════════════
-        from art.calibracion import calibra_correlograma, describe_calibracion
+        from art.calibracion import (calibra_correlograma, describe_calibracion,
+                                     estacionalidad_del_modelo)
         _f = int(getattr(ts, "freq", 1) or 1)
         cal = calibra_correlograma(
             m._result.residuals, umbral=threshold,
             freq=_f, start=getattr(ts, "start", ()),
-            desfase=_desfase_obs(m))                          # BUG-0172
+            desfase=_desfase_obs(m),                           # BUG-0172
+            estacional=estacionalidad_del_modelo(m))          # BUG-0212
         # BUG-0133: de aquí sale la TABLA con su veredicto por retardo. La
         # FIGURA de esta llamada es la del escaneo de tres paneles —el gráfico
         # de calibración de distorsiones—, que enseña además dónde está el
