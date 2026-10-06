@@ -148,19 +148,6 @@ class DiagnosisResult:
         return [k + 1 for k, v in enumerate(np.asarray(self.pacf, dtype=float))
                 if abs(v) > self.banda]
 
-    # EL JARQUE-BERA DEL `.out` — BUG-0214. Mismos residuos (los
-    # incondicionales, n − d − D·s) y mismos momentos (asimetría y curtosis
-    # poblacionales): la diferencia es el factor. `fue` reproduce el programa en
-    # C, que calcula n/6 en ENTEROS (`(n // 6)`), y aquí es n/6 exacto, que es
-    # el estadístico de los libros y el que da el p-valor. IPC_US AR(2), n=215:
-    # 215/6·10,262 = 367,742 frente a 35·10,262 = 359,190. Coinciden cuando 6
-    # divide a n.
-    @property
-    def jb_out(self) -> float:
-        """El JB tal como lo imprime el `.out` del motor: ⌊n/6⌋·(S² + K²/4)."""
-        n = len(self.residuals)
-        return (n // 6) * (self.skewness ** 2 + self.excess_kurtosis ** 2 / 4.0)
-
     @property
     def normal(self) -> bool:
         """True if JB p-value > 0.05 (cannot reject normality)."""

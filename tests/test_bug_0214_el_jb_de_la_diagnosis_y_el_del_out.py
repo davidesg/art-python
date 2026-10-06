@@ -1,9 +1,9 @@
 """BUG-0214 — el Jarque-Bera de la diagnosis no es el del `.out`.
 
 IPC_US AR(2): diagnosis 367,742, `.out` 359,190. Mismos residuos (215) y mismos
-momentos: el motor reproduce el programa en C, que calcula n/6 en enteros. La
-diagnosis conserva el estadístico exacto —el que da el p-valor— y cita el del
-`.out` con la razón cuando difieren.
+momentos: fue copiaba del C antiguo n/6 en enteros. Ahora fue usa n/6 exacto
+(fue/BUG-0026), como el C actual, scipy, pyfug y art: un solo JB en todas
+partes, también con n = 215, que 6 no divide.
 """
 import os
 import re
@@ -46,19 +46,17 @@ def ajuste(tmp_path_factory):
     return t, jb_out, out[:-4] + ".pre"
 
 
-def test_la_diagnosis_cita_el_jb_del_out_y_por_que(ajuste):
+def test_la_diagnosis_da_el_jb_del_out(ajuste):
     t, jb_out, _ = ajuste
     linea = re.search(r"- Normalidad \(JB\):[^\n]*", t).group(0)
-    assert f"el `.out` da {jb_out:.3f}" in linea, linea
-    assert "⌊215/6⌋" in linea
+    assert f"JB={jb_out:.3f}" in linea, linea
+    assert "el `.out` da" not in linea
 
 
-def test_es_el_mismo_estadistico_salvo_el_factor(ajuste):
+def test_un_solo_estadistico_con_n_que_6_no_divide(ajuste):
     _, jb_out, pre = ajuste
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         dg = diagnose(mirar(pre)[1])
-    n = len(dg.residuals)
-    assert n == 215
-    assert abs(dg.jb_out - jb_out) < 1e-3
-    assert abs(dg.jb_stat * (n // 6) / (n / 6) - jb_out) < 1e-3
+    assert len(dg.residuals) == 215
+    assert abs(dg.jb_stat - jb_out) < 1e-3

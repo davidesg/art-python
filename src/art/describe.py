@@ -1987,12 +1987,8 @@ def describe_diagnosis(model) -> Description:
             f"={result.q_stats[-1]:.2f}, "
             f"p={result.q_p_cancerbero:.4f} — **decide 3f+3**"
             if result.q_lags else "sin contraste")),
-        f"- Normalidad (JB): {nm}  JB={result.jb_stat:.3f}, p={result.jb_pvalue:.4f}"
-        # BUG-0214: el `.out` del mismo modelo da otra cifra, y hay que decir
-        # por qué antes de que el alumno elija una al azar.
-        + (f"  (el `.out` da {result.jb_out:.3f}: mismos residuos y momentos, "
-           f"pero el motor trunca n/6 a entero, ⌊{len(result.residuals)}/6⌋)"
-           if abs(result.jb_out - result.jb_stat) >= 5e-4 else ""),
+        # BUG-0214: el MISMO JB que el `.out` (fue/BUG-0026: n/6 exacto).
+        f"- Normalidad (JB): {nm}  JB={result.jb_stat:.3f}, p={result.jb_pvalue:.4f}",
         f"- Asimetría={result.skewness:.3f}, curtosis exceso={result.excess_kurtosis:.3f}",
     ]
 
