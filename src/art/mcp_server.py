@@ -7581,6 +7581,7 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                                descendants, iteraciones, modelos_sin_registrar,
                                entradas_que_no_cuadran, linaje_dudoso,
                                comparaciones_entre_muestras, q_marca,
+                               especificadas_sin_estimar,
                                cifra as _cifra)
         g = load_guion(os.path.expanduser(guion_path))
         if not g.entries:
@@ -7701,9 +7702,14 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
         detalle_nodos = " · ".join(f"{k}: {v}" for k, v in por_nodo.items())
         lines += ["", f"**{len(cerradas)} iteraciones**"
                       + (f" — {detalle_nodos}" if detalle_nodos else "")]
-        abiertas = [i for i in its if not i.cerrada]
+        # Sólo lo que de verdad espera estimación: un nodo final que no
+        # especifica nada (la previsión) no es un modelo pendiente (BUG-0221).
+        abiertas = especificadas_sin_estimar(g)
         if abiertas:
-            lines.append(f"   {len(abiertas)} especificada(s) sin estimar.")
+            lines.append(f"   {len(abiertas)} especificada(s) sin estimar: "
+                         + "; ".join(", ".join(
+                             f"n{e.version} {(e.node or {}).get('nodo', e.name)}"
+                             for e in i.especificacion) for i in abiertas) + ".")
 
         # ¿ESTÁ COMPLETO EL REGISTRO? El guion no tenía forma de saberse
         # incompleto, y se sabe incompleto: en UEM_FOOD_SERV_DS —un caso que

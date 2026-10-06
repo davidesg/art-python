@@ -1056,6 +1056,28 @@ def iteraciones(guion: "Guion") -> list[Iteracion]:
     return [por_num[k] for k in sorted(por_num)]
 
 
+#: Los nodos que ESPECIFICAN un modelo: después de ellos toca estimar. Los
+#: demás —el dominio, la previsión, una conclusión— no dejan nada pendiente.
+NODOS_DE_ESPECIFICACION = {
+    "lambda", "estacionalidad", "d", "ordenes", "media", "intervenciones",
+    "reformulacion",
+}
+
+
+def especificadas_sin_estimar(guion: "Guion") -> list[Iteracion]:
+    """Iteraciones con una especificación escrita y ningún modelo — BUG-0221.
+
+    `iteraciones` abre una iteración con cualquier nodo y la cierra con un
+    modelo, así que un nodo FINAL que no especifica nada —«prevision» en la
+    P04, la conclusión en Moncloa— quedaba como iteración abierta y el mapa
+    afirmaba «1 especificada(s) sin estimar» con todo estimado. Sólo cuenta
+    la iteración abierta que lleva un nodo de especificación.
+    """
+    return [i for i in iteraciones(guion) if not i.cerrada and any(
+        ((e.node or {}).get("nodo") or e.nodo or "").strip().lower()
+        in NODOS_DE_ESPECIFICACION for e in i.especificacion)]
+
+
 def modelos_sin_registrar(guion: "Guion", guion_path: str) -> list[str]:
     """Ternas que hay en la carpeta del guion y NO están en el guion.
 
