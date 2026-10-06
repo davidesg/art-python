@@ -2540,21 +2540,36 @@ def describe_formal_tests(model, run_meg: bool = True,
                 f"ENCIMA de la nula ρₘ={sf_res.phi_null:.4f}: los datos son al "
                 f"menos tan integrados como H₀. Un Φ̂₁ᵤ grande aquí mide "
                 f"distancia, no estacionariedad.")
-        elif sf_res.phi_dominant is not None and sf_res.phi_dominant < 0:
-            # BUG-0215: se leía |φ̂| y una raíz en −1 pasaba por una en +1.
-            lines.append(
-                f"  ℹ La raíz real del AR más cercana a +1 es NEGATIVA "
-                f"(φ̂={sf_res.phi_dominant:.4f}, frecuencia π): no hay raíz "
-                f"cerca de la frecuencia cero, y el contraste lo dice. "
-                + ("Una raíz tan cerca de −1 es el factor (1 + B) de Nyquist: "
-                   "eso no dice nada sobre `d` — lo mira el contraste en π "
-                   "(MEG / DCD en Nyquist), no éste."
-                   if sf_res.phi_dominant <= -0.9 else ""))
         elif sf_res.phi_dominant is not None:
             lines.append(
                 f"  ℹ Raíz dominante φ̂={sf_res.phi_dominant:.4f} "
                 f"(por debajo de ρₘ={sf_res.phi_null:.4f}: la dirección del "
                 f"contraste es la buena).")
+
+    # SIN RAÍZ REAL POSITIVA — BUG-0215. Shin-Fuller sólo mira raíces reales
+    # positivas: d trata de una raíz en +1. Si el AR no tiene ninguna, no hay
+    # estadístico —calcularlo sobre una raíz negativa no significa nada— y en
+    # f=0 decide sólo el DCD. Una raíz cerca de −1 recibe una nota, sin número.
+    sf_sin_positiva = sf_res is None and "raíz real positiva" in sf_motivo
+    if sf_sin_positiva:
+        lines.append("\n**Shin-Fuller (no estacionariedad AR)** — no aplica: el "
+                     "AR no tiene raíz real positiva; en f=0 decide el DCD.")
+        try:
+            import numpy as _npr
+            _neg = []
+            for _f in (model.ar or []):
+                for _z in _npr.roots([-c for c in reversed(list(_f))] + [1.0]):
+                    if abs(_z.imag) <= 1e-8 * max(1.0, abs(_z.real)) and _z.real < 0:
+                        _neg.append(1.0 / float(_z.real))
+            _cerca = [p for p in _neg if p <= -0.9]
+            if _cerca:
+                lines.append(
+                    f"  ℹ Raíz real en φ̂={min(_cerca):+.4f} (frecuencia π): "
+                    "una raíz tan cerca de −1 es el factor (1 + B) de Nyquist "
+                    "y no tiene nada que ver con `d`. Lo que le corresponde son "
+                    "los contrastes en Nyquist (MEG / DCD en π), no éste.")
+        except Exception:
+            pass
 
     # DCD
     if dcd_res:
@@ -2725,6 +2740,9 @@ def describe_formal_tests(model, run_meg: bool = True,
                    "cerca del círculo unidad es no estacionariedad en ω≠0: eso "
                    "lo contrastan el MEG y el DCD_f."
                    if "raíz REAL" in sf_motivo else
+                   "El AR de este modelo no tiene raíz real positiva, así que "
+                   "Shin-Fuller no aplica y en f=0 decide sólo este DCD."
+                   if sf_sin_positiva else
                    "Este modelo no tiene AR regular libre, así que Shin-Fuller "
                    "no es aplicable.")
                 + (" El lado AR —la nula opuesta— no está disponible "
@@ -3214,6 +3232,17 @@ def describe_formal_tests(model, run_meg: bool = True,
                "el modelo:\n" + "\n".join(f"  • {i}" for i in pendientes))
     else:
         rec = "Los contrastes formales no detectan problemas. El modelo es adecuado."
+    # BUG-0215: con un solo lado en f=0 no hay «par» que coincida o discrepe;
+    # el cierre lo dice en vez de dejar que «adecuado» se lea como confirmado
+    # por los dos.
+    if (sf_res is None and od_res is not None
+            and od_res.lr < od_res._crit['5%'] and od_res.coef_free >= 0.0
+            and not (sf_sobre is not None and sf_sobre.convergido)):
+        rec += ("\n  ℹ En f=0 hay un solo lado, el DCD de sobrediferenciación: "
+                "la ∇ extra sobra, así que d basta por ese lado"
+                + (" (Shin-Fuller no aplica: el AR no tiene raíz real positiva)."
+                   if sf_sin_positiva else
+                   " (sin lado AR con que emparejarlo)."))
 
     return Description(
         summary="\n".join(lines),

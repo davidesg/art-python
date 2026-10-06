@@ -97,8 +97,9 @@ def test_both_paper_caveats_are_stated():
 
 def test_a_series_where_the_pair_agrees_gets_no_band_warning():
     """Simulada I(1) con estacionalidad determinista: el testigo se apila en la
-    frontera (θ̂=1.0000, LR≈0) y los dos contrastes coinciden en que d basta.
-    Un aviso de banda ahí sería un falso positivo del propio aviso.
+    frontera (θ̂=1.0000, LR≈0): d basta. Un aviso de banda ahí sería un falso
+    positivo del propio aviso. (Su AR(1) sale negativo: desde BUG-0215 no hay
+    lado Shin-Fuller y el DCD va solo.)
     """
     import numpy as np
     import fue
@@ -115,7 +116,14 @@ def test_a_series_where_the_pair_agrees_gets_no_band_warning():
     m.fit()
 
     d = _report(m)
-    assert d.data["f0_pair"]["quasi_cancellation"] is False
-    assert "Los dos coinciden" in d.summary
+    # BUG-0215 (decisión del mantenedor): el AR(1) sale con φ̂ ≈ −0,04, sin
+    # raíz real positiva, así que Shin-Fuller no aplica y en f=0 queda sólo el
+    # lado DCD. Antes se contrastaba esa raíz negativa como si fuera de +1.
+    assert m.ar[0][0] < 0
+    assert d.data["f0_pair"] is None
+    assert d.data["shin_fuller"] is None
+    assert "no tiene raíz real positiva" in d.summary
+    assert "Los dos coinciden" not in d.summary
     assert "DISCREPAN" not in d.summary
     assert "cuasi-cancelación" not in d.recommendation.lower()
+    assert "un solo lado" in d.recommendation

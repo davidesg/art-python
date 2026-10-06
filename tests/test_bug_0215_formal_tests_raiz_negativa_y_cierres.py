@@ -64,40 +64,46 @@ def negativo(tmp):
                    ar=[[-0.9]], ar_free=[[True]])
 
 
-# ═══════════════ Shin-Fuller: la raíz más cercana a +1, con signo ═══════════
+# ═══════════════ Shin-Fuller: sólo raíces reales POSITIVAS ═══════════════
 
-def test_una_raiz_negativa_no_es_una_raiz_unitaria(negativo):
+def test_una_raiz_negativa_no_da_estadistico(negativo):
+    """Decisión del mantenedor: d trata de una raíz en +1; sobre una raíz
+    negativa Φ̂₁ᵤ no significa nada, así que no se calcula."""
     phi = negativo.ar[0][0]
     # el testigo vale si |φ̂| supera ρₘ: ahí la versión anterior comparaba
     # |φ̂| con ρₘ y decía «raíz unitaria — considerar d+1»
     assert phi < -(1 - 4 / negativo.series.nobs), phi
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        sf = shin_fuller(negativo)
-    assert sf.phi_dominant == pytest.approx(phi, abs=1e-6)
-    assert not sf.mas_integrado_que_la_nula
-    assert sf.stationary, "no hay raíz en +1: el lado AR dice que d basta"
+    with pytest.raises(ValueError, match="no tiene raíz real positiva"):
+        shin_fuller(negativo)
 
 
-def test_el_informe_no_pide_d_mas_1_por_una_raiz_en_pi(negativo):
+def test_el_informe_dice_no_aplica_y_decide_el_dcd(negativo):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         d = describe_formal_tests(negativo, run_meg=False)
     s = d.summary
     assert "Raíz unitaria — considerar d+1" not in s
-    assert "POR ENCIMA de la nula" not in s
-    assert "NEGATIVA" in s and "Nyquist" in s
+    assert "Φ̂₁ᵤ=" not in s, "sobre una raíz negativa no hay estadístico"
+    assert "no aplica: el AR no tiene raíz real positiva; en f=0 decide el DCD" in s
+    # φ̂ ≤ −0,9: sólo una nota hacia Nyquist
+    assert "(1 + B) de Nyquist" in s
+    assert d.data["shin_fuller"] is None and d.data["f0_pair"] is None
+    # un solo lado: nada de «coinciden» ni «discrepa»
+    assert "coinciden" not in s and "DISCREPAN" not in s
     assert "Considera aumentar d en 1" not in d.recommendation
+    assert "discrepa" not in d.recommendation
 
 
-def test_un_ar_negativo_pequeño_conserva_el_lado_ar(tmp):
-    """Un ARIMA(1,1,0) con φ̂ < 0 es corriente: su lado AR existe."""
+def test_un_ar_negativo_pequeño_tampoco_da_estadistico_ni_nota(tmp):
     m = _estima(tmp, "NEG3", _ar([-0.3], 240, 2), d=1, boxlam=1.0,
                 ar=[[-0.2]], ar_free=[[True]])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        sf = shin_fuller(m)
-    assert sf.phi_dominant < 0 and sf.stationary
+        with pytest.raises(ValueError, match="raíz real positiva"):
+            shin_fuller(m)
+        s = describe_formal_tests(m, run_meg=False).summary
+    assert "no tiene raíz real positiva" in s
+    assert "Nyquist" not in s.split("Shin-Fuller")[1].split("**DCD")[0]
 
 
 def test_con_una_raiz_positiva_y_otra_negativa_aisla_la_positiva(tmp):
@@ -106,6 +112,7 @@ def test_con_una_raiz_positiva_y_otra_negativa_aisla_la_positiva(tmp):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         sf = shin_fuller(m)
+    # se contrasta la POSITIVA (≈0,5), no la de −0,95
     assert sf.phi_dominant is not None and 0 < sf.phi_dominant < 0.9
     assert sf.stationary
 
