@@ -153,8 +153,12 @@ def lee_out(path: str) -> LecturaOut:
         raise FileNotFoundError(f"No hay `.out` que leer: {path}")
     with open(path, encoding="utf-8", errors="replace") as fh:
         texto = fh.read()
+    return lee_texto_out(texto, path)
 
-    r = LecturaOut(ruta=path, texto=texto)
+
+def lee_texto_out(texto: str, ruta: str = "") -> LecturaOut:
+    """Lee el TEXTO de un `.out` (el de un fichero o el de `write_out()`)."""
+    r = LecturaOut(ruta=ruta, texto=texto)
     lineas = texto.split("\n")
 
     bloque = ""
@@ -252,8 +256,10 @@ def lee_out(path: str) -> LecturaOut:
                         r.residuos.minimo = dato
                     else:
                         r.residuos.maximo = dato
-            elif re.match(r"^\d+\s+observations", s):
-                r.residuos.n = int(_num(s) or 0) or None
+            elif (m := re.match(r"^(\d+)\s+observations", s)):
+                # El número va ANTES de los dos puntos: `_num` cogía el mes de
+                # «from 2/2011» y daba n = 2 (BUG-0222).
+                r.residuos.n = int(m.group(1)) or None
             continue
 
         # ── la tabla de parámetros ──
@@ -308,3 +314,270 @@ def aviso_out(lectura: "LecturaOut") -> str:
     if lectura is None or lectura.se_del_hessiano:
         return ""
     return AVISO_OUT_BFGS
+
+
+# ── El resumen (BUG-0222) ───────────────────────────────────────────────────
+#
+# El `.out` pesa unos 40 KB: la serie tipificada línea a línea, el histograma,
+# la ACF/PACF dibujadas y la calibración de la FAS. En el carril autónomo se
+# lee decenas de veces para tres cifras, y cada lectura entera satura el
+# contexto. El resumen saca del MISMO fichero —no reestima— lo que decide un
+# nodo; sólo añade aritmética de lo que ya está escrito: t, AIC/BIC, los
+# valores p y las raíces de los factores.
+
+_FACTOR = re.compile(r"^Coefficients for (regular|annual) (f-fixed )?(AR|MA) factor (\d+)"
+                     r"(?:\s*\[f = ([\d.]+)\])?")
+_DETERM = re.compile(r"^(Omegas|Deltas) for deterministic variable (\d+)")
+_VALOR = re.compile(r"^\s*(-?\d+\.\d+)(?:\s*\(\s*(-?\d+\.?\d*)\s*\)\s*\[\s*(\d+)\s*\])?\s*$")
+_CORR = re.compile(r"corr\[\s*(\d+)\]\[\s*(\d+)\]\s*=\s*(-?\d+\.\d+)")
+_LB = re.compile(r"^\s*(\d+)\s+-?\d+\.\d+\s.*[|+]\s*(\d+\.\d+)\s+(\d+)\s*$")
+_ATIP = re.compile(r"^\s*\|\s*(\d+)\s+(\S+)\s+(-?\d+\.\d+)\s+\|\s*$")
+_LETRA = {("AR", False): "φ", ("AR", True): "Φ", ("MA", False): "θ", ("MA", True): "Θ"}
+
+
+@dataclass
+class FactorOut:
+    """Un factor ARMA tal como lo escribe el `.out`: (1 − c₁B − … − c_pB^p)."""
+
+    tipo: str                    # "AR" | "MA"
+    anual: bool
+    numero: int
+    coefs: list[float] = field(default_factory=list)   # también el φ₁ derivado de un f-fijo
+    freq_fija: float | None = None
+
+    @property
+    def nombre(self) -> str:
+        clase = ("f-fijo" if self.freq_fija is not None
+                 else "anual" if self.anual else "regular")
+        return f"{self.tipo} {clase} {self.numero}"
+
+
+def _estructura(texto: str):
+    """Factores ARMA, etiqueta de cada parámetro [n], y lo que publica el
+    diagnóstico: correlaciones altas, Q de Ljung-Box y tabla de anómalos."""
+    factores: list[FactorOut] = []
+    etiquetas: dict[int, str] = {}
+    corr: list[tuple[int, int, float]] = []
+    lb: list[tuple[int, float, int]] = []
+    atip: list[tuple[int, str, float]] = []
+    umbral_atip = None
+
+    actual = None            # (clase, datos)
+    j = 0
+    seccion = "parametros"
+    for L in texto.split("\n"):
+        s = L.strip()
+        if seccion == "parametros":
+            if s.startswith("Box-Cox lambda"):
+                seccion = ""
+                continue
+            m = _FACTOR.match(s)
+            if m:
+                f = FactorOut(tipo=m.group(3), anual=m.group(1) == "annual",
+                              numero=int(m.group(4)),
+                              freq_fija=float(m.group(5)) if m.group(5) else None)
+                factores.append(f)
+                actual, j = ("factor", f), 0
+                continue
+            m = _DETERM.match(s)
+            if m:
+                actual, j = ("det", (m.group(1), int(m.group(2)))), 0
+                continue
+            if s.startswith("Mean parameter"):
+                actual, j = ("mu", None), 0
+                continue
+            m = _VALOR.match(L)
+            if m and actual is not None:
+                j += 1
+                idx = int(m.group(3)) if m.group(3) else None
+                clase, dat = actual
+                if clase == "factor":
+                    dat.coefs.append(float(m.group(1)))
+                    if idx is not None:
+                        etiquetas[idx] = f"{_LETRA[(dat.tipo, dat.anual)]}{j} [{dat.nombre}]"
+                elif idx is not None and clase == "det":
+                    nombre, k = dat
+                    etiquetas[idx] = (f"ω{j - 1} [det. {k}]" if nombre == "Omegas"
+                                      else f"δ{j} [det. {k}]")
+                elif idx is not None:
+                    etiquetas[idx] = "μ"
+            continue
+
+        if s.startswith("Correlations greater than"):
+            seccion = "corr"
+        elif s.startswith("Unconditional residuals"):
+            seccion = ""
+        elif s.startswith("Autocorrelation function"):
+            seccion = "acf"
+        elif s.startswith("Partial autocorrelation function"):
+            seccion = ""
+        elif "Table of standardized values" in s:
+            seccion = "atip"
+        elif s.startswith("Standardized time series histogram"):
+            seccion = ""
+        elif seccion == "corr":
+            for a, b, v in _CORR.findall(s):
+                corr.append((int(a), int(b), float(v)))
+        elif seccion == "acf":
+            m = _LB.match(L)
+            if m:
+                lb.append((int(m.group(1)), float(m.group(2)), int(m.group(3))))
+        elif seccion == "atip":
+            m = re.search(r"greater than or equal to\s*([\d.]+)", s)
+            if m:
+                umbral_atip = float(m.group(1))
+            m = _ATIP.match(L)
+            if m:
+                atip.append((int(m.group(1)), m.group(2), float(m.group(3))))
+    return factores, etiquetas, corr, lb, atip, umbral_atip
+
+
+def _raices(f: FactorOut) -> list[str]:
+    """Raíces de 1 − c₁z − … − c_p z^p: módulo y, si son complejas, periodo."""
+    import numpy as np
+    pol = [-c for c in reversed(f.coefs)] + [1.0]     # grado p … 0
+    while len(pol) > 1 and pol[0] == 0:
+        pol = pol[1:]
+    if len(pol) < 2:
+        return []
+    out = []
+    for z in sorted(np.roots(pol), key=abs):
+        if z.imag < -1e-9:
+            continue                                  # va con su conjugada
+        if abs(z.imag) > 1e-9:
+            per = 2 * np.pi / abs(np.angle(z))
+            out.append(f"{z.real:.3f}±{abs(z.imag):.3f}i "
+                       f"(|z|={abs(z):.3f}, periodo {per:.1f})")
+        else:
+            out.append(f"{z.real:.3f} (|z|={abs(z):.3f})")
+    return out
+
+
+def _p_chi2(x: float, gl: int) -> float | None:
+    try:
+        from scipy.stats import chi2
+        return float(chi2.sf(x, gl)) if gl > 0 else None
+    except Exception:
+        return None
+
+
+def _fp(p: float | None) -> str:
+    if p is None:
+        return "—"
+    return "<0.001" if p < 0.001 else f"{p:.3f}"
+
+
+def resumen_out(r: LecturaOut, max_atipicos: int = 12) -> str:
+    """Lo que decide un nodo, leído del `.out`, en ≈ 1–3 KB (BUG-0222).
+
+    Parámetros con e.t. y t; σ̂ₐ; ℓ, AIC y BIC; correlaciones altas entre
+    estimadores; raíces de cada factor; Q de Ljung-Box en los retardos que el
+    `.out` publica (12/24/36/39 en mensual) con g.l. y p; JB con p; y la tabla
+    de anómalos con fecha. Lo que falte en el fichero se omite, no se inventa.
+
+    AIC = −2ℓ + 2k y BIC = −2ℓ + k·ln n, con k los parámetros del `.out` y n
+    los residuos: los mismos que `model.aic`/`model.bic` de fue.
+    """
+    import math
+    factores, etq, corr, lb, atip, umbral = _estructura(r.texto)
+    res = r.residuos
+    n_eff = res.n
+    L: list[str] = []
+
+    det = []
+    if r.convergio is True:
+        det.append(f"convergió en {r.iteraciones} iter." if r.iteraciones
+                   else "convergió")
+    elif r.convergio is False:
+        det.append("⚠ NO convergió")
+    if r.metodo_se:
+        det.append(f"e.t.: {r.metodo_se}")
+    for nom, v in (("λ", r.lam), ("d", r.d), ("D", r.D), ("s", r.freq)):
+        if v is not None:
+            det.append(f"{nom}={v:g}")
+    if n_eff:
+        det.append(f"n={n_eff} residuos")
+    L.append(f"**Resumen de `{os.path.basename(r.ruta) or '.out'}`**"
+             + (" — " + " · ".join(det) if det else ""))
+    L.append("")
+
+    if r.parametros:
+        L.append("| # | parámetro | estimación | e.t. | t |")
+        L.append("|---|---|---:|---:|---:|")
+        for p in r.parametros:
+            L.append(f"| {p.indice} | {etq.get(p.indice, p.bloque or '?')} | "
+                     f"{p.valor:.6f} | {p.se:.6f} | {p.t:.2f} |")
+    else:
+        L.append("*El `.out` no trae parámetros estimados.*")
+    L.append("")
+
+    k = r.npar if r.npar is not None else len(r.parametros)
+    aj = []
+    if r.sigma is not None:
+        aj.append(f"σ̂ₐ = {r.sigma:.6g}")
+    if r.sigma2 is not None:
+        aj.append(f"σ̂ₐ² = {r.sigma2:.6g}"
+                  + (f" (e.t. {r.se_sigma2:.3g})" if r.se_sigma2 is not None else ""))
+    if r.loglik is not None:
+        aj.append(f"ℓ = {r.loglik:.3f}")
+        aj.append(f"AIC = {-2 * r.loglik + 2 * k:.2f}")
+        if n_eff:
+            aj.append(f"BIC = {-2 * r.loglik + k * math.log(n_eff):.2f}")
+    if aj:
+        L.append("**Ajuste:** " + " · ".join(aj) + f" (k={k})")
+
+    if corr:
+        L.append("**Correlaciones |ρ| ≥ 0.7 entre estimadores:** " + "; ".join(
+            f"{etq.get(a, f'[{a}]')} ~ {etq.get(b, f'[{b}]')}: {v:+.2f}"
+            for a, b, v in sorted(corr, key=lambda c: -abs(c[2]))))
+    elif "Correlations greater than" in r.texto:
+        L.append("**Correlaciones |ρ| ≥ 0.7 entre estimadores:** ninguna")
+
+    lr = []
+    for f in factores:
+        rr = _raices(f)
+        if rr:
+            var = f"B^{r.freq}" if (f.anual and r.freq) else "B"
+            lr.append(f"- {f.nombre} (en {var}): " + "; ".join(rr))
+    if lr:
+        L.append("**Raíces** (|z| > 1 ⇒ estacionario / invertible):")
+        L.extend(lr)
+    L.append("")
+
+    if lb:
+        L.append("**Ljung-Box:** " + " · ".join(
+            f"Q({lag}) = {q:.2f}, g.l. {gl}, p {_fp(_p_chi2(q, gl))}"
+            for lag, q, gl in lb))
+    if res.jarque_bera is not None:
+        extra = []
+        if res.asimetria is not None:
+            extra.append(f"asimetría {res.asimetria:.3f}")
+        if res.curtosis is not None:
+            extra.append(f"curtosis {res.curtosis:.3f}")
+        L.append(f"**Jarque-Bera:** {res.jarque_bera:.2f}, p "
+                 f"{_fp(_p_chi2(res.jarque_bera, 2))}"
+                 + (f" ({', '.join(extra)})" if extra else ""))
+    if res.media is not None and res.se_media:
+        L.append(f"**Media de los residuos:** {res.media:.4g} (e.t. "
+                 f"{res.se_media:.3g}, t = {res.media / res.se_media:.2f})")
+
+    if "Table of standardized values" in r.texto:
+        u = f"{umbral:g}" if umbral is not None else "2"
+        if atip:
+            sel = atip
+            if len(atip) > max_atipicos:
+                sel = sorted(sorted(atip, key=lambda a: -abs(a[2]))[:max_atipicos])
+            resto = len(atip) - len(sel)
+            L.append(f"**Anómalos |z| ≥ {u}** ({len(atip)}): "
+                     + ", ".join(f"{fecha} ({z:+.2f})" for _, fecha, z in sel)
+                     + (f"; y {resto} más de menor |z|" if resto else ""))
+        else:
+            L.append(f"**Anómalos |z| ≥ {u}:** ninguno")
+    elif "above 8 sigmas" in r.texto:
+        L.append("**Anómalos:** ⚠ el `.out` avisa de al menos una observación por "
+                 "encima de 8σ y no publica la tabla — mira el extremo de los "
+                 "residuos o `residual_outlier_scan`.")
+        for nom, ext in (("mínimo", res.minimo), ("máximo", res.maximo)):
+            if ext:
+                L.append(f"  residuo {nom}: {ext[0]:.4g} en {ext[1]}")
+    return "\n".join(L).rstrip() + "\n"

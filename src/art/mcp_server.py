@@ -805,7 +805,8 @@ Se usan para mirar algo concreto. Ninguno sustituye a un nodo del protocolo.
              guion) · model_equation_display · model_histogram
   REGISTRO   get_out_report — LEE el .out de un modelo estimado: el registro
              de lo que se publicó, con la línea que dice qué hessiano dio sus
-             errores típicos (regla 1 del convenio)
+             errores típicos (regla 1 del convenio). En AUTÓNOMO, resumen=True
+             (≈ 2 KB: parámetros, σ̂ₐ, AIC/BIC, raíces, Q, JB, anómalos)
   COMPARAR   compare_versions (avisa y suprime el Δ si no son comparables:
              distinto operador de diferenciación o distinta escala)
   ESTRUCTURA ar_factorization · overparameterization_analysis ·
@@ -10633,9 +10634,17 @@ def load_data(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def get_out_report(inp_path: str) -> list:
+def get_out_report(inp_path: str, resumen: bool = False) -> list:
     """
-    Return the full fue .out ASCII report for an estimated model.
+    Return the fue .out report for an estimated model — entero, o RESUMIDO.
+
+    `resumen=True` (≈ 2 KB en vez de ≈ 40 KB; úsalo en el carril AUTÓNOMO, que
+    lo lee muchas veces): parámetros con e.t. y t, σ̂ₐ, ℓ/AIC/BIC,
+    correlaciones |ρ| ≥ 0.7, raíces de cada factor, Q de Ljung-Box (12/24/36/39
+    en mensual) con g.l. y p, Jarque-Bera con p, y anómalos con fecha. Las
+    mismas cifras del mismo `.out`, sin la serie tipificada, el histograma, los
+    gráficos de ACF/PACF ni la calibración de la FAS (BUG-0222).
+    `resumen=False` (por defecto): el `.out` entero, verbatim.
 
     Produces the same output as the C 'fue' binary: parameter estimates with
     standard errors, AR/MA polynomials, sigma, log-likelihood, AIC/BIC,
@@ -10661,10 +10670,12 @@ def get_out_report(inp_path: str) -> list:
     ----------
     inp_path : ruta del `.inp`, `.pre` o `.out`. La terna comparte basename, así
                que se busca el `.out` hermano.
+    resumen  : True → sólo las cifras que deciden un nodo (ver arriba).
     """
     try:
         from mcp.types import TextContent
-        from art.outfile import hay_out, lee_out, aviso_out
+        from art.outfile import (hay_out, lee_out, lee_texto_out, aviso_out,
+                                 resumen_out)
 
         if hay_out(inp_path):
             r = lee_out(inp_path)
@@ -10673,8 +10684,10 @@ def get_out_report(inp_path: str) -> list:
             # fue/BUG-0015: un `.out` que no dice "Standard errors: fdhess"
             # trae las SE del BFGS del camino. Se lee igual y se dice.
             _av = aviso_out(r)
+            cuerpo = (resumen_out(r) + "\n*El `.out` entero: `resumen=False`.*"
+                      if resumen else f"```\n{r.texto}\n```")
             return [TextContent(type="text",
-                                text=cab + f"```\n{r.texto}\n```"
+                                text=cab + cuerpo
                                 + (f"\n\n{_av}" if _av else ""))]
 
         ts, m = _load_fitted(inp_path)
@@ -10687,8 +10700,12 @@ def get_out_report(inp_path: str) -> list:
             aviso += aviso_se_no_fiable(m)
         except Exception as _e:               # BUG-0160: no se calla
             _warn("no se pudo componer el aviso del método en get_out_report", _e)
-        return [TextContent(type="text",
-                            text=aviso + f"\n\n```\n{out_text}\n```")]
+        if resumen:
+            cuerpo = resumen_out(lee_texto_out(
+                out_text, os.path.splitext(inp_path)[0] + ".out"))
+        else:
+            cuerpo = f"```\n{out_text}\n```"
+        return [TextContent(type="text", text=aviso + "\n\n" + cuerpo)]
     except Exception:
         return _err(traceback.format_exc())
 
