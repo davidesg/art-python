@@ -1978,6 +1978,22 @@ def _mu_del_base(model):
     return mu / rf, se / rf, mu / se
 
 
+def _adecuado(diag) -> bool:
+    """EL predicado de adecuación de la iteración: el del veredicto (BUG-0211).
+
+    Es `DiagnosisResult.clean` —media centrada, ruido blanco, normalidad y sin
+    estacionalidad residual—, el que escribe «APROBADO ✓ / REVISAR ✗». La
+    conclusión, la reformulación y las alternativas lo leen de aquí y no
+    recomponen el suyo: cada lista propia ha acabado divergiendo (BUG-0036,
+    BUG-0042, BUG-0106). Sin `clean` en el dict (un `Description` antiguo o
+    sintético) se cae a Q y JB, que era lo que había.
+    """
+    d = getattr(diag, "data", None) or {}
+    if "clean" in d:
+        return bool(d.get("clean"))
+    return d.get("white_noise") is not False and d.get("normal") is not False
+
+
 def _reformulacion_desde(diag, guion_next: str = "") -> str:
     """La 4ª etapa, deducida de la diagnosis y de lo que declare el analista.
 
@@ -2001,8 +2017,12 @@ def _reformulacion_desde(diag, guion_next: str = "") -> str:
         # Se delega en `_conclusiones_desde`, que ya lee las claves correctas,
         # en vez de repetir la lectura: dos funciones consultando el mismo dict
         # con nombres distintos es exactamente cómo se llegó aquí.
-        d = getattr(diag, "data", None) or {}
-        if d.get("white_noise") is False or d.get("normal") is False:
+        #
+        # Y el predicado es el del VEREDICTO, `clean`, no una lista propia:
+        # esta rama miraba sólo Q y JB, así que un REVISAR ✗ por la media o
+        # por la estacionalidad residual acababa en «no procede reformular: el
+        # modelo se sostiene» en la misma salida (BUG-0211).
+        if not _adecuado(diag):
             partes.append(_conclusiones_desde(diag).split("\n\n")[0]
                           + " La iteración continúa.")
     except Exception as e:                                   # pragma: no cover
@@ -2078,6 +2098,18 @@ def _conclusiones_desde(diag) -> str:
     (fallos if d.get("normal") is False else bien).append(
         "el Jarque-Bera " + ("RECHAZA la normalidad" if d.get("normal") is False
                              else "no rechaza la normalidad"))
+    # Los otros dos criterios del veredicto (BUG-0211). Sin ellos esta sección
+    # decía «el modelo se sostiene» bajo un «REVISAR ✗».
+    if d.get("centred") is False:
+        fallos.append(f"la media residual NO es cero (t={float(d.get('mean_t') or 0):+.2f})")
+    if d.get("seasonal_residual"):
+        _ps = d.get("seasonal_p")
+        fallos.append("queda estacionalidad en los residuos"
+                      + (f" (p={_ps:.4f})" if _ps is not None else ""))
+    if not fallos and not _adecuado(diag):
+        # Red de seguridad: el veredicto es REVISAR y ningún criterio de los de
+        # arriba lo explica. Antes de decir «se sostiene», se dice eso.
+        fallos.append("el veredicto de la diagnosis es REVISAR")
     # LOS ANÓMALOS NO DICTAN LA ADECUACIÓN, y estaban en la lista de fallos.
     # La adecuación la deciden la Q y el Jarque-Bera —es lo que dice
     # `result.clean`— y meter aquí `n_extreme` producía informes que se
@@ -2294,8 +2326,27 @@ def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
             "distribución distinta.\n"
             f"   `residual_outlier_scan(inp_path={ruta})`")
 
-    # 4 · si nada falla, ADOPTAR es una decisión y hay que poder tomarla
-    if not alts:
+    # 3bis · los otros dos criterios del veredicto (BUG-0211): sin ellos, un
+    # REVISAR ✗ por la media o por la estacionalidad residual caía en
+    # «Adoptar este modelo».
+    if d.get("centred") is False:
+        alts.append(
+            f"**Añadir la media** — la media residual no es cero "
+            f"(t={float(d.get('mean_t') or 0):+.2f}): la deriva de la serie "
+            f"está en los residuos. Ninguna intervención la absorbe.\n"
+            f"   `confirm_and_estimate(inp_path={ruta}, estimate_mu=True, ...)`")
+    if d.get("seasonal_residual"):
+        alts.append(
+            "**Tratar la estacionalidad residual** — el contraste sobre los "
+            "residuos la detecta. Si la Q también rechaza, corrige antes el "
+            "ARMA regular: una estructura regular sin modelar se hace pasar "
+            "por estacional.\n"
+            f"   `confirm_and_estimate(inp_path={ruta}, n_harmonics=..., ...)`, "
+            f"o `meg_frequency(...)` si sospechas raíz unitaria estacional")
+
+    # 4 · si nada falla, ADOPTAR es una decisión y hay que poder tomarla. «Nada
+    # falla» es el veredicto, no la lista de arriba (BUG-0211).
+    if not alts and _adecuado(diag):
         # Se adopta la entrada que ya está en el guion; reinscribirla con
         # `record_version` la duplicaba (BUG-0207 D6).
         _v = "<versión>"

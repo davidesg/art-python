@@ -2275,6 +2275,16 @@ def describe_diagnosis(model) -> Description:
             "clean": result.clean,
             "white_noise": result.white_noise,
             "normal": result.normal,
+            # Los OTROS dos criterios de `clean`. Sin ellos, quien leía este
+            # dict para escribir la conclusión sólo veía Q y JB, y un modelo
+            # REVISAR ✗ por la media o por la estacionalidad residual salía
+            # «el modelo se sostiene» en la misma salida (BUG-0211).
+            "centred": result.centred,
+            "mean_t": result.mean_t,
+            "seasonal_residual": bool(result.seasonal is not None
+                                      and result.seasonal.seasonal_detected),
+            "seasonal_p": (float(result.seasonal.p_value)
+                           if result.seasonal is not None else None),
             "jb_stat": result.jb_stat,
             "jb_pvalue": result.jb_pvalue,
             "q_fails": q_fails,
