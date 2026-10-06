@@ -2494,6 +2494,11 @@ def _plot_series_at_d(ts, lam: float, d: int) -> str | None:
         pf  = _pyfug_ts(w, freq, start, name=title)
         fig = _pyfug_combined(pf, timeout=d, tsnobs=len(w) + d,
                               nlags=_dl(len(w), freq), title=title)
+        # BUG-0219: el «%» de pyfug sólo tiene sentido sobre una tasa (∇ln y).
+        # Un nivel en log (paso 2, d=0) o una serie sin log no se dan en %.
+        if not (lam == 0.0 and d >= 1):
+            from art.describe import _estadisticos_sin_porcentaje
+            _estadisticos_sin_porcentaje(fig, w)
         b64 = _fig_b64(fig)
         plt.close(fig)
         return b64

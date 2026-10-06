@@ -67,6 +67,55 @@ def _pyfug_ts(data, freq: int, start: tuple, name: str = "") -> "_Tseries":
                     begyear=begyear, begtime=begtime, data=arr)
 
 
+def _num(x: float) -> str:
+    return f"{x:.4g}" if abs(x) < 1 else f"{x:.2f}"
+
+
+def _estadisticos_sin_porcentaje(fig, data) -> None:
+    """BUG-0219. pyfug (`fugplot.statistics`) escribe «w̄ (σ̂w̄) = m% (se%)
+    σ̂w = sd%» multiplicando por 100: el convenio de fug, en el que lo que se
+    dibuja es una TASA (∇ln y). Sobre un nivel en log eso da «w̄ = 429,39 %»
+    para ln IPC_ES, y sobre una serie en niveles, cualquier cosa. Aquí se
+    reescribe esa línea con las mismas cuentas (σ̂ con ddof=0, σ̂w̄ = σ̂/√n) en
+    la escala de la serie, sin %. Si pyfug cambia el rótulo, no se toca nada."""
+    import math
+    w = np.asarray(data, dtype=float)
+    n = len(w)
+    if n == 0:
+        return
+    m, sd = float(np.mean(w)), float(np.std(w, ddof=0))
+    se = sd / math.sqrt(n)
+    for t in getattr(fig, "texts", []):
+        if r"\bar{w}" in t.get_text() and "%" in t.get_text():
+            t.set_text(r"$\bar{w}$ ( $\hat{\sigma}_{\bar{w}}$ ) = "
+                       f"{_num(m)} ({_num(se)})"
+                       r"        $\hat{\sigma}_w$ = " f"{_num(sd)}")
+
+
+def _histograma_en_densidad(fig) -> None:
+    """BUG-0219. pyfug (`graphics/histogram.py`) dibuja 100·densidad —barras
+    200·n_i/n con anchura 0,5 y la normal ×100, el convenio de fug C— y rotula
+    el eje «%». Con residuos muy concentrados la barra central pasa del
+    «100 %». Se reescala a densidad (÷100: barras y curva en la misma escala,
+    la normal con su máximo 0,399) y se rotula «densidad»."""
+    for ax in fig.axes:
+        if ax.get_ylabel() != "%":
+            continue
+        top = 0.0
+        for p in ax.patches:
+            p.set_height(p.get_height() / 100.0)
+            top = max(top, p.get_height())
+        for ln in ax.lines:
+            x, y = ln.get_data()
+            if len(x) > 2:                       # la normal, no el eje x=0
+                y = np.asarray(y, dtype=float) / 100.0
+                ln.set_ydata(y)
+                top = max(top, float(np.max(y)))
+        if top > 0:
+            ax.set_ylim(0, 1.05 * top)           # el margen de matplotlib
+        ax.set_ylabel("densidad", fontsize=16)
+
+
 def _pyfug_from_fue(ts) -> "_Tseries":
     """Convert a fue TimeSeries to pyfug Tseries."""
     return _pyfug_ts(ts.data, ts.freq, ts.start, name=ts.name or "")
@@ -1884,6 +1933,7 @@ def describe_diagnosis(model) -> Description:
         fig_acf  = figura_residuos(model, rtitle)
         b64      = _fig_b64(fig_acf);  plt.close(fig_acf)
         fig_hist = _pyfug_histogram(pf, d=0, title=title_hist)
+        _histograma_en_densidad(fig_hist)                 # BUG-0219
         hist_b64 = _fig_b64(fig_hist); plt.close(fig_hist)
     else:
         fig = plot_diagnosis(result, model)

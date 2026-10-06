@@ -1089,8 +1089,11 @@ def plot_diagnosis_histogram(model) -> plt.Figure:
     """Residuals histogram with its normal density, drawn by pyfug
     (`plot_histogram`). It used to come from `fue.plots`."""
     from pyfug.graphics import plot_histogram
+    from art.describe import _histograma_en_densidad
     serie = serie_residuos_pyfug(model)
-    return plot_histogram(serie, d=0, title=f"Histograma {serie.name}".strip())
+    fig = plot_histogram(serie, d=0, title=f"Histograma {serie.name}".strip())
+    _histograma_en_densidad(fig)                          # BUG-0219: densidad, no «%»
+    return fig
 
 
 # ---------------------------------------------------------------------------
