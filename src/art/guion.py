@@ -252,6 +252,11 @@ class GuionEntry:
     parent: int | None = None
     status: str = "exploring"          # exploring | adopted | dead-end
     why_abandoned: str = ""
+    #: La razón de ADOPTAR, simétrica de `why_abandoned` (BUG-0207 D6). El
+    #: estado `adopted` existía en el modelo de datos y nadie lo escribía: el
+    #: mapa no enseñó nunca un ✓, y adoptar se hacía reinscribiendo el modelo,
+    #: que lo duplicaba en «exploring».
+    why_adopted: str = ""
 
     # ── LA ITERACIÓN ──────────────────────────────────────────────────────
     # El método es iterativo y sus etapas están dadas: especificación inicial,
@@ -643,6 +648,177 @@ def path_to_root(guion: "Guion", version: int) -> list[int]:
         cadena.append(v)
         v = por_v[v].parent
     return list(reversed(cadena))
+
+
+def adopt(guion: "Guion", version: int, why: str) -> list[int]:
+    """Marcar un MODELO como adoptado, CON SU RAZÓN — BUG-0207 D6.
+
+    Es la simétrica de `abandon`, y por la misma razón `why` es obligatorio: un
+    modelo adoptado sin decir por qué es un resultado sin argumento.
+
+    No crea entradas: cambia el estado de la que ya está. Adoptar reinscribiendo
+    el modelo (la vía que había) lo duplicaba, y la copia quedaba «exploring».
+
+    Un nodo no se adopta —es una decisión, no un modelo— y un callejón tampoco:
+    está marcado con una razón, y adoptarlo en silencio la contradiría.
+
+    Devuelve los otros modelos VIVOS (ni adoptados ni callejón): los hermanos
+    que siguen «explorando» y que el analista tiene que cerrar o dejar abiertos
+    a sabiendas. No se tocan: abandonar exige una razón propia de cada uno.
+    """
+    if not why or not why.strip():
+        raise ValueError(
+            "adopt() exige una razón: un modelo adoptado sin decir por qué es "
+            "un resultado sin argumento.")
+    por_v = {e.version: e for e in guion.entries}
+    e = por_v.get(version)
+    if e is None:
+        raise ValueError(f"la versión {version} no está en el guion")
+    if e.is_node or e.stats is None:
+        raise ValueError(
+            f"v{version} es un nodo de decisión, no un modelo: lo que se adopta "
+            f"es un modelo estimado.")
+    if e.status == "dead-end":
+        raise ValueError(
+            f"v{version} está marcada como callejón («{e.why_abandoned}»). "
+            f"Adoptarla contradiría esa razón; si ya no vale, regístralo de nuevo "
+            f"con `record_version` y adopta la nueva entrada.")
+    e.status = "adopted"
+    e.why_adopted = why.strip()
+    return [x.version for x in guion.entries
+            if x.version != version and not x.is_node and x.stats is not None
+            and x.status == "exploring"
+            and x.re_registro_de != version and e.re_registro_de != x.version]
+
+
+#: Los campos que `annotate` admite, con sus alias en castellano. Los de una
+#: entrada de modelo y, para un nodo, los de su ficha.
+CAMPOS_ANOTABLES = {
+    "problems_found": "problems_found", "problemas": "problems_found",
+    "rationale": "rationale", "razon": "rationale", "razón": "rationale",
+    "decision": "decision", "decisión": "decision",
+    "next_version": "next_version", "siguiente": "next_version",
+    "evidencia": "evidencia", "alternativas": "alternativas",
+}
+
+
+def annotate(guion: "Guion", version: int, campo: str, texto: str) -> str:
+    """Añadir texto a un campo de una entrada YA registrada — BUG-0207 D4.
+
+    AÑADE, no sustituye: lo escrito en su momento es el registro de lo que se
+    sabía entonces, y pisarlo es lo que BUG-0058 prohibió para los callejones.
+    Lo nuevo va en una línea aparte, fechada.
+
+    Devuelve el nombre canónico del campo tocado.
+    """
+    from datetime import datetime
+    if not texto or not texto.strip():
+        raise ValueError("annotate() necesita un texto que añadir.")
+    c = CAMPOS_ANOTABLES.get((campo or "").strip().lower())
+    if c is None:
+        raise ValueError(
+            "campo no anotable: «" + str(campo) + "». Valen: "
+            + ", ".join(sorted(set(CAMPOS_ANOTABLES.values()))) + ".")
+    e = {x.version: x for x in guion.entries}.get(version)
+    if e is None:
+        raise ValueError(f"la versión {version} no está en el guion")
+    linea = f"[{datetime.now().strftime('%Y-%m-%d')}] {texto.strip()}"
+    if c in ("evidencia", "alternativas"):
+        if not e.is_node:
+            raise ValueError(f"`{c}` es un campo de los NODOS; v{version} es un modelo.")
+        nd = dict(e.node or {})
+        previo = (nd.get(c) or "").strip()
+        nd[c] = f"{previo}\n{linea}" if previo else linea
+        e.node = nd
+        return c
+    previo = (getattr(e, c) or "").strip()
+    setattr(e, c, f"{previo}\n{linea}" if previo else linea)
+    return c
+
+
+def q_salvedades(stats: "GuionStats | None") -> list[tuple[int, float]]:
+    """Retardos NO cancerberos que rechazan, leídos de los p-valores GUARDADOS.
+
+    El veredicto `q_pass` es el del retardo 3s+3 (decisión del 11-sep-2026, ver
+    `DiagnosisResult.white_noise`); los otros retardos son salvedad. El guion
+    sólo guardaba el veredicto, así que un modelo con r₁ = 0,38 y Q(12) p=0,0003
+    quedaba como Q✓ (BUG-0207 D3). Derivarla de los p-valores la recupera
+    también en los guiones ya escritos.
+    """
+    if stats is None or not stats.q_lags or not stats.q_pvalues:
+        return []
+    return [(int(l), float(p)) for l, p in
+            zip(stats.q_lags[:-1], stats.q_pvalues[:-1]) if p <= 0.05]
+
+
+def q_estado(stats: "GuionStats | None") -> str | None:
+    """«pasa» | «salvedad» | «rechaza» | None (no consta).
+
+    El tercer estado es el que faltaba: pasa el retardo que decide y rechaza en
+    otro. No es un aprobado limpio ni un suspenso, y el mapa no puede pintarlo
+    como ninguno de los dos.
+    """
+    if stats is None or stats.q_pass is None:
+        return None
+    if not stats.q_pass:
+        return "rechaza"
+    return "salvedad" if q_salvedades(stats) else "pasa"
+
+
+def q_marca(stats: "GuionStats | None") -> str:
+    """La celda Q del mapa: Q✓, Q⚠(12,24) con salvedad, Q✗ o Q?."""
+    est = q_estado(stats)
+    if est == "pasa":
+        return "Q✓"
+    if est == "salvedad":
+        return "Q⚠(" + ",".join(str(l) for l, _ in q_salvedades(stats)) + ")"
+    if est == "rechaza":
+        return "Q✗"
+    return "Q?"
+
+
+def hallazgos_de_la_diagnosis(diag_result, stats: "GuionStats",
+                              umbral_z: float | None = None) -> str:
+    """Lo que la diagnosis VIO, en una línea por hallazgo — BUG-0207 D4.
+
+    `problems_found` sólo se rellenaba si el llamante lo escribía, así que la
+    ficha de un modelo descartado quedaba sin la razón por la que se descartó:
+    estaba en la pantalla y no en el registro. Esto la deja donde corresponde,
+    con las cifras.
+
+    Vacío si no hay nada que anotar.
+    """
+    h = []
+    lag_c = getattr(diag_result, "q_lag_cancerbero", None)
+    p_c = getattr(diag_result, "q_p_cancerbero", None)
+    if getattr(diag_result, "white_noise", True) is False and lag_c:
+        h.append(f"la Q rechaza el ruido blanco en el retardo que decide "
+                 f"({lag_c}, p={p_c:.4f})")
+    sal = ", ".join(f"{l} (p={p:.4f})" for l, p in q_salvedades(stats))
+    if sal:
+        h.append(f"salvedad de la Q: pasa en {lag_c} pero rechaza en {sal}"
+                 if getattr(diag_result, "white_noise", True)
+                 else f"la Q rechaza también en {sal}")
+    if getattr(diag_result, "normal", True) is False:
+        h.append(f"el Jarque-Bera rechaza la normalidad "
+                 f"(p={float(diag_result.jb_pvalue):.4f})")
+    if getattr(diag_result, "centred", True) is False:
+        h.append(f"la media residual no es cero (t={float(diag_result.mean_t):+.2f})")
+    seas = getattr(diag_result, "seasonal", None)
+    if seas is not None and getattr(seas, "seasonal_detected", False):
+        h.append("queda estacionalidad en los residuos"
+                 + (f" (p={float(seas.p_value):.4f})"
+                    if getattr(seas, "p_value", None) is not None else ""))
+    ext = list(getattr(stats, "extreme", None) or [])
+    if umbral_z is not None:
+        ext = [x for x in ext if abs(float(x.get("z", 0))) > umbral_z]
+    if ext:
+        cab = (f"anómalos por encima del umbral calibrado ({umbral_z:.2f})"
+               if umbral_z is not None else "residuos con |z|>3")
+        h.append(cab + ": " + ", ".join(
+            f"{x.get('date', x.get('obs'))} (z={float(x.get('z', 0)):+.2f})"
+            for x in ext[:6]) + (" …" if len(ext) > 6 else ""))
+    return "; ".join(h)
 
 
 # ---------------------------------------------------------------------------
@@ -1453,6 +1629,14 @@ def _pass_cell(val: bool | None) -> str:
     return '<td class="bad">✗</td>'
 
 
+def _q_cell(stats: "GuionStats | None") -> str:
+    """La celda Q, con el tercer estado: pasa con salvedad (BUG-0207 D3)."""
+    if q_estado(stats) == "salvedad":
+        lags = ",".join(str(l) for l, _ in q_salvedades(stats))
+        return f'<td class="bad" title="pasa 3s+3, rechaza en {lags}">✓⚠ {lags}</td>'
+    return _pass_cell(stats.q_pass if stats is not None else None)
+
+
 def export_guion_html(guion: Guion) -> str:
     """Render a Guion to a self-contained HTML string."""
     lines = [
@@ -1505,7 +1689,7 @@ def export_guion_html(guion: Guion) -> str:
                 f"<td><code>{e.equation}</code></td>"
                 f"<td>{cifra(s.loglik)}</td><td>{aic_str}</td><td>{bic_str}</td>"
                 f"<td>{cifra(s.sigma_a, '.5f')}</td>"
-                + _pass_cell(s.q_pass) + _pass_cell(s.jb_pass) +
+                + _q_cell(s) + _pass_cell(s.jb_pass) +
                 f"<td>{s.n_extreme}</td>"
                 f"<td>{dec_short}</td>"
                 f"</tr>"
@@ -1519,7 +1703,7 @@ def export_guion_html(guion: Guion) -> str:
             open_attr = " open" if e == guion.entries[-1] else ""
             # Igual aquí: un nodo no tiene ajuste que resumir en la cabecera.
             aic_hdr = f"{s.aic:.1f}" if (s and s.aic is not None) else "—"
-            q_hdr   = "✓" if (s and s.q_pass) else ("✗" if (s and s.q_pass is False) else "—")
+            q_hdr   = {"pasa": "✓", "salvedad": "✓⚠", "rechaza": "✗"}.get(q_estado(s), "—")
             jb_hdr  = "✓" if (s and s.jb_pass) else ("✗" if (s and s.jb_pass is False) else "—")
             lines += [
                 f"<details id='v{e.version}'{open_attr}>",
@@ -1574,7 +1758,7 @@ def export_guion_html(guion: Guion) -> str:
                 "<tr><th>loglik</th><th>AIC</th><th>BIC</th><th>σ_a</th><th>Q</th><th>JB</th><th>Anomalías</th></tr>",
                 f"<tr><td>{cifra(s.loglik, '.3f')}</td><td>{aic_s}</td><td>{bic_s}</td>"
                 f"<td>{cifra(s.sigma_a, '.6f')}</td>"
-                + _pass_cell(s.q_pass) + _pass_cell(s.jb_pass) +
+                + _q_cell(s) + _pass_cell(s.jb_pass) +
                 f"<td>{s.n_extreme}</td></tr>",
                 "</table>",
             ]
@@ -1590,6 +1774,10 @@ def export_guion_html(guion: Guion) -> str:
                 lines.append(f"<div class='decision'><b>Justificación:</b> {e.rationale}</div>")
             if e.problems_found:
                 lines.append(f"<div class='problems'><b>Problemas detectados:</b> {e.problems_found}</div>")
+            if e.status == "adopted" and getattr(e, "why_adopted", ""):
+                lines.append(f"<div class='next'><b>Adoptado:</b> {e.why_adopted}</div>")
+            if e.status == "dead-end" and e.why_abandoned:
+                lines.append(f"<div class='problems'><b>Callejón:</b> {e.why_abandoned}</div>")
             if e.next_version:
                 lines.append(f"<div class='next'><b>Próxima versión:</b> {e.next_version}</div>")
 

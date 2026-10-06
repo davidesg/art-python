@@ -500,7 +500,15 @@ ANTES DE LA LLAMADA 1 — EL NODO DOMINIO (obligatorio desde 2026-09-30):
   es un criterio. «Sin expectativa» es una respuesta honesta para una clase
   sin teoría conocida; entonces, en un empate, manda el dato.
 
-CADA NODO DEL CARRIL GUIADO SE REGISTRA CON TU PROPUESTA (BUG-0110):
+PASA guion_path A guided_identification (BUG-0207): cada llamada deja su nodo
+  (λ, d, estacionalidad, órdenes) PENDIENTE con la propuesta de la herramienta,
+  y la siguiente —la que lleva el valor elegido, con `razon=`— lo cierra y dice
+  si coincide. La llamada 1 escribe el nodo dominio con `domain` +
+  `expectativas`; confirm_and_estimate(guion_path=…) cierra el de los órdenes.
+  Una alternativa que sale de un modelo anterior se declara con `parent=N` en
+  confirm_and_estimate: el padre inferido es la última entrada.
+
+LO QUE DECIDAS FUERA DE ESA PUERTA, CON TU PROPUESTA (BUG-0110):
       guion_node(guion_path, nodo=…, decidido="<lo que decidió el analista>",
                  razon="…", decidido_por="analista+LLM",
                  propuesta="<lo que TÚ propusiste>", coincide="sí" | "no")
@@ -782,6 +790,11 @@ El guion se escribe SOLO en cada estimación. No hay que pedirlo.
                                 órdenes): lo que se decidió y por qué, antes de
                                 que exista el primer modelo.
   guion_abandon(...)            marca un callejón con su razón; poda en cascada.
+  guion_adopt(guion, N, why=…)  marca ✓ el modelo ADOPTADO, con su razón, sin
+                                duplicarlo (no lo reinscribas con record_version).
+  guion_annotate(guion, N, campo, texto)
+                                AÑADE a una entrada ya escrita (problemas que se
+                                vieron después, la razón que faltó). No pisa.
   guion_diff(a, b)              compara DOS recorridos nodo a nodo. Es lo que
                                 hace comparables dos análisis en vez de dos
                                 listas parecidas.
@@ -2084,6 +2097,16 @@ def _conclusiones_desde(diag) -> str:
             L.append("Retardos donde la Q falla: " + "; ".join(str(x) for x in qf)
                      + ". *Dónde falla dice QUÉ falta: un retardo estacional "
                        "pide estructura estacional, uno bajo pide orden regular.*")
+    elif d.get("q_fails"):
+        # BUG-0207 D3. Pasa el retardo que decide (3s+3) y rechaza en otro: la
+        # salida lo llamaba salvedad y esta línea lo daba por bueno. Con
+        # r₁ = 0,38 y Q(12) p = 0,0003 la parte regular está sin modelar.
+        L.append("**El modelo se sostiene con SALVEDAD:** la Q no rechaza el "
+                 "ruido blanco en el retardo que decide (3s+3), pero sí en "
+                 + "; ".join(str(x) for x in d["q_fails"]) + "; "
+                 + "; ".join(b for b in bien if not b.startswith("la Q"))
+                 + ". *No es un aprobado limpio: dónde rechaza dice qué falta. "
+                   "No lo adoptes sin haberlo mirado.*")
     else:
         L.append("**El modelo se sostiene:** " + "; ".join(bien) + ".")
 
@@ -2221,8 +2244,9 @@ def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
               f"   `suggest_intervention_form(inp_path={ruta}, date=\"{f}\")` "
               f"→ y luego `guided_intervention(...)`")
 
-    # 2 · dónde falla la Q dice qué falta
-    if d.get("white_noise") is False:
+    # 2 · dónde falla la Q dice qué falta — también cuando sólo es salvedad
+    # (BUG-0207 D3): si no, la única alternativa que quedaba era «adoptar».
+    if d.get("white_noise") is False or d.get("q_fails"):
         qf = " ".join(str(x) for x in (d.get("q_fails") or []))
         estacional = ts is not None and any(
             f" {k}" in qf for k in (str(int(ts.freq)), str(int(ts.freq) * 2)))
@@ -2272,11 +2296,24 @@ def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
 
     # 4 · si nada falla, ADOPTAR es una decisión y hay que poder tomarla
     if not alts:
+        # Se adopta la entrada que ya está en el guion; reinscribirla con
+        # `record_version` la duplicaba (BUG-0207 D6).
+        _v = "<versión>"
+        try:
+            from art.guion import load_guion as _lg
+            if guion_path and os.path.exists(os.path.expanduser(guion_path)):
+                _ab = os.path.abspath(os.path.expanduser(inp_path or ""))
+                _v = next((str(e.version) for e in reversed(
+                    _lg(os.path.expanduser(guion_path)).entries)
+                    if not e.is_node and os.path.abspath(e.inp_path or "") == _ab),
+                    _v)
+        except Exception as _ge:
+            _warn("versión del guion para adoptar", _ge)
         alts.append(
             "**Adoptar este modelo** y cerrar el nodo. Nada en la diagnosis "
             "pide cambiarlo.\n"
-            f"   `record_version(inp_path={ruta}, decision=\"adoptado\", "
-            f"rationale=\"...\")`")
+            f"   `guion_adopt(guion_path=\"{guion_path or '<guion>'}\", "
+            f"version={_v}, why=\"...\")`")
         alts.append(
             "**Sobreparametrizar para comprobarlo** — añadir un parámetro y ver "
             "si sale no significativo es la forma de saber que no falta nada.\n"
@@ -5112,9 +5149,20 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                            d: int = -1, D: int = -1,
                            pre_path: str = "",
                            objetivo: _Objetivo = "univariante",
-                           domain: str = "") -> list:
+                           domain: str = "",
+                           guion_path: str = "",
+                           expectativas: str = "",
+                           razon: str = "") -> list:
     """
     Sequential identification — ONE decision node per call.
+
+    With `guion_path`, EACH CALL WRITES ITS NODE in the guion (BUG-0207): the
+    node it shows (λ, d, estacionalidad, ordenes) is left PENDING with the
+    tool's proposal, and the next call — which carries the chosen value —
+    confirms it and records whether it matches the proposal. Call 1 also writes
+    the `dominio` node from `domain` + `expectativas` (asks for them if
+    missing). `razon`: why the value passed in THIS call was chosen (it closes
+    the previous node). `confirm_and_estimate(guion_path=…)` closes `ordenes`.
 
     DECISION TREE — call in this sequence, one at a time:
 
@@ -5177,6 +5225,10 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                is precisely where the purpose matters.
     pre_path : path to fitted .pre (Call 4, B1): ARMA identified on
                its residuals instead of the raw transformed series.
+    guion_path   : guion.json where the nodes are written (see above).
+    expectativas : Call 1 — the dynamics the theory expects for this class of
+                   series (the `dominio` node; see guion_node).
+    razon        : why the value(s) passed in this call were chosen.
     """
     try:
         # Por las puertas de art no entra un objetivo que nadie eligió: la
@@ -5188,6 +5240,64 @@ def guided_identification(inp_path: str, lam: float = -1.0,
         from mcp.types import TextContent, ImageContent
         from art.describe import describe_boxcox, describe_seasonality, describe_identification
         ts, _ = _load_ts_model(inp_path)
+
+        # BUG-0207 D1. Lo que esta llamada TRAE (λ, d, D) cierra los nodos que
+        # dejaron pendientes las anteriores. Documentar no tumba el flujo.
+        nota_guion = []
+
+        def _g(fn, *a, **k):
+            if not guion_path:
+                return
+            try:
+                t = fn(guion_path, *a, **k)
+                if t:
+                    nota_guion.append(t.strip())
+            except Exception as _ge:
+                _warn("guion del carril guiado", _ge)
+
+        # El guion nace con el nombre de la serie, no con el del fichero.
+        if guion_path and not os.path.exists(os.path.expanduser(guion_path)):
+            try:
+                from art.guion import Guion as _Gn, save_guion as _sg
+                from datetime import datetime as _dt
+                os.makedirs(os.path.dirname(os.path.expanduser(guion_path)) or ".",
+                            exist_ok=True)
+                _sg(_Gn(series=ts.name or "serie", analyst="",
+                        created=_dt.now().strftime("%Y-%m-%d"), carril="guiado"),
+                    os.path.expanduser(guion_path))
+            except Exception as _ge:
+                _warn("guion del carril guiado", _ge)
+        if lam >= 0:
+            _g(_confirma_nodo, "lambda", f"{lam:g}", valor=float(lam),
+               razon=razon if d < 0 else "",
+               coincide_fn=lambda a, b: abs(float(a) - float(b)) < 1e-9)
+        if d >= 0:
+            _g(_confirma_nodo, "d", str(int(d)), valor=int(d),
+               razon=razon if D < 0 else "")
+        if D >= 0:
+            _g(_confirma_nodo, "estacionalidad",
+               lambda pv: _texto_D(D, seasonal_hint=pv or "", b1=bool(pre_path)),
+               valor=int(D), razon=razon, coincide_fn=_coincide_D)
+
+        # D2: las expectativas pueden llegar en cualquier llamada, no sólo en
+        # la 1; el nodo `dominio` se escribe en cuanto llegan, si no estaba.
+        if guion_path and lam >= 0 and (expectativas or "").strip():
+            try:
+                _dd = dominio_declarado(domain)
+                _t = _nodo_dominio_guiado(guion_path,
+                                          _dd or policy.decide_domain(ts),
+                                          bool(_dd), expectativas)
+                if _t:
+                    nota_guion.append(_t.strip())
+            except Exception as _ge:
+                _warn("nodo dominio del carril guiado", _ge)
+
+        def _con_guion(items):
+            """Añade al texto lo que se escribió en el guion."""
+            if nota_guion and items and hasattr(items[0], "text"):
+                items[0].text += ("\n\n---\n*Guion:* " + " · ".join(
+                    n.lstrip("\n") for n in nota_guion))
+            return items
 
         # ── Call 1: Box-Cox scatter ────────────────────────────────────────
         if lam < 0:
@@ -5271,10 +5381,30 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 "(o el valor que decidas) para ver la serie transformada."
                 + _nota_figura(_ruta_fig)
             )
+            # BUG-0207 D2: el nodo `dominio` va ANTES que λ — o se piden sus
+            # expectativas, que no se pueden inventar.
+            if guion_path:
+                try:
+                    text += _nodo_dominio_guiado(guion_path, dom, bool(dom_decl),
+                                                 expectativas)
+                except Exception as _ge:
+                    _warn("nodo dominio del carril guiado", _ge)
+            _bd = bc.data or {}
+            _g(_nodo_pendiente, "lambda", f"{rec_lam:g}", valor=float(rec_lam),
+               evidencia="; ".join(x for x in (
+                   f"gap={_bd['gap']:+.3f}" if _bd.get("gap") is not None else "",
+                   f"corr(nivel)={_bd['corr_raw']:.3f}"
+                   if _bd.get("corr_raw") is not None else "",
+                   f"corr(log)={_bd['corr_log']:.3f}"
+                   if _bd.get("corr_log") is not None else "",
+                   f"estadístico λ={bc.data.get('recommended_lambda'):g}"
+                   if bc.data.get("recommended_lambda") is not None else "",
+                   f"regla de dominio `{dom}`" if index_note.startswith("\n\n> ⚠")
+                   else "") if x))
             items = [TextContent(type="text", text=text)]
             if bc.figure_b64:
                 items.append(_imagen(bc.figure_b64, "guided_identification"))
-            return items
+            return _con_guion(items)
 
         # ── Call 2: Series at d=0 + ADF/KPSS unit root table ─────────────
         if d < 0:
@@ -5327,10 +5457,15 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 + "\n".join(_llamadas)
                 + _nota_figura(_ruta_fig)                     # BUG-0113
             )
+            _g(_nodo_pendiente, "d", str(int(rec_d)), valor=int(rec_d),
+               evidencia="; ".join(
+                   f"d={r.get('d')}: ADF p={r.get('adf_pvalue', float('nan')):.3f}, "
+                   f"KPSS p={r.get('kpss_pvalue', float('nan')):.3f}"
+                   for r in (urt.data.get("results") or [])))
             items = [TextContent(type="text", text=text)]
             if b64:
                 items.append(_imagen(b64, "guided_identification"))
-            return items
+            return _con_guion(items)
 
         # ── Call 3: Series at level d, D not yet decided ──────────────────
         if D < 0:
@@ -5499,12 +5634,24 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 # y en el mismo orden en que van los ImageContent de abajo.
                 + _nota_figura(_ruta_fig) + _nota_figura(_ruta_sea)
             )
+            if d > 0:
+                _sd = sea.data or {}
+                _dec = _sd.get("decision") or ("B1" if hay_estacionalidad else "A")
+                _g(_nodo_pendiente, "estacionalidad",
+                   ("estacional (B1: D=0 + armónicos)" if _dec == "B1"
+                    else "sin estacionalidad (D=0)"), valor=_dec,
+                   evidencia=(f"F-HAC={_sd['f_stat']:.2f}, p={_sd['p_value']:.4f}"
+                              if _sd.get("f_stat") is not None
+                              and _sd.get("p_value") is not None else ""))
+            else:
+                # En d=0 no se contrasta: el nodo queda abierto sin propuesta.
+                _g(_nodo_pendiente, "estacionalidad", "", valor=None)
             items = [TextContent(type="text", text=text)]
             if b64:
                 items.append(_imagen(b64, "guided_identification"))
             if sea_fig:
                 items.append(_imagen(sea_fig, "guided_identification"))
-            return items
+            return _con_guion(items)
 
         # ── Call 4: ARMA identification ───────────────────────────────────
         # B1 with clean residuals: pre_path points to fitted model after outlier cycle
@@ -5558,6 +5705,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
         rec_q = top.get("q", 0)
         rec_P = top.get("P", 0)
         rec_Q = top.get("Q", 0)
+        _prop_ord = (rec_p, rec_q, rec_P, rec_Q)
         n_harm = max(ts.freq // 2 - 1, 0)
 
         # ── Mean significance check ───────────────────────────────────────────
@@ -5671,6 +5819,7 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 p_base = _libres(m_pre.ar, getattr(m_pre, "ar_free", None))
                 q_base = _libres(m_pre.ma, getattr(m_pre, "ma_free", None))
                 p_tot, q_tot = p_base + rec_p, q_base + rec_q
+                _prop_ord = (p_tot, q_tot, rec_P, rec_Q)
                 hay_base = (p_base or q_base)
                 nota_inc = (
                     f"\n\n> ⚠ **La lista de arriba es un INCREMENTO, no un total.** "
@@ -5731,10 +5880,18 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             + "\n\n**Próximo paso:** " + next_call
             + _nota_figura(_ruta_fig)                              # BUG-0113
         )
+        # El nodo de los órdenes queda pendiente; lo cierra confirm_and_estimate.
+        _g(_nodo_pendiente, "ordenes", _texto_ordenes(*_prop_ord, ts.freq),
+           valor=[int(x) for x in _prop_ord],
+           evidencia="; ".join(
+               f"{_texto_ordenes(c.get('p', 0), c.get('q', 0), c.get('P', 0), c.get('Q', 0), ts.freq)}"
+               + (f" sim={c['similarity']:.3f}" if c.get("similarity") is not None else "")
+               for c in (ident.data.get("suggestions") or [])[:3])
+           + (f" — sobre {data_label}" if data_label else ""))
         items = [TextContent(type="text", text=text)]
         if ident.figure_b64:
             items.append(_imagen(ident.figure_b64, "guided_identification"))
-        return items
+        return _con_guion(items)
 
     except Exception:
         return _err(traceback.format_exc())
@@ -6274,6 +6431,203 @@ def _version_instr() -> str:
         return ""
 
 
+# ---------------------------------------------------------------------------
+# El carril guiado escribe sus nodos — BUG-0207 D1/D2
+# ---------------------------------------------------------------------------
+#
+# Todo lo que se decide antes del primer modelo —λ, d, la estacionalidad, los
+# órdenes— no dejaba rastro: había que escribir cada nodo a mano. Cada llamada
+# de `guided_identification` deja ahora el nodo que acaba de enseñar, PENDIENTE
+# y con la propuesta de la herramienta; la llamada siguiente —que es la que
+# lleva el valor elegido— lo confirma y dice si coincide con la propuesta. Así
+# el campo `coincide` sale de comparar VALORES, no textos.
+
+def _abre_guion(gp: str):
+    from art.guion import Guion, load_guion
+    from datetime import datetime
+    if os.path.exists(gp):
+        return load_guion(gp)
+    os.makedirs(os.path.dirname(gp) or ".", exist_ok=True)
+    serie = os.path.basename(gp).replace("_guion.json", "").replace("guion.json", "")
+    return Guion(series=serie or "serie", analyst="",
+                 created=datetime.now().strftime("%Y-%m-%d"))
+
+
+def _ultimo_nodo(g, nodo: str):
+    return next((e for e in reversed(g.entries)
+                 if e.is_node and (e.node or {}).get("nodo") == nodo), None)
+
+
+def _nodo_pendiente(guion_path: str, nodo: str, propuesta: str,
+                    evidencia: str = "", valor=None,
+                    decidido_por: str = "analista+LLM") -> str:
+    """Deja el nodo `nodo` PENDIENTE con la propuesta de la herramienta.
+
+    Repetir la misma llamada no duplica: si el último nodo de ese nombre sigue
+    pendiente, se actualiza.
+    """
+    from art.guion import GuionEntry, save_guion, infer_parent
+    from datetime import datetime
+    gp = os.path.expanduser(guion_path)
+    g = _abre_guion(gp)
+    ult = _ultimo_nodo(g, nodo)
+    nd = {"nodo": nodo, "decidido": "", "evidencia": evidencia,
+          "alternativas": "", "pendiente": True}
+    if valor is not None:
+        nd["propuesta_valor"] = valor
+    if ult is not None and (ult.node or {}).get("pendiente"):
+        ult.node = {**(ult.node or {}), **nd}
+        ult.propuesta = propuesta
+        save_guion(g, gp)
+        return f"◆ guion n{ult.version}: **{nodo}** pendiente (propuesta: {propuesta})"
+    version = (max(e.version for e in g.entries) + 1) if g.entries else 1
+    g.entries.append(GuionEntry(
+        version=version, name=nodo, inp_path="",
+        timestamp=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        spec={}, stats=None, equation="",
+        decision=f"{nodo} = (pendiente)", rationale="",
+        problems_found="", next_version="",
+        parent=infer_parent(g), kind="node", node=nd,
+        decided_by=decidido_por, propuesta=propuesta,
+        instrumento=_version_instr()))
+    if not g.carril:
+        g.carril = "guiado"
+    save_guion(g, gp)
+    return f"◆ guion n{version}: **{nodo}** pendiente (propuesta: {propuesta})"
+
+
+def _confirma_nodo(guion_path: str, nodo: str, decidido: str, valor=None,
+                   razon: str = "", coincide_fn=None,
+                   decidido_por: str = "analista+LLM") -> str:
+    """Cierra el nodo pendiente `nodo` con lo que el analista eligió.
+
+    `coincide_fn(propuesta_valor, valor)` compara VALORES; sin ella, se compara
+    `valor` con `propuesta_valor` por igualdad. Sin nodo pendiente: si el último
+    ya dice lo mismo no se toca; si dice otra cosa —se volvió al nodo— se
+    escribe uno nuevo, decidido.
+    """
+    from art.guion import GuionEntry, save_guion, infer_parent
+    from datetime import datetime
+    gp = os.path.expanduser(guion_path)
+    g = _abre_guion(gp)
+    ult = _ultimo_nodo(g, nodo)
+    pend = ult is not None and (ult.node or {}).get("pendiente")
+    if callable(decidido):
+        # El texto puede depender de lo propuesto (la ruta de D=0: B1 o «sin
+        # estacionalidad»), que sólo se sabe aquí.
+        decidido = decidido((ult.node or {}).get("propuesta_valor") if pend else None)
+    if pend:
+        nd = dict(ult.node or {})
+        pv = nd.get("propuesta_valor")
+        if pv is None:
+            coinc = None
+        elif coincide_fn is not None:
+            coinc = coincide_fn(pv, valor)
+        else:
+            coinc = (pv == valor)
+        nd.pop("pendiente", None)
+        nd["decidido"] = decidido
+        ult.node = nd
+        ult.coincide = coinc
+        ult.decision = f"{nodo} = {decidido}"
+        ult.rationale = (razon.strip() or (
+            "se toma la propuesta de la herramienta" if coinc else
+            "el analista decidió otra cosa que la propuesta — razón sin "
+            "escribir: anótala con `guion_annotate(…, campo=\"razon\")`"
+            if coinc is False else "confirmado en el carril guiado"))
+        save_guion(g, gp)
+        marca = ("" if coinc is None else " — coincide con la propuesta" if coinc
+                 else f" — **corrige la propuesta** ({ult.propuesta})")
+        return f"◆ guion n{ult.version}: **{nodo} = {decidido}**{marca}"
+    if ult is not None and (ult.node or {}).get("decidido") == decidido:
+        return ""
+    version = (max(e.version for e in g.entries) + 1) if g.entries else 1
+    g.entries.append(GuionEntry(
+        version=version, name=nodo, inp_path="",
+        timestamp=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        spec={}, stats=None, equation="",
+        decision=f"{nodo} = {decidido}",
+        rationale=razon.strip() or ("se vuelve al nodo: decidido de nuevo"
+                                    if ult is not None else
+                                    "decidido sin pasar por su paso del carril"),
+        problems_found="", next_version="",
+        parent=infer_parent(g), kind="node",
+        node={"nodo": nodo, "decidido": decidido, "evidencia": "",
+              "alternativas": ""},
+        decided_by=decidido_por, instrumento=_version_instr()))
+    save_guion(g, gp)
+    return f"◆ guion n{version}: **{nodo} = {decidido}**"
+
+
+def _texto_ordenes(p, q, P=0, Q=0, s=12) -> str:
+    """ARMA(p,q)×(P,Q)_s, el valor del nodo `ordenes`."""
+    p = p if not isinstance(p, (list, tuple)) else "[" + ",".join(map(str, p)) + "]"
+    return f"ARMA({p},{q})" + (f"×({P},{Q})_{s}" if (P or Q) else "")
+
+
+def _texto_D(D: int, seasonal_hint: str = "", b1: bool = False) -> str:
+    """El valor del nodo estacionalidad, dicho con su ruta."""
+    if int(D) >= 1:
+        return f"D={int(D)} (B2, diferencia estacional)"
+    if b1 or seasonal_hint == "B1":
+        return "D=0 (B1, armónicos deterministas)"
+    if seasonal_hint == "A":
+        return "D=0 (sin estacionalidad)"
+    return "D=0"
+
+
+def _coincide_D(propuesta, D) -> bool | None:
+    # La herramienta propone «A» (sin estacionalidad) o «B1» (D=0 + armónicos).
+    # D=0 sigue cualquiera de las dos; D=1 es la ruta B2, que no propone.
+    if propuesta not in ("A", "B1"):
+        return None
+    return int(D) == 0
+
+
+def _nodo_dominio_guiado(guion_path: str, dom: str, declarado: bool,
+                         expectativas: str) -> str:
+    """El nodo `dominio` al abrir el carril (BUG-0207 D2), o la petición.
+
+    `criterio="dominio"` exige un nodo `dominio` previo con expectativas, y el
+    flujo guiado nunca lo creaba. Si ya existe, no se toca; si faltan las
+    expectativas, se piden: son un preregistro y no se pueden inventar.
+    """
+    gp = os.path.expanduser(guion_path)
+    g = _abre_guion(gp)
+    hay = [e for e in g.entries if e.is_node
+           and (e.node or {}).get("nodo") == "dominio"
+           and (e.node or {}).get("expectativas")]
+    if hay:
+        return ""
+    if not (expectativas or "").strip():
+        return ("\n\n> ⚠ **Falta el nodo `dominio` en el guion.** Antes de ver "
+                "ningún orden candidato, declara qué dinámica espera la teoría "
+                "para esta clase de serie (persistencia, ciclo, memoria finita, "
+                "media o estacionalidad estocástica) y por qué: vuelve a llamar "
+                "con `expectativas=\"…\"`, o `guion_node(guion_path, "
+                "nodo=\"dominio\", …, expectativas=…)`. Sin él, "
+                "`criterio=\"dominio\"` no se puede citar después.")
+    from art.guion import GuionEntry, save_guion, infer_parent
+    from datetime import datetime
+    version = (max(e.version for e in g.entries) + 1) if g.entries else 1
+    g.entries.append(GuionEntry(
+        version=version, name="dominio", inp_path="",
+        timestamp=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        spec={}, stats=None, equation="",
+        decision=f"dominio = {dom}",
+        rationale=("declarado por el analista" if declarado
+                   else "inferido por `decide_domain`"),
+        problems_found="", next_version="",
+        parent=infer_parent(g), kind="node",
+        node={"nodo": "dominio", "decidido": dom, "evidencia": "",
+              "alternativas": "", "expectativas": expectativas.strip()},
+        decided_by="analista+LLM", instrumento=_version_instr()))
+    if not g.carril:
+        g.carril = "guiado"
+    save_guion(g, gp)
+    return f"\n\n*◆ guion n{version}: **dominio = {dom}**, con sus expectativas*"
+
+
 def _record_node_to_guion(guion_path: str, nodo: str, decidido: str,
                           razon: str, evidencia: str = "",
                           alternativas: str = "",
@@ -6327,10 +6681,15 @@ def _record_to_guion(
     hist_b64: str | None = None,
     base_pre_path: str = "",
     dominio: str = "",
+    parent: int | None = None,
 ) -> str:
     """
     Add a fitted model entry to guion.json (creates file if absent).
     Returns a one-line confirmation string for the caller.
+
+    `parent` (≥ 0) declares the version this one comes from, apart from
+    `base_pre_path` — which in `confirm_and_estimate` means «incremental mode»,
+    not «where it comes from» (BUG-0207 D5).
     """
     from datetime import datetime
     from art.guion import (
@@ -6367,10 +6726,23 @@ def _record_to_guion(
     base_pre_sha = (sha_del_fichero(pre_de_la_base(base_pre_path))
                     if base_pre_path else "")
     pre_sha = sha_del_fichero(pre_hermano(inp_path))
+    parent_decl = parent
     parent = infer_parent(guion, base_pre_path, base_pre_sha)
     # Y CÓMO se supo. Sin `base_pre_path` el padre es «la última entrada», que
     # es una conjetura razonable y a veces falsa (BUG-0108).
     parent_origen = "declarado" if base_pre_path else "inferido"
+    # BUG-0207 D5. En `confirm_and_estimate`, `base_pre_path` no es «de dónde
+    # sale» sino «modo incremental», así que un modelo nuevo no tenía forma de
+    # declarar su padre: dos sobreparametrizaciones seguidas de m02 dejaban la
+    # segunda colgando de la primera, y abandonar la primera arrastraba a la
+    # segunda. `parent` lo dice aparte, y manda.
+    aviso_padre = ""
+    if parent_decl is not None and parent_decl >= 0:
+        if any(e.version == parent_decl for e in guion.entries):
+            parent, parent_origen = int(parent_decl), "declarado"
+        else:
+            aviso_padre = (f"  ⚠ `parent={parent_decl}` no está en el guion: "
+                           f"se infiere")
 
     # ¿ES ESTO UN MODELO NUEVO O EL MISMO OTRA VEZ? — BUG-0176.
     # Mismo `.pre` byte a byte es el mismo modelo. Reinscribirlo —para ponerle
@@ -6379,7 +6751,12 @@ def _record_to_guion(
     # descendía de la sobreparametrización que lo rechazó, y que el FINAL
     # descendía del descartado. Una copia hereda el padre del original.
     re_registro_de = None
-    if pre_sha and not base_pre_path:
+    # Encadenar desde el PROPIO `.pre` (base y modelo con la misma huella) no es
+    # un hijo: es el mismo modelo otra vez — la vía por la que se «adoptaba» y
+    # que lo duplicaba como hijo de sí mismo (BUG-0207 D6).
+    _mismo = bool(pre_sha and base_pre_sha and pre_sha == base_pre_sha)
+    _explicito = parent_decl is not None and parent_decl >= 0 and not aviso_padre
+    if pre_sha and (not base_pre_path or _mismo) and not _explicito:
         for e in guion.entries:
             if e.pre_sha and e.pre_sha == pre_sha:
                 re_registro_de = e.version
@@ -6396,6 +6773,21 @@ def _record_to_guion(
         spec["dominio"] = dominio
     stats = _extract_stats(model, diag_result)
     eq    = _build_equation(spec, model.series.freq)
+    # BUG-0207 D4. Lo que la diagnosis VE va a la ficha de SU versión. Sólo se
+    # escribía si el llamante lo pasaba, y los problemas de un modelo
+    # descartado acababan en la versión siguiente o en ninguna parte. Lo del
+    # analista va primero; lo de la diagnosis, marcado como tal.
+    try:
+        from art.guion import hallazgos_de_la_diagnosis
+        _n = int(stats.nobs or 0)
+        _h = hallazgos_de_la_diagnosis(
+            diag_result, stats, umbral_z=umbral_extremo(_n) if _n else None)
+    except Exception as _he:
+        _warn("hallazgos de la diagnosis para el guion", _he)
+        _h = ""
+    if _h:
+        problems_found = ((problems_found.strip() + "\n") if problems_found.strip()
+                          else "") + f"[diagnosis] {_h}"
 
     entry = GuionEntry(
         version=version,
@@ -6499,7 +6891,11 @@ def _record_to_guion(
     # Una línea, y corta: el registro es interno y la salida no debe crecer por
     # documentar. Quien quiera ver lo documentado llama a `export_guion`.
     padre = f" ← v{parent}" if parent is not None else ""
-    return f"*guion: {name} v{version}{padre}*" + aviso_terna
+    # Un padre INFERIDO se dice como tal, con la forma de corregirlo: es la
+    # conjetura que BUG-0207 D5 encontró falsa (BUG-0108 en otra herramienta).
+    if parent is not None and parent_origen == "inferido":
+        padre += " (inferido; si sale de otra versión, `parent=`)"
+    return f"*guion: {name} v{version}{padre}*" + aviso_terna + aviso_padre
 
 
 # ---------------------------------------------------------------------------
@@ -6554,6 +6950,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                           guion_rationale: str = "",
                           guion_problems: str = "",
                           guion_next: str = "",
+                          parent: int = -1,
                           con_figuras: bool = False,
                           modo: _Modo = "guiado") -> list:
     """
@@ -6688,6 +7085,11 @@ def confirm_and_estimate(inp_path: str, output_path: str,
     guion_path      : (optional) path to guion.json — records this version
     guion_name      : version name (e.g. "PC3"); auto-assigned if empty
     guion_decision  : brief description of what this model tests or concludes
+    parent          : guion version this model COMES FROM (-1 = inferred: the
+                      last live entry). Pass it for a sibling — a second
+                      overparametrisation of m02 hangs from m02, not from the
+                      first one (BUG-0207). `base_pre_path` does not say it in
+                      a fresh model: it switches to incremental mode.
     objetivo        : what the model is FOR — "univariante" (forecasting the
                       series itself), "multivariante" (it enters a system: VECM,
                       transfer function) or "estructural" (read the components).
@@ -6894,6 +7296,33 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         # rastro que la memoria de quien la hizo — y en un asistente esa memoria
         # se resume y desaparece. Si el llamante no da ruta, se deriva.
         guion_note = ""
+        # BUG-0207 D1. Los nodos que el carril guiado dejó PENDIENTES se cierran
+        # aquí con lo que de verdad se estimó —los órdenes, sobre todo—, ANTES
+        # de la entrada del modelo: son su etapa 1.
+        _notas_nodos = []
+        try:
+            _gp_eff = guion_path or _derive_guion_path(output_path, m)
+            if os.path.exists(os.path.expanduser(_gp_eff)):
+                _tot = lambda x: sum(x) if isinstance(x, (list, tuple)) else int(x)
+                for _n, _dec, _val, _fn in (
+                        ("lambda", f"{float(lam):g}", float(lam),
+                         lambda a, b: abs(float(a) - float(b)) < 1e-9),
+                        ("d", str(int(d)), int(d), None),
+                        ("estacionalidad",
+                         lambda pv: _texto_D(D, seasonal_hint=pv or ""),
+                         int(D), _coincide_D),
+                        ("ordenes", _texto_ordenes(p, q, P, Q, ts.freq),
+                         [_tot(p), int(q), int(P), int(Q)],
+                         lambda a, b: [_tot(x) for x in a] == list(b))):
+                    _ult = _ultimo_nodo(_abre_guion(os.path.expanduser(_gp_eff)), _n)
+                    if _ult is not None and (_ult.node or {}).get("pendiente"):
+                        _t = _confirma_nodo(_gp_eff, _n, _dec, valor=_val,
+                                            razon=(guion_rationale if _n == "ordenes"
+                                                   else ""), coincide_fn=_fn)
+                        if _t:
+                            _notas_nodos.append(_t)
+        except Exception as _ne:
+            _warn("cierre de los nodos pendientes del carril guiado", _ne)
         try:
             guion_note = _record_to_guion(
                 model=m, inp_path=output_path, lam=lam,
@@ -6905,6 +7334,8 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                 hist_b64=(diag.data or {}).get("hist_b64"),
                 base_pre_path=base_pre_path,
                 dominio=(domain or "").strip(),
+                parent=(int(parent) if parent is not None and int(parent) >= 0
+                        else None),
             )
         except Exception as e:
             # Documentar no puede tumbar una estimación válida.
@@ -6954,6 +7385,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                 # pide nada, `envuelve_iteracion` lo dice explícitamente.
                 reformulacion=_reformulacion_desde(diag, guion_next),
                 extra=pre_note
+                      + ("\n\n" + " · ".join(_notas_nodos) if _notas_nodos else "")
                       + (f"\n\n{guion_note}" if guion_note else "")
                       + _state_footer(
                           m, inp_path=output_path, guion_note=guion_note,
@@ -6994,9 +7426,13 @@ def record_version(inp_path: str,
                    rationale: str = "",
                    problems_found: str = "",
                    next_version: str = "",
-                   base_pre_path: str = "") -> list:
+                   base_pre_path: str = "",
+                   parent: int = -1) -> list:
     """
     Load, fit and record a model version in guion.json.
+
+    To ADOPT a model already in the guion use `guion_adopt`: re-recording it
+    with decision="adoptado" duplicates it (BUG-0207).
 
     Loads the model from inp_path, fits it, extracts stats (loglik, AIC, BIC,
     Q-test, JB-test, extreme residuals) and appends an entry to guion.json.
@@ -7015,12 +7451,31 @@ def record_version(inp_path: str,
                      Sin esto el padre es «la última entrada registrada», que es
                      una conjetura y en el run 4 fue falsa tres veces: declara
                      de dónde viene y el árbol lo dibuja bien (BUG-0176).
+    parent         : la versión del guion de la que sale (-1 = inferida). Manda
+                     sobre `base_pre_path` (BUG-0207 D5).
     """
     try:
         from mcp.types import TextContent, ImageContent
         from art.describe import _fig_b64
         from art.diagnosis import diagnose, figura_residuos
         import matplotlib.pyplot as plt
+
+        # BUG-0207 D6. «Adoptar» reinscribiendo un modelo que ya está en el
+        # guion lo DUPLICABA, y la copia quedaba «exploring»: el mapa no
+        # enseñaba nunca un ✓. Si el `.pre` es, byte a byte, el de una entrada
+        # registrada y la decisión es adoptarlo, se adopta ESA entrada.
+        if "adopt" in (decision or "").lower() and os.path.exists(
+                os.path.expanduser(guion_path)):
+            from art.guion import (load_guion, save_guion, sha_del_fichero,
+                                   pre_hermano)
+            _gp = os.path.expanduser(guion_path)
+            _sha = sha_del_fichero(pre_hermano(inp_path))
+            _g = load_guion(_gp)
+            _orig = next((e for e in _g.entries
+                          if _sha and e.pre_sha == _sha and not e.is_node), None)
+            if _orig is not None:
+                return getattr(guion_adopt, "fn", guion_adopt)(
+                    _gp, _orig.version, why=(rationale or decision).strip())
 
         _, m = _mirar(inp_path)
 
@@ -7042,6 +7497,8 @@ def record_version(inp_path: str,
             decision=decision, rationale=rationale,
             problems_found=problems_found, next_version=next_version,
             figure_b64=b64, base_pre_path=base_pre_path,
+            parent=(int(parent) if parent is not None and int(parent) >= 0
+                    else None),
         )
 
         # `record_version` CIERRA una iteración —escribe la entrada del guion—
@@ -7123,7 +7580,7 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
         from art.guion import (load_guion, path_to_root, safe_ancestor,
                                descendants, iteraciones, modelos_sin_registrar,
                                entradas_que_no_cuadran, linaje_dudoso,
-                               comparaciones_entre_muestras,
+                               comparaciones_entre_muestras, q_marca,
                                cifra as _cifra)
         g = load_guion(os.path.expanduser(guion_path))
         if not g.entries:
@@ -7166,8 +7623,11 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                 quien = f" [{e.decided_by}]" if e.decided_by else ""
                 # BUG-0110: dónde el analista corrigió al asistente
                 corr = (" ✎ corregido" if getattr(e, "coincide", None) is False else "")
+                # Un nodo que el carril guiado dejó PENDIENTE (BUG-0207 D1).
+                _val = (f"⏳ pendiente (propuesta: {e.propuesta or '—'})"
+                        if nd.get("pendiente") else _rec(nd.get('decidido', ''), 190))
                 lines.append(f"{sangria}{rama}◆ n{e.version} {nd.get('nodo', e.name)}"
-                             f" = {_rec(nd.get('decidido', ''), 190)}{quien}{corr}")
+                             f" = {_val}{quien}{corr}")
                 if getattr(e, "coincide", None) is False and getattr(e, "propuesta", ""):
                     lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
                                  f"el asistente propuso: {_rec(e.propuesta)}")
@@ -7181,7 +7641,8 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                     lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
                                  f"descartado: {_rec(nd['alternativas'])}")
             else:
-                q = "Q✓" if e.stats.q_pass else ("Q✗" if e.stats.q_pass is not None else "Q?")
+                # BUG-0207 D3: pasar el 3s+3 rechazando en s o 2s no es Q✓.
+                q = q_marca(e.stats)
                 jb = "JB✓" if e.stats.jb_pass else ("JB✗" if e.stats.jb_pass is not None else "JB?")
                 # Una reinscripción no es un paso más del método: es el mismo
                 # modelo otra vez, con otro nombre o con el veredicto encima
@@ -7195,6 +7656,9 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
             if e.status == "dead-end" and e.why_abandoned:
                 lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
                              f"↳ callejón: {_rec(e.why_abandoned)}")
+            if e.status == "adopted" and getattr(e, "why_adopted", ""):
+                lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
+                             f"↳ adoptada: {_rec(e.why_adopted)}")
             kids = sorted(hijos.get(v, []))
             for i, k in enumerate(kids):
                 dibuja(k, sangria + ("   " if ultimo else "│  "), i == len(kids) - 1)
@@ -7205,6 +7669,10 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
 
         lines += ["", "◆ nodo de decisión · ✓ adoptada · ✗ callejón sin salida · · en exploración"
                   " · ✎ el analista corrigió la propuesta del asistente"]
+        if any(q_marca(e.stats).startswith("Q⚠") for e in g.entries
+               if e.stats is not None):
+            lines.append("Q⚠(lags): pasa el retardo que decide (3s+3) y RECHAZA "
+                         "en esos: salvedad, no aprobado limpio.")
         _con = [e for e in g.entries if getattr(e, "coincide", None) is not None]
         if _con:
             _corr = [e for e in _con if e.coincide is False]
@@ -7322,10 +7790,13 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
         try:
             actual = _version_instr()
             viejos = sorted({e.instrumento for e in g.entries
-                             if getattr(e, "instrumento", "") and
+                             if not e.is_node and getattr(e, "instrumento", "") and
                              e.instrumento != actual})
+            # Los NODOS no se calculan: no tienen veredicto que releer, y
+            # contarlos hacía saltar el aviso en todo guion bien escrito
+            # (BUG-0207 D7).
             sin = [e.version for e in g.entries
-                   if not getattr(e, "instrumento", "")]
+                   if not e.is_node and not getattr(e, "instrumento", "")]
             if viejos or sin:
                 lines += ["", "⚠ **No todo se calculó con el mismo instrumento.**"]
                 if viejos:
@@ -7426,6 +7897,10 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
             f"— exige la razón, y arrastra a sus descendientes: una decisión "
             f"contaminada contamina lo que viene después."
             + (f" ({n_muertas} marcado{'s' if n_muertas != 1 else ''} ya)" if n_muertas else ""),
+            "",
+            "**Adoptar un modelo:** `guion_adopt(guion_path, version, why=…)` "
+            "— lo marca ✓ sin duplicarlo. **Anotar una entrada ya escrita:** "
+            "`guion_annotate(guion_path, version, campo, texto)`.",
             "",
             f"**Informe navegable:** `export_guion(\"{os.path.expanduser(guion_path)}\", "
             f"\"<salida>.html\")` — tabla de versiones con ecuación, ajuste y "
@@ -7782,6 +8257,93 @@ def guion_abandon(guion_path: str, version: int, why: str,
         else:
             txt.append("No queda ningún ancestro sano: hay que rehacer desde el principio.")
         return [TextContent(type="text", text="\n".join(txt) + aviso_linaje)]
+    except ValueError as e:
+        return _err(str(e))
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+@mcp.tool()
+def guion_adopt(guion_path: str, version: int, why: str) -> list:
+    """
+    Mark a MODEL as ADOPTED (✓ in the map), with the reason. The symmetric of
+    guion_abandon. Changes the entry's status; it creates no new entry
+    (re-recording it with record_version duplicated it — BUG-0207).
+
+    `why` is required. Nodes and dead ends cannot be adopted. The other models
+    still «exploring» are listed, not touched: close each with guion_abandon
+    and its own reason, or leave it open knowingly.
+
+    Parameters
+    ----------
+    guion_path : path to guion.json
+    version    : model version to adopt
+    why        : why this model is adopted (required)
+    """
+    try:
+        from mcp.types import TextContent
+        from art.guion import load_guion, save_guion, adopt
+        gp = os.path.expanduser(guion_path)
+        g = load_guion(gp)
+        por_v = {e.version: e for e in g.entries}
+        vivos = adopt(g, int(version), why)
+        save_guion(g, gp)
+        e = por_v[int(version)]
+        txt = [f"✓ **v{e.version} ({e.name}) adoptada.**", "",
+               f"**Razón:** {why.strip()}"]
+        otros = [x for x in g.entries
+                 if x.status == "adopted" and x.version != e.version]
+        if otros:
+            txt += ["", "Ya había adoptada(s): "
+                    + ", ".join(f"v{x.version} ({x.name})" for x in otros)
+                    + ". Siguen adoptadas: dos modelos adoptados son legítimos "
+                      "si sirven a objetivos distintos; si no, abandona el "
+                      "que sobra con su razón."]
+        if vivos:
+            txt += ["", "**Siguen en exploración:** "
+                    + ", ".join(f"v{v} ({por_v[v].name})" for v in vivos)
+                    + ". Ciérralos con `guion_abandon(guion_path, version, "
+                      "why=…)` —cada uno con su razón— o déjalos abiertos a "
+                      "sabiendas."]
+        txt += ["", f"*mapa:* `guion_map(\"{gp}\")`"]
+        return [TextContent(type="text", text="\n".join(txt))]
+    except ValueError as e:
+        return _err(str(e))
+    except Exception:
+        return _err(traceback.format_exc())
+
+
+@mcp.tool()
+def guion_annotate(guion_path: str, version: int, campo: str,
+                   texto: str) -> list:
+    """
+    APPEND text to a field of an entry already in the guion — e.g. what was
+    found after recording it. Never overwrites: the new text goes on its own
+    dated line (BUG-0207).
+
+    campo: "problems_found" | "rationale" | "decision" | "next_version"
+    (aliases: problemas, razon, siguiente); for a NODE also "evidencia" |
+    "alternativas".
+
+    Parameters
+    ----------
+    guion_path : path to guion.json
+    version    : entry to annotate
+    campo      : field (see above)
+    texto      : what to add
+    """
+    try:
+        from mcp.types import TextContent
+        from art.guion import load_guion, save_guion, annotate
+        gp = os.path.expanduser(guion_path)
+        g = load_guion(gp)
+        c = annotate(g, int(version), campo, texto)
+        save_guion(g, gp)
+        e = {x.version: x for x in g.entries}[int(version)]
+        valor = ((e.node or {}).get(c) if c in ("evidencia", "alternativas")
+                 else getattr(e, c))
+        return [TextContent(type="text", text=(
+            f"v{e.version} ({e.name}) — **{c}** anotado:\n\n{valor}"))]
     except ValueError as e:
         return _err(str(e))
     except Exception:
