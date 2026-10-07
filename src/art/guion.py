@@ -1697,6 +1697,8 @@ summary:hover { color:#1a237e; }
             padding:8px 14px; margin:6px 0; }
 .problems { background:#fce4ec; border-left:4px solid #e91e63;
             padding:8px 14px; margin:6px 0; }
+.warn     { background:#fff8e1; border-left:4px solid #f9a825;
+            padding:8px 14px; margin:6px 0; }
 .next     { background:#e8f5e9; border-left:4px solid #43a047;
             padding:8px 14px; margin:6px 0; }
 img { max-width:100%; border:1px solid #c5cae9; border-radius:4px; margin:10px 0; }
@@ -1720,6 +1722,27 @@ def _q_cell(stats: "GuionStats | None") -> str:
     return _pass_cell(stats.q_pass if stats is not None else None)
 
 
+def grupos_de_operador(entries) -> dict:
+    """Versiones del guion agrupadas por la variable dependiente que explican.
+
+    `{«λ=0, d=1, D=0»: [1, 2], «λ=0, d=2, D=0»: [3]}`. ℓ, AIC y BIC sólo se
+    comparan dentro de un grupo: el mismo criterio que `compare_versions`
+    (BUG-0051) —λ, d, D e `ifadf`—, aplicado al guion entero (BUG-0220).
+    Las entradas sin spec (nodos de decisión) no cuentan.
+    """
+    grupos: dict = {}
+    for e in entries:
+        sp = getattr(e, "spec", None) or {}
+        if not sp or getattr(e, "stats", None) is None:
+            continue
+        etq = (f"λ={float(sp.get('lam', 0.0) or 0.0):g}, d={sp.get('d', 0)}, "
+               f"D={sp.get('D', 0)}")
+        if any(sp.get("ifadf") or []):
+            etq += f", ifadf={list(sp.get('ifadf'))}"
+        grupos.setdefault(etq, []).append(e.version)
+    return grupos
+
+
 def export_guion_html(guion: Guion) -> str:
     """Render a Guion to a self-contained HTML string."""
     lines = [
@@ -1735,8 +1758,27 @@ def export_guion_html(guion: Guion) -> str:
         lines.append("<p><em>Sin versiones registradas.</em></p>")
     else:
         # Summary table
+        lines.append("<h2>Resumen de versiones</h2>")
+        # BUG-0220. ℓ, AIC y BIC de modelos con distinto operador (λ, d, D,
+        # ifadf) explican variables distintas y no se comparan: la tabla los
+        # ponía en la misma columna sin decirlo. Con más de un grupo, se dice y
+        # cada cifra lleva la letra de su grupo.
+        _grupos = grupos_de_operador(guion.entries)
+        _letra = {}
+        if len(_grupos) > 1:
+            lis = []
+            for i, (etq, vs) in enumerate(_grupos.items()):
+                L = chr(ord("A") + i)
+                _letra.update({v: L for v in vs})
+                lis.append(f"<li><b>{L}</b> — {etq}: "
+                           + ", ".join(f"v{v}" for v in vs) + "</li>")
+            lines += [
+                "<div class='warn'>⚠ <b>El árbol mezcla operadores de "
+                "diferenciación</b> — loglik, AIC y BIC sólo se comparan DENTRO "
+                "de cada grupo (la letra junto a cada cifra). El orden de "
+                "integración lo deciden los contrastes formales, no el AIC.<ul>",
+                *lis, "</ul></div>"]
         lines += [
-            "<h2>Resumen de versiones</h2>",
             "<table>",
             "<tr><th>#</th><th>Nombre</th><th>Ecuación</th>"
             "<th>loglik</th><th>AIC</th><th>BIC</th>"
@@ -1763,8 +1805,9 @@ def export_guion_html(guion: Guion) -> str:
                     f"<td>{dec[:60]}</td></tr>")
                 continue
             s = e.stats
-            aic_str = f"{s.aic:.1f}" if s.aic is not None else "—"
-            bic_str = f"{s.bic:.1f}" if s.bic is not None else "—"
+            _g = (f"<sup>{_letra[e.version]}</sup>" if e.version in _letra else "")
+            aic_str = (f"{s.aic:.1f}" if s.aic is not None else "—") + _g
+            bic_str = (f"{s.bic:.1f}" if s.bic is not None else "—") + _g
             dec_short = e.decision[:60] + "…" if len(e.decision) > 60 else e.decision
             lines.append(
                 f"<tr>"

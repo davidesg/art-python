@@ -1574,24 +1574,9 @@ def _forma_estructural(model, lam: float) -> str:
 
 
 def _grupos_de_operador(entries) -> dict:
-    """Versiones del guion agrupadas por la variable dependiente que explican.
-
-    `{«λ=0, d=1, D=0»: [1, 2], «λ=0, d=2, D=0»: [3]}`. ℓ, AIC y BIC sólo se
-    comparan dentro de un grupo: el mismo criterio que `compare_versions`
-    (BUG-0051) —λ, d, D e `ifadf`—, aplicado al guion entero (BUG-0220).
-    Las entradas sin spec (nodos de decisión) no cuentan.
-    """
-    grupos: dict = {}
-    for e in entries:
-        sp = getattr(e, "spec", None) or {}
-        if not sp or getattr(e, "stats", None) is None:
-            continue
-        etq = (f"λ={float(sp.get('lam', 0.0) or 0.0):g}, d={sp.get('d', 0)}, "
-               f"D={sp.get('D', 0)}")
-        if any(sp.get("ifadf") or []):
-            etq += f", ifadf={list(sp.get('ifadf'))}"
-        grupos.setdefault(etq, []).append(e.version)
-    return grupos
+    """Ver `guion.grupos_de_operador` (BUG-0220): el mapa y el HTML, una regla."""
+    from art.guion import grupos_de_operador
+    return grupos_de_operador(entries)
 
 
 def _orden_efectivo(factores, libres) -> int:

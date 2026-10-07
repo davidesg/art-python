@@ -70,3 +70,19 @@ def test_un_solo_operador_no_avisa(tmp_path):
     e.append(NS(version=3, spec={"lam": 0.0, "d": 1, "D": 0, "ifadf": [0, 1]},
                 stats=object()))
     assert len(srv._grupos_de_operador(e)) == 2
+
+
+def test_el_html_avisa_y_marca_el_grupo_de_cada_cifra(recorrido):
+    """La tabla de `export_guion` apilaba los AIC de d=1 y d=2 sin decirlo."""
+    from art.guion import export_guion_html, load_guion
+    _, g = recorrido
+    h = export_guion_html(load_guion(g))
+    assert "mezcla operadores de diferenciación" in h
+    assert "<b>A</b> — λ=0, d=1, D=0: v1" in h and "<b>B</b> — λ=0, d=2, D=0: v2" in h
+    assert h.count("<sup>A</sup>") == 2 and h.count("<sup>B</sup>") == 2
+
+
+def test_el_html_de_un_solo_operador_no_avisa(tmp_path):
+    from art.guion import Guion, export_guion_html
+    assert "mezcla operadores" not in export_guion_html(
+        Guion(series="X", analyst="", created="2026-10-07"))

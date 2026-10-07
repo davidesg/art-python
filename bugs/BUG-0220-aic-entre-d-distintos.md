@@ -58,6 +58,9 @@ On IPC_ES_SA with ARMA(1,1) and AR(2) at d=1 and ARIMA(1,2,1) it prints:
 - `compare_versions` still suppresses the Δ;
 - a single operator does not warn, and ifadf counts as a distinct operator.
 
-Open: the `export_guion` HTML table (guion.py) still stacks the AIC.
+The `export_guion` HTML table follows the same rule (`guion.grupos_de_operador`,
+now shared by the map and the HTML): with more than one group it warns, lists
+the groups by letter, and each loglik/AIC/BIC figure carries its group's
+letter.
 
 **Nota (2026-10-06).** El «IPC_ES» de este informe es IPC_ES_SA, el IPC de España *desestacionalizado* de la P02 (`bugs/BUG-0208-repro/IPC_ES_SA.inp`), no el IPC_ES histórico de BUG-0015.
