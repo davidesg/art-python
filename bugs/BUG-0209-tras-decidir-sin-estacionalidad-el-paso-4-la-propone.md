@@ -69,5 +69,6 @@ The repro (block 0209) now prints `n_harmonics=5: False · candidatos: []`
 - a seasonal series still gets route B1 with `n_harmonics=5`;
 - `estacional=None` keeps the two-branch text.
 
-`identification_analysis` still calls `describe_identification` without the
-decision (out of scope).
+`identification_analysis` takes the same decision (`_estacional_del_nodo3`,
+shared with node 4), so the standalone listing no longer offers seasonal
+candidates on a series without seasonality either.

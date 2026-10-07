@@ -121,3 +121,24 @@ def test_sin_decision_conocida_el_texto_no_cambia(sin_est):
     d = describe_identification(ts, d=1, D=0, lam=0.0)
     assert d.data["estacional"] is None
     assert "Si el nodo 3 detectó estacionalidad (ruta B1)" in d.recommendation
+
+
+
+def _listado(f):
+    fn = getattr(srv.identification_analysis, "fn", srv.identification_analysis)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        out = fn(f, d=1, D=0, lam=0.0)
+    return "\n".join(x if isinstance(x, str) else getattr(x, "text", "") or ""
+                     for x in out)
+
+
+def test_identification_analysis_respeta_la_misma_decision(sin_est):
+    """La herramienta suelta usa la decisión del nodo 3, como el paso 4."""
+    t = _listado(sin_est[1])
+    assert _estacionales(t) == [], _estacionales(t)
+    assert "n_harmonics=5" not in t
+
+
+def test_identification_analysis_con_estacionalidad_sigue_proponiendola(con_est):
+    assert "n_harmonics=5" in _listado(con_est[1])

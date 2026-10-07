@@ -1512,6 +1512,24 @@ def _warn(context: str, exc: "Exception | None" = None) -> None:
     print(f"⚠ [art] {context}{detail}", file=sys.stderr)
 
 
+def _estacional_del_nodo3(ts, D: int) -> "bool | None":
+    """La decisión estacional del nodo 3, repetida — BUG-0209.
+
+    Con D=0 el listado no sabe si el nodo 3 eligió la ruta B1 (armónicos) o la
+    Decisión A (sin estacionalidad), y proponía para las dos. Se repite el
+    MISMO contraste (`detect_seasonality` con sus valores por defecto, como
+    `describe_seasonality`), así que la decisión es la misma. `None` —sin
+    información— con D ≥ 1, en anuales, o si el contraste falla."""
+    if D != 0 or int(getattr(ts, "freq", 1) or 1) <= 1:
+        return None
+    try:
+        from art.seasonal_detection import detect_seasonality as _ds
+        return bool(_ds(ts).seasonal_detected)
+    except Exception as e:
+        _warn("seasonality check of node 3 failed", e)
+        return None
+
+
 def _errores_del_out(inp_path: str, model) -> "tuple[list | None, str]":
     """Los errores típicos del `.out` hermano, en el orden de `model.params`.
 
@@ -3473,7 +3491,9 @@ def identification_analysis(inp_path: str, d: int = 2, D: int = 0,
     try:
         from art.describe import describe_identification
         ts, _ = _load_ts_model(inp_path)
-        desc = describe_identification(ts, d=d, D=D, lam=lam)
+        # La misma decisión estacional que el nodo 4 del carril guiado (BUG-0209).
+        desc = describe_identification(ts, d=d, D=D, lam=lam,
+                                       estacional=_estacional_del_nodo3(ts, D))
         _escribe_fig(desc.figure_b64, "identification")
         return _result(desc)
     except Exception as e:
@@ -5883,15 +5903,8 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             # desestacionalizada (IPC_US, F-HAC p=0,78). Se repite el MISMO
             # contraste del nodo 3 (`describe_seasonality` → `detect_seasonality`
             # con sus valores por defecto), así que la decisión es la misma.
-            _estacional = None
-            if D == 0 and int(ts.freq or 1) > 1:
-                try:
-                    from art.seasonal_detection import detect_seasonality as _ds
-                    _estacional = bool(_ds(ts).seasonal_detected)
-                except Exception as _e_sd:
-                    _warn("seasonality check at node 4 failed", _e_sd)
             ident      = describe_identification(ts, d=d, D=D, lam=lam,
-                                                 estacional=_estacional)
+                                                 estacional=_estacional_del_nodo3(ts, D))
             data_label = f"∇^{d}∇_s^{D} y(λ={lam})"
 
         _ruta_fig = _escribe_fig(ident.figure_b64, "identification")   # BUG-0113
