@@ -1,0 +1,28 @@
+# bateria_contrastes_d.py — N=200 SEED=2026 REPS=1
+modelo                   d | SF    esp   v      | DCD+                      v       | DCD−                v         | par       | cierre    | discrepancias con el árbol
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ruido                    0 | —     —            | ∇^1 θ̂+1.0000 LR-0.000    cancela | —                             | sin par   | adecuado  | 
+AR(1) .6                 0 | SF    SF    estac. | ∇^1 θ̂+1.0000 LR-0.000    cancela | —                             | coinciden | adecuado  | 
+AR(1) .95                0 | SF    SF    estac. | ∇^1 θ̂+1.0000 LR0.000     cancela | —                             | coinciden | adecuado  | 
+AR(2) reales .5,.3       0 | SF    SF    estac. | ∇^1 θ̂+1.0000 LR-0.000    cancela | —                             | coinciden | no adecuado| diagnosis: ruido blanco (Q): p mínimo = 0.0408
+AR(2) complejo 1,-.5     0 | SFsob SFsob estac. | ∇^1 θ̂+1.0000 LR-0.000    cancela | —                             | sin par   | adecuado  | 
+MA(1) .5                 0 | —     —            | ∇^1 θ̂+1.0000 LR0.000     cancela | —                             | sin par   | adecuado  | 
+ARMA(1,1) .6/.3          0 | SF    SF    estac. | ∇^1 θ̂+1.0000 LR-0.000    cancela | —                             | coinciden | adecuado  | 
+ruido                    1 | —     —            | ∇^2 θ̂+1.0000 LR0.000     cancela | θ̂-0.0354 LR637.275 genuina   | sin par   | adecuado  | 
+AR(1) .6                 1 | SF    SF    estac. | ∇^2 θ̂+1.0000 LR0.000     cancela | θ̂-0.1148 LR91.425  genuina   | coinciden | adecuado  | DCD− con AR libre sin aviso (BUG-0224)
+AR(1) .95                1 | SF    SF    estac. | ∇^2 θ̂+0.9342 LR4.841     genuina | θ̂+0.0629 LR367.913 genuina   | discrepan | reformular| DCD− con AR libre sin aviso (BUG-0224)
+AR(2) reales .5,.3       1 | SF    SF    estac. | ∇^2 θ̂+0.9667 LR-0.053    cancela | θ̂+0.0932 LR13.456  genuina   | coinciden | adecuado  | DCD− con AR libre sin aviso (BUG-0224); LR negativo: el libre peor que el restringido
+AR(2) complejo 1,-.5     1 | SFsob SFsob estac. | ∇^2 θ̂+1.0000 LR-0.000    cancela | θ̂-0.0637 LR57.486  genuina   | sin par   | no adecuado| DCD− con AR libre sin aviso (BUG-0224); diagnosis: estacionalidad en los residuos (p = 0.0151)
+MA(1) .5                 1 | —     —            | ∇^2 θ̂+1.0000 LR0.000     cancela | θ̂+0.4962 LR468.319 genuina   | sin par   | no adecuado| diagnosis: ruido blanco (Q): p mínimo = 0.0077
+ARMA(1,1) .6/.3          1 | SF    SF    estac. | ∇^2 θ̂+1.0000 LR-0.000    cancela | θ̂+0.3494 LR23.816  genuina   | coinciden | adecuado  | 
+ruido                    2 | —     —            | ∇^3 θ̂+1.0000 LR-0.000    cancela | θ̂-0.0001 LR362.297 genuina   | sin par   | adecuado  | DCD+ lanzado con d=2 (∇³); sin par cruzado d=1/d=2 (BUG-0235)
+AR(1) .6                 2 | SF    SF    estac. | ∇^3 θ̂+1.0000 LR-0.000    cancela | θ̂+0.1671 LR118.538 genuina   | coinciden | adecuado  | DCD+ lanzado con d=2 (∇³); DCD− con AR libre sin aviso (BUG-0224); sin par cruzado d=1/d=2 (BUG-0235)
+AR(1) .95                2 | SF    SF    raíz   | ∇^3 θ̂-0.1893 LR-1.807    cancela | θ̂-0.0908 LR461.519 genuina   | —         | reformular| DCD+ lanzado con d=2 (∇³); DCD− con AR libre sin aviso (BUG-0224); LR negativo: el libre peor que el restringido; SF pide d+1 desde d=2 (d=3); sin par cruzado d=1/d=2 (BUG-0235)
+AR(2) reales .5,.3       2 | SF    SF    estac. | ∇^3 θ̂+0.9943 LR0.010     cancela | θ̂-0.3044 LR30.450  genuina   | coinciden | adecuado  | DCD+ lanzado con d=2 (∇³); DCD− con AR libre sin aviso (BUG-0224); sin par cruzado d=1/d=2 (BUG-0235)
+AR(2) complejo 1,-.5     2 | SFsob SFsob estac. | ∇^3 θ̂+1.0000 LR0.000     cancela | θ̂-0.0581 LR59.570  genuina   | sin par   | no adecuado| DCD+ lanzado con d=2 (∇³); DCD− con AR libre sin aviso (BUG-0224); sin par cruzado d=1/d=2 (BUG-0235); diagnosis: ruido blanco (Q): p mínimo = 0.0044
+MA(1) .5                 2 | —     —            | ∇^3 θ̂+1.0000 LR0.000     cancela | θ̂+0.5146 LR446.801 genuina   | sin par   | adecuado  | DCD+ lanzado con d=2 (∇³); sin par cruzado d=1/d=2 (BUG-0235)
+ARMA(1,1) .6/.3          2 | SF    SF    estac. | ∇^3 θ̂+1.0000 LR0.000     cancela | θ̂+0.1459 LR21.711  genuina   | coinciden | no adecuado| DCD+ lanzado con d=2 (∇³); sin par cruzado d=1/d=2 (BUG-0235); diagnosis: media residual distinta de cero: t = -2.18
+
+SF: lanzado · esp: lo que pide el árbol · v: veredicto (estac. = ρ<1; raíz = ρ≈1).
+DCD+: sobrediferenciación (∇^k del candidato) · DCD−: subdiferenciación.
+Modelos estimados con su especificación VERDADERA; n por serie = N.

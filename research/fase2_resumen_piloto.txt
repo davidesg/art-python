@@ -1,0 +1,150 @@
+# 1. La d elegida: % de acierto (y reparto de la regla del árbol)
+
+celda                            d   n |  árbol ADF+KPSS art  kpss   adf | reparto de la regla
+AR(1) .5                         0  50 |    94%         100%   90%   98% | 0:47, amb01:3
+AR(2) cplx corto p8 r.7          0  50 |    96%         100%   94%  100% | 0:48, 1:2
+AR(2) cplx largo p36 r.97        0  50 |   100%         100%   94%   92% | 0:50
+AR(2) reales .5,.3               0  50 |    96%          98%   74%   66% | 0:48, amb01:2
+ARMA(1,1) .6/.3                  0  50 |    92%         100%   96%   98% | 0:46, amb01:3, 1:1
+I(0) + tendencia                 0  50 |     0%           0%    0%  100% | 1:35, amb01:15
+MA(1) .5                         0  50 |   100%         100%  100%  100% | 0:50
+ruido                            0  50 |    92%         100%   96%  100% | 0:46, 1:4
+AR(1) .5                         1  50 |    98%          98%   88%   94% | 1:49, amb12:1
+AR(1) .5 + 3 escalones           1  50 |    94%          90%   88%   96% | 1:47, amb12:3
+AR(1) .5 + cambio de varianza    1  50 |    98%          84%   76%   90% | 1:49, amb12:1
+AR(1) 0.8                        1  50 |    98%          92%   72%   82% | 1:49, amb12:1
+AR(1) 0.9                        1  50 |    84%          90%   64%   38% | 1:42, amb12:6, ind12:1, 2:1
+AR(1) 0.95                       1  50 |    30%          64%   24%   16% | ind12:31, 1:15, 2:3, amb12:1
+AR(1) 0.98                       1  50 |     0%          36%    8%    4% | ind12:36, 2:14
+AR(2) cplx corto p8 r.7          1  50 |    76%          88%   94%   96% | 1:38, amb01:10, 0:1, amb12:1
+AR(2) cplx largo p36 r.97        1  50 |    92%          90%   84%   86% | 1:46, amb12:3, 2:1
+AR(2) reales .5,.3               1  50 |    92%          92%   56%   60% | 1:46, amb12:4
+AR(4) Salamanca                  1  50 |    60%          88%   46%   48% | 1:30, ind01:9, amb12:6, ind12:4, 0:1
+AR(7) Villaverde                 1  50 |    58%          90%   70%   92% | 1:29, ind01:13, ind12:3, amb12:3, 0:2
+ARMA(1,1) .6/.3                  1  50 |    90%          98%   86%  100% | 1:45, amb12:4, 2:1
+ARMA(1,1) señal+ruido .95/.7     1  50 |     2%          68%   34%   40% | 2:31, amb12:18, 1:1
+MA(1) .5                         1  50 |   100%          86%   94%   90% | 1:50
+MA(1) .9                         1  50 |    96%          30%   74%   10% | 1:48, 0:2
+MA(1) .95                        1  50 |    62%          10%   50%    0% | 1:31, 0:19
+ruido                            1  50 |    96%          98%   98%   94% | 1:48, 2:2
+AR(1) .5                         2  50 |   100%          84%   98%   90% | 2:50
+AR(1) 0.8                        2  50 |   100%          90%   96%   84% | 2:50
+AR(1) 0.9                        2  50 |   100%          84%   98%   92% | 2:50
+AR(1) 0.95                       2  50 |   100%          88%   98%   78% | 2:50
+AR(1) 0.98                       2  50 |   100%          82%  100%   76% | 2:50
+AR(2) cplx corto p8 r.7          2  50 |    90%          74%   92%   90% | 2:45, amb12:5
+AR(2) cplx largo p36 r.97        2  50 |   100%          60%   86%   88% | 2:50
+AR(2) reales .5,.3               2  50 |   100%          82%   98%   90% | 2:50
+ARMA(1,1) .6/.3                  2  50 |    98%          90%   92%   94% | 2:49, amb12:1
+ARMA(1,1) señal+ruido .95/.7     2  50 |   100%          80%  100%   76% | 2:50
+IMA θ.75 Salamanca               2  50 |   100%          60%   90%   66% | 2:50
+MA(1) .5                         2  50 |   100%          72%   98%   86% | 2:50
+MA(1) .9                         2  50 |    88%          42%   74%   14% | 2:44, 1:6
+MA(1) .95                        2  50 |    76%           8%   58%    0% | 2:38, 1:12
+ruido                            2  50 |   100%          88%   98%   92% | 2:50
+MEDIA                                  |    84%          77%   79%   73%
+
+# 2. Cada contraste, por d estimada (% de series)
+#    SF raíz = no rechaza ρ=1 · DCD+ cancela = no rechaza θ=1 en ∇^{d+1} · DCD− cancela = no rechaza θ=1 en ∇^d
+
+celda                            d est |    SF  raíz |  DCD+  canc |  DCD−  canc |  LR<0 tst<0 | no adec | fallos
+AR(1) .5                         0   0 |    50    0% |    50   94% |     0    — |     0%    0% |     12% | ruido blanco (Q):2, estacionalidad en los residu:2, normalidad (JB):2
+AR(1) .5                         0   1 |     0    — |    50  100% |    50   94% |     0%    0% |     58% | ruido blanco (Q):26, estacionalidad en los residu:2, normalidad (JB):1
+AR(2) cplx corto p8 r.7          0   0 |    26    0% |    46  100% |     0    — |     0%    0% |     20% | ruido blanco (Q):7, normalidad (JB):2, estacionalidad en los residu:1
+AR(2) cplx corto p8 r.7          0   1 |     0    — |    50  100% |    50   92% |     0%    0% |     70% | ruido blanco (Q):35
+AR(2) cplx largo p36 r.97        0   0 |    26    0% |    50  100% |     0    — |     0%    0% |     14% | ruido blanco (Q):4, normalidad (JB):2, estacionalidad en los residu:1
+AR(2) cplx largo p36 r.97        0   1 |    50    2% |    50   92% |    50  100% |     2%    0% |     62% | ruido blanco (Q):31
+AR(2) reales .5,.3               0   0 |    50    0% |    50   96% |     0    — |     2%    0% |      8% | estacionalidad en los residu:3, normalidad (JB):1
+AR(2) reales .5,.3               0   1 |    11    0% |    50  100% |    50   96% |    22%   10% |     20% | estacionalidad en los residu:5, ruido blanco (Q):3, normalidad (JB):2
+ARMA(1,1) .6/.3                  0   0 |    50    2% |    50   92% |     0    — |     4%    0% |      8% | ruido blanco (Q):2, estacionalidad en los residu:2
+ARMA(1,1) .6/.3                  0   1 |    50    0% |    50  100% |    50   92% |     4%    0% |     14% | ruido blanco (Q):5, estacionalidad en los residu:2
+I(0) + tendencia                 0   0 |    50   70% |    50    0% |     0    — |     0%    0% |     60% | ruido blanco (Q):29, estacionalidad en los residu:1
+I(0) + tendencia                 0   1 |     0    — |    50  100% |    50    0% |     0%    0% |     54% | ruido blanco (Q):26, estacionalidad en los residu:1
+MA(1) .5                         0   0 |     0    — |    50  100% |     0    — |     0%    0% |     20% | estacionalidad en los residu:4, ruido blanco (Q):4, normalidad (JB):2
+MA(1) .5                         0   1 |     0    — |    50  100% |    50  100% |     0%    0% |     98% | ruido blanco (Q):49
+ruido                            0   0 |     0    — |    46  100% |     0    — |     0%    0% |     18% | estacionalidad en los residu:5, normalidad (JB):4
+ruido                            0   1 |     0    — |    50  100% |    50   92% |     0%    0% |    100% | ruido blanco (Q):50
+AR(1) .5                         1   0 |    50  100% |    50    0% |     0    — |     0%   50% |    100% | ruido blanco (Q):50
+AR(1) .5                         1   1 |    50    0% |    50   98% |    50    0% |     0%   50% |     16% | ruido blanco (Q):4, media residual distinta de c:2, normalidad (JB):1
+AR(1) .5                         1   2 |     0    — |    50  100% |    50   98% |     0%    0% |     54% | ruido blanco (Q):21, normalidad (JB):4, estacionalidad en los residu:2
+AR(1) .5 + 3 escalones           1   0 |    50  100% |    50    0% |     0    — |     0%   44% |    100% | ruido blanco (Q):48, normalidad (JB):2
+AR(1) .5 + 3 escalones           1   1 |    50    0% |    50   94% |    50    0% |     0%   44% |    100% | normalidad (JB):45, ruido blanco (Q):5
+AR(1) .5 + 3 escalones           1   2 |     0    — |    50  100% |    50   94% |     0%    0% |     86% | ruido blanco (Q):28, normalidad (JB):15
+AR(1) .5 + cambio de varianza    1   0 |    50  100% |    50    0% |     0    — |     0%   54% |    100% | ruido blanco (Q):50
+AR(1) .5 + cambio de varianza    1   1 |    50    0% |    50   98% |    50    0% |     2%   52% |     92% | normalidad (JB):27, ruido blanco (Q):19
+AR(1) .5 + cambio de varianza    1   2 |     0    — |    50  100% |    50   98% |     2%    0% |     98% | ruido blanco (Q):43, normalidad (JB):6
+AR(1) 0.8                        1   0 |    50  100% |    50    0% |     0    — |     0%   72% |    100% | ruido blanco (Q):50
+AR(1) 0.8                        1   1 |    50    0% |    50   98% |    50    0% |     0%   52% |     14% | ruido blanco (Q):4, normalidad (JB):1, estacionalidad en los residu:1
+AR(1) 0.8                        1   2 |     6    0% |    50  100% |    50   98% |    14%    6% |     22% | ruido blanco (Q):5, estacionalidad en los residu:3, normalidad (JB):3
+AR(1) 0.9                        1   0 |    50  100% |    50    0% |     0    — |     0%   88% |    100% | ruido blanco (Q):50
+AR(1) 0.9                        1   1 |    50    4% |    50   86% |    50    0% |     0%   66% |     16% | ruido blanco (Q):4, normalidad (JB):3, media residual distinta de c:1
+AR(1) 0.9                        1   2 |    15    0% |    50  100% |    50   86% |    20%   10% |     20% | ruido blanco (Q):7, normalidad (JB):3
+AR(1) 0.95                       1   0 |    50  100% |    50    0% |     0    — |     0%   82% |    100% | ruido blanco (Q):50
+AR(1) 0.95                       1   1 |    50   68% |    50   94% |    50    0% |     8%   62% |     16% | ruido blanco (Q):6, normalidad (JB):1, estacionalidad en los residu:1
+AR(1) 0.95                       1   2 |    23    0% |    50  100% |    50   92% |    60%   42% |     14% | ruido blanco (Q):4, estacionalidad en los residu:2, normalidad (JB):1
+AR(1) 0.98                       1   0 |    50  100% |    50    0% |     0    — |     0%   98% |    100% | ruido blanco (Q):50
+AR(1) 0.98                       1   1 |    50  100% |    50   84% |    50    0% |    16%   58% |     16% | ruido blanco (Q):5, normalidad (JB):2, estacionalidad en los residu:1
+AR(1) 0.98                       1   2 |    27    0% |    50  100% |    50   72% |    34%   48% |     12% | normalidad (JB):2, ruido blanco (Q):2, estacionalidad en los residu:2
+AR(2) cplx corto p8 r.7          1   0 |    50   78% |    36    0% |     0    — |     0%   46% |    100% | ruido blanco (Q):50
+AR(2) cplx corto p8 r.7          1   1 |    24    0% |    49  100% |    50    0% |     0%   48% |     22% | ruido blanco (Q):5, normalidad (JB):3, estacionalidad en los residu:3
+AR(2) cplx corto p8 r.7          1   2 |     0    — |    50  100% |    50   98% |     0%    0% |     92% | ruido blanco (Q):46
+AR(2) cplx largo p36 r.97        1   0 |     5  100% |     0    — |     0    — |     0%   58% |    100% | ruido blanco (Q):50
+AR(2) cplx largo p36 r.97        1   1 |    24    0% |    46  100% |    50    0% |     4%   48% |     18% | ruido blanco (Q):6, normalidad (JB):2, estacionalidad en los residu:1
+AR(2) cplx largo p36 r.97        1   2 |    50    0% |    50   94% |    50   92% |     4%    0% |     76% | ruido blanco (Q):38
+AR(2) reales .5,.3               1   0 |    50  100% |    50    0% |     0    — |     0%   18% |     78% | ruido blanco (Q):35, media residual distinta de c:3, estacionalidad en los residu:1
+AR(2) reales .5,.3               1   1 |    50    0% |    50   92% |    50    0% |     4%   44% |     14% | normalidad (JB):3, ruido blanco (Q):2, estacionalidad en los residu:2
+AR(2) reales .5,.3               1   2 |    19    0% |    50  100% |    50   92% |    38%   24% |     34% | ruido blanco (Q):13, estacionalidad en los residu:3, normalidad (JB):1
+AR(4) Salamanca                  1   0 |    45  100% |    46   28% |     0    — |    14%   24% |     40% | ruido blanco (Q):16, estacionalidad en los residu:2, normalidad (JB):1
+AR(4) Salamanca                  1   1 |    50    8% |    50   82% |    50   26% |    26%   34% |     12% | ruido blanco (Q):3, estacionalidad en los residu:2, normalidad (JB):1
+AR(4) Salamanca                  1   2 |    19    0% |    50  100% |    50   88% |    48%   44% |     18% | ruido blanco (Q):5, estacionalidad en los residu:3, normalidad (JB):1
+AR(7) Villaverde                 1   0 |    46  100% |    48   38% |     0    — |    20%   42% |     54% | ruido blanco (Q):19, normalidad (JB):3, media residual distinta de c:3
+AR(7) Villaverde                 1   1 |    50    6% |    50   88% |    50   32% |    42%   62% |     24% | normalidad (JB):5, media residual distinta de c:3, estacionalidad en los residu:3
+AR(7) Villaverde                 1   2 |    20    0% |    50  100% |    50   94% |    76%   82% |     16% | normalidad (JB):4, estacionalidad en los residu:2, ruido blanco (Q):2
+ARMA(1,1) .6/.3                  1   0 |    50  100% |    50    0% |     0    — |     0%    4% |     54% | ruido blanco (Q):23, normalidad (JB):2, estacionalidad en los residu:1
+ARMA(1,1) .6/.3                  1   1 |    50    2% |    50   90% |    50    0% |     6%    4% |     12% | estacionalidad en los residu:3, normalidad (JB):2, ruido blanco (Q):1
+ARMA(1,1) .6/.3                  1   2 |    50    0% |    50  100% |    50   90% |     8%    0% |     22% | ruido blanco (Q):5, normalidad (JB):3, estacionalidad en los residu:3
+ARMA(1,1) señal+ruido .95/.7     1   0 |    50  100% |    50    0% |     0    — |     0%    0% |    100% | ruido blanco (Q):48, estacionalidad en los residu:1, media residual distinta de c:1
+ARMA(1,1) señal+ruido .95/.7     1   1 |    50   62% |    50    2% |    50    0% |     0%    0% |     20% | ruido blanco (Q):4, estacionalidad en los residu:4, normalidad (JB):1
+ARMA(1,1) señal+ruido .95/.7     1   2 |    33    0% |    50  100% |    50    2% |     0%    0% |     18% | estacionalidad en los residu:4, normalidad (JB):3, ruido blanco (Q):2
+MA(1) .5                         1   0 |     0    — |     0    — |     0    — |     0%   18% |    100% | ruido blanco (Q):50
+MA(1) .5                         1   1 |     0    — |    50  100% |    50    0% |     0%    0% |     22% | media residual distinta de c:4, normalidad (JB):4, ruido blanco (Q):2
+MA(1) .5                         1   2 |     0    — |    50  100% |    50  100% |     0%    0% |     98% | ruido blanco (Q):49
+MA(1) .9                         1   0 |     0    — |     2  100% |     0    — |     2%    0% |     68% | ruido blanco (Q):34
+MA(1) .9                         1   1 |     0    — |    50  100% |    50    4% |     0%    0% |     14% | ruido blanco (Q):3, normalidad (JB):2, estacionalidad en los residu:2
+MA(1) .9                         1   2 |     0    — |    50  100% |    50  100% |     0%    0% |    100% | ruido blanco (Q):50
+MA(1) .95                        1   0 |     0    — |    19  100% |     0    — |     0%    0% |     28% | ruido blanco (Q):12, estacionalidad en los residu:2
+MA(1) .95                        1   1 |     0    — |    50  100% |    50   38% |     0%    0% |     14% | normalidad (JB):3, estacionalidad en los residu:2, ruido blanco (Q):2
+MA(1) .95                        1   2 |     0    — |    50  100% |    50  100% |     0%    0% |    100% | ruido blanco (Q):50
+ruido                            1   0 |     0    — |     0    — |     0    — |     0%  100% |    100% | ruido blanco (Q):50
+ruido                            1   1 |     0    — |    48  100% |    50    0% |     0%  100% |     32% | media residual distinta de c:4, estacionalidad en los residu:4, normalidad (JB):4
+ruido                            1   2 |     0    — |    50  100% |    50   96% |     0%    0% |    100% | ruido blanco (Q):50
+AR(1) .5                         2   1 |    50  100% |    50    0% |    50    0% |     0%  100% |    100% | ruido blanco (Q):50
+AR(1) .5                         2   2 |    50    0% |    50   96% |    50    0% |     0%   62% |     14% | normalidad (JB):3, estacionalidad en los residu:3, ruido blanco (Q):1
+AR(1) 0.8                        2   1 |    50  100% |    50    0% |    50    0% |     0%  100% |    100% | ruido blanco (Q):50
+AR(1) 0.8                        2   2 |    50    0% |    50   96% |    50    0% |     0%   46% |     14% | ruido blanco (Q):3, media residual distinta de c:2, estacionalidad en los residu:1
+AR(1) 0.9                        2   1 |    50  100% |    50    0% |    50    0% |     0%  100% |    100% | ruido blanco (Q):50
+AR(1) 0.9                        2   2 |    50    2% |    50   92% |    50    0% |     4%   44% |     18% | ruido blanco (Q):4, normalidad (JB):3, estacionalidad en los residu:1
+AR(1) 0.95                       2   1 |    47  100% |    47    0% |    47    0% |     0%   94% |     94% | ruido blanco (Q):47
+AR(1) 0.95                       2   2 |    50   62% |    50   84% |    50    0% |     8%   52% |     22% | ruido blanco (Q):5, estacionalidad en los residu:4, normalidad (JB):2
+AR(1) 0.98                       2   1 |    41  100% |    41    0% |    41    0% |     0%   82% |     82% | ruido blanco (Q):41
+AR(1) 0.98                       2   2 |    50   94% |    50   84% |    50    0% |    16%   52% |     18% | estacionalidad en los residu:4, ruido blanco (Q):3, normalidad (JB):2
+AR(2) cplx corto p8 r.7          2   1 |    50   90% |    46    0% |    50    0% |     0%  100% |    100% | ruido blanco (Q):50
+AR(2) cplx corto p8 r.7          2   2 |    21    0% |    48  100% |    50    0% |     0%   42% |     18% | ruido blanco (Q):5, estacionalidad en los residu:2, normalidad (JB):2
+AR(2) cplx largo p36 r.97        2   1 |    14  100% |     0    — |    50    0% |     0%  100% |    100% | ruido blanco (Q):50
+AR(2) cplx largo p36 r.97        2   2 |    20    0% |    45  100% |    50    0% |     0%   40% |     24% | ruido blanco (Q):7, normalidad (JB):2, media residual distinta de c:2
+AR(2) reales .5,.3               2   1 |    50  100% |    50    6% |    50    0% |     0%   28% |     76% | ruido blanco (Q):35, media residual distinta de c:3
+AR(2) reales .5,.3               2   2 |    50    0% |    50  100% |    50    0% |     0%   54% |     10% | ruido blanco (Q):2, media residual distinta de c:2, estacionalidad en los residu:1
+ARMA(1,1) .6/.3                  2   1 |    50   98% |    50    0% |    50    0% |     0%  100% |     58% | ruido blanco (Q):14, media residual distinta de c:13, normalidad (JB):1
+ARMA(1,1) .6/.3                  2   2 |    50    0% |    50   94% |    50    0% |     0%   22% |     10% | estacionalidad en los residu:2, ruido blanco (Q):2, media residual distinta de c:1
+ARMA(1,1) señal+ruido .95/.7     2   1 |    50  100% |    50    0% |    50    0% |     0%  100% |    100% | ruido blanco (Q):50
+ARMA(1,1) señal+ruido .95/.7     2   2 |    50   78% |    50    0% |    50    0% |     0%    0% |     24% | ruido blanco (Q):7, estacionalidad en los residu:5
+IMA θ.75 Salamanca               2   1 |     0    — |     0    — |    50    0% |     0%  100% |     98% | ruido blanco (Q):49
+IMA θ.75 Salamanca               2   2 |     0    — |    50  100% |    50    0% |     0%    0% |     16% | estacionalidad en los residu:3, normalidad (JB):2, ruido blanco (Q):2
+MA(1) .5                         2   1 |     0    — |     0    — |    50    0% |     0%  100% |    100% | ruido blanco (Q):50
+MA(1) .5                         2   2 |     0    — |    50  100% |    50    0% |     0%    0% |     14% | estacionalidad en los residu:3, normalidad (JB):3, media residual distinta de c:1
+MA(1) .9                         2   1 |     0    — |     6  100% |    50    0% |     0%  100% |    100% | ruido blanco (Q):46, media residual distinta de c:4
+MA(1) .9                         2   2 |     0    — |    50  100% |    50   12% |     0%    0% |     26% | ruido blanco (Q):8, normalidad (JB):4, estacionalidad en los residu:1
+MA(1) .95                        2   1 |     0    — |    12  100% |    50    0% |     0%  100% |     98% | ruido blanco (Q):31, media residual distinta de c:15, normalidad (JB):3
+MA(1) .95                        2   2 |     0    — |    50  100% |    50   24% |     0%    0% |     18% | normalidad (JB):4, ruido blanco (Q):4, estacionalidad en los residu:1
+ruido                            2   1 |     0    — |     0    — |    50    0% |     0%  100% |    100% | ruido blanco (Q):50
+ruido                            2   2 |     0    — |    47  100% |    50    0% |     2%  100% |     30% | normalidad (JB):5, ruido blanco (Q):4, estacionalidad en los residu:3

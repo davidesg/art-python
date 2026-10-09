@@ -1,0 +1,26 @@
+FASE 2b — 14 celdas × 200 réplicas, n=200 (9-oct-2026)
+Tablas completas: fase2b_resumen_oraculo.txt, fase2b_resumen_identificado.txt
+
+Acierto medio en d (14 celdas):
+                         árbol (par cruzado)  árbol (un modelo)  ADF+KPSS art  KPSS  ADF
+  órdenes verdaderos            67 %               49 %*            62 %       63 %  42 %
+  órdenes de suggest_orders     31 %               44 %             62 %       63 %  42 %
+  * en las celdas con d=2 el DCD+ del modelo en ∇¹ no se calcula; esa columna no vale ahí.
+
+Celdas con d=1, árbol con órdenes identificados (cruzado / un modelo) frente a ADF+KPSS art:
+  AR(1) .5 + escalones 11/34 vs 96 · AR(1) .9 14/57 vs 90 · AR(4) Salamanca 6/27 vs 86
+  AR(7) Villaverde 14/42 vs 88 · MA(1) .9 37/66 vs 42
+
+Mecanismo: el SF y el DCD contrastan DENTRO de un modelo y sólo dicen la verdad si el resto
+del modelo es correcto. Identificado en la d equivocada, el modelo absorbe la diferencia:
+  - AR(1) .9 en ∇²: suggest_orders propone ruido blanco (60 %); el testigo de
+    sobrediferenciación no cancela (el AR casi unitario y la (1−B) sobrante se compensan).
+  - AR(1) .5 + escalones en ∇²: propone MA(1) sin el AR; el MA(1) imita (1−B)/(1−.5B),
+    θ̂ lejos de 1 y el DCD− cancela en el 30 % (94 % con los órdenes verdaderos).
+  - El par cruzado (BUG-0235) toma el DCD del modelo identificado en ∇^{d+1}: es el que
+    más sufre. Con un solo modelo (SF y DCD+ del mismo ajuste) mejora, pero no alcanza a
+    ADF+KPSS.
+
+Conclusión: como regla autónoma para proponer d, el árbol no compite con ADF+KPSS cuando
+los órdenes vienen del identificador. Su sitio es confirmar la d sobre el modelo ya
+adoptado (como en los guiones), no elegirla.
