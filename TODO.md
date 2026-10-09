@@ -103,6 +103,11 @@ BUG-0192, BUG-0194 y BUG-0196.
       Φ̂₁ᵤ. Interesa también cómo depende el crítico de δ (0.80–0.95) y de
       la fecha de t* respecto al inicio de la muestra (condiciones iniciales).
 
+      **Los estudios viven en SF_MEG** (`~/Dropbox/SF_MEG/TODO.md`, sección
+      «Shin–Fuller extension», entrada del 2026-10-09; motores en
+      `research/sf_meg/`: `shinfuller_ar1.py`, `shinfuller_crit_table.py`,
+      `deterministic_effect.py`).
+
       **Piloto** (en `research/sf_meg/`, antes de tocar `formal_tests`):
       1. Bootstrap paramétrico bajo H₀. El candidato ∇^{d+1} con θ = 1 ES el
          modelo con d, así que se simula desde el `.pre` ajustado (AR, μ, ω del
