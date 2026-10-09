@@ -58,6 +58,59 @@ BUG-0192, BUG-0194 y BUG-0196.
         es cierto en punto y no en bandas a largo plazo (3,1× a diez años con
         θ=0,968).
 
+## PILOTO — bootstrap de los contrastes formales con intervenciones (9-oct-2026)
+
+- [ ] **El crítico del DCD no está medido cuando el modelo lleva escalones,
+      impulsos o rampas.** Hoy `formal_tests` usa la ley desnuda (1.00 / 1.94 /
+      4.41, s = 1) y sólo puede avisar de que el crítico «puede estar
+      SUBESTIMADO» porque el determinista resuena en f = 0. El analista decide a
+      ciegas justo cuando el LR cae cerca del crítico.
+
+      **Lo que enseñó la brecha del deflactor del PIB** (revisión del paper de
+      dolarización, `dolarization/revision-suite/Python/art_drvec/DEFL/GAPGDPD_G/`,
+      AR(2), n = 68): **el LR del DCD depende de la FORMA de la intervención.**
+      Con el suceso de 2008 sobreintervenido (Q2/2008 × 5) daba LR 2.82; con un
+      escalón 2008Q4 × 1, 2.11 (> 1.94, el par discrepaba); con 2008Q4 × 2, que
+      es la forma que piden los datos (ω₁ t 2.62, LR 6.38), **1.80 y el par
+      coincide en d = 1**. Con × 1 la cola del suceso se leía como persistencia
+      en f = 0. Lección para el aviso: antes de leer el DCD con escalones,
+      comprobar que la forma está bien (Treadway y ω de orden > 0).
+
+      **Caso donde la decisión SÍ depende del crítico**
+      (`DEFL/GDPDEC_G/`, deflactor del PIB de Ecuador en bruto): AR(2) +
+      escalón 2008Q4 × 2, n = 68. SF 3.97, DCD de sobrediferenciación θ̂ 0.852,
+      LR **2.61**, a 0.148 de la frontera. El candidato d = 2 adecuado
+      (∇² + AR(2) + MA(1)) gana **3.1 puntos de AIC y de BIC**, pero con
+      φ₂ no significativo; el d = 2 parsimonioso (IMA(1,1)) falla la Q. Se
+      adopta d = 1 por coherencia y d = 2 queda abierto hasta tener el crítico.
+      El escalón aquí tiene DOS ω: el piloto debe cubrir ω de orden > 0.
+
+      **Piloto** (en `research/sf_meg/`, antes de tocar `formal_tests`):
+      1. Bootstrap paramétrico bajo H₀. El candidato ∇^{d+1} con θ = 1 ES el
+         modelo con d, así que se simula desde el `.pre` ajustado (AR, μ, ω del
+         escalón en su fecha, n real), con innovaciones gaussianas y, como
+         variante, remuestreando los residuos.
+      2. En cada réplica se repite el contraste tal cual: se reestiman el modelo
+         con d y el candidato d + 1 (mismo AR, mismo escalón y misma fecha, sin
+         media) y se calcula el LR.
+      3. Salida: crítico empírico al 10 / 5 / 1 %, p-valor y error de Monte
+         Carlo (√(p(1−p)/B)), como en el `-bootstrap` de drvec. B = 499 y 999.
+      4. **Pregunta del piloto:** ¿rechaza el 2.61 de GDPDEC? ¿Cuánto sube el
+         crítico con un escalón frente a la ley desnuda? ¿Depende de la fecha
+         del escalón (centro frente a extremo de la muestra)?
+
+      **Motor:** `deterministic_effect.py` ya hace ML exacta con estructura de
+      banda y regresores (GLS), validado contra fue en f = 0, pero sólo para
+      MA(2) + regresores: **hay que extenderlo a AR** (el candidato lleva el AR
+      del modelo reestimado). fue sirve de contraste, pero ojo con el salto de
+      su verosimilitud en la frontera (`dcd_mc.py`).
+
+      **Si el piloto es estable:** opción `formal_tests(..., bootstrap=B)` para
+      el par en f = 0 (DCD de sobre- y subdiferenciación y, después,
+      Shin–Fuller con deterministas). Es opcional: sin `bootstrap` el veredicto
+      sigue saliendo de la tabla, **con el aviso actual intacto** (no se quita
+      ninguna salvaguarda). Más tarde, los MEG estacionales con armónicos.
+
 ## PARA 0.2.2 — lo que quedó fuera de la 0.2.1 (12-sep-2026)
 
 Decisión del analista al cerrar la 0.2.1: *«todo lo demás para 0.2.2. Entre 0.2.x
