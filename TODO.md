@@ -58,7 +58,7 @@ BUG-0192, BUG-0194 y BUG-0196.
         es cierto en punto y no en bandas a largo plazo (3,1× a diez años con
         θ=0,968).
 
-## PILOTO — bootstrap de los contrastes formales con intervenciones (9-oct-2026)
+## PILOTO — bootstrap de los contrastes formales con intervenciones y transiciones (9-oct-2026)
 
 - [ ] **El crítico del DCD no está medido cuando el modelo lleva escalones,
       impulsos o rampas.** Hoy `formal_tests` usa la ley desnuda (1.00 / 1.94 /
@@ -84,6 +84,24 @@ BUG-0192, BUG-0194 y BUG-0196.
       φ₂ no significativo; el d = 2 parsimonioso (IMA(1,1)) falla la Q. Se
       adopta d = 1 por coherencia y d = 2 queda abierto hasta tener el crítico.
       El escalón aquí tiene DOS ω: el piloto debe cubrir ω de orden > 0.
+
+      **Tercer caso: el Shin-Fuller con una función de transferencia**
+      (`dolarization/revision-suite/Python/art_drvec/RIPC/A/`, RIPC mensual
+      2002M1–2008M6, n = 78; modelo de García-Hiernaux y Guerrero 2021): ratio
+      en niveles con transición ω₀/(1 − δB) sobre un escalón en 2002M2 (δ̂
+      0.883), AR(2) de raíces reales (0.727, 0.594) y 11 armónicos. SF
+      Φ̂₁ᵤ = **1.70** frente a los críticos de la tabla II (1.07 / **1.75** /
+      3.41): rechaza al 10 %, no al 5 %. Los críticos de Shin y Fuller son para
+      el AR con media; **aquí N_t se estima junto con un determinista que
+      decae (δᵗ) y que, con δ cerca de 1, se parece a una tendencia local**:
+      puede quitar potencia al contraste o desplazar su distribución. Es
+      justo la pregunta del paper (Proposición 1: ¿N_t es I(0) tras la
+      transición?), y el «SF = 1.8 %» que publicaba no se reproduce.
+      Bootstrap: bajo H₀ (N_t con raíz unitaria, ρ = 1 − 4/n como el SF), con
+      la transición, los armónicos y el AR estacionario restante estimados;
+      se simula, se reestima el modelo completo (incluido δ) y se calcula
+      Φ̂₁ᵤ. Interesa también cómo depende el crítico de δ (0.80–0.95) y de
+      la fecha de t* respecto al inicio de la muestra (condiciones iniciales).
 
       **Piloto** (en `research/sf_meg/`, antes de tocar `formal_tests`):
       1. Bootstrap paramétrico bajo H₀. El candidato ∇^{d+1} con θ = 1 ES el
