@@ -367,9 +367,31 @@ def decide_d(unit_root_data: dict, seasonal: bool | None = None,
         rec = 1
 
     d = rec if max_step is None else min(rec, int(current_d) + int(max_step))
+    d = _un_paso_desde(unit_root_data, d, int(current_d))
     if seasonal:
         d = min(d, 1)
     return max(d, 0)
+
+
+def _un_paso_desde(unit_root_data: dict, d: int, current_d: int) -> int:
+    """La regla de la escuela para d, en UN sitio (BUG-0226, BUG-0227).
+
+    * Desde una d confirmada sólo se pregunta «¿una más?»: la decisión nunca
+      vuelve POR DEBAJO de ``current_d`` (si sobra una diferencia lo dice el DCD
+      sobre el modelo estimado, no un ADF sobre la serie).
+    * Con ``current_d ≥ 1`` la diferencia siguiente exige que en la d actual
+      LOS DOS contrastes vean raíz unitaria (fila ``unit_root``). Es la regla
+      del paso 3 guiado (BUG-0197); el carril autónomo, que leía sólo el ADF a
+      través de `recommended_d`, daba el segundo paso con una fila ambigua.
+      Sin la tabla por filas se conserva el comportamiento anterior."""
+    if current_d <= 0:
+        return d
+    d = max(d, current_d)
+    filas = unit_root_data.get("results") or []
+    fila = next((r for r in filas if int(r.get("d", -1)) == current_d), None)
+    if d > current_d and fila is not None and fila.get("verdict") != "unit_root":
+        d = current_d
+    return d
 
 
 def razon_d(unit_root_data: dict, seasonal: bool | None = None,
@@ -389,6 +411,9 @@ def razon_d(unit_root_data: dict, seasonal: bool | None = None,
         rec, razon = 1, "tendencia"
     if max_step is not None and rec > int(current_d) + int(max_step):
         rec, razon = int(current_d) + int(max_step), "paso"
+    _r = _un_paso_desde(unit_root_data, rec, int(current_d))
+    if _r != rec:
+        rec, razon = _r, "paso"
     if seasonal and rec > 1:
         rec, razon = 1, "estacionalidad"
     return razon if max(rec, 0) != rec0 else ""

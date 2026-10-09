@@ -6,6 +6,47 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### d moves one step at a time, from where it stands (BUG-0226, BUG-0227)
+
+- From d only d+1 is proposed, never a value below the confirmed d; from
+  d ≥ 1 the next difference needs both ADF and KPSS to see a unit root at d.
+  One rule (`policy._un_paso_desde`) for step 2, step 3 and the autonomous lane.
+- Step 3 tabulates only rows d and d+1. With seasonality detected it says why
+  the question of another difference is deferred (untreated seasonality takes
+  the power of the tests).
+- The `d` node records the d the text recommends, not the raw table's.
+  Test: `tests/test_bug_0225_0231_guiado_ipc_es.py`.
+
+### Identification: no AICc before estimation except to break ties
+
+- Mixed ARMA candidates (p≤3, q≤2) all enter the list and are placed by the
+  similarity of their searched template, like the pure ones; the AICc gate
+  (best four) is gone. Same mean accuracy on the ARIMA and three-engine
+  batteries (`ART_18/tests/results_*_gate_{aicc,similitud}.txt`); the ARMA(1,1)
+  .95/.7 rises from 64/90 % to 72/100 % top-1/top-3. `ART_MIXTOS_POR=aicc`
+  restores the old gate.
+- Step 4 shows ΔAICc only for the candidates tied in similarity for first
+  place, the one place where it decides. The tie-break itself stays: between
+  candidates of equal size, both pure, the AICc picks (without it Series G's
+  airline loses first place, `test_bug_0192`).
+
+### guion_adopt reads an ARMA(0,0) as ARMA(0,0) (BUG-0241)
+
+- The `.inp` filler of a random walk (an AR(1) fixed at zero) no longer closes
+  the pending `ordenes` node as ARMA(1,0): a factor whose flags are all fixed is
+  not an estimated order. Test: `tests/test_bug_0241_adopt_arma00.py`.
+
+### Guided lane: wording, ties, over-fitting and the Q (BUG-0225, 0229–0231)
+
+- Box-Cox quotes both correlations with their sign (BUG-0225).
+- A declared tie of orders leaves the `ordenes` node pending until
+  `guion_adopt` or `guion_node` closes it; `guion_node` closes a pending node
+  instead of appending another (BUG-0229).
+- A model whose last AR/MA coefficient is not significant is not offered for
+  adoption; "sobreparametrizar" estimates p+1 and q+1 (BUG-0230).
+- The diagnosis quotes Q at s, 2s and 3s next to the deciding 3s+3 (BUG-0231).
+- BUG-0228 retracted: exact ML confirms art's ΔAICc.
+
 ### The guided lane writes its own guion (BUG-0207)
 
 - `guided_identification(guion_path=…)` writes each node (λ, d, seasonality,

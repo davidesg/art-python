@@ -2332,6 +2332,45 @@ def _falta_el_easter(model, ts) -> float:
         return 0.0
 
 
+def _ordenes_regulares(model) -> "tuple[int, int]":
+    """(p, q) regulares del modelo: los coeficientes de sus factores."""
+    try:
+        return (sum(len(f) for f in (model.ar or [])),
+                sum(len(f) for f in (model.ma or [])))
+    except Exception:
+        return 0, 0
+
+
+def _ultimos_no_significativos(model, umbral: float = 2.0) -> "list[tuple[str, float]]":
+    """El ÚLTIMO coeficiente de cada polinomio regular de un solo factor, si
+    no es significativo (|t| < `umbral`) — BUG-0230.
+
+    Sólo el último: un AR(4) con φ̂₂ ≈ 0 sigue siendo un AR(4) (lo que se
+    poda es otra cosa, con su razón). Con varios factores la numeración de
+    las etiquetas se repite y no se puede decir cuál es el último: se calla."""
+    if model is None:
+        return []
+    try:
+        from art.diagnosis import _build_param_labels
+        labels = _build_param_labels(model)
+        par = [float(x) for x in model.params]
+        se = [float(x) for x in model.std_errors]
+    except Exception:
+        return []
+    out = []
+    for pref, factores in (("AR", model.ar), ("MA", model.ma)):
+        if not factores or len(factores) != 1:
+            continue
+        idx = [i for i, l in enumerate(labels[:len(par)])
+               if l.startswith(pref + "(")]
+        if not idx:
+            continue
+        i = idx[-1]
+        if i < len(se) and se[i] > 0 and abs(par[i] / se[i]) < umbral:
+            out.append((labels[i], par[i] / se[i]))
+    return out
+
+
 def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
                         guion_path: str = "") -> list:
     """La 4ª sección: las opciones REALES, cada una con su llamada.
@@ -2484,6 +2523,35 @@ def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
             f"   `confirm_and_estimate(inp_path={ruta}, n_harmonics=..., ...)`, "
             f"o `meg_frequency(...)` si sospechas raíz unitaria estacional")
 
+    # 3ter · BUG-0230: un modelo que pasa la diagnosis puede SOBRAR. El AR(2)
+    # que sobreparametriza un AR(1) (φ̂₂ con t ≈ −1) o el ARMA(1,1) que une dos
+    # candidatos empatados (ninguno significativo) pasan la Q y el JB, y la
+    # sección ofrecía «Adoptar este modelo». Sobra el último coeficiente de un
+    # polinomio —no uno intermedio: un AR(4) con φ̂₂ ≈ 0 es un AR(4)—.
+    _sobran = _ultimos_no_significativos(model)
+    # La correlación entre parámetros AVISA con el umbral de fue en C, 0,7
+    # (posible redundancia o mala situación de la estimación), y el aviso se
+    # da siempre —también aquí, en la decisión—. Pero sola no manda quitar
+    # nada: en Salamanca, ARMA(1,1), corr(φ̂, θ̂) = 0,75 con t = 27 y t = 8 es
+    # un ARMA(1,1) persistente bien estimado. Quitar lo deciden los t.
+    _par_corr = [p for p in (d.get("high_corr_pairs") or [])
+                 if abs(float(p.get("corr") or 0)) > 0.7]
+    _aviso_corr = ("; ".join(
+        f"corr({p.get('label_i')}, {p.get('label_j')}) = "
+        f"{float(p.get('corr') or 0):+.2f}" for p in _par_corr[:3]))
+    if _sobran:
+        _que = "; ".join(f"{l} con t = {t:+.2f}" for l, t in _sobran)
+        alts.append(
+            f"**Quitar lo que sobra** — {_que}"
+            + (f" (y {_aviso_corr}, por encima de 0,7)" if _aviso_corr else "")
+            + ". Pasar la diagnosis no basta: un parámetro que no es "
+            "significativo no aporta nada y empeora la previsión. Vuelve al "
+            "modelo sin él —si esto era una sobreparametrización, al de "
+            "partida— y abandona éste con su razón.\n"
+            + (f"   `guion_abandon(guion_path=\"{guion_path}\", version=<esta>, "
+               "why=\"...\", cascade=False)`" if guion_path else
+               "   `guion_abandon(guion_path=<guion>, version=<esta>, why=\"...\")`"))
+
     # 4 · si nada falla, ADOPTAR es una decisión y hay que poder tomarla. «Nada
     # falla» es el veredicto, no la lista de arriba (BUG-0211).
     if not alts and _adecuado(diag):
@@ -2502,13 +2570,29 @@ def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
             _warn("versión del guion para adoptar", _ge)
         alts.append(
             "**Adoptar este modelo** y cerrar el nodo. Nada en la diagnosis "
-            "pide cambiarlo.\n"
+            "pide cambiarlo."
+            + (f" ⚠ Antes, mira el aviso: {_aviso_corr}, por encima de 0,7 — "
+               "posible redundancia o mala situación de la estimación. Con todos "
+               "los coeficientes significativos puede ser la estructura del "
+               "modelo (un AR casi en 1 con su MA); compruébalo simplificando "
+               "y sobreparametrizando, y di en el guion por qué se mantiene."
+               if _aviso_corr else "")
+            + "\n"
             f"   `guion_adopt(guion_path=\"{guion_path or '<guion>'}\", "
             f"version={_v}, why=\"...\")`")
+        # BUG-0230 (2): la llamada era `overparameterization_analysis`, que
+        # lee las correlaciones del modelo YA estimado y no añade nada.
+        _pre = (f'"{os.path.splitext(inp_path)[0]}.pre"' if inp_path
+                else "<este .pre>")
+        _p, _q = _ordenes_regulares(model)
         alts.append(
             "**Sobreparametrizar para comprobarlo** — añadir un parámetro y ver "
-            "si sale no significativo es la forma de saber que no falta nada.\n"
-            f"   `overparameterization_analysis(inp_path={ruta})`")
+            "si sale no significativo es la forma de saber que no falta nada. "
+            "Una estimación por extensión, cada una con su `parent` en este "
+            "modelo:\n"
+            f"   `confirm_and_estimate(inp_path={ruta}, output_path=..., "
+            f"base_pre_path={_pre}, p={_p + 1}, q={_q}, ...)` · "
+            f"`confirm_and_estimate(..., base_pre_path={_pre}, p={_p}, q={_q + 1}, ...)`")
 
     # 5 · siempre: volver atrás. El camino es un grafo, no un árbol.
     alts.append(
@@ -5647,6 +5731,10 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 "- **Sin tendencia aparente** → posiblemente d=0 es suficiente\n\n"
                 "---\n\n"
                 + urt.summary + "\n\n"
+                + ("> La estacionalidad se contrasta en el paso 3. Si la hay y no "
+                   "está tratada, ADF y KPSS pierden potencia; por eso desde d=0 "
+                   "sólo se propone d=1, y la pregunta por d=2 se hace después, "
+                   "desde d=1.\n\n" if ts.freq > 1 else "")
                 + _linea_d + f"{urt.recommendation}\n\n"
                 "---\n\n"
                 "**Instrumentos de este nodo** (si quieres mirar más a fondo): "
@@ -5657,7 +5745,11 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 + "\n".join(_llamadas)
                 + _nota_figura(_ruta_fig)                     # BUG-0113
             )
-            _g(_nodo_pendiente, "d", str(int(rec_d)), valor=int(rec_d),
+            # BUG-0226: la propuesta del nodo es la que el texto RECOMIENDA (la
+            # de la política), no la d cruda de la tabla: con IPC_ES_SA el
+            # texto decía «Punto de partida: d = 1» y el guion «propuesta: 0»,
+            # y al confirmar d=1 el mapa contaba una «corrección» del analista.
+            _g(_nodo_pendiente, "d", str(int(pol_d)), valor=int(pol_d),
                evidencia="; ".join(
                    f"d={r.get('d')}: ADF p={r.get('adf_pvalue', float('nan')):.3f}, "
                    f"KPSS p={r.get('kpss_pvalue', float('nan')):.3f}"
@@ -5712,11 +5804,11 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                                    if r.get("d") == d), {})
                     _both  = _row_d.get("verdict") == "unit_root"
                     # La pregunta del nodo es «¿hace falta UNA MÁS?», no
-                    # «redecide d desde cero». `recommended_d` recorre la tabla
-                    # entera y puede devolver un valor POR DEBAJO de la d
-                    # actual: eso no contesta esta pregunta — apunta a
-                    # sobrediferenciación, que es el otro lado y lo dictamina el
-                    # DCD sobre el modelo estimado, no un ADF sobre la serie.
+                    # «redecide d desde cero». BUG-0227: la tabla ya sólo tiene
+                    # las filas d y d+1 (`current_d=d`), así que `_rec2` no puede
+                    # quedar POR DEBAJO de d — la rama que decía «la
+                    # recomendación de la tabla es d=0» bajo una tabla cuyo único
+                    # consenso era d=2 se ha ido con la fila que la provocaba.
                     if _rec2 > d and _both:
                         _veredicto = (
                             f"\n\n→ En d={d} los dos contrastes ven raíz unitaria (el ADF "
@@ -5732,15 +5824,15 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                             f"y con una serie corta o un ciclo el ADF pierde potencia. "
                             f"Salvedad, no instrucción: si el modelo estimado la pide, lo "
                             f"dirán Shin-Fuller y el DCD de sobrediferenciación.")
-                    elif _rec2 < d:
+                    elif _row_d.get("verdict") == "ambiguous":
                         _veredicto = (
-                            f"\n\n→ **No hace falta otra diferencia** — pero ojo: la "
-                            f"recomendación de la tabla es d={_rec2}, POR DEBAJO de la "
-                            f"d={d} confirmada. Esa fila reabre una decisión ya tomada y "
-                            f"no contesta la pregunta de este nodo. Si sospechas "
-                            f"sobrediferenciación, quien lo dictamina es el DCD sobre el "
-                            f"MODELO ESTIMADO (etapa de contrastes formales), no un ADF "
-                            f"sobre la serie: el testigo apilado en θ=+1 es la señal.")
+                            f"\n\n→ **No hace falta otra diferencia.** En d={d} el ADF "
+                            f"rechaza la raíz unitaria; el KPSS rechaza la "
+                            f"estacionariedad, que con una media que se desplaza o una "
+                            f"serie larga es lo que hace. Una fila que se contradice no "
+                            f"es evidencia de d={d + 1}. Si sobra o falta una diferencia, "
+                            f"lo dictaminan Shin-Fuller y el DCD sobre el MODELO "
+                            f"ESTIMADO, no un ADF sobre la serie.")
                     else:
                         _veredicto = (
                             f"\n\n→ La evidencia sostiene **d={d}**. No hace falta otra "
@@ -5755,6 +5847,21 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                         + "\n\nRecuerda que esto sigue siendo especificación inicial: "
                           "el contraste que decide sobre el modelo estimado es "
                           "Shin-Fuller, con el DCD de sobrediferenciación como par."
+                    )
+                else:
+                    # La otra mitad de la regla, dicha: con estacionalidad sin
+                    # tratar, ADF y KPSS no tienen potencia (la regresión del ADF
+                    # no lleva términos estacionales). La pregunta d → d+1 no se
+                    # contesta aquí: se aplaza a después de tratarla.
+                    d_next_text = (
+                        f"\n\n---\n\n### Una diferencia más (d={d} → d={d + 1}): todavía no\n\n"
+                        "**Esta pregunta todavía no se hace.** Hay estacionalidad sin tratar, y "
+                        "con ella ADF y KPSS pierden potencia: el patrón va a la "
+                        "varianza residual del ADF y lo sesga hacia «diferencia otra "
+                        "vez». Primero se trata la estacionalidad (B1 o B2); el orden "
+                        "de integración lo contrastan después Shin-Fuller y el DCD "
+                        "sobre el modelo estimado. Un paso cada vez: desde d=0 sólo "
+                        "d=1, y desde d=1 sólo d=2."
                     )
 
             n_harm = max(ts.freq // 2 - 1, 0)
@@ -6074,8 +6181,13 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             + _nota_figura(_ruta_fig)                              # BUG-0113
         )
         # El nodo de los órdenes queda pendiente; lo cierra confirm_and_estimate.
+        # BUG-0229: salvo EMPATE declarado. Entonces se estiman los candidatos y
+        # el primero que se estima no es la decisión: el nodo espera a
+        # `guion_adopt` (o a un `guion_node('ordenes', …)` explícito).
+        _empate = [list(map(int, c)) for c in (ident.data.get("tie") or [])]
         _g(_nodo_pendiente, "ordenes", _texto_ordenes(*_prop_ord, ts.freq),
            valor=[int(x) for x in _prop_ord],
+           extra=({"empate": _empate} if len(_empate) >= 2 else {"empate": []}),
            evidencia="; ".join(
                f"{_texto_ordenes(c.get('p', 0), c.get('q', 0), c.get('P', 0), c.get('Q', 0), ts.freq)}"
                + (f" sim={c['similarity']:.3f}" if c.get("similarity") is not None else "")
@@ -6647,6 +6759,29 @@ def _abre_guion(gp: str):
                  created=datetime.now().strftime("%Y-%m-%d"))
 
 
+def _ordenes_de_texto(txt: str) -> "list[int] | None":
+    """[p, q, P, Q] del PRIMER orden que se nombra en el texto: «AR(1)»,
+    «MA(2)», «ARMA(1,1)», «ARIMA(1,1,0)…» — lo mínimo para saber si una
+    decisión escrita es uno de los candidatos empatados (BUG-0229). Sin parte
+    estacional explícita, P=Q=0. El primero, no el de cualquier patrón: en
+    «AR(4) en d=1 … el ARMA(1,1) lleva al IMA» lo decidido es el AR(4)."""
+    import re as _re
+    s = (txt or "").upper()
+    pats = [
+        (r"\bARIMA\((\d+),\s*\d+,\s*(\d+)\)(?:\((\d+),\s*\d+,\s*(\d+)\))?",
+         lambda m: [int(m.group(1)), int(m.group(2)),
+                    int(m.group(3) or 0), int(m.group(4) or 0)]),
+        (r"\bARMA\((\d+),\s*(\d+)\)",
+         lambda m: [int(m.group(1)), int(m.group(2)), 0, 0]),
+        (r"\b(AR|MA)\((\d+)\)",
+         lambda m: ([int(m.group(2)), 0, 0, 0] if m.group(1) == "AR"
+                    else [0, int(m.group(2)), 0, 0])),
+    ]
+    hits = [(m.start(), f(m)) for pat, f in pats
+            if (m := _re.search(pat, s)) is not None]
+    return min(hits)[1] if hits else None
+
+
 def _ultimo_nodo(g, nodo: str):
     return next((e for e in reversed(g.entries)
                  if e.is_node and (e.node or {}).get("nodo") == nodo), None)
@@ -6654,7 +6789,8 @@ def _ultimo_nodo(g, nodo: str):
 
 def _nodo_pendiente(guion_path: str, nodo: str, propuesta: str,
                     evidencia: str = "", valor=None,
-                    decidido_por: str = "analista+LLM") -> str:
+                    decidido_por: str = "analista+LLM",
+                    extra: "dict | None" = None) -> str:
     """Deja el nodo `nodo` PENDIENTE con la propuesta de la herramienta.
 
     Repetir la misma llamada no duplica: si el último nodo de ese nombre sigue
@@ -6669,6 +6805,8 @@ def _nodo_pendiente(guion_path: str, nodo: str, propuesta: str,
           "alternativas": "", "pendiente": True}
     if valor is not None:
         nd["propuesta_valor"] = valor
+    if extra:
+        nd.update(extra)
     if ult is not None and (ult.node or {}).get("pendiente"):
         ult.node = {**(ult.node or {}), **nd}
         ult.propuesta = propuesta
@@ -7510,6 +7648,16 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                          [_tot(p), int(q), int(P), int(Q)],
                          lambda a, b: [_tot(x) for x in a] == list(b))):
                     _ult = _ultimo_nodo(_abre_guion(os.path.expanduser(_gp_eff)), _n)
+                    if (_n == "ordenes" and _ult is not None
+                            and (_ult.node or {}).get("pendiente")
+                            and (_ult.node or {}).get("empate")):
+                        # BUG-0229: con empate declarado el primer candidato
+                        # estimado no cierra el nodo.
+                        _notas_nodos.append(
+                            f"◆ guion n{_ult.version}: **ordenes** sigue pendiente — "
+                            f"empate declarado; se cierra al adoptar (`guion_adopt`) "
+                            f"o con `guion_node('ordenes', …, criterio=…)`")
+                        continue
                     if _ult is not None and (_ult.node or {}).get("pendiente"):
                         _t = _confirma_nodo(_gp_eff, _n, _dec, valor=_val,
                                             razon=(guion_rationale if _n == "ordenes"
@@ -8317,6 +8465,47 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                             "en el nodo `dominio`, y este guion no tiene ninguno con "
                             "expectativas. Declaradas DESPUÉS de ver los candidatos no "
                             "son un criterio: son la historia que mejor encaja.")
+        # BUG-0229: si el nodo está PENDIENTE (lo dejó la identificación, p. ej.
+        # un empate de órdenes), esta llamada lo CIERRA en vez de abrir otro: un
+        # nodo pendiente y otro decidido con el mismo nombre contaban la misma
+        # decisión dos veces, la primera con el candidato descartado.
+        from art.mcp_server import _ultimo_nodo as _un
+        _pend = _un(g, nodo)
+        if _pend is not None and (_pend.node or {}).get("pendiente"):
+            _nd = dict(_pend.node or {})
+            if not prop:
+                prop = _pend.propuesta or ""
+                if not co:
+                    _emp = _nd.get("empate") or []
+                    _ords = _ordenes_de_texto(decidido)
+                    coinc = (True if _emp and _ords in [list(c) for c in _emp] else
+                             mismo_valor(prop, decidido, nodo) if prop else None)
+            _nd.pop("pendiente", None)
+            _nd.update({"decidido": decidido, "evidencia": evidencia or _nd.get("evidencia", ""),
+                        "alternativas": alternativas,
+                        **({"criterio": "estadístico" if crit == "estadistico" else crit}
+                           if crit else {})})
+            _pend.node = _nd
+            _pend.decision = f"{nodo} = {decidido}"
+            _pend.rationale = razon
+            _pend.propuesta = prop
+            _pend.coincide = coinc
+            # El nodo pendiente ya tiene su sitio —es la etapa 1 de los modelos
+            # que cuelgan de él—: cambiarle el padre a uno de esos modelos hacía
+            # un ciclo y el mapa dejaba de dibujar la rama (Salamanca, n5 ← v6
+            # ← n5). `parent` no se aplica al cerrar.
+            save_guion(g, gp)
+            return [TextContent(type="text", text=(
+                f"◆ nodo n{_pend.version} (estaba pendiente) cerrado: "
+                f"**{nodo} = {decidido}**"
+                + (f"\n   propuesta del asistente: {prop} — "
+                   + ("el analista la tomó" if coinc is True else
+                      "el analista la tomó en parte" if coinc == "parcial" else
+                      "**el analista la CORRIGIÓ**" if coinc is False else
+                      "no consta si coincide") if prop else "")
+                + f"\n   razón: {razon}"
+                + (f"\n   criterio: {crit}" if crit else "")
+                + f"\n\n*mapa:* `guion_map(\"{gp}\")`"))]
         version = (max(e.version for e in g.entries) + 1) if g.entries else 1
         entry = GuionEntry(
             version=version, name=nodo, inp_path="", 
@@ -8552,6 +8741,39 @@ def guion_adopt(guion_path: str, version: int, why: str) -> list:
         e = por_v[int(version)]
         txt = [f"✓ **v{e.version} ({e.name}) adoptada.**", "",
                f"**Razón:** {why.strip()}"]
+        # BUG-0229: el nodo de los órdenes que un empate dejó pendiente se
+        # cierra AQUÍ, con los órdenes del modelo adoptado y su razón.
+        _ult = _ultimo_nodo(g, "ordenes")
+        _sp = dict(e.spec or {})
+        # BUG-0241: el relleno «1 1 / 0.0 0» de un ARMA(0,0) —un AR(1) fijo a
+        # cero— llega al spec como p=1. Un factor con TODAS sus banderas fijas
+        # no es un orden estimado.
+        for _k, _fk in (("p", "ar_free"), ("q", "ma_free")):
+            _fl = _sp.get(_fk)
+            if _fl and not any(any(f) for f in _fl):
+                _sp[_k] = 0
+        if (_ult is not None and (_ult.node or {}).get("pendiente")
+                and all(k in _sp for k in ("p", "q"))):
+            _tot = lambda x: sum(x) if isinstance(x, (list, tuple)) else int(x)
+            _freq = 12
+            try:
+                _freq = int(_load_ts_model(e.inp_path)[0].freq)
+            except Exception:
+                pass
+            _nt = _confirma_nodo(
+                gp, "ordenes",
+                _texto_ordenes(_sp.get("p", 0), _sp.get("q", 0),
+                               _sp.get("P", 0), _sp.get("Q", 0), _freq),
+                valor=[_tot(_sp.get("p", 0)), int(_sp.get("q", 0)),
+                       int(_sp.get("P", 0)), int(_sp.get("Q", 0))],
+                razon=why,
+                # Con empate, elegir CUALQUIERA de los candidatos empatados
+                # coincide con lo propuesto: la propuesta era el empate.
+                coincide_fn=lambda a, b: (
+                    list(b) in [list(c) for c in ((_ult.node or {}).get("empate") or [])]
+                    or [_tot(x) for x in a] == list(b)))
+            if _nt:
+                txt += ["", _nt]
         otros = [x for x in g.entries
                  if x.status == "adopted" and x.version != e.version]
         if otros:

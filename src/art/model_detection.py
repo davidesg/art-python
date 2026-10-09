@@ -16,6 +16,7 @@ Algorithm:
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -868,7 +869,12 @@ def _nested_parsimony(cands):
     an ARMA(1,1) whose φ ≈ 1 absorbs a missing difference (the thesis'
     Colombian CPI: it tied with the AR(2) and won on AICc) —; then the lower
     AICc: the fit settles what the pattern leaves tied, and only that (option
-    B). The others stay in the list, behind."""
+    B). By then the candidates have the same number of parameters and are all
+    pure (AR(1) against MA(1), the airline against an AR(1)×SMA(1)), so the
+    absorption the AICc rewards (a φ≈1 or a θ≈1 in a mixed model) cannot
+    reach first place through it. Checked 9-oct-2026: without this key Series
+    G's airline loses first place (test_bug_0192). The others stay in the
+    list, behind."""
     rest = list(cands)
     out = []
     first = True
@@ -1138,14 +1144,25 @@ def suggest_orders(
     # Hannan-Rissanen and AICc, the best four added if missing. The cut-off
     # gates read PURE models, and a mixed ARMA tails off on both sides — they
     # kept the ARMA(1,1) out of the list (BUG-0198).
-    mixed = []
-    for pp in range(1, min(3, p_max) + 1):
-        for qq in range(1, min(2, q_max) + 1):
-            fit = _quick_fit(w, acf_emp, s, pp, qq, 0, 0)
-            if fit is not None:
-                mixed.append((_sarima_aicc(w, *fit, s, max(pp, qq)), pp, qq))
-    for _a, pp, qq in sorted(mixed)[:4]:
-        _add_candidate(pp, qq, 0, 0)
+    # Since 9-oct-2026 every mixed cell enters and the similarity of its
+    # searched template places it, like the rest of the list, with no AICc
+    # before estimation. Same mean accuracy on the ARIMA and three-engine
+    # batteries; the ARMA(1,1) .95/.7 rises from 64/90 % to 72/100 %
+    # (top-1/top-3) and identification runs about 3x faster.
+    # ART_MIXTOS_POR=aicc restores the old gate (best four by AICc).
+    if os.environ.get("ART_MIXTOS_POR", "similitud") != "aicc":
+        for pp in range(1, min(3, p_max) + 1):
+            for qq in range(1, min(2, q_max) + 1):
+                _add_candidate(pp, qq, 0, 0)
+    else:
+        mixed = []
+        for pp in range(1, min(3, p_max) + 1):
+            for qq in range(1, min(2, q_max) + 1):
+                fit = _quick_fit(w, acf_emp, s, pp, qq, 0, 0)
+                if fit is not None:
+                    mixed.append((_sarima_aicc(w, *fit, s, max(pp, qq)), pp, qq))
+        for _a, pp, qq in sorted(mixed)[:4]:
+            _add_candidate(pp, qq, 0, 0)
 
     completos = [m for m in candidates
                  if not (m.sparse_ar_lag or m.sparse_ma_lag)]

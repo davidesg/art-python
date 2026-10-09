@@ -180,10 +180,11 @@ def describe_boxcox(ts) -> Description:
     rec_str = "log (λ=0)" if prefers_log else "identidad (λ=1)"
 
     def _lectura(c):
+        # BUG-0225: «→ se pasa» no decía QUÉ se pasaba.
         if c > 0.05:
-            return "la dispersión CRECE con el nivel → se queda corta"
+            return "la dispersión CRECE con el nivel → esta escala no la estabiliza"
         if c < -0.05:
-            return "la dispersión CAE con el nivel → se pasa"
+            return "la dispersión CAE con el nivel → esta escala transforma de más"
         return "sin dependencia apreciable"
 
     lines = [
@@ -225,15 +226,23 @@ def describe_boxcox(ts) -> Description:
     elif prefers_log:
         lines += [
             "",
-            f"La escala log reduce la correlación media-std de {corr_raw:.3f} a "
-            f"{corr_log:.3f}: la varianza es más homogénea entre períodos.",
+            f"La escala log reduce la correlación media-std de {corr_raw_s:+.3f} a "
+            f"{corr_log_s:+.3f}: la varianza es más homogénea entre períodos.",
             "Esto es habitual en índices de precios y series multiplicativas.",
         ]
     else:
         lines += [
             "",
-            f"La escala original ya tiene varianza homogénea (corr={corr_raw:.3f}). "
-            "La transformación log no mejora la estabilidad.",
+            # BUG-0225: citaba |corr| sin signo (0.305 con corr = −0,305) y
+            # llamaba «homogénea» a cualquier correlación no positiva.
+            (f"En la escala original la dispersión no crece con el nivel "
+             f"(corr = {corr_raw_s:+.3f}), y el log no la hace más estable "
+             f"(corr = {corr_log_s:+.3f}): el gráfico no pide logaritmos. Si el "
+             "dominio los pide, decide el dominio."
+             if corr_raw_s <= 0.05 else
+             f"La escala original deja menos dependencia media-dt "
+             f"(corr = {corr_raw_s:+.3f}) que el log (corr = {corr_log_s:+.3f}). "
+             "Si el dominio pide logaritmos, decide el dominio."),
         ]
 
     if ambiguous:
@@ -356,7 +365,8 @@ def describe_seasonality(ts) -> Description:
         lines += [
             "",
             "**Decisión A — sin estacionalidad.**",
-            "- d=1 (o d=2 si los tests lo sugieren), D=0, sin armónicos cos/sin.",
+            "- La d confirmada, D=0, sin armónicos cos/sin. Una diferencia más "
+            "sólo si en esa d los dos contrastes ven raíz unitaria (un paso cada vez).",
             "- La serie diferenciada es estacionaria: el modelo ARMA sobre ∇y es apropiado.",
         ]
     else:
@@ -422,6 +432,16 @@ def describe_seasonality(ts) -> Description:
                 "(D y/o armónicos); el orden de integración se decide después, y "
                 "el contraste que vale sobre el modelo estimado es Shin-Fuller.",
             ]
+        elif adf_ok:
+            # BUG-0227: con el ADF rechazando, la fila es ambigua y no abre la
+            # pregunta de otra diferencia — la regla de un paso exige que los
+            # DOS vean raíz unitaria (policy._un_paso_desde).
+            lines += [
+                "",
+                f"ℹ {_que_dicen}: fila ambigua. Con el ADF rechazando no es "
+                "evidencia de una diferencia más; si sobra o falta, lo dicen "
+                "Shin-Fuller y el DCD sobre el modelo estimado.",
+            ]
         else:
             # BUG-0197: this is EVIDENCE, not the decision. The guided node 3
             # asks «one more difference?» with its own table and one verdict;
@@ -478,8 +498,17 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2,
       recommendation — recommended d with reasoning
       data         — list of per-level dicts + recommended_d
     """
-    results = unit_root_tests(ts, lam=lam, max_d=max_d)
-    rec_d   = recommended_d(results)
+    # BUG-0227. Un paso cada vez, también en la TABLA. Desde una d ya confirmada
+    # la pregunta del nodo es «¿hace falta UNA MÁS?», y se contesta con dos filas:
+    # la d actual y d+1. Las filas de abajo reabrían una decisión ya tomada
+    # (IPC_ES_SA, paso 3 con d=1: «En d=0 el ADF rechaza… la recomendación de la
+    # tabla es d=0, POR DEBAJO de la d=1 confirmada»), y `recommended_d`, que
+    # recorre la tabla desde arriba, podía devolver un valor por debajo de la d
+    # actual. Con current_d=0 (paso 2, `unit_root_analysis`, carril autónomo)
+    # la tabla es la de siempre.
+    results = [r for r in unit_root_tests(ts, lam=lam, max_d=max_d)
+               if r.d >= int(current_d)]
+    rec_d   = recommended_d(results) if results else int(current_d)
 
     # ¿Cuánto de la serie ES la tendencia? R² de una recta sobre el nivel
     # transformado. Es evidencia, no decisión: la política la usa para dudar de
@@ -546,11 +575,11 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2,
     # arreglaron aguas abajo. Sobre RATIO: d=0 con raíz unitaria, d=1 AMBIGUO,
     # d=2 estacionaria → recomendaba 2, saltándose la duda entera.
     from art.policy import decide_d as _decide_d, razon_d as _razon_d, THRESHOLDS as _TH
-    _rec_pol = _decide_d({"recommended_d": rec_d, "trend_r2": trend_r2},
-                         seasonal=None, current_d=0, max_step=1)
+    _ev = {"recommended_d": rec_d, "trend_r2": trend_r2,
+           "results": [{"d": r.d, "verdict": r.verdict} for r in results]}
+    _rec_pol = _decide_d(_ev, seasonal=None, current_d=int(current_d), max_step=1)
     # BUG-0210 (2): QUÉ regla movió la d, para decir ésa y no otra.
-    _razon = _razon_d({"recommended_d": rec_d, "trend_r2": trend_r2},
-                      seasonal=None, current_d=0, max_step=1)
+    _razon = _razon_d(_ev, seasonal=None, current_d=int(current_d), max_step=1)
 
     # BUG-0210. Esto era una plantilla por valor de d: «primera diferencia con
     # consenso» debajo de una fila d=1 marcada «ambiguo ⚠» (Retiro, Salamanca),
@@ -807,14 +836,17 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
         if getattr(sp, "sparse_ma_lag", 0):
             disperso.append(f"MA sólo en B^{sp.sparse_ma_lag}")
         sufijo = f"  [{', '.join(disperso)}]" if disperso else ""
-        # BUG-0198 (option B): the AICc is INFORMATION next to the pattern's
-        # order, as ΔAICc against the best candidate listed.
+        # 9-oct-2026: the ΔAICc is shown ONLY inside the tie of the first place,
+        # which is the one place it acts (the last key of `_nested_parsimony`,
+        # between candidates of equal size and purity). Shown beside every
+        # order, the analyst read it as a second criterion that the list does
+        # not follow (BUG-0198, option B).
+        _band = [c for c in completos if getattr(c, "tied", False)
+                 and getattr(c, "aicc", None) is not None and np.isfinite(c.aicc)]
         _a = getattr(sp, "aicc", None)
-        _best = min((c.aicc for c in completos
-                     if getattr(c, "aicc", None) is not None and np.isfinite(c.aicc)),
-                    default=None)
-        _fit = (f"  ΔAICc={_a - _best:+.1f}" if _a is not None and _best is not None
-                and np.isfinite(_a) else "")
+        _fit = ""
+        if getattr(sp, "tied", False) and _band and _a is not None and np.isfinite(_a):
+            _fit = f"  [empate: ΔAICc={_a - min(c.aicc for c in _band):+.1f}]"
         lines.append(
             f"{marker} {i}. ARIMA({sp.p},{sp.d},{sp.q})({sp.P},{sp.D},{sp.Q})_{sp.s}"
             f"{sufijo}  sim={sp.similarity:.3f}{_fit}  —  {label}"
@@ -1986,7 +2018,15 @@ def describe_diagnosis(model) -> Description:
          + (f"{q_label(result.q_lag_cancerbero, result.q_lag_cancerbero - result.q_df_correction)}"
             f"={result.q_stats[-1]:.2f}, "
             f"p={result.q_p_cancerbero:.4f} — **decide 3f+3**"
-            if result.q_lags else "sin contraste")),
+            if result.q_lags else "sin contraste")
+         # BUG-0231: los otros retardos (s, 2s, 3s) se calculaban y no se
+         # decían; el guion y la rúbrica piden la Q en 12, 24 y 39, y la de s
+         # es la que delata un r₁ fuera de banda que la de 3s+3 diluye.
+         + ("" if len(result.q_lags) < 2 else
+            "  ·  " + "  ·  ".join(
+                f"Q({lag})={q:.2f}, p={p:.4f}"
+                for lag, q, p in zip(result.q_lags[:-1], result.q_stats[:-1],
+                                     result.q_pvalues[:-1])))),
         # BUG-0214: el MISMO JB que el `.out` (fue/BUG-0026: n/6 exacto).
         f"- Normalidad (JB): {nm}  JB={result.jb_stat:.3f}, p={result.jb_pvalue:.4f}",
         f"- Asimetría={result.skewness:.3f}, curtosis exceso={result.excess_kurtosis:.3f}",

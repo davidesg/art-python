@@ -57,7 +57,10 @@ def test_ipc_es_nombra_el_unico_orden_con_consenso(monkeypatch):
                                         _fila(1, 0.0000, 0.01),
                                         _fila(2, 0.0000, 0.0739)], max_d=2,
                           current_d=1)
-    assert out.data["recommended_d"] == 0
+    # BUG-0227: desde d=1 la tabla sólo tiene las filas 1 y 2; la recomendación
+    # no puede quedar por debajo de la d confirmada.
+    assert out.data["recommended_d"] == 1
+    assert [r["d"] for r in out.data["results"]] == [1, 2]
     assert "estacionaria en niveles" not in linea
     assert "único orden con consenso" in linea and "d=2" in linea
 

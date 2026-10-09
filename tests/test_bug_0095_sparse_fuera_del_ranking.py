@@ -79,8 +79,13 @@ def test_los_completos_van_primero_y_ordenados(serie):
     tipos = [_disperso(sp) for sp in con]
     assert tipos == sorted(tipos), "un disperso se coló entre los completos"
     comp = [sp for sp in con if not _disperso(sp)]
-    assert [s.similarity for s in comp] == sorted(
-        (s.similarity for s in comp), reverse=True)
+    # ordenados por similitud salvo dentro de la banda de empate, donde manda
+    # la parsimonia (_nested_parsimony): cada uno está a menos de TIE_SIM del
+    # mejor de los que quedan. Con todos los mixtos en la lista (9-oct-2026)
+    # el ARMA(2,2) pasa delante del ARMA(3,1), más similar por 0.006.
+    from art.model_detection import TIE_SIM
+    for i, c in enumerate(comp):
+        assert max(x.similarity for x in comp[i:]) - c.similarity < TIE_SIM
 
 
 def test_el_defecto_es_no_incluirlos(serie):

@@ -211,8 +211,11 @@ def test_el_tercer_caso_la_tabla_recomienda_MENOS_que_la_d_actual():
 
     out = M.guided_identification(_escribe(ts), lam=1.0, d=1, D=-1)
     texto = "\n".join(c.text for c in out if hasattr(c, "text"))
-    assert "No hace falta otra diferencia" in texto
-    assert "POR DEBAJO de la d=1 confirmada" in texto
-    assert "DCD sobre el MODELO ESTIMADO" in texto
+    assert "No hace falta otra diferencia" in texto or "sostiene **d=1**" in texto
+    # BUG-0227: la tabla del paso 3 sólo tiene las filas d y d+1, así que ya no
+    # puede «recomendar» por debajo de la d confirmada ni reabrir esa decisión.
+    seccion = texto.split("¿Hace falta una diferencia más?")[1]
+    assert "| 0 |" not in seccion
+    assert "POR DEBAJO de la d=1 confirmada" not in texto
     # y NO debe invitar a reentrar con d=2
     assert "La evidencia apunta a **d=2**" not in texto

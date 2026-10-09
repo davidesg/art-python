@@ -135,9 +135,16 @@ def test_D1_confirm_and_estimate_cierra_el_nodo_de_ordenes(serie):
           p=p, q=q, P=P, Q=Q, guion_path=gp, guion_name="c01")
     es = _entradas(gp)
     ordn = next(e for e in es if (e["node"] or {}).get("nodo") == "ordenes")
-    assert not ordn["node"].get("pendiente") and ordn["coincide"] is True
     # el nodo es la etapa 1 del modelo: el modelo cuelga de él
     assert es[-1]["kind"] == "model" and es[-1]["parent"] == ordn["version"]
+    if ordn["node"].get("empate"):
+        # BUG-0229: con empate declarado el primer candidato estimado no cierra
+        # el nodo; lo cierra la adopción.
+        assert ordn["node"].get("pendiente")
+        _call(srv.guion_adopt, gp, es[-1]["version"], why="prueba")
+        ordn = next(e for e in _entradas(gp)
+                    if (e["node"] or {}).get("nodo") == "ordenes")
+    assert not ordn["node"].get("pendiente") and ordn["coincide"] is True
 
 
 # ── D3 ───────────────────────────────────────────────────────────────────

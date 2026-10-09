@@ -1073,9 +1073,19 @@ def especificadas_sin_estimar(guion: "Guion") -> list[Iteracion]:
     afirmaba «1 especificada(s) sin estimar» con todo estimado. Sólo cuenta
     la iteración abierta que lleva un nodo de especificación.
     """
+    # BUG-0229: un nodo que ELIGE entre modelos ya estimados —lleva `criterio`
+    # (empate) y cuelga de un modelo— no especifica nada que estimar: decide
+    # sobre lo estimado. El mapa lo contaba como «decisión sin modelo detrás».
+    modelos = {e.version for e in guion.entries if not e.is_node}
+
+    def _especifica(e) -> bool:
+        nd = e.node or {}
+        if nd.get("criterio") and e.parent in modelos:
+            return False
+        return (nd.get("nodo") or e.nodo or "").strip().lower() in NODOS_DE_ESPECIFICACION
+
     return [i for i in iteraciones(guion) if not i.cerrada and any(
-        ((e.node or {}).get("nodo") or e.nodo or "").strip().lower()
-        in NODOS_DE_ESPECIFICACION for e in i.especificacion)]
+        _especifica(e) for e in i.especificacion)]
 
 
 def modelos_sin_registrar(guion: "Guion", guion_path: str) -> list[str]:
