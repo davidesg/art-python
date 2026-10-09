@@ -94,7 +94,9 @@ BUG-0192, BUG-0194 y BUG-0196.
       3.41): rechaza al 10 %, no al 5 %. Los críticos de Shin y Fuller son para
       el AR con media; **aquí N_t se estima junto con un determinista que
       decae (δᵗ) y que, con δ cerca de 1, se parece a una tendencia local**:
-      puede quitar potencia al contraste o desplazar su distribución. Es
+      puede quitar potencia al contraste o desplazar su distribución. **Aquí
+      la pregunta es SÓLO el SF**: el DCD no tiene problema (el candidato
+      I(1) estima θ̂ = 1.000, no tiene representación invertible). Es
       justo la pregunta del paper (Proposición 1: ¿N_t es I(0) tras la
       transición?), y el «SF = 1.8 %» que publicaba no se reproduce.
       Bootstrap: bajo H₀ (N_t con raíz unitaria, ρ = 1 − 4/n como el SF), con
