@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**243 report(s), 17 open.**
+**248 report(s), 22 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -25,6 +25,11 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0244](BUG-0244-confirm-and-estimate-incremental-p-lista.md) | open | low | pipeline | confirm_and_estimate con base_pre_path no acepta `p` como lista de factores (TypeError en _arma_starts), así que no se puede sobreajustar AR(1)·AR(2) conservando las intervenciones | — |
 | [BUG-0245](BUG-0245-confirm-and-estimate-con-base-pre-path-ignora-en.md) | open | medium | pipeline | confirm_and_estimate con base_pre_path ignora en silencio n_harmonics/seasonal: estima el modelo SIN armónicos, lo registra en el guion con el nombre y la razón de los armónicos y dice «se conservan sus armónicos» | — |
 | [BUG-0246](BUG-0246-guided-identification-llamada-4-con-pre-path-eti.md) | open | low | guion | guided_identification (llamada 4 con pre_path) etiqueta el nodo estacionalidad como «D=0 (B1, armónicos deterministas)» en la Decisión A, sin armónicos, y lo escribe como un nodo nuevo duplicado | — |
+| [BUG-0247](BUG-0247-box-cox-horquilla-y-ambigua-se-contradicen.md) | open | low | describe | El nodo Box-Cox dice a la vez «Eso NO es "las dos son razonables"» y «Ambas transformaciones son razonables» | — |
+| [BUG-0248](BUG-0248-avisos-que-no-corresponden-al-modelo.md) | open | low | describe | Cinco avisos que no corresponden al modelo que se acaba de estimar (ruido blanco y ARMA(1,1)) | — |
+| [BUG-0249](BUG-0249-intervencion-calibra-sobre-un-modelo-que-ya-absorbio-el-suceso.md) | open | medium | intervencion | guided_intervention calibra sobre los residuos de un modelo que ya tiene órdenes, y no puede ver si esos órdenes los fabrica el anómalo | — |
+| [BUG-0250](BUG-0250-encadenar-p0-q0-conserva-el-ar-de-la-base.md) | open | high | pipeline | confirm_and_estimate con base_pre_path y p=0, q=0 conserva el AR de la base en vez de quitarlo | — |
+| [BUG-0251](BUG-0251-adoptar-dentro-del-empate-dice-coincide-con-la-propuesta.md) | open | low | guion | Adoptar un modelo del empate dice «coincide con la propuesta» y guarda coincide=True junto a una propuesta que es OTRO orden | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
 | [BUG-0003](BUG-0003-display-tools-no-persist.md) | fixed | medium | mcp-tools | Clean estimation display-tools do not persist .pre/.out (only confirm_and_estimate does, and it carries BUG-0001) | 0.1.2 |
