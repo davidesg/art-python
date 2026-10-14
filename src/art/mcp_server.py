@@ -654,8 +654,8 @@ ETAPA 2 — ESTIMACIÓN DEL MODELO ARMA ELEGIDO
     ÓPTIMO en forma re-ejecutable: encadenar hereda armónicos, intervenciones y
     la media YA estimados y solo añade el ARMA. Sin base_pre_path el modelo se
     reconstruye desde cero, se re-estima lo ya resuelto y la media se pierde
-    (BUG-0014). Con base_pre_path, n_harmonics se ignora: los armónicos vienen
-    del .pre.
+    (BUG-0014). Con base_pre_path los armónicos vienen del .pre; pasar
+    n_harmonics o seasonal los REHACE sobre él (BUG-0245), no los ignora.
     Este tool construye el INP, estima y devuelve la ECUACIÓN + diagnosis en una sola respuesta.
     NO llames model_equation_display por separado — la ecuación ya viene incluida.
   → PRESENTA la ecuación del modelo (verbatim) y MUESTRA el gráfico diagnóstico Treadway
@@ -1117,7 +1117,7 @@ from art.pipeline import (
     # El sitio que llama declara lo que necesita, y por eso `mirar` no avisa:
     # no promete nada que un `.pre` estropee.
     _load_ts_model, _write_bare_inp, _load_fitted, mirar as _mirar, _obs_to_date,
-    _write_inp, _build_arma_on_model, _make_model,
+    _write_inp, _build_arma_on_model, _make_model, terminos_armonicos,
     ModelSpec, FitResult, build_and_fit, run_full,
     _RESCALE_FACTOR,
 )
@@ -7292,7 +7292,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                           p: int | list[int] = 0, q: int = 1,
                           ar_seeds: list | None = None,
                           ar_f_freqs: list | None = None,
-                          n_harmonics: int = 5,
+                          n_harmonics: int | None = None,
                           P: int = 0, Q: int = 0,
                           base_pre_path: str = "",
                           estimate_mu: bool = False,
@@ -7375,8 +7375,17 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                       ratio with 1 d.f. decides it. Without it the only way to
                       claim a factor is seasonal was to impose it.
     q               : regular MA order
-    n_harmonics     : harmonic pairs cos/sin (D=0 fresh only; ignored when
-                      base_pre_path is given — harmonics come from the .pre)
+    n_harmonics     : harmonic pairs cos/sin (D=0). None (default) = 5 in a
+                      fresh model (capped to what fits the frequency) and
+                      INHERITED from the .pre with base_pre_path.
+                      **Con `base_pre_path`, pasarlo (o `seasonal`) rehace el
+                      bloque de armónicos del .pre** (BUG-0245): pares cos/sin
+                      k=1..n (el `alter` del .pre se hereda; si el .pre no tiene
+                      bloque, va con el nuevo); los que ya estaban conservan su ω,
+                      los nuevos parten de 0, y la salida lo dice. Así se AÑADEN
+                      armónicos a un modelo con intervenciones (n_harmonics=2,
+                      seasonal=True) o se quitan (seasonal=False). Antes se
+                      ignoraban en silencio. Con un .pre de D=1 se rechaza.
     easter          : add the EASTER (Semana Santa) calendar regressor. MONTHLY
                       series only — the engine builds it itself: 1.0 in the month
                       of Easter Sunday, split 0.5 March + 0.5 April when Good
@@ -7391,7 +7400,8 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                       aceptaba el argumento y se descartaba en silencio, con lo
                       que no quedaba NINGUNA vía para añadirlo a un modelo ya
                       construido sin volver al `.inp` fresco y perder todas las
-                      intervenciones. `n_harmonics` sigue viniendo del `.pre`.
+                      intervenciones. Los armónicos, con `n_harmonics`/`seasonal`
+                      (BUG-0245).
     seasonal        : on/off switch for the whole deterministic seasonal package
                       (cos/sin pairs + Nyquist alter). None (default) => derive from
                       n_harmonics>0, correct for freq>=4. Pass False for a
@@ -7520,14 +7530,30 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             # argumento y se descartaba en silencio al encadenar.
             # Con otra d, estimate_mu=True siembra una media NUEVA sobre ∇^d:
             # la del .pre no es la misma cantidad y no se hereda.
+            # BUG-0245: los armónicos pedidos se aplican sobre los del .pre
+            # en vez de descartarse en silencio. Con D=1 no hay bloque
+            # determinista que añadir: se rechaza, como una λ distinta.
+            _pide_arm = (seasonal is True
+                         or (n_harmonics is not None and int(n_harmonics) > 0))
+            if _pide_arm and _Db != 0:
+                return _err(
+                    f"armónicos pedidos (n_harmonics={n_harmonics}, "
+                    f"seasonal={seasonal}) sobre un .pre con D={_Db}: la "
+                    f"estacionalidad ya la toma la diferencia estacional y "
+                    f"los armónicos deterministas serían redundantes. Para "
+                    f"la ruta determinista, estima desde el .inp con D=0.")
+            arm_base = terminos_armonicos(m_base.interventions)
             m = _build_arma_on_model(m_base, p=p, q=q, P=P, Q=Q,
                                      estimate_mu=estimate_mu, easter=easter,
-                                     d=d)
+                                     d=d, ar_seeds=ar_seeds,
+                                     n_harmonics=n_harmonics,
+                                     seasonal=seasonal)
             _write_inp(ts, m, output_path)
         else:
             lam = 0.0 if lam is None else float(lam)
             d = 1 if d is None else int(d)
             D = 0 if D is None else int(D)
+            n_harmonics = 5 if n_harmonics is None else int(n_harmonics)
             m_fresh = _make_model(ts, lam=lam, d=d, D=D, p=p, q=q,
                                   n_harmonics=n_harmonics, P=P, Q=Q,
                                   estimate_mu=estimate_mu, seasonal=seasonal,
@@ -7566,11 +7592,39 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                    ": el modelo va SIN μ — pasa estimate_mu=True si la "
                    "deriva de la serie diferenciada lo pide."))
 
+        # BUG-0245: lo que se hereda y lo que cambia en los armónicos, dicho.
+        # «se conservan sus intervenciones y armónicos» salía aunque el .pre
+        # no tuviera armónicos, o aunque se acabaran de cambiar.
+        aviso_arm = encadenado = ""
+        if base_pre_path:
+            arm_m = terminos_armonicos(m.interventions)
+            _otros = [i for i in (m_base.interventions or [])
+                      if not terminos_armonicos([i])]
+            _cambia = sorted(arm_m) != sorted(arm_base)
+            hered = (["intervenciones"] if _otros else []) + (
+                ["armónicos"] if arm_base and not _cambia else [])
+            encadenado = (f"\n\n*Encadenado desde "
+                          f"`{os.path.basename(base_pre_path)}`: "
+                          + (f"se conservan sus {' y '.join(hered)}, y "
+                             if hered else "")
+                          + "se sustituye el ARMA.*")
+            if _cambia:
+                _l = lambda t: ", ".join(t) if t else "ninguno"
+                _nuevos = [t for t in arm_m if t not in arm_base]
+                aviso_arm = (
+                    f"\n\n> **Armónicos cambiados** respecto de "
+                    f"`{os.path.basename(base_pre_path)}`: {_l(arm_base)} → "
+                    f"{_l(arm_m)}."
+                    + (f" Los nuevos ({_l(_nuevos)}) parten de 0; los que ya "
+                       f"estaban conservan su ω." if _nuevos else ""))
+
         # Parameter table
         if base_pre_path:
-            n_itvs = len(m.interventions) if m.interventions else 0
-            spec_str = (f"ARIMA({p},{d},{q}) + {n_itvs} interv. "
-                        f"[desde {os.path.basename(base_pre_path)}]")
+            n_term_arm = len(terminos_armonicos(m.interventions))
+            n_itvs = len(m.interventions or []) - n_term_arm
+            spec_str = (f"ARIMA({p},{d},{q}) + {n_itvs} interv."
+                        + (f" + {n_term_arm} térm. armónicos" if n_term_arm else "")
+                        + f" [desde {os.path.basename(base_pre_path)}]")
         elif D == 1 and (P > 0 or Q > 0):
             spec_str = f"SARIMA({p},{d},{q})({P},{D},{Q})_{ts.freq}"
         elif D == 1:
@@ -7734,10 +7788,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                     guion_path=guion_path or _derive_guion_path(output_path, m)),
                 especificacion=(
                     spec_line + aviso_dom
-                    + (f"\n\n*Encadenado desde "
-                       f"`{os.path.basename(base_pre_path)}`: se conservan sus "
-                       f"intervenciones y armónicos, y se sustituye el ARMA.*"
-                       if base_pre_path else "")
+                    + encadenado + aviso_arm
                     + aviso_d
                     # Encadenar desde un `.pre` hereda sus intervenciones, y
                     # una rampa heredada sigue fijando la previsión (BUG-0182).
@@ -8011,8 +8062,10 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                 # Un nodo que el carril guiado dejó PENDIENTE (BUG-0207 D1).
                 _val = (f"⏳ pendiente (propuesta: {e.propuesta or '—'})"
                         if nd.get("pendiente") else _rec(nd.get('decidido', ''), 190))
+                # BUG-0234: un nodo que concluye sobre lo estimado lo dice.
+                fin = "  ∎ conclusión" if nd.get("conclusion") else ""
                 lines.append(f"{sangria}{rama}◆ n{e.version} {nd.get('nodo', e.name)}"
-                             f" = {_val}{quien}{corr}")
+                             f" = {_val}{quien}{corr}{fin}")
                 if getattr(e, "coincide", None) in (False, "parcial", "empate") \
                         and getattr(e, "propuesta", ""):
                     lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
@@ -8369,7 +8422,7 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                alternativas: str = "", decidido_por: str = "",
                parent: int = -1, expectativas: str = "",
                criterio: str = "", propuesta: str = "",
-               coincide: str = "") -> list:
+               coincide: str = "", conclusion: bool = False) -> list:
     """
     Record a DECISION NODE in the guion — a specification choice, not a model.
 
@@ -8421,6 +8474,13 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                    "estadístico" | "dominio" | "uso". "dominio" requires a
                    `dominio` node with expectations in this guion: the decision
                    cites them. So these decisions can be audited and COUNTED.
+    conclusion   : True when the node CONCLUDES on models already estimated
+                   instead of specifying a new one — «d = ambiguo: I(1) con el
+                   AR(4), I(2) con el IMA(1); los dos son adecuados». It must
+                   hang from a model (`parent`). Without it a "d"/"ordenes"/…
+                   node hung from a model and with nothing below reads as a
+                   reformulation still to estimate, and guion_map lists it as
+                   «decisión sin modelo estimado detrás» (BUG-0234).
 
     THE DECISION BETWEEN TIED CANDIDATES (docs/DISENO-dominio-en-los-ordenes.md
     §4.4), in `razon`, with this fixed format:
@@ -8511,6 +8571,8 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                     coinc = (True if _emp and _ords in [list(c) for c in _emp] else
                              mismo_valor(prop, decidido, nodo) if prop else None)
             _nd.pop("pendiente", None)
+            if conclusion:
+                _nd["conclusion"] = True
             _nd.update({"decidido": decidido, "evidencia": evidencia or _nd.get("evidencia", ""),
                         "alternativas": alternativas,
                         **({"criterio": "estadístico" if crit == "estadistico" else crit}
@@ -8537,16 +8599,29 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                 + (f"\n   criterio: {crit}" if crit else "")
                 + f"\n\n*mapa:* `guion_map(\"{gp}\")`"))]
         version = (max(e.version for e in g.entries) + 1) if g.entries else 1
+        padre = int(parent) if parent >= 0 else infer_parent(g)
+        # BUG-0234: una conclusión es SOBRE modelos estimados; colgada de un
+        # nodo o de nada no concluiría sobre nada, y el mapa dejaría de
+        # avisar de una especificación que sí está pendiente.
+        if conclusion:
+            _pv = next((e for e in g.entries if e.version == padre), None)
+            if _pv is None or _pv.is_node:
+                return _err(
+                    "`conclusion=True` marca un nodo que concluye sobre modelos "
+                    "YA estimados, así que cuelga de uno: pasa `parent=<versión "
+                    f"del modelo>` (ahora el padre es "
+                    f"{'ninguno' if _pv is None else f'el nodo n{padre}'}).")
         entry = GuionEntry(
             version=version, name=nodo, inp_path="", 
             timestamp=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             spec={}, stats=None, equation="",
             decision=f"{nodo} = {decidido}",
             rationale=razon, problems_found="", next_version="",
-            parent=(int(parent) if parent >= 0 else infer_parent(g)),
+            parent=padre,
             kind="node",
             node={"nodo": nodo, "decidido": decidido,
                   "evidencia": evidencia, "alternativas": alternativas,
+                  **({"conclusion": True} if conclusion else {}),
                   **({"expectativas": expectativas.strip()} if expectativas.strip() else {}),
                   **({"criterio": "estadístico" if crit == "estadistico" else crit}
                      if crit else {})},
@@ -8561,6 +8636,8 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
         return [TextContent(type="text", text=(
             f"◆ nodo n{version} registrado: **{nodo} = {decidido}**"
             + (f"  [{decidido_por}]" if decidido_por else "")
+            + (f"\n   ∎ conclusión sobre v{padre}: no especifica nada que "
+               f"estimar" if conclusion else "")
             + (f"\n   propuesta del asistente: {prop} — "
                + ("el analista la tomó en parte" if coinc == "parcial" else
                   "el analista la tomó" if coinc else
