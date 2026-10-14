@@ -6879,12 +6879,19 @@ def _confirma_nodo(guion_path: str, nodo: str, decidido: str, valor=None,
         ult.coincide = coinc
         ult.decision = f"{nodo} = {decidido}"
         ult.rationale = (razon.strip() or (
+            "elegido dentro del empate que propuso la herramienta — razón sin "
+            "escribir: anótala con `guion_annotate(…, campo=\"razon\")`"
+            if coinc == "empate" else
             "se toma la propuesta de la herramienta" if coinc else
             "el analista decidió otra cosa que la propuesta — razón sin "
             "escribir: anótala con `guion_annotate(…, campo=\"razon\")`"
             if coinc is False else "confirmado en el carril guiado"))
         save_guion(g, gp)
-        marca = ("" if coinc is None else " — coincide con la propuesta" if coinc
+        # BUG-0251: dentro de un empate, ni coincide ni corrige.
+        marca = ("" if coinc is None else
+                 f" — elegido dentro del empate (la propuesta era {ult.propuesta})"
+                 if coinc == "empate" else
+                 " — coincide con la propuesta" if coinc
                  else f" — **corrige la propuesta** ({ult.propuesta})")
         return f"◆ guion n{ult.version}: **{nodo} = {decidido}**{marca}"
     if ult is not None and (ult.node or {}).get("decidido") == decidido:
@@ -7998,13 +8005,15 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                 quien = f" [{e.decided_by}]" if e.decided_by else ""
                 # BUG-0110: dónde el analista corrigió al asistente
                 corr = (" ✎ corregido" if getattr(e, "coincide", None) is False else
-                        " ≈ parcial" if getattr(e, "coincide", None) == "parcial" else "")
+                        " ≈ parcial" if getattr(e, "coincide", None) == "parcial" else
+                        " ⇄ dentro del empate"                       # BUG-0251
+                        if getattr(e, "coincide", None) == "empate" else "")
                 # Un nodo que el carril guiado dejó PENDIENTE (BUG-0207 D1).
                 _val = (f"⏳ pendiente (propuesta: {e.propuesta or '—'})"
                         if nd.get("pendiente") else _rec(nd.get('decidido', ''), 190))
                 lines.append(f"{sangria}{rama}◆ n{e.version} {nd.get('nodo', e.name)}"
                              f" = {_val}{quien}{corr}")
-                if getattr(e, "coincide", None) in (False, "parcial") \
+                if getattr(e, "coincide", None) in (False, "parcial", "empate") \
                         and getattr(e, "propuesta", ""):
                     lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
                                  f"el asistente propuso: {_rec(e.propuesta)}")
@@ -8055,13 +8064,17 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
         if _con:
             _corr = [e for e in _con if e.coincide is False]
             _parc = [e for e in _con if e.coincide == "parcial"]
+            _empa = [e for e in _con if e.coincide == "empate"]       # BUG-0251
             lines.append(f"Propuestas registradas: {len(_con)} nodos; el analista corrigió "
                          f"{len(_corr)}" + (": " + ", ".join(
                              f"n{e.version} {(e.node or {}).get('nodo', e.name)}"
                              for e in _corr) if _corr else "")
                          + (f"; en parte {len(_parc)}: " + ", ".join(
                              f"n{e.version} {(e.node or {}).get('nodo', e.name)}"
-                             for e in _parc) if _parc else "") + "."
+                             for e in _parc) if _parc else "")
+                         + (f"; dentro de un empate {len(_empa)}: " + ", ".join(
+                             f"n{e.version} {(e.node or {}).get('nodo', e.name)}"
+                             for e in _empa) if _empa else "") + "."
                          + (f" Carril: {g.carril}." if getattr(g, "carril", "") else ""))
 
         # LA CUENTA DE ITERACIONES. Un modelo estimado cierra una iteración; los
@@ -8785,10 +8798,16 @@ def guion_adopt(guion_path: str, version: int, why: str) -> list:
                        int(_sp.get("P", 0)), int(_sp.get("Q", 0))],
                 razon=why,
                 # Con empate, elegir CUALQUIERA de los candidatos empatados
-                # coincide con lo propuesto: la propuesta era el empate.
+                # no corrige la propuesta: la propuesta era el empate. Pero
+                # tampoco COINCIDE con ella si es otro orden (BUG-0251): el
+                # guion decía `coincide: true` junto a una propuesta distinta
+                # de lo decidido, y la elección del analista dentro del empate
+                # desaparecía. Se registra como "empate".
                 coincide_fn=lambda a, b: (
-                    list(b) in [list(c) for c in ((_ult.node or {}).get("empate") or [])]
-                    or [_tot(x) for x in a] == list(b)))
+                    True if [_tot(x) for x in a] == list(b) else
+                    "empate" if list(b) in [list(c) for c in
+                                            ((_ult.node or {}).get("empate") or [])]
+                    else False))
             if _nt:
                 txt += ["", _nt]
         otros = [x for x in g.entries

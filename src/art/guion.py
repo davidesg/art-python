@@ -233,6 +233,7 @@ class GuionEntry:
     #   propuesta — lo que el asistente propuso en ese nodo (en guiado);
     #   coincide  — True si se decidió lo propuesto, False si el analista lo
     #               corrigió, "parcial" si tomó una parte (BUG-0217),
+    #               "empate" si eligió otro de los empatados (BUG-0251),
     #               corrigió, None si no se registró (los guiones antiguos).
     propuesta: str = ""
     coincide: bool | str | None = None
@@ -1883,6 +1884,7 @@ def export_guion_html(guion: Guion) -> str:
                         f"<p><b>Propuesta del asistente:</b> {e.propuesta}"
                         + (" — <b>corregida por el analista</b>" if e.coincide is False
                            else " — tomada en parte" if e.coincide == "parcial"
+                           else " — se eligió dentro del empate" if e.coincide == "empate"
                            else " — tomada" if e.coincide else "") + "</p>")
                 if e.rationale:
                     lines.append(f"<p><b>Razón:</b> {e.rationale}</p>")
