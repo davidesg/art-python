@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**248 report(s), 8 open.**
+**249 report(s), 8 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -251,6 +251,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0249](BUG-0249-intervencion-calibra-sobre-un-modelo-que-ya-absorbio-el-suceso.md) | fixed | medium | intervencion | guided_intervention calibra sobre los residuos de un modelo que ya tiene órdenes, y no puede ver si esos órdenes los fabrica el anómalo | 0.2.3.dev0 |
 | [BUG-0250](BUG-0250-encadenar-p0-q0-conserva-el-ar-de-la-base.md) | fixed | high | pipeline | confirm_and_estimate con base_pre_path y p=0, q=0 conserva el AR de la base en vez de quitarlo | 0.2.3.dev0 |
 | [BUG-0251](BUG-0251-adoptar-dentro-del-empate-dice-coincide-con-la-propuesta.md) | fixed | low | guion | Adoptar un modelo del empate dice «coincide con la propuesta» y guarda coincide=True junto a una propuesta que es OTRO orden | 0.2.3.dev0 |
+| [BUG-0252](BUG-0252-encadenar-ignora-ar-f-freqs.md) | fixed | medium | pipeline | confirm_and_estimate con base_pre_path ignora en silencio ar_f_freqs y estima el modelo sin el factor de frecuencia fija | 0.2.3.dev0 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 | [BUG-0205](BUG-0205-el-intervalo-de-prevision-sale-simetrico-en-nivel.md) | wontfix | low | mcp-tools | El intervalo al 95 % de la tabla de previsión sale simétrico en nivel en modelos en logaritmos — es la aproximación del método delta, no exp(ŷ ± 1,96 s); a 24 meses del airline, [383, 668] frente a [401, 689] | — |

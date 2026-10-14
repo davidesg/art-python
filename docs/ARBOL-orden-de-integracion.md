@@ -89,7 +89,7 @@ Los DCD se leen con la ley s = 1, crítico al 5 % ≈ 1,94:
 
 | El modelo en d tiene… | SF | DCD sobrediferenciación (candidato ∇^{d+1}) | DCD subdiferenciación (en ∇^d) |
 |---|---|---|---|
-| **AR con raíces reales, sin MA** (AR(1), AR(p)) | sí, sobre la raíz real positiva dominante | se AÑADE un testigo MA(1) (θ⁰ = +0,85) y el AR se reestima dentro. **θ̂ depende de ese AR**: con muchos coeficientes libres absorbe la persistencia y el testigo se va a 1 (Salamanca AR(4): LR 1,88, «d basta» con poca potencia) | se AÑADE un testigo MA(1). **Con AR libre, bajo H₀ el AR se va a 1 y reconstruye la ∇ cancelada**, porque (1 − ρB) con ρ → 1 es otra vez (1 − B): el contraste pierde potencia (BUG-0224) o falla (LR −inf, BUG-0232). No es fiable |
+| **AR con raíces reales, sin MA** (AR(1), AR(p)) | sí, sobre la raíz real positiva dominante | se AÑADE un testigo MA(1) (θ⁰ = +0,85) y el AR se reestima dentro. **θ̂ depende de ese AR**: con muchos coeficientes libres absorbe la persistencia y el testigo se va a 1 (Salamanca AR(4): LR 1,88, «d basta» con poca potencia) | se AÑADE un testigo MA(1). **Con AR libre, bajo H₀ el AR se va a 1 y reconstruye la ∇ cancelada**, porque (1 − ρB) con ρ → 1 es otra vez (1 − B): el contraste perdía potencia (BUG-0224) o fallaba (LR −inf, BUG-0232). **Desde art 0.2.3** la raíz AR dominante del restringido se acota en ρₘ = 1 − 4/n, un LR negativo reajusta el libre desde el restringido y un LR no finito es «no calculable», no un veredicto; el veredicto lee θ̂ y si el AR quedó acotado (`_frontera_theta_uno`) |
 | **AR(2) con raíces complejas** | **no directamente** (no hay raíz real que aislar); art lo **recupera por sobreajuste**: AR(p+1) → AR(1)·AR(p) y SF sobre el AR(1) (sección 5) | se añade el testigo; el par complejo no puede imitar un (1 − B) mientras siga siendo complejo, así que el testigo lee la f=0 limpio. Salvo que la reestimación lo vuelva real (ver 5) | se añade el testigo; mismo razonamiento: un par complejo no reconstruye la ∇ salvo que degenere en dos raíces reales |
 | **MA, sin AR** (MA(1), IMA) | **no aplicable**: falta el lado AR; el par se forma con el SF del modelo en d−1 | el MA(1) del modelo se SUSTITUYE por el testigo | el MA(1) del modelo ES el testigo: H₀ θ = 1 sobre él (coincide con el DCD de invertibilidad) |
 | **AR(1) y MA(1)** (ARMA(1,1)) | sí | el MA(1) se sustituye por el testigo y el AR(1) se reestima dentro | el MA(1) del modelo es el testigo; si φ̂ ≈ 1, mismo riesgo que con AR libre |
@@ -194,7 +194,7 @@ inversas: r = √(−φ₂); frecuencia: cos ω = φ₁ / (2r); periodo 2π/ω.
         │   │       con el modelo parsimonioso o con el DCD de subdiferenciación desde d = 2 (1.2)
         │   └─ HACIA ABAJO, frontera 0/1 (sólo si el dominio admite d = 0):
         │       ├─ con MA(1) → DCD subdiferenciación sobre su MA
-        │       ├─ sin MA → se añade un testigo (⚠ con AR real libre no es fiable: BUG-0224)
+        │       ├─ sin MA → se añade un testigo (con AR real libre, acotado en ρₘ: BUG-0224)
         │       ├─ genuina → d = 1 confirmado por abajo
         │       └─ cancelada → estimar d = 0; con μ ≠ 0, d = 0 CON tendencia lineal (Chan y Wallis)
         │
@@ -202,7 +202,7 @@ inversas: r = √(−φ₂); frecuencia: cos ω = φ₁ / (2r); periodo 2π/ω.
             │   no se mira hacia arriba (no hay ∇³). Sólo la frontera 1/2, y el par CRUZA
             │   dos modelos:
             ├─ lado MA: DCD subdiferenciación sobre el modelo en d = 2
-            │     (con MA(1), su MA es el testigo; sin MA, se añade, con la cautela de BUG-0224)
+            │     (con MA(q), su raíz real más cercana a +1 es el testigo, BUG-0243; sin MA, se añade, con el AR acotado de BUG-0224)
             ├─ lado AR: SF sobre el mejor modelo en d = 1 (necesita un AR real)
             └─ tabla de verdad:
                   SF (d=1)        DCD sub (d=2)        conclusión

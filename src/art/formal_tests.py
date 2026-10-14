@@ -286,6 +286,7 @@ class ShinFullerResult:
     n: int
     s: int
     phi_dominant: float | None = None   # raíz dominante en forma AR (BUG-0065)
+    d: int | None = None                # diferencias regulares del modelo (BUG-0235)
 
     @property
     def lr(self) -> float:
@@ -332,9 +333,17 @@ class ShinFullerResult:
             f"  logL(constrained) = {self.loglik_constrained:.4f}",
             f"  Φ̂₁ᵤ = {self.phi_1u:.4f}  {stars}",
             f"  Crit. vals (Table II): 10%={self.crit_10pct:.2f}  5%={self.crit_5pct:.2f}  1%={self.crit_1pct:.2f}",
-            f"  → {'ESTACIONARIO ✓' if self.stationary else 'RAÍZ UNITARIA — considerar d+1 ✗'}",
+            f"  → {'ESTACIONARIO ✓' if self.stationary else self._no_estacionario()}",
         ]
         return "\n".join(lines)
+
+    def _no_estacionario(self) -> str:
+        # BUG-0235: desde D_MAX_REGULAR no se propone otra diferencia; la
+        # frontera que queda por mirar es la de abajo (modelo_d_menos_1)
+        if self.d is not None and self.d >= D_MAX_REGULAR:
+            return (f"RAÍZ UNITARIA — con d = {self.d} no se propone d+1: "
+                    "contrasta la frontera d−1/d ✗")
+        return "RAÍZ UNITARIA — considerar d+1 ✗"
 
 
 def _count_free_ar(model) -> int:
@@ -582,6 +591,7 @@ def shin_fuller(model) -> ShinFullerResult:
         pvalue=pvalue,
         n=n,
         s=s,
+        d=int(getattr(model, "d", 0) or 0),
     )
 
 

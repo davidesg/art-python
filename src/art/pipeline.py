@@ -977,7 +977,8 @@ def _build_arma_on_model(m_base, p, q: int,
                          d: int | None = None,
                          ar_seeds: list | None = None,
                          n_harmonics: int | None = None,
-                         seasonal: bool | None = None):
+                         seasonal: bool | None = None,
+                         ar_f_freqs: list | None = None):
     """
     Return a new unfitted fue.Model that keeps all interventions and harmonics
     from m_base but replaces the ARMA specification with (p, q, P, Q).
@@ -1022,7 +1023,9 @@ def _build_arma_on_model(m_base, p, q: int,
 
     No llevan interruptor porque no son un orden que el llamador especifique:
     `(p, q, P, Q)` nombran los operadores regulares y de retardo estacional, y
-    los de frecuencia fija son estructura, como las intervenciones.
+    los de frecuencia fija son estructura, como las intervenciones. Lo que sí
+    se puede es AÑADIR AR(2) de frecuencia fija con `ar_f_freqs`, como en el
+    modo nuevo (BUG-0252): los heredados se quedan como están.
 
     **`easter` SÍ lleva interruptor — BUG-0170.** Es el único determinista que
     el analista puede querer AÑADIR a un modelo ya construido, y no había forma:
@@ -1123,6 +1126,12 @@ def _build_arma_on_model(m_base, p, q: int,
     # como las intervenciones.
     ar_f_val = list(m_base.ar_f or [])
     ma_f_val = list(m_base.ma_f or [])
+    # BUG-0252: `ar_f_freqs` AÑADE los AR(2) de frecuencia fija que pide y que
+    # la base no tiene, como en el modo nuevo. Los heredados no se tocan: son
+    # estructura (arriba). Antes se descartaba en silencio.
+    _hay = {int(f.freq) for f in ar_f_val}
+    ar_f_val += [fue.FixedFreqFactor(freq=int(k), coef=-0.5, free=True)
+                 for k in dict.fromkeys(ar_f_freqs or []) if int(k) not in _hay]
 
     # THE MEAN, carried like the interventions above. `mu0` is where fue keeps
     # the mean -- the seed before a fit, the estimate after one -- so inheriting

@@ -114,3 +114,14 @@ def test_el_par_cruzado_coincide_en_d(modelos, monkeypatch):
         d = describe_formal_tests(m2, run_meg=False, modelo_d_menos_1=m1)
     assert d.data["par_d_menos_1"] == "d"
     assert "Coinciden en d=2" in d.summary
+
+
+def test_el_resumen_de_shin_fuller_en_d2_no_propone_d3():
+    # el resumen del resultado, no sólo el texto de describe
+    base = dict(phi_null=0.98, phi_free=[0.999], loglik_free=0.0,
+                loglik_constrained=0.0, phi_1u=0.0, crit_10pct=1.0,
+                crit_5pct=1.5, crit_1pct=2.5, df=1, pvalue=1.0, n=200, s=12,
+                phi_dominant=0.999)
+    assert "considerar d+1" in ShinFullerResult(**base, d=1).summary()
+    r2 = ShinFullerResult(**base, d=2).summary()
+    assert "considerar d+1" not in r2 and "no se propone d+1" in r2

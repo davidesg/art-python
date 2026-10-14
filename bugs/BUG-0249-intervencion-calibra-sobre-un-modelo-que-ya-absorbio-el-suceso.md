@@ -91,12 +91,15 @@ cosas y decirlo (`src/art/mcp_server.py`).
 
 **Lo que NO se hizo: contar el episodio de la llamada 2 sobre la serie sin el
 ARMA.** Sobre la serie sin el AR(1) el episodio de 12/1973 tiene 2 extremos
-(no 1), pero `decide_episodios` (d = 1) le sigue dando **1 período en el
-nivel** —su convenio: L impulsos del nivel son L + d extremos—. El encabezado
-diría lo mismo, así que no explica la discrepancia con la configuración
-ganadora (12/1973×2). Lo que la explica es que dos extremos consecutivos del
-mismo signo en ∇ son dos escalones, no un impulso: es el convenio de
-`decide_episodios`, no el AR. Queda fuera de este bug.
+(no 1), pero `decide_episodios` (d = 1) le sigue dando 1 período en el nivel,
+y el encabezado diría lo mismo. No hay discrepancia que explicar con la
+configuración ganadora (12/1973×2): un episodio de L períodos se especifica
+como L + 1 escalones en el nivel, así que uno de 1 período son 2 escalones, y
+la estimación decide qué pasó en cada uno. La matemática de los episodios está
+bien definida: un impulso en el nivel se ve en ∇ como un impulso compensado
+(+, −); un escalón en el nivel, como un impulso en ∇; dos extremos seguidos
+del mismo signo en ∇ son dos escalones, que es lo que esos L + 1 escalones
+cubren. No es un defecto.
 
 Test: `tests/test_bug_0249_intervencion_con_el_orden_ya_dentro.py` — sobre
 Minneapolis, la llamada 1 con el AR(1) dice «Este modelo ya tiene AR(1)», da

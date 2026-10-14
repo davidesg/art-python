@@ -365,7 +365,9 @@ Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
                       This is the CONTRASTABLE version of «this factor is
                       seasonal» — nested in the free factor, so a likelihood
                       ratio with 1 d.f. decides it. Without it the only way to
-                      claim a factor is seasonal was to impose it.
+                      claim a factor is seasonal was to impose it. With
+                      base_pre_path it ADDS the factors the .pre lacks; those
+                      it carries are inherited unchanged (BUG-0252).
     q               : regular MA order
     n_harmonics     : harmonic pairs cos/sin (D=0). None (default) = 5 in a
                       fresh model (capped to what fits the frequency) and

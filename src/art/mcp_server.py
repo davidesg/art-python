@@ -7382,7 +7382,9 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                       This is the CONTRASTABLE version of «this factor is
                       seasonal» — nested in the free factor, so a likelihood
                       ratio with 1 d.f. decides it. Without it the only way to
-                      claim a factor is seasonal was to impose it.
+                      claim a factor is seasonal was to impose it. With
+                      base_pre_path it ADDS the factors the .pre lacks; those
+                      it carries are inherited unchanged (BUG-0252).
     q               : regular MA order
     n_harmonics     : harmonic pairs cos/sin (D=0). None (default) = 5 in a
                       fresh model (capped to what fits the frequency) and
@@ -7556,7 +7558,8 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                                      estimate_mu=estimate_mu, easter=easter,
                                      d=d, ar_seeds=ar_seeds,
                                      n_harmonics=n_harmonics,
-                                     seasonal=seasonal)
+                                     seasonal=seasonal,
+                                     ar_f_freqs=ar_f_freqs)
             _write_inp(ts, m, output_path)
         else:
             lam = 0.0 if lam is None else float(lam)
@@ -7605,6 +7608,18 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         # «se conservan sus intervenciones y armónicos» salía aunque el .pre
         # no tuviera armónicos, o aunque se acabaran de cambiar.
         aviso_arm = encadenado = ""
+        if base_pre_path and ar_f_freqs:
+            # BUG-0252: los AR(2) de frecuencia fija pedidos, dichos
+            _base_ff = {int(f.freq) for f in (m_base.ar_f or [])}
+            _nuevos_ff = [int(k) for k in dict.fromkeys(ar_f_freqs)
+                          if int(k) not in _base_ff]
+            _ya_ff = [int(k) for k in dict.fromkeys(ar_f_freqs) if int(k) in _base_ff]
+            aviso_arm += (
+                (f"\n\n> **AR(2) de frecuencia fija añadidos**: k = "
+                 f"{', '.join(map(str, _nuevos_ff))}." if _nuevos_ff else "")
+                + (f"\n\n> k = {', '.join(map(str, _ya_ff))}: el `.pre` ya lleva ese "
+                   f"factor de frecuencia fija y se hereda con su estimación."
+                   if _ya_ff else ""))
         if base_pre_path:
             arm_m = terminos_armonicos(m.interventions)
             _otros = [i for i in (m_base.interventions or [])
@@ -7620,7 +7635,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             if _cambia:
                 _l = lambda t: ", ".join(t) if t else "ninguno"
                 _nuevos = [t for t in arm_m if t not in arm_base]
-                aviso_arm = (
+                aviso_arm += (
                     f"\n\n> **Armónicos cambiados** respecto de "
                     f"`{os.path.basename(base_pre_path)}`: {_l(arm_base)} → "
                     f"{_l(arm_m)}."
