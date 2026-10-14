@@ -55,6 +55,9 @@ Cada criterio de la puerta (Q, JB, media, estacionalidad residual) bloquea por s
 retardo 3s+3 (39 en mensual), con los grados de libertad descontando los parámetros ARMA
 (BUG-0075, BUG-0166). Lo que es el p mínimo es el TEXTO: «ruido blanco (Q): p mínimo = …»
 cita el menor p de los cuatro retardos, no el que decidió. De ahí salió esta lectura.
+El texto ya está corregido en 0.2.3: «ruido blanco (Q): Q(39) con 38 g.l., p = 0,0163»
+(test `tests/test_bug_0237_puerta_cita_la_q_que_decide.py`). El bug sigue abierto por la
+otra mitad: qué criterios cierran la puerta.
 
 ## Fix
 

@@ -2623,9 +2623,14 @@ def describe_formal_tests(model, run_meg: bool = True,
     _dg_fallos: list[str] = []
     _dg_avisos: list[str] = []
     if _dg is not None:
-        _q_min = min(_dg.q_pvalues) if _dg.q_pvalues else 1.0
         if not _dg.white_noise:
-            _dg_fallos.append(f"ruido blanco (Q): p mínimo = {_q_min:.4f}")
+            # BUG-0237: se cita la Q que DECIDE —la del retardo 3f+3, con sus
+            # g.l. descontando el ARMA—, no el p mínimo de los cuatro retardos,
+            # que no es el que cierra la puerta y hacía creer que sí.
+            _l = _dg.q_lag_cancerbero
+            _dg_fallos.append(
+                f"ruido blanco (Q): Q({_l}) con {_l - _dg.q_df_correction} g.l., "
+                f"p = {_dg.q_p_cancerbero:.4f}")
         if not _dg.normal:
             _dg_fallos.append(
                 f"normalidad (JB): {_dg.jb_stat:.3f}, p = {_dg.jb_pvalue:.4f}")
