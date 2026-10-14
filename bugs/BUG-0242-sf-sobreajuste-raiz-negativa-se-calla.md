@@ -1,11 +1,11 @@
 ---
 id: BUG-0242
 title: formal_tests calla el Shin-Fuller por sobreajuste cuando la raíz real recuperada es NEGATIVA y dice «el lado AR no existe», cuando sí es informativa
-status: open
+status: fixed
 severity: medium
 component: formal_tests
 found_in: 0.2.3.dev0 (+ arreglos sin commit)
-fixed_in:
+fixed_in: 0.2.3.dev0
 reported: 2026-10-09
 reporter: David / Claude — análisis guiado de IPC_US (P02)
 tags: [shin-fuller, sobreajuste, bug-0068, bug-0215]
@@ -37,12 +37,30 @@ ts, m = _load_fitted("bugs/BUG-0242-repro/IPC_US_m06.pre")
 shin_fuller_sobreajuste(m)   # ValueError: «Sus raíces reales son negativas (φ̂ = -0.2060)»
 ```
 
-## Fix (propuesto)
+## Fix
 
-Que `shin_fuller_sobreajuste` devuelva un resultado «sin raíz real positiva» con la φ̂
-recuperada (como el BUG-0215 hace en el SF directo), y que el informe lo presente así: «lado
-AR por sobreajuste: la raíz real recuperada es −0,21, lejos de ρ=1, así que no apoya d+1».
+El propuesto. `shin_fuller_sobreajuste` (`src/art/formal_tests.py:716`) mira las
+raíces reales del AR(p+1): si alguna es positiva, contrasta como antes; si
+todas son negativas, devuelve el resultado con `sf = None` y `phi_real` = la
+raíz recuperada (`sin_raiz_positiva`, l. 625); si no hay ninguna real, lanza
+como siempre.
+
+`describe.py:2882` lo presenta: «su raíz real sale NEGATIVA (φ̂ = −0,2060),
+lejos de ρ = +1. No hay Φ̂₁ᵤ … pero la lectura existe: el AR ampliado tuvo
+sitio para una raíz cerca de +1 y no la puso, así que el lado AR no apoya
+d+1», con el ΔAIC. Y el cierre lo lee (`describe.py:3441`): con el DCD de
+sobrediferenciación pidiendo d+1 y el lado AR por sobreajuste sin apoyarlo
+(raíz negativa o Φ̂₁ᵤ que rechaza), el par discrepa y va a `pendientes`; si los
+dos apuntan a d+1, lo dice. Antes, con el sobreajuste presente, el cierre no
+leía ese caso.
+
+Test: `tests/test_bug_0242_sobreajuste_raiz_negativa.py` — IPC_US m06:
+`sin_raiz_positiva`, φ̂ ≈ −0,206; el informe no dice «no existe en esta
+corrida», lo presenta, y el cierre dice «NO lo apoya». Falla sin el arreglo.
 
 ## Validation
 
-El caso de la repro y las celdas de AR(2) complejo de la batería de la fase 2.
+`bugs/BUG-0242-repro/repro.py` (nuevo) sale con 0; con HEAD, 1. IPC_US m06: el
+DCD de sobrediferenciación θ̂ = 0,958, LR = 4,52 (d+1, en la banda, con dos
+deterministas) frente al lado AR recuperado (φ̂ = −0,206, ΔAIC +1,34): el cierre
+dice que el par discrepa y que d no queda fijado.

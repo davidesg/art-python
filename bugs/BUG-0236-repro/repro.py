@@ -3,6 +3,10 @@
 Regenera las MISMAS series que research/bateria_contrastes_d.py (N=200,
 SEED=2026: se recorre el generador en el mismo orden) y estima sólo los casos
 que hacen falta. Uso:  ART_NO_VIEWER=1 python repro.py
+
+Sale 1 mientras BUG-0236 siga abierto (un «d confirmado ✓» o un «θ→+1» sobre
+un LR negativo o un testigo negativo), o mientras con d=2 se construya ∇³ o
+Shin-Fuller proponga d+1 (añadido a BUG-0235). Los bloques 0237 sólo imprimen.
 """
 import os, re, sys, tempfile
 import numpy as np
@@ -28,6 +32,7 @@ def T(r): return r if isinstance(r, str) else "\n".join(
     t for c in r if isinstance(t := getattr(c, "text", None), str))
 def grep(p, t): return [l.strip()[:170] for l in t.splitlines() if re.search(p, l)]
 
+abierto = False
 rng = np.random.default_rng(SEED)
 with tempfile.TemporaryDirectory() as w:
     for d in (0, 1, 2):
@@ -46,7 +51,17 @@ with tempfile.TemporaryDirectory() as w:
                                      domain="generic", modo="autonomo"))
             ft = T(s.formal_tests(out.replace(".inp", ".pre"), run_meg=False, subdiferenciacion=True))
             print(f"\n== d={d} {nombre}: {CASOS[(d, nombre)]}")
+            for l in grep(r"^- θ̂=", ft):
+                m_ = re.search(r"θ̂=([+-]\d+\.\d+), LR=(-?[\d.]+|-?inf)", l)
+                th, lr = float(m_.group(1)), float(m_.group(2))
+                if ("θ→+1" in l or "d confirmado ✓" in l) and (lr < -1e-3 or th < 0):
+                    abierto = True
+            if d == 2 and grep(r"Candidato: ∇\^3|considerar d\+1", ft):
+                abierto = True
             for p in (r"Φ̂₁ᵤ=", r"^- θ̂=", r"Candidato: ∇", r"La diagnosis falla en",
                       r"Considera aumentar d|d\+1", r"no es fiable|AR libre|BUG-0224"):
                 for l in grep(p, ft)[:2]:
                     print("   ", l)
+
+print("\nBUG-0236", "ABIERTO" if abierto else "arreglado")
+sys.exit(1 if abierto else 0)
