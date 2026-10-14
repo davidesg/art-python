@@ -964,10 +964,11 @@ def _mu_seed(ts, lam, d, D, estimate_mu, refactor=_RESCALE_FACTOR):
         return 0.0
 
 
-def _build_arma_on_model(m_base, p: int, q: int,
+def _build_arma_on_model(m_base, p, q: int,
                          P: int = 0, Q: int = 0,
                          estimate_mu=None, easter: bool = False,
-                         d: int | None = None):
+                         d: int | None = None,
+                         ar_seeds: list | None = None):
     """
     Return a new unfitted fue.Model that keeps all interventions and harmonics
     from m_base but replaces the ARMA specification with (p, q, P, Q).
@@ -1040,6 +1041,11 @@ def _build_arma_on_model(m_base, p: int, q: int,
     `estimate_mu=True` se siembra de nuevo sobre la d nueva. λ y D no se
     cambian aquí (λ cambia la escala de todos los ω; D choca con los armónicos
     o el `ifadf` del base): eso lo rechaza el llamador.
+
+    **`p` es un entero o una lista de órdenes por FACTOR — BUG-0244**, como en
+    `_make_model`: `p=[1, 2]` construye (1−φB)(1−φ₁B−φ₂B²). `ar_seeds` son las
+    semillas por factor (las de `ar_factorization`); sin ellas, semillas
+    neutras, porque las de Yule-Walker son las del operador completo.
     """
     import fue
     import numpy as np
@@ -1055,11 +1061,22 @@ def _build_arma_on_model(m_base, p: int, q: int,
     except Exception:
         resid = None
     s_freq = int(getattr(m_base.series, "freq", 12))
-    ar_i, ma_i, ars_i, mas_i = _arma_starts(resid, p, q, P, Q, s_freq)
+    # BUG-0244: `p` llegaba tal cual a `_arma_starts`, que sólo acepta enteros,
+    # y una lista de factores moría en un TypeError. Se reparte como en el modo
+    # nuevo: semillas del operador TOTAL si hay un solo factor; si hay varios,
+    # las del llamador o neutras.
+    _ords = ordenes_ar(int(p) if isinstance(p, np.integer) else p)
+    ar_i, ma_i, ars_i, mas_i = _arma_starts(resid, sum(_ords), q, P, Q, s_freq)
 
-    if p > 0:
+    if len(_ords) == 1:
         ar   = [ar_i]
-        ar_f = [[True] * p]
+        ar_f = [[True] * _ords[0]]
+    elif _ords:
+        if ar_seeds and len(ar_seeds) == len(_ords):
+            ar = [[float(c) for c in fac] for fac in ar_seeds]
+        else:
+            ar = [[0.0] * o for o in _ords]
+        ar_f = [[True] * o for o in _ords]
     elif q == 0 and P == 0 and Q == 0:
         # Sin ARMA: fue necesita un AR de relleno, FIJO a cero. Nunca el del
         # base (BUG-0250): `m_base.ar or ...` heredaba el AR libre, y encadenar

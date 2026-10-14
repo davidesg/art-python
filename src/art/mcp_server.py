@@ -7499,7 +7499,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             # la del .pre no es la misma cantidad y no se hereda.
             m = _build_arma_on_model(m_base, p=p, q=q, P=P, Q=Q,
                                      estimate_mu=estimate_mu, easter=easter,
-                                     d=d)
+                                     d=d, ar_seeds=ar_seeds)
             _write_inp(ts, m, output_path)
         else:
             lam = 0.0 if lam is None else float(lam)
