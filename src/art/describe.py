@@ -2144,13 +2144,35 @@ def describe_diagnosis(model) -> Description:
     #     Check RV test (Bloque F) before concluding over-parametrization.
     #   • FLT transfer function (ω + δ): gain and decay rate are jointly identified from
     #     the impulse response ω·δ^t → high corr(ω, δ) is inherent, not redundant.
+    #
+    # BUG-0248: la nota del AR(2) salía en TODO par AR–MA. En un ARMA(1,1) con
+    # corr(φ̂, θ̂) ≈ +0.99 —(1 − .33B) y (1 − .19B), casi el mismo factor— es
+    # el caso de manual de factor común, y la nota apuntaba a la explicación
+    # benigna. Sólo va si el AR del par tiene un factor de orden ≥ 2 con raíces
+    # complejas (los AR_f lo son por construcción).
+    def _ar_complejo(lbl_ar: str) -> bool:
+        if lbl_ar.startswith("AR_f"):
+            return True
+        facs = model.ar_s if lbl_ar.startswith("AR_s") else model.ar
+        for fac in (facs or []):
+            c = [float(x) for x in fac]
+            if len(c) < 2:
+                continue
+            r = np.roots([-x for x in reversed(c)] + [1.0])
+            if np.any(np.abs(np.imag(r)) > 1e-8):
+                return True
+        return False
+
     def _overpar_note(lbl_i: str, lbl_j: str) -> str:
         ar_ma = (lbl_i.startswith("AR") and lbl_j.startswith("MA")) or \
                 (lbl_i.startswith("MA") and lbl_j.startswith("AR"))
         flt   = (lbl_i.startswith("ω(") and lbl_j.startswith("δ")) or \
                 (lbl_i.startswith("δ") and lbl_j.startswith("ω("))
         if ar_ma:
-            return " ℹ puede ser normal en AR(2) con raíces complejas — verificar con test RV"
+            if _ar_complejo(lbl_i if lbl_i.startswith("AR") else lbl_j):
+                return " ℹ puede ser normal en AR(2) con raíces complejas — verificar con test RV"
+            return (" ⚠ factor común probable: compara las raíces AR y MA — si "
+                    "casi coinciden, se cancelan y sobra el par")
         if flt:
             return " ℹ normal en FLT (ω y δ se identifican conjuntamente)"
         return ""
@@ -2751,7 +2773,10 @@ def describe_formal_tests(model, run_meg: bool = True,
                 "la verosimilitud exacta del estudio; esa validación se hizo "
                 "sobre candidatos SIN AR). Esa persistencia es la que el par en "
                 "f=0 tiene que leer."
-                + ("" if not (model.ar or []) else
+                # BUG-0248: `model.ar` es [[0.0]] fijo cuando no hay ARMA; lo
+                # que cuenta son los coeficientes libres, como en la línea del
+                # candidato de arriba.
+                + ("" if not _p_ar else
                    " Este candidato lleva el AR del modelo, y con AR esa "
                    "validación de fue no está hecha."))
         if sf_res is None:

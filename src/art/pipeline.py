@@ -285,9 +285,16 @@ def aviso_se_no_fiable(model) -> str:
     el `.inp` y no hay nada que avisar. Sólo si fue cayó al BFGS —o es un fue
     anterior, sin `se_method`— el `.pre` vuelve a ser la causa del problema.
     """
-    from art.diagnosis import se_del_hessiano
+    from art.diagnosis import se_del_hessiano, _build_param_labels
     if not viene_de_pre(model) or se_del_hessiano(getattr(model, "_result", None)):
         return ""
+    # BUG-0248: sin parámetros libres —un (0,1,0) sin deterministas— no hay
+    # ninguna desviación típica a la que afecte el aviso.
+    try:
+        if not _build_param_labels(model):
+            return ""
+    except Exception:
+        pass
     return "\n\n" + AVISO_SE_DESDE_PRE
 
 

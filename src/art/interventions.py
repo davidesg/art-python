@@ -1275,9 +1275,21 @@ def _lleva_arma(model) -> bool:
     residuo tipificado es el contraste exacto; con ARMA es la forma del filtro
     π y el residuo solo se queda corto (BUG-0089).
     """
+    # BUG-0248: el AR(1) fijo a cero que fue necesita cuando no hay ningún
+    # operador (`ar=[[0.0]]`, `ar_free=[[False]]`) es relleno, no un ARMA: con
+    # él un (0,1,0) recibía la nota de «p CONSERVADOR», y su contraste es el
+    # EXACTO. Cuenta un coeficiente libre, o fijo pero distinto de cero (mismo
+    # criterio que BUG-0241 en `guion_adopt`).
     for atr in ("ar", "ma", "ar_s", "ma_s"):
-        for factor in (getattr(model, atr, None) or []):
+        frees = getattr(model, atr + "_free", None) or []
+        for i, factor in enumerate(getattr(model, atr, None) or []):
             vals = factor if isinstance(factor, (list, tuple)) else [factor]
-            if any(v is not None for v in vals):
-                return True
+            fl = frees[i] if i < len(frees) else None
+            fl = fl if isinstance(fl, (list, tuple)) else [fl] * len(vals)
+            for j, v in enumerate(vals):
+                if v is None:
+                    continue
+                libre = fl[j] if j < len(fl) and fl[j] is not None else True
+                if libre or float(v) != 0.0:
+                    return True
     return False

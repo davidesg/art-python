@@ -1,11 +1,11 @@
 ---
 id: BUG-0248
 title: Cinco avisos que no corresponden al modelo que se acaba de estimar (ruido blanco y ARMA(1,1))
-status: open
+status: fixed
 severity: low
 component: describe
 found_in: 0.2.3.dev0
-fixed_in: 
+fixed_in: 0.2.3.dev0
 reported: 2026-10-14
 reporter: David / Claude — rodaje de art con el ejemplo lutkepohl_poskitt de sima (Buffalo, carril guiado)
 tags:
@@ -66,19 +66,48 @@ justo en el caso en que la correlación sí es un fallo.
     confirm_and_estimate(lam=0, d=1, D=0, p=1, q=1, n_harmonics=0, seasonal=False)  # m02: 1
     formal_tests(m01.pre, run_meg=False)                                            # 3 y 4
 
+## Root cause
+
+1. `_overpar_note` (en `describe_diagnosis`) ponía la nota del AR(2) a todo
+   par AR–MA, sin mirar el AR.
+2. `_auto_scan_section` decidía el siguiente paso con `has_arma` (coeficientes
+   ARMA libres): un ruido blanco elegido no tiene ninguno, igual que el m00 de
+   la ruta B1, que sí está por identificar.
+3. `aviso_se_no_fiable` miraba sólo el origen (`.pre`) y el método de las SE,
+   no si había alguna SE.
+4. y 5. Las dos condiciones contaban el relleno `ar=[[0.0]]`, `ar_free=[[False]]`
+   que fue necesita sin operadores: `not (model.ar or [])` en el DCD y
+   `any(v is not None …)` en `_lleva_arma`. Confirmado: es la misma raíz.
+
 ## Fix
 
-1. La nota del AR(2) sólo si el factor AR del par tiene orden ≥ 2 con raíces
-   complejas; para un ARMA(1,1) con corr alta, decir lo contrario: «factor
-   común probable: compara las raíces AR y MA».
-2. `nxt` según el nodo `ordenes` del guion (ya decidido → contrastes
-   formales), no según `has_arma`.
-3. `aviso_se_no_fiable` vacío cuando el modelo no tiene parámetros libres.
-4. Contar los coeficientes AR (no los factores) en la condición del DCD.
-5. `_lleva_arma`: un factor cuyas banderas están todas fijas y sus valores a
-   cero es el relleno, no un ARMA (mismo criterio que BUG-0241 en guion_adopt).
+1. `src/art/describe.py`, `describe_diagnosis`: `_ar_complejo` mira si el AR
+   del par (regular, estacional o AR_f) tiene un factor de orden ≥ 2 con raíces
+   complejas. Sólo entonces sale la nota del AR(2); si no, «⚠ factor común
+   probable: compara las raíces AR y MA — si casi coinciden, se cancelan y
+   sobra el par».
+2. `src/art/mcp_server.py`, `_auto_scan_section`: `ordenes_decididos` sustituye
+   a `has_arma` en los tres `nxt` y en el nodo de distorsión fuerte. Los órdenes
+   están por decidir sólo si no hay ARMA libre, el modelo lleva deterministas
+   (el m00 de B1 y sus intervenciones) y el guion no tiene nodo `ordenes`. Los
+   dos llamantes (`confirm_and_estimate`, `suggest_intervention_form`) le pasan
+   la ruta del guion.
+3. `src/art/pipeline.py`, `aviso_se_no_fiable`: "" si `_build_param_labels`
+   no da ningún parámetro libre.
+4. `src/art/describe.py`, DCD: la condición usa `_p_ar` (coeficientes AR
+   libres), el mismo recuento que la línea «Candidato: …» de dos líneas antes.
+5. `src/art/interventions.py`, `_lleva_arma`: cuenta un coeficiente si es libre
+   o, fijo, distinto de cero. El relleno no cuenta (criterio de BUG-0241).
+
+Test: `tests/test_bug_0248_avisos_que_no_corresponden.py` — un test por texto
+sobre Buffalo, y uno unitario para `_lleva_arma` (relleno, libre a cero, fijo
+no nulo). Fallan los siete sin el arreglo.
 
 ## Validation
 
-Un test por texto, sobre la serie Buffalo del ejemplo (o una simulada de ruido
-blanco con d = 1).
+El repro sale con 0. Sobre Buffalo: m02 dice «factor común probable» junto a
+corr = +0.988; el escaneo de m01 termina en «procede a contrastes formales»,
+como el pie; `formal_tests` sobre m01.pre no da el aviso de SE ni la frase del
+AR; la intervención sobre m01 no lleva la nota de «p CONSERVADOR». Los tests
+del escaneo latente (BUG-0212), de la calibración, de BUG-0087/0088/0089 y de
+BUG-0090 siguen pasando.

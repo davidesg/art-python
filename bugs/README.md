@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**248 report(s), 20 open.**
+**248 report(s), 19 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -25,7 +25,6 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0244](BUG-0244-confirm-and-estimate-incremental-p-lista.md) | open | low | pipeline | confirm_and_estimate con base_pre_path no acepta `p` como lista de factores (TypeError en _arma_starts), así que no se puede sobreajustar AR(1)·AR(2) conservando las intervenciones | — |
 | [BUG-0245](BUG-0245-confirm-and-estimate-con-base-pre-path-ignora-en.md) | open | medium | pipeline | confirm_and_estimate con base_pre_path ignora en silencio n_harmonics/seasonal: estima el modelo SIN armónicos, lo registra en el guion con el nombre y la razón de los armónicos y dice «se conservan sus armónicos» | — |
 | [BUG-0246](BUG-0246-guided-identification-llamada-4-con-pre-path-eti.md) | open | low | guion | guided_identification (llamada 4 con pre_path) etiqueta el nodo estacionalidad como «D=0 (B1, armónicos deterministas)» en la Decisión A, sin armónicos, y lo escribe como un nodo nuevo duplicado | — |
-| [BUG-0248](BUG-0248-avisos-que-no-corresponden-al-modelo.md) | open | low | describe | Cinco avisos que no corresponden al modelo que se acaba de estimar (ruido blanco y ARMA(1,1)) | — |
 | [BUG-0249](BUG-0249-intervencion-calibra-sobre-un-modelo-que-ya-absorbio-el-suceso.md) | open | medium | intervencion | guided_intervention calibra sobre los residuos de un modelo que ya tiene órdenes, y no puede ver si esos órdenes los fabrica el anómalo | — |
 | [BUG-0251](BUG-0251-adoptar-dentro-del-empate-dice-coincide-con-la-propuesta.md) | open | low | guion | Adoptar un modelo del empate dice «coincide con la propuesta» y guarda coincide=True junto a una propuesta que es OTRO orden | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
@@ -250,6 +249,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0231](BUG-0231-la-diagnosis-solo-cita-la-q-de-39.md) | fixed | medium | diagnosis | La diagnosis de confirm_and_estimate sólo cita la Q(39) («decide 3f+3»); la Q en s y 2s (12 y 24) no aparece, aunque el método y el guion la piden | 0.2.3.dev0 |
 | [BUG-0241](BUG-0241-guion-adopt-arma00-se-cierra-como-ar1.md) | fixed | medium | guion | guion_adopt cierra el nodo «ordenes» de un ARMA(0,0) como ARMA(1,0) — cuenta el relleno AR(1) fijo a cero del .inp | 0.2.3.dev0 (sin commit) |
 | [BUG-0247](BUG-0247-box-cox-horquilla-y-ambigua-se-contradicen.md) | fixed | low | describe | El nodo Box-Cox dice a la vez «Eso NO es "las dos son razonables"» y «Ambas transformaciones son razonables» | 0.2.3.dev0 |
+| [BUG-0248](BUG-0248-avisos-que-no-corresponden-al-modelo.md) | fixed | low | describe | Cinco avisos que no corresponden al modelo que se acaba de estimar (ruido blanco y ARMA(1,1)) | 0.2.3.dev0 |
 | [BUG-0250](BUG-0250-encadenar-p0-q0-conserva-el-ar-de-la-base.md) | fixed | high | pipeline | confirm_and_estimate con base_pre_path y p=0, q=0 conserva el AR de la base en vez de quitarlo | 0.2.3.dev0 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |

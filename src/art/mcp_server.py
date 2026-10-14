@@ -5258,7 +5258,8 @@ def save_identification_report(inp_path: str, output_path: str,
 
 def _auto_scan_section(ts, m, lam: float, d: int, D: int,
                         p: int, q: int, P: int, Q: int,
-                        inp_path: str, pre_path: str
+                        inp_path: str, pre_path: str,
+                        guion_path: str = ""
                         ) -> "tuple[str, str | None]":
     """Auto-scan model residuals for outlier impact; return (text_section, b64).
 
@@ -5296,6 +5297,21 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
             _n_free(m.ar_s, m.ar_s_free) > 0,
             _n_free(m.ma_s, m.ma_s_free) > 0,
         ])
+        # BUG-0248: sin ARMA libre no quiere decir que falte identificarlo. Un
+        # ruido blanco ELEGIDO —(0,1,0) tras la llamada 4— decía «procede a la
+        # identificación ARMA» con el pie en «contrastes formales». Los órdenes
+        # están por decidir sólo en el m00 de la ruta B1 y sus descendientes de
+        # intervención (con deterministas), y mientras el guion no tenga nodo
+        # `ordenes`: ese nodo lo abre la llamada 4.
+        ordenes_decididos = has_arma or not (m.interventions or [])
+        if not ordenes_decididos and guion_path:
+            try:
+                _gp = os.path.expanduser(guion_path)
+                if os.path.exists(_gp):
+                    ordenes_decididos = _ultimo_nodo(
+                        _abre_guion(_gp), "ordenes") is not None
+            except Exception:
+                pass
         level = scan.data.get("distortion_level", "none")
         n_out = scan.data.get("n_outliers", 0)
         var_o = scan.data.get("var_outlier_pct", 0.0)
@@ -5307,7 +5323,7 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
         if level != "strong":
             if n_out == 0:
                 note = "anómalos revisados, ninguno significativo"
-                nxt = ("procede a la identificación ARMA" if not has_arma
+                nxt = ("procede a la identificación ARMA" if not ordenes_decididos
                        else "procede a contrastes formales")
                 return ("\n\n---\n\n*✓ Escaneo de anómalos (latente): " + note
                         + " → " + nxt + ".*"), None
@@ -5336,7 +5352,7 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
             if cambia is None:
                 cuerpo = (cab + " — no se pudo calibrar el correlograma; "
                           "llama a `residual_outlier_scan` antes de fijar órdenes")
-                nxt = ("procede a la identificación ARMA" if not has_arma
+                nxt = ("procede a la identificación ARMA" if not ordenes_decididos
                        else "procede a contrastes formales")
             elif cambia:
                 ar = ", ".join(f"PACF({k})" for k in sd.get("flips_ar", []))
@@ -5387,13 +5403,13 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
                 # El siguiente paso depende del veredicto, no del sitio del
                 # flujo: decir "interviene ANTES de identificar → procede a
                 # identificar" sería la misma contradicción.
-                nxt = ("procede a la identificación ARMA" if not has_arma
+                nxt = ("procede a la identificación ARMA" if not ordenes_decididos
                        else "procede a contrastes formales")
             return ("\n\n---\n\n*Escaneo de anómalos (latente): " + cuerpo
                     + " → " + nxt + ".*"), None
 
         # Distortion STRONG → surface the decision node (calibration + A/B + figure).
-        if has_arma:
+        if ordenes_decididos:
             ab_choice = (
                 "\n\n**PUNTO DE DECISIÓN (analista).** Anómalos grandes distorsionan con "
                 "fuerza la ACF/PACF. Claude: presenta la distorsión calibrada y SUGIERE; "
@@ -7687,6 +7703,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         scan_section, scan_b64 = _auto_scan_section(
             ts, m, lam=lam, d=d, D=D, p=p, q=q, P=P, Q=Q,
             inp_path=inp_path, pre_path=pre_path,
+            guion_path=guion_path or _derive_guion_path(output_path, m),
         )
 
         text = (
@@ -10375,6 +10392,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             ts, m_fit, lam=lam_fit, d=d_fit, D=D_fit,
             p=p_fit, q=q_fit, P=P_fit, Q=Q_fit,
             inp_path=inp_path, pre_path=new_pre_path,
+            guion_path=guion_path or _derive_guion_path(output_path, m_fit),
         )
 
         _forma_txt = form.upper() + (f" ({n_omega} escalones en el nivel)"
