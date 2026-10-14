@@ -2059,6 +2059,19 @@ def describe_diagnosis(model) -> Description:
             if result.white_noise else
             f"- Y además del retardo que decide, rechazan: {_s}.")
 
+    if result.alfa < 0.05:
+        # BUG-0237: la adecuación es UNA afirmación con k criterios; cada uno
+        # va al 5 %/k para que el tamaño conjunto no pase del 5 %.
+        lines.append(
+            f"- Nivel de cada criterio: **{100 * result.alfa:.2f} %** (5 % entre "
+            f"{round(0.05 / result.alfa)} contrastes, Bonferroni: el veredicto es "
+            "conjunto, con tamaño ≤ 5 %).")
+        if result.rechazos_aislados:
+            lines.append(
+                "- ⚠ **Salvedad**: al 5 % aislado rechazaría "
+                + ", ".join(result.rechazos_aislados)
+                + ". No bloquea —el veredicto es conjunto— pero dice dónde mirar.")
+
     if not result.centred:
         lines += [
             "",
@@ -2445,9 +2458,11 @@ def describe_formal_tests(model, run_meg: bool = True,
     _dg_fallos: list[str] = []
     _dg_avisos: list[str] = []
     if _dg is not None:
-        _q_min = min(_dg.q_pvalues) if _dg.q_pvalues else 1.0
+        # BUG-0237: el p que DECIDE es el del cancerbero (3f+3), no el mínimo
+        # de los cuatro retardos, y cada criterio va al nivel de la puerta.
         if not _dg.white_noise:
-            _dg_fallos.append(f"ruido blanco (Q): p mínimo = {_q_min:.4f}")
+            _dg_fallos.append(f"ruido blanco (Q({_dg.q_lag_cancerbero})): "
+                              f"p = {_dg.q_p_cancerbero:.4f}")
         if not _dg.normal:
             _dg_fallos.append(
                 f"normalidad (JB): {_dg.jb_stat:.3f}, p = {_dg.jb_pvalue:.4f}")
@@ -2458,6 +2473,11 @@ def describe_formal_tests(model, run_meg: bool = True,
             _dg_fallos.append(
                 f"estacionalidad en los residuos (p = "
                 f"{getattr(_dg.seasonal, 'p_value', float('nan')):.4f})")
+        if not _dg_fallos and _dg.rechazos_aislados:
+            _dg_avisos.append(
+                "al 5 % aislado rechazaría " + ", ".join(_dg.rechazos_aislados)
+                + f" (cada criterio va al {100 * _dg.alfa:.2f} %: la adecuación es "
+                "una afirmación conjunta, con tamaño ≤ 5 %)")
         if _dg.extreme:
             _peor = max(_dg.extreme, key=lambda t: abs(t[1]))
             _dg_avisos.append(
@@ -2516,10 +2536,11 @@ def describe_formal_tests(model, run_meg: bool = True,
             + "; ".join(_dg_avisos) + ".",
             ">",
             "> No invalida lo que sigue —las nulas de esta etapa suponen ruido "
-            "blanco, y el modelo lo es— pero conviene saber que está ahí: un "
-            "extremo aislado suele señalar un episodio cuya FORMA todavía no "
-            "está bien especificada. Añadir un parámetro no significativo sólo "
-            "para hacerlo desaparecer no es la respuesta.",
+            "blanco, y el modelo lo es— pero conviene saber que está ahí"
+            + (": un extremo aislado suele señalar un episodio cuya FORMA todavía "
+               "no está bien especificada" if _dg.extreme else "")
+            + ". Añadir un parámetro no significativo sólo para hacerla "
+            "desaparecer no es la respuesta.",
         ]
     if _dg_fallos:
         # BUG-0025: el aviso va ARRIBA, antes de cualquier estadístico, porque
@@ -2527,7 +2548,9 @@ def describe_formal_tests(model, run_meg: bool = True,
         lines += [
             "",
             "> ⚠ **Este modelo todavía NO es adecuado.** La diagnosis falla en: "
-            + "; ".join(_dg_fallos) + ".",
+            + "; ".join(_dg_fallos) + (
+                f" (cada criterio al {100 * _dg.alfa:.2f} %, para un tamaño "
+                "conjunto ≤ 5 %)" if _dg.alfa < 0.05 else "") + ".",
             ">",
             "> Los contrastes de esta etapa —MEG, Shin-Fuller, los DCD— derivan "
             "sus distribuciones nulas suponiendo residuos que son ruido blanco, "

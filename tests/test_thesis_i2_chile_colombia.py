@@ -84,7 +84,22 @@ def test_the_initial_specification_is_d_one(name):
     _ts, r = _run(name)
     assert r.d == 1
     assert r.lam == 0.0            # índice de precios: la regla de BUG-0015
-    assert r.D == 0 and r.decision == "B1"
+    if name == "IPC_Colombia":
+        # BUG-0237: con la puerta a tamaño conjunto 5 % (cada criterio al
+        # 1,25 %), la rama B2 es adecuada —su JB p = 0,029 ya no rechaza— y la
+        # B1 no (JB p ≈ 0); la adecuación decide la ruta antes que el MEG
+        # (`decide_seasonal_route`, paso 0). Antes fallaban las dos y decidía
+        # el MEG, que separa f=4: B1.
+        assert r.D == 1 and r.decision == "B2"
+        assert "B1 no pasa la diagnosis y B2 sí" in r.route_reason
+    else:
+        assert r.D == 0 and r.decision == "B1"
+
+
+def _modelo_b1(r):
+    """El modelo de la rama B1, que es donde vive el MEG: el final si la ruta
+    adoptada es B1, la rama abandonada si no (Colombia desde BUG-0237)."""
+    return r.final_model if r.decision == "B1" else r.branches["B1"][1]
 
 
 def test_colombia_is_where_the_trend_rule_earns_its_keep():
@@ -131,7 +146,7 @@ def test_the_meg_sweep_is_complete_on_both():
 
     for name in sorted(_SERIES):
         _ts, r = _run(name)
-        d = describe_formal_tests(r.final_model, run_meg=True)
+        d = describe_formal_tests(_modelo_b1(r), run_meg=True)
         megs = d.data["meg"]
         assert [x["freq"] for x in megs] == [1, 2, 3, 4, 5, 6], name
         assert not [x for x in megs if x["status"] == "skipped"], name
@@ -144,6 +159,6 @@ def test_colombia_carries_a_stochastic_frequency():
     from art.describe import describe_formal_tests
 
     _ts, r = _run("IPC_Colombia")
-    megs = {x["freq"]: x for x in describe_formal_tests(r.final_model, run_meg=True).data["meg"]}
+    megs = {x["freq"]: x for x in describe_formal_tests(_modelo_b1(r), run_meg=True).data["meg"]}
     assert megs[4]["status"] == "stochastic"
     assert [f for f, x in megs.items() if x["status"] == "stochastic"] == [4]
