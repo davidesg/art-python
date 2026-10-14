@@ -674,6 +674,7 @@ EXTIENDE la muestra de un modelo: el mismo modelo, más observaciones.
 | `inp_path` | string | yes | — |
 | `run_meg` | boolean | no | `True` |
 | `subdiferenciacion` | boolean | no | `False` |
+| `modelo_d_menos_1` | — | no | `None` |
 
 Run formal hypothesis tests on a fitted model.
 
@@ -766,6 +767,12 @@ Run formal hypothesis tests on a fitted model.
                Y cuando lo pidas, lee BUG-0167: con un AR de orden 1 el brazo
                nulo gasta su única raíz en la unitaria y el LR mide dinámica
                perdida, no frontera.
+    modelo_d_menos_1 : .pre/.inp del modelo de la MISMA serie en d−1 (BUG-0235).
+               Forma el par de la frontera d−1/d, que cruza dos modelos: el DCD
+               de subdiferenciación de éste y el Shin-Fuller de aquél, con su
+               tabla de verdad. Es la forma de mirar un modelo en d=2 —desde d=2
+               no se contrasta una tercera diferencia—. Implica
+               `subdiferenciacion=True`.
 
 ---
 

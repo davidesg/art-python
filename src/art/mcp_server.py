@@ -4261,7 +4261,8 @@ def overparameterization_analysis(inp_path: str, threshold: float = 0.7) -> list
 
 @mcp.tool()
 def formal_tests(inp_path: str, run_meg: bool = True,
-                 subdiferenciacion: bool = False) -> list:
+                 subdiferenciacion: bool = False,
+                 modelo_d_menos_1: str | None = None) -> list:
     """
     Run formal hypothesis tests on a fitted model.
 
@@ -4354,14 +4355,22 @@ def formal_tests(inp_path: str, run_meg: bool = True,
                Y cuando lo pidas, lee BUG-0167: con un AR de orden 1 el brazo
                nulo gasta su única raíz en la unitaria y el LR mide dinámica
                perdida, no frontera.
+    modelo_d_menos_1 : .pre/.inp del modelo de la MISMA serie en d−1 (BUG-0235).
+               Forma el par de la frontera d−1/d, que cruza dos modelos: el DCD
+               de subdiferenciación de éste y el Shin-Fuller de aquél, con su
+               tabla de verdad. Es la forma de mirar un modelo en d=2 —desde d=2
+               no se contrasta una tercera diferencia—. Implica
+               `subdiferenciacion=True`.
     """
     try:
         from mcp.types import TextContent
         from art.describe import describe_formal_tests
         from art.diagnosis import diagnose
         ts, m = _load_fitted(inp_path)
+        m1 = _load_fitted(modelo_d_menos_1)[1] if modelo_d_menos_1 else None
         desc = describe_formal_tests(m, run_meg=run_meg,
-                                     subdiferenciacion=subdiferenciacion)
+                                     subdiferenciacion=subdiferenciacion,
+                                     modelo_d_menos_1=m1)
 
         # Ésta es la etapa de CIERRE: el analista da aquí el vistazo final, y
         # tiene que dárselo AL MODELO, no sólo a los contrastes. La ecuación con
