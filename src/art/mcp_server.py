@@ -5559,8 +5559,13 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             _g(_confirma_nodo, "d", str(int(d)), valor=int(d),
                razon=razon if D < 0 else "")
         if D >= 0:
+            # BUG-0246: tener `pre_path` no es estar en la ruta B1 —también la
+            # Decisión A calibra anómalos con un base y vuelve con su `.pre`—.
+            # La ruta la dice el `.pre`; con la etiqueta correcta, el nodo ya
+            # confirmado con el mismo valor no se duplica.
+            _ruta_pre = _ruta_estacional_del_pre(pre_path) if pre_path else ""
             _g(_confirma_nodo, "estacionalidad",
-               lambda pv: _texto_D(D, seasonal_hint=pv or "", b1=bool(pre_path)),
+               lambda pv: _texto_D(D, seasonal_hint=_ruta_pre or pv or ""),
                valor=int(D), razon=razon, coincide_fn=_coincide_D)
 
         # D2: las expectativas pueden llegar en cualquier llamada, no sólo en
@@ -6903,15 +6908,29 @@ def _texto_ordenes(p, q, P=0, Q=0, s=12) -> str:
     return f"ARMA({p},{q})" + (f"×({P},{Q})_{s}" if (P or Q) else "")
 
 
-def _texto_D(D: int, seasonal_hint: str = "", b1: bool = False) -> str:
+def _texto_D(D: int, seasonal_hint: str = "") -> str:
     """El valor del nodo estacionalidad, dicho con su ruta."""
     if int(D) >= 1:
         return f"D={int(D)} (B2, diferencia estacional)"
-    if b1 or seasonal_hint == "B1":
+    if seasonal_hint == "B1":
         return "D=0 (B1, armónicos deterministas)"
     if seasonal_hint == "A":
         return "D=0 (sin estacionalidad)"
     return "D=0"
+
+
+def _ruta_estacional_del_pre(pre_path: str) -> str:
+    """La ruta estacional de un modelo: «B1» si lleva armónicos (cos/sin/alter),
+    «A» si no — BUG-0246. "" si el fichero no se puede leer."""
+    try:
+        import fue
+        _, m = fue.load(os.path.expanduser(pre_path))
+    except Exception as e:
+        _warn("ruta estacional del .pre", e)
+        return ""
+    return ("B1" if any(getattr(i, "type", "") in ("cos", "sin", "alter")
+                        for i in (getattr(m, "interventions", None) or []))
+            else "A")
 
 
 def _coincide_D(propuesta, D) -> bool | None:
