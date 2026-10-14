@@ -1,11 +1,11 @@
 ---
 id: BUG-0250
 title: confirm_and_estimate con base_pre_path y p=0, q=0 conserva el AR de la base en vez de quitarlo
-status: open
+status: fixed
 severity: high
 component: pipeline
 found_in: 0.2.3.dev0
-fixed_in: 
+fixed_in: 0.2.3.dev0
 reported: 2026-10-14
 reporter: David / Claude — rodaje de art con el ejemplo lutkepohl_poskitt de sima (Minneapolis, carril guiado)
 tags:
@@ -58,13 +58,20 @@ siempre `[[0.0]]` fijo; `m_base.ar or` hereda el AR libre de la base.
 
 ## Fix
 
+En `_build_arma_on_model` (`src/art/pipeline.py`), sin ARMA el relleno es
+siempre el AR(1) fijo a cero:
+
     ar   = [[0.0]]
     ar_f = [[False]]
 
-y un test: base con AR(1) libre, encadenar p=q=0, el modelo no tiene
-parámetros AR libres.
+Test: `tests/test_bug_0250_encadenar_p0_q0_quita_el_ar.py` — un base con
+AR(1) libre, encadenado con p = q = 0, no deja ningún AR libre, y estimado
+no lleva AR. Falla sin el arreglo.
 
 ## Validation
 
-Rodeado en el ejemplo construyendo la intervención sobre el (0,1,0) (m03 → m06
+El repro sale con 0: m05 (p = 0, q = 0 sobre m04) es `∇Nₜ = aₜ` con los
+escalones.
+
+Antes del arreglo se rodeó en el ejemplo construyendo la intervención sobre el (0,1,0) (m03 → m06
 con `suggest_intervention_form`): ω = 14.33, 14.01, ℓ −294.20, AIC 592.40.

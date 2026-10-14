@@ -1061,9 +1061,11 @@ def _build_arma_on_model(m_base, p: int, q: int,
         ar   = [ar_i]
         ar_f = [[True] * p]
     elif q == 0 and P == 0 and Q == 0:
-        # Keep the p=0,q=0 workaround only when there is truly no ARMA at all
-        ar   = m_base.ar or [[0.0]]
-        ar_f = m_base.ar_free or [[False]]
+        # Sin ARMA: fue necesita un AR de relleno, FIJO a cero. Nunca el del
+        # base (BUG-0250): `m_base.ar or ...` heredaba el AR libre, y encadenar
+        # p = q = 0 —«vuelve al modelo sin él»— devolvía el mismo modelo.
+        ar   = [[0.0]]
+        ar_f = [[False]]
     else:
         ar   = []
         ar_f = []
