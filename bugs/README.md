@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**248 report(s), 20 open.**
+**248 report(s), 19 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -22,7 +22,6 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0240](BUG-0240-c-candidatos-por-mlp-en-la-senal-mas-ruido.md) | open | medium | identification (C) | El identificador en C (atsw-gui) acierta el 18 % del ARMA(1,1) señal + ruido (0,95/0,7) frente al 64 % de art-python: sus candidatos salen del MLP y no de los filtros de corte | — |
 | [BUG-0242](BUG-0242-sf-sobreajuste-raiz-negativa-se-calla.md) | open | medium | formal_tests | formal_tests calla el Shin-Fuller por sobreajuste cuando la raíz real recuperada es NEGATIVA y dice «el lado AR no existe», cuando sí es informativa | — |
 | [BUG-0243](BUG-0243-dcd-subdif-con-ma2-anade-testigo.md) | open | medium | formal_tests | dcd_underdiff_regular con un MA(2) en el modelo AÑADE un testigo MA(1) aparte en vez de contrastar la raíz del MA(2) en +1 — sale θ̂ = −0,12, LR = 50,6, sin significado | — |
-| [BUG-0245](BUG-0245-confirm-and-estimate-con-base-pre-path-ignora-en.md) | open | medium | pipeline | confirm_and_estimate con base_pre_path ignora en silencio n_harmonics/seasonal: estima el modelo SIN armónicos, lo registra en el guion con el nombre y la razón de los armónicos y dice «se conservan sus armónicos» | — |
 | [BUG-0246](BUG-0246-guided-identification-llamada-4-con-pre-path-eti.md) | open | low | guion | guided_identification (llamada 4 con pre_path) etiqueta el nodo estacionalidad como «D=0 (B1, armónicos deterministas)» en la Decisión A, sin armónicos, y lo escribe como un nodo nuevo duplicado | — |
 | [BUG-0247](BUG-0247-box-cox-horquilla-y-ambigua-se-contradicen.md) | open | low | describe | El nodo Box-Cox dice a la vez «Eso NO es "las dos son razonables"» y «Ambas transformaciones son razonables» | — |
 | [BUG-0248](BUG-0248-avisos-que-no-corresponden-al-modelo.md) | open | low | describe | Cinco avisos que no corresponden al modelo que se acaba de estimar (ruido blanco y ARMA(1,1)) | — |
@@ -250,6 +249,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0231](BUG-0231-la-diagnosis-solo-cita-la-q-de-39.md) | fixed | medium | diagnosis | La diagnosis de confirm_and_estimate sólo cita la Q(39) («decide 3f+3»); la Q en s y 2s (12 y 24) no aparece, aunque el método y el guion la piden | 0.2.3.dev0 |
 | [BUG-0241](BUG-0241-guion-adopt-arma00-se-cierra-como-ar1.md) | fixed | medium | guion | guion_adopt cierra el nodo «ordenes» de un ARMA(0,0) como ARMA(1,0) — cuenta el relleno AR(1) fijo a cero del .inp | 0.2.3.dev0 (sin commit) |
 | [BUG-0244](BUG-0244-confirm-and-estimate-incremental-p-lista.md) | fixed | low | pipeline | confirm_and_estimate con base_pre_path no acepta `p` como lista de factores (TypeError en _arma_starts), así que no se puede sobreajustar AR(1)·AR(2) conservando las intervenciones | 0.2.3.dev0 |
+| [BUG-0245](BUG-0245-confirm-and-estimate-con-base-pre-path-ignora-en.md) | fixed | medium | pipeline | confirm_and_estimate con base_pre_path ignora en silencio n_harmonics/seasonal: estima el modelo SIN armónicos, lo registra en el guion con el nombre y la razón de los armónicos y dice «se conservan sus armónicos» | 0.2.3.dev0 |
 | [BUG-0250](BUG-0250-encadenar-p0-q0-conserva-el-ar-de-la-base.md) | fixed | high | pipeline | confirm_and_estimate con base_pre_path y p=0, q=0 conserva el AR de la base en vez de quitarlo | 0.2.3.dev0 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
