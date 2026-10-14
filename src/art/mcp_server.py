@@ -9288,6 +9288,96 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
 
 
 # ---------------------------------------------------------------------------
+# La serie de identificación de un modelo con ARMA — BUG-0249
+# ---------------------------------------------------------------------------
+#
+# La llamada 1 de `guided_intervention` calibra los RESIDUOS del modelo que se
+# le pasa. Si ese modelo ya tiene el orden que un anómalo pudo fabricar, el
+# orden se comió la señal y la calibración no puede verla: sobre el AR(1) de
+# Minneapolis, r(1) +0.009 → −0.110; sobre la misma serie sin el AR, +0.221 →
+# +0.071, y el par 12/1973–01/1974 hace un tercio. Con dos escalones en 12/1973
+# el φ cae de 0.229 (t 2.34) a 0.118 (t 1.16). La pregunta del nodo —¿este
+# orden es estructura o lo hace un suceso?— quedaba sin respuesta justo cuando
+# el orden ya está en el modelo, que es el caso normal tras identificar.
+
+def _ordenes_arma(m) -> "dict[str, int]":
+    """Los órdenes con algún coeficiente LIBRE: {"AR": p, "MA": q, "AR_s": P,
+    "MA_s": Q}, sin los nulos. El relleno `ar=[[0.0]]` fijo no cuenta."""
+    out = {}
+    for clave, atr in (("AR", "ar"), ("MA", "ma"), ("AR_s", "ar_s"),
+                       ("MA_s", "ma_s")):
+        fs = getattr(m, atr, None) or []
+        fl = getattr(m, atr + "_free", None) or []
+        libre = any(
+            (fl[i][j] if i < len(fl) and fl[i] is not None and j < len(fl[i])
+             else True)
+            for i, f in enumerate(fs) for j in range(len(f)))
+        if libre:
+            out[clave] = sum(len(f) for f in fs)
+    return out
+
+
+def _texto_ordenes_arma(o: "dict[str, int]") -> str:
+    """«AR(1)», «AR(1) y MA(1)», «MA estacional (1)»…"""
+    nom = {"AR": "AR({})", "MA": "MA({})", "AR_s": "AR estacional ({})",
+           "MA_s": "MA estacional ({})"}
+    partes = [nom[k].format(v) for k, v in o.items()]
+    return " y ".join(partes) if len(partes) <= 2 else \
+        ", ".join(partes[:-1]) + " y " + partes[-1]
+
+
+def _sin_arma(m):
+    """El mismo modelo SIN su ARMA —deterministas, intervenciones, d, D y
+    factores de frecuencia fija heredados—, estimado. Sus residuos son la serie
+    de identificación: ∇^d ∇_s^D y(λ) menos los deterministas. None si falla."""
+    try:
+        from art.pipeline import _build_arma_on_model
+        m0 = _build_arma_on_model(m, p=0, q=0, P=0, Q=0)
+        m0.fit()
+        if getattr(m0, "_result", None) is None or m0._result.residuals is None:
+            return None
+        return m0
+    except Exception as e:
+        _warn("guided_intervention: la serie sin el ARMA no se pudo estimar", e)
+        return None
+
+
+def _orden_y_anomalos(m, cal0, ordenes: "dict[str, int]") -> "tuple[list, list]":
+    """Sobre la calibración `cal0` de la serie SIN el ARMA, los retardos de los
+    órdenes del modelo y lo que les hacen los anómalos.
+
+    Devuelve `(filas, sospechas)`. Cada fila es `(clave, función, k, obs, cal,
+    estado, Distorsion)` con `estado` ∈ {"fabricada", "marginal", None}:
+    «fabricada» es el cambio de veredicto con margen (BUG-0212); «marginal»,
+    fuera de banda y dentro al omitirlos, sin el margen. El AR se lee en la
+    PACF y el MA en la ACF, como en la tabla de la llamada 1."""
+    s = int(getattr(getattr(m, "series", None), "freq", 0) or 0)
+    por_lag = {d.lag: d for d in cal0.distorsiones}
+    filas = []
+    for clave, n in ordenes.items():
+        paso = s if clave.endswith("_s") and s > 1 else 1
+        if clave.endswith("_s") and paso == 1:
+            continue
+        pacf = clave.startswith("AR")
+        for j in range(1, n + 1):
+            d = por_lag.get(j * paso)
+            if d is None:
+                continue
+            obs, cal = ((d.pacf_obs, d.pacf_cal) if pacf
+                        else (d.acf_obs, d.acf_cal))
+            flip = d.pacf_flip if pacf else d.acf_flip
+            if flip == "fabricada":
+                estado = "fabricada"
+            elif abs(obs) > cal0.banda and abs(cal) < cal0.banda:
+                estado = "marginal"
+            else:
+                estado = None
+            filas.append((clave, "PACF" if pacf else "ACF", d.lag, obs, cal,
+                          estado, d))
+    return filas, [f for f in filas if f[5]]
+
+
+# ---------------------------------------------------------------------------
 # Tool: guided_intervention — la PUERTA del nodo de intervención
 # ---------------------------------------------------------------------------
 
@@ -9766,7 +9856,7 @@ def guided_intervention(inp_path: str,
                         # hipótesis caía sobre datos que no le corresponden.
                         # `Candidato.arranque_resid` ya trae la posición buena,
                         # 1-based en residuos, que es el índice de `at`.
-                        _fig2 = describe_superposicion(
+                        _sup = describe_superposicion(
                             m._result.residuals,
                             at=int(getattr(mejor, "arranque_resid", ep.inicio)),
                             omega=_om, entrada=_ent,
@@ -9774,7 +9864,20 @@ def guided_intervention(inp_path: str,
                             freq=_f, start=getattr(ts, "start", ()),
                             desfase=_desfase_obs(m),      # BUG-0172
                             etiqueta=f"{mejor.etiqueta} — {mejor.en_palabras}",
-                        ).figure_b64
+                        )
+                        _fig2 = _sup.figure_b64
+                        # BUG-0249: la leyenda dice «hypothesis × 0.88» y nada
+                        # lo explicaba — el texto de la superposición, que sí lo
+                        # dice, no se publica en esta llamada.
+                        _esc = (_sup.data or {}).get("escala")
+                        if _esc is not None:
+                            L += ["", f"*En la figura, «hypothesis × {_esc:.3g}» "
+                                  "es la respuesta de la forma ganadora, con sus "
+                                  "ω estimados, multiplicada por el factor que "
+                                  "mejor la encaja en lo observado (mínimos "
+                                  "cuadrados por el origen). Cerca de 1, la "
+                                  "amplitud estimada es la que se ve; lejos de "
+                                  "1, la forma puede valer pero la amplitud no.*"]
                 except Exception as _se:
                     _warn(f"guided_intervention: superposición no disponible: {_se}")
 
@@ -9825,12 +9928,83 @@ def guided_intervention(inp_path: str,
              "pueden cambiar de veredicto en sentidos opuestos en el mismo "
              "retardo.", "", "---", "", d_cal.summary, ""]
 
+        # BUG-0249: con ARMA, los residuos no ven si el orden lo fabrica un
+        # anómalo — el orden ya se comió esa señal. Se calibra TAMBIÉN la serie
+        # de identificación (el modelo sin su ARMA) en los retardos del modelo.
+        _ords = _ordenes_arma(m)
+        fabricado, sospecha = [], []
+        if _ords:
+            _m0 = _sin_arma(m)
+            if _m0 is not None:
+                try:
+                    _cal0 = calibra_correlograma(
+                        _m0._result.residuals, umbral=threshold, freq=_f,
+                        start=getattr(ts, "start", ()),
+                        desfase=_desfase_obs(_m0),
+                        estacional=estacionalidad_del_modelo(_m0))
+                    filas, sospecha = _orden_y_anomalos(m, _cal0, _ords)
+                except Exception as _ce:
+                    _warn("guided_intervention: calibración sin el ARMA", _ce)
+                    filas = []
+                if filas:
+                    from art.calibracion import CUOTA_PAR_DOMINANTE as _CUOTA
+                    _ot = _texto_ordenes_arma(_ords)
+                    fabricado = [f for f in sospecha if f[5] == "fabricada"]
+                    L += ["---", "", f"### Este modelo ya tiene {_ot}", "",
+                          f"La tabla de arriba calibra los **residuos** de este "
+                          f"modelo, y su {_ot} ya se comió la señal que un "
+                          "anómalo pudo fabricar en sus retardos: sobre ellos no "
+                          "se ve si ese orden es estructura o lo hace un suceso. "
+                          "Se calibra también la **serie de identificación** —la "
+                          "misma sin el ARMA: ∇^d ∇_s^D y(λ) menos los "
+                          f"deterministas—, banda ±{_cal0.banda:.3f}:", "",
+                          "| orden | retardo | serie sin ARMA | sin anómalos |",
+                          "|---|---|---|---|"]
+                    for clave, fun, k, o, c, _e, _d in filas:
+                        L.append(f"| {clave} | {fun}({k}) | {o:+.3f} | {c:+.3f} |")
+                    L.append("")
+                    for clave, fun, k, o, c, est, d in sospecha:
+                        _par = ""
+                        if (d.pares and abs(d.acf_obs) > 1e-9
+                                and abs(d.pares[0][2] / d.acf_obs) >= _CUOTA):
+                            i, j, cp = d.pares[0]
+                            _par = (f" El par {_cal0.fecha(i)}–{_cal0.fecha(j)} "
+                                    f"hace {cp:+.3f} de r({k}) "
+                                    f"({100 * cp / d.acf_obs:.0f} %).")
+                        L.append(
+                            (f"⚠ **El {clave}({k}) lo fabrican los anómalos**: al "
+                             f"omitirlos, {fun}({k}) pasa de {o:+.3f}, claramente "
+                             f"fuera de banda, a {c:+.3f}, claramente dentro."
+                             if est == "fabricada" else
+                             f"⚠ **El {clave}({k}) puede estar fabricado por los "
+                             f"anómalos**: al omitirlos, {fun}({k}) pasa de "
+                             f"{o:+.3f}, fuera de banda, a {c:+.3f}, dentro —sin "
+                             "el margen que haría falta para cambiar de "
+                             "veredicto, pero es el retardo del orden.")
+                            + _par)
+                        L.append("")
+                    if sospecha:
+                        L += ["Para saberlo, interviene el suceso y mira si el "
+                              "orden sobrevive: si su t cae, lo hacía el suceso. "
+                              "O vuelve al modelo sin el orden (`p=0, q=0` con "
+                              "`base_pre_path`) y pasa aquí ese `.pre`.", ""]
+                    else:
+                        L += [f"Sobre la serie sin el ARMA los anómalos tampoco "
+                              f"mueven los retardos del {_ot}: ese orden no lo "
+                              "fabrican ellos.", ""]
+
         cambia = bool(getattr(cal, "flips_ar", []) or getattr(cal, "flips_ma", []))
         L += ["---", "", "## Veredicto", ""]
         if cambia:
             L += ["**Los anómalos SÍ cambian la identificación.** Intervenir "
                   "está justificado: sin hacerlo se estaría eligiendo el orden "
                   "de los operadores sobre un correlograma contaminado.", ""]
+        elif fabricado:
+            L += ["**Sobre los residuos los anómalos no cambian nada, pero el "
+                  "orden del modelo lo fabrican ellos** (arriba). Intervenir "
+                  "está justificado: el orden se eligió sobre un correlograma "
+                  "contaminado, y los residuos de este modelo no pueden "
+                  "enseñarlo.", ""]
         else:
             L += ["**Los anómalos NO cambian la identificación.** Ningún "
                   "retardo cambia de veredicto al omitirlos, ni en la ACF ni "
@@ -9840,6 +10014,9 @@ def guided_intervention(inp_path: str,
                   "residuo sube de |z| y pide su turno. El criterio de parada "
                   "es éste — cuando la calibración deja de decir que los "
                   "anómalos cambian la identificación, se para.", ""]
+            if sospecha:
+                L += ["⚠ **Salvo el orden del modelo** (arriba): puede ser del "
+                      "suceso, y esta parada no lo cubre.", ""]
 
         ext = [(i + 1, float(z[i])) for i in range(len(z))
                if abs(z[i]) > threshold]
@@ -9876,9 +10053,20 @@ def guided_intervention(inp_path: str,
             _warn(f"guided_intervention: figura del escaneo no disponible: {_fe}")
         return _result(Description(summary="\n".join(L),
                                    figure_b64=_fig,
-                                   recommendation=d_cal.recommendation,
+                                   recommendation=(
+                                       "El orden del modelo lo fabrican los "
+                                       "anómalos (BUG-0249): interviene el suceso "
+                                       "y mira si el orden sobrevive."
+                                       if fabricado and not cambia else
+                                       d_cal.recommendation
+                                       + (" Salvo el orden del modelo, que puede "
+                                          "ser del suceso: interviene y mira si "
+                                          "sobrevive." if sospecha and not cambia
+                                          else "")),
                                    data=dict(llamada=1,
-                                             cambia_identificacion=cambia)))
+                                             cambia_identificacion=cambia,
+                                             orden_fabricado=bool(fabricado),
+                                             orden_sospechoso=bool(sospecha))))
     except Exception:
         return _err(traceback.format_exc())
 
