@@ -905,22 +905,39 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
                 f"  · ARIMA({sp.p},{sp.d},{sp.q})({sp.P},{sp.D},{sp.Q})_{sp.s}"
                 f"  [{', '.join(d_)}]  sim={sp.similarity:.3f}")
 
-    # Ambiguity: top-2 gap < 0.05 — sobre el RANKING, no sobre los dispersos
+    # Ambiguity — sobre el RANKING, no sobre los dispersos
     specs = completos or specs
-    # |gap|: parsimony may put a slightly less similar candidate first (BUG-0198)
-    ambiguous = len(specs) >= 2 and abs(specs[0].similarity - specs[1].similarity) < 0.05
-    top_gap   = abs(specs[0].similarity - specs[1].similarity) if len(specs) >= 2 else 1.0
+    # BUG-0233: la ambigüedad es la BANDA DEL EMPATE del primer puesto (la de
+    # `_nested_parsimony`, la de la ficha), no «los dos primeros de la lista».
+    # La lista va por parsimonia dentro de bandas de 0,04 de similitud, así que
+    # el 2.º puede salir de la banda SIGUIENTE: en Salamanca el aviso nombraba
+    # (1,1,1) y (3,1,0) mientras la ficha comparaba (1,1,1), (1,1,2) y (2,1,1).
+    banda = [sp for sp in specs if getattr(sp, "tied", False)]
+    ambiguous = len(banda) >= 2
+    top_gap = (max(sp.similarity for sp in banda) - min(sp.similarity for sp in banda)
+               if ambiguous else
+               abs(specs[0].similarity - specs[1].similarity) if len(specs) >= 2
+               else 1.0)
+    _nombre = lambda sp: (f"ARIMA({sp.p},{d},{sp.q})"
+                          if int(getattr(ts, "freq", 1) or 1) <= 1 or _sin_est else
+                          f"SARIMA({sp.p},{d},{sp.q})({sp.P},{D},{sp.Q})")
+    _enum = lambda xs: (", ".join(xs[:-1]) + " y " + xs[-1]) if len(xs) > 1 else "".join(xs)
 
+    if len(specs) >= 2:
+        lines += ["", "*Orden de la lista: por parsimonia dentro de bandas de 0,04 de "
+                  "similitud —en cada banda, menos parámetros primero y un modelo puro "
+                  "antes que un mixto—; no por similitud ni por AICc.*"]
     if ambiguous:
         lines += [
             "",
-            f"⚠ **Decisión ambigua** — los dos primeros candidatos difieren en sólo "
-            f"{top_gap:.3f} de similitud. El patrón ACF/PACF no discrimina claramente "
-            f"entre ellos.",
-            "  Recomendación: estimar ambos y comparar AIC/BIC y calidad de residuos.",
+            f"⚠ **Decisión ambigua** — {_enum([_nombre(sp) for sp in banda])} quedan en "
+            f"la banda del primer puesto (a menos de 0,04 de similitud; "
+            f"diferencia máxima {top_gap:.3f}). El patrón ACF/PACF no los separa.",
+            "  Recomendación: estimarlos y comparar AIC/BIC y calidad de residuos.",
         ]
     elif specs:
-        lines += ["", f"El patrón favorece claramente el modelo 1 (gap={top_gap:.3f})."]
+        lines += ["", "El patrón favorece el modelo 1: ningún otro candidato queda en "
+                  "su banda de empate (0,04 de similitud)."]
 
     # THE CARD OF IMPLIED DYNAMICS — the domain procedure (docs/DISENO-dominio-
     # en-los-ordenes.md, decided 2026-09-30): generated here, by itself, when
@@ -992,13 +1009,12 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
             seasonal_note = "D=1: sin armónicos. Especifica P, Q en confirm_and_estimate."
 
     if ambiguous:
-        sp0, sp1 = specs[0], specs[1]
+        # BUG-0233: los de la ficha, si la hay; si no, los de la banda.
+        _emp = tied if len(tied) >= 2 else banda
         rec = (
-            (f"Decisión ambigua entre ARIMA({sp0.p},{d},{sp0.q}) y "
-             f"ARIMA({sp1.p},{d},{sp1.q}). " if _freq <= 1 or _sin_est else
-             f"Decisión ambigua entre SARIMA({sp0.p},{d},{sp0.q})({sp0.P},{D},{sp0.Q}) y "
-             f"SARIMA({sp1.p},{d},{sp1.q})({sp1.P},{D},{sp1.Q}). ")
-            + f"Estima ambos y elige por AIC/BIC y diagnosis de residuos. "
+            f"Decisión ambigua entre {_enum([_nombre(sp) for sp in _emp])}. "
+            + ("Estima ambos" if len(_emp) == 2 else "Estímalos")
+            + " y elige por AIC/BIC y diagnosis de residuos. "
             + seasonal_note
         )
     else:
