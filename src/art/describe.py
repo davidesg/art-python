@@ -768,6 +768,69 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2,
 # Identification (ACF/PACF + order suggestions)
 # ---------------------------------------------------------------------------
 
+#: Raíz inversa real y positiva a partir de la cual un factor «casi se cancela»
+#: con una diferencia (BUG-0239): φ̂ ≥ 0,9 apunta a una ∇ que falta; θ̂ ≥ 0,9, a
+#: una que sobra. Y siempre que el OTRO lado no la cancele (una raíz AR y una MA
+#: casi iguales se anulan entre sí, no con la diferencia): las dos a menos de
+#: `HOLGURA_CANCELACION` no avisan. Medido con 60 réplicas por caso (n = 200):
+#: 4 % de avisos en modelos sin persistencia (ruido, AR(1) 0,6, MA(1) 0,5,
+#: ARMA(1,1) 0,6/0,3); 72 % en ARMA(1,1) 0,95/0,7, 43 % en un I(2) con d = 1,
+#: 88-95 % sobrediferenciando un I(0).
+RAIZ_PERSISTENTE = 0.9
+HOLGURA_CANCELACION = 0.05
+
+
+def _raiz_real_mayor(coef) -> float:
+    """La mayor raíz inversa REAL y positiva de 1 − c₁B − … − cₖBᵏ (0 si no hay)."""
+    import numpy as np
+    c = [float(x) for x in (coef if coef is not None else [])]
+    if not c:
+        return 0.0
+    r = np.roots([1.0] + [-x for x in c])
+    reales = [float(z.real) for z in r if abs(z.imag) < 1e-8 and z.real > 0]
+    return max(reales, default=0.0)
+
+
+def _aviso_aicc_persistente(specs, d: int) -> str:
+    """El AICc como AVISO, no como columna — BUG-0239.
+
+    En la batería ARIMA el AICc sólo gana a la similitud en los mixtos casi
+    cancelados, y en los casos reales (Salamanca, Villaverde) su preferencia por
+    un ARMA(1,1) con φ ≈ 0,95 anunciaba que el orden de integración estaba
+    abierto. Eso es lo que se dice, y sólo eso: si el mejor de la lista por
+    AICc es un mixto con una raíz AR real ≥ 0,9, o lleva una raíz MA real
+    ≥ 0,9, y el otro lado no la cancela. No ordena nada.
+    """
+    import math
+    fin = [sp for sp in specs if getattr(sp, "aicc", None) is not None
+           and math.isfinite(sp.aicc) and getattr(sp, "coef", None) is not None]
+    if len(fin) < 2:
+        return ""
+    best = min(fin, key=lambda sp: sp.aicc)
+    phi, theta = best.coef[0], best.coef[1]
+    r_ar, r_ma = _raiz_real_mayor(phi), _raiz_real_mayor(theta)
+    nombre = f"ARIMA({best.p},{d},{best.q})" + (
+        f"({best.P},{best.D},{best.Q})" if best.P or best.Q else "")
+    pos = specs.index(best) + 1
+    donde = "es el 1.º de la lista" if pos == 1 else f"es el {pos}.º de la lista"
+    if (best.p > 0 and best.q > 0 and r_ar >= RAIZ_PERSISTENTE
+            and r_ma <= r_ar - HOLGURA_CANCELACION):
+        return (f"⚠ **Aviso del AICc** — prefiere {nombre} ({donde}), con una raíz "
+                f"AR real de {r_ar:.2f} y una MA de {r_ma:.2f}: un mixto persistente, "
+                f"con la raíz AR rozando la unidad. Es la señal de que el **orden de "
+                f"integración puede estar abierto** (con φ → 1 falta una diferencia). "
+                f"Contrástalo sobre "
+                f"el modelo estimado con `formal_tests` (Shin-Fuller y los DCD), no "
+                f"lo decidas por el AICc: el AICc no ordena esta lista.")
+    if best.q > 0 and r_ma >= RAIZ_PERSISTENTE and r_ar <= r_ma - HOLGURA_CANCELACION:
+        return (f"⚠ **Aviso del AICc** — prefiere {nombre} ({donde}), con una raíz "
+                f"MA real de {r_ma:.2f}: con θ → 1 la diferencia puede **sobrar**, y el "
+                f"orden de integración está abierto. Contrástalo sobre el modelo "
+                f"estimado con `formal_tests` (el DCD de sobrediferenciación), no lo "
+                f"decidas por el AICc: el AICc no ordena esta lista.")
+    return ""
+
+
 def describe_identification(ts, d: int, D: int, lam: float = 0.0,
                             npar: int = 0,
                             estacional: bool | None = None) -> Description:
@@ -836,17 +899,12 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
         if getattr(sp, "sparse_ma_lag", 0):
             disperso.append(f"MA sólo en B^{sp.sparse_ma_lag}")
         sufijo = f"  [{', '.join(disperso)}]" if disperso else ""
-        # 9-oct-2026: the ΔAICc is shown ONLY inside the tie of the first place,
-        # which is the one place it acts (the last key of `_nested_parsimony`,
-        # between candidates of equal size and purity). Shown beside every
-        # order, the analyst read it as a second criterion that the list does
-        # not follow (BUG-0198, option B).
-        _band = [c for c in completos if getattr(c, "tied", False)
-                 and getattr(c, "aicc", None) is not None and np.isfinite(c.aicc)]
-        _a = getattr(sp, "aicc", None)
-        _fit = ""
-        if getattr(sp, "tied", False) and _band and _a is not None and np.isfinite(_a):
-            _fit = f"  [empate: ΔAICc={_a - min(c.aicc for c in _band):+.1f}]"
+        # BUG-0239: el ΔAICc sale de la lista. Junto a la similitud se leía
+        # como un segundo criterio que la lista no sigue (BUG-0198, opción B),
+        # y dentro del empate tampoco se sabía qué significaba. La lista marca
+        # sólo quién está en la banda del empate; lo que el AICc aporta —un
+        # mixto persistente— va abajo, como aviso.
+        _fit = "  [empate]" if getattr(sp, "tied", False) else ""
         lines.append(
             f"{marker} {i}. ARIMA({sp.p},{sp.d},{sp.q})({sp.P},{sp.D},{sp.Q})_{sp.s}"
             f"{sufijo}  sim={sp.similarity:.3f}{_fit}  —  {label}"
@@ -926,7 +984,8 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
     if len(specs) >= 2:
         lines += ["", "*Orden de la lista: por parsimonia dentro de bandas de 0,04 de "
                   "similitud —en cada banda, menos parámetros primero y un modelo puro "
-                  "antes que un mixto—; no por similitud ni por AICc.*"]
+                  "antes que un mixto—; no por similitud ni por AICc. `[empate]`: en "
+                  "la banda del primer puesto.*"]
     if ambiguous:
         lines += [
             "",
@@ -938,6 +997,10 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
     elif specs:
         lines += ["", "El patrón favorece el modelo 1: ningún otro candidato queda en "
                   "su banda de empate (0,04 de similitud)."]
+    # BUG-0239: lo que el AICc aporta, como aviso y no como columna.
+    _aviso_aicc = _aviso_aicc_persistente(specs, d)
+    if _aviso_aicc:
+        lines += ["", _aviso_aicc]
 
     # THE CARD OF IMPLIED DYNAMICS — the domain procedure (docs/DISENO-dominio-
     # en-los-ordenes.md, decided 2026-09-30): generated here, by itself, when
