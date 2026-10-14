@@ -5766,103 +5766,112 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             sym     = {0: "", 1: "∇", 2: "∇²"}.get(d, f"∇^{d}")
             _ruta_fig = _escribe_fig(b64, f"series_d{d}")        # BUG-0113
 
-            sea_text = ""
-            sea_fig  = None
-            _ruta_sea = ""
             d_next_text = ""
-            hay_estacionalidad = False
-            if d > 0:
-                sea     = describe_seasonality(ts)
-                _ruta_sea = _escribe_fig(sea.figure_b64, "seasonality")   # BUG-0113
-                sea_fig  = sea.figure_b64
-                sea_text = (
-                    ("\n\n" + sea.summary) if sea.data.get("annual") else
-                    "\n\n**Test HAC de estacionalidad (soporte):**\n"
-                    + sea.summary + "\n\n---\n" + sea.recommendation
-                )
-                # BUG-0023: el tope de un paso es RELATIVO al d actual, no una
-                # prohibición de d=2. Evaluada ya d y DESCARTADA la
-                # estacionalidad, la contaminación que invalidaba el ADF ha
-                # desaparecido y preguntar por d+1 es legítimo: es la segunda
-                # decisión de la escala, tomada con su instrumento delante y no
-                # de un salto. Con estacionalidad detectada NO se ofrece — ahí
-                # el ADF sigue sesgado hacia «vuelve a diferenciar» y lo que
-                # toca primero es tratarla.
-                hay_estacionalidad = bool(sea.data.get("seasonal_detected", False))
-                if not hay_estacionalidad:
-                    from art.describe import describe_unit_root as _dur
-                    _urt2  = _dur(ts, lam=lam, max_d=d + 1, current_d=d)
-                    _rec2  = int(_urt2.data.get("recommended_d", d))
-                    # BUG-0197: ONE decision about d, the policy's, said once.
-                    # The table's consensus can sit at d+1 only because the ADF
-                    # does not reject at d — with a short series or a cycle it
-                    # lacks power. Another difference is invited only when BOTH
-                    # tests at d say unit root; when they disagree it is a
-                    # caveat, not an instruction (the muskrat: ADF p=0.14, KPSS
-                    # accepts; d=2 is exactly the error there).
-                    _row_d = next((r for r in _urt2.data.get("results", [])
-                                   if r.get("d") == d), {})
-                    _both  = _row_d.get("verdict") == "unit_root"
-                    # La pregunta del nodo es «¿hace falta UNA MÁS?», no
-                    # «redecide d desde cero». BUG-0227: la tabla ya sólo tiene
-                    # las filas d y d+1 (`current_d=d`), así que `_rec2` no puede
-                    # quedar POR DEBAJO de d — la rama que decía «la
-                    # recomendación de la tabla es d=0» bajo una tabla cuyo único
-                    # consenso era d=2 se ha ido con la fila que la provocaba.
-                    if _rec2 > d and _both:
-                        _veredicto = (
-                            f"\n\n→ En d={d} los dos contrastes ven raíz unitaria (el ADF "
-                            f"no la rechaza y el KPSS rechaza la estacionariedad): "
-                            f"**hace falta otra diferencia**. Reentra con "
-                            f"`guided_identification(inp_path, lam={lam}, d={d + 1})`.")
-                    elif _rec2 > d:
-                        _veredicto = (
-                            f"\n\n→ **Se sigue con d={d}.** La tabla llega al consenso "
-                            f"en d={_rec2}, pero en d={d} los contrastes no coinciden "
-                            f"(el ADF no rechaza la raíz unitaria; el KPSS no rechaza la "
-                            f"estacionariedad): no hay evidencia firme de otra diferencia, "
-                            f"y con una serie corta o un ciclo el ADF pierde potencia. "
-                            f"Salvedad, no instrucción: si el modelo estimado la pide, lo "
-                            f"dirán Shin-Fuller y el DCD de sobrediferenciación.")
-                    elif _row_d.get("verdict") == "ambiguous":
-                        _veredicto = (
-                            f"\n\n→ **No hace falta otra diferencia.** En d={d} el ADF "
-                            f"rechaza la raíz unitaria; el KPSS rechaza la "
-                            f"estacionariedad, que con una media que se desplaza o una "
-                            f"serie larga es lo que hace. Una fila que se contradice no "
-                            f"es evidencia de d={d + 1}. Si sobra o falta una diferencia, "
-                            f"lo dictaminan Shin-Fuller y el DCD sobre el MODELO "
-                            f"ESTIMADO, no un ADF sobre la serie.")
-                    else:
-                        _veredicto = (
-                            f"\n\n→ La evidencia sostiene **d={d}**. No hace falta otra "
-                            f"diferencia.")
-                    d_next_text = (
-                        f"\n\n---\n\n### ¿Hace falta una diferencia más? (d={d} → d={d + 1})\n\n"
-                        "Sin estacionalidad que contamine el contraste, esta "
-                        "pregunta ya es legítima y se responde con el mismo "
-                        "instrumento:\n\n"
-                        + _urt2.summary
-                        + _veredicto
-                        + "\n\nRecuerda que esto sigue siendo especificación inicial: "
-                          "el contraste que decide sobre el modelo estimado es "
-                          "Shin-Fuller, con el DCD de sobrediferenciación como par."
-                    )
+            # BUG-0223: con d=0 no se contrastaba, y la rama «sin
+            # estacionalidad» decía «Decisión A» sobre una bandera que nadie
+            # había calculado (BXE = X/M, F-HAC = 9.58). El contraste va SIEMPRE
+            # sobre ∇y, también con d=0, y ahí está su validez: si los niveles
+            # deambulan, ∇ los hace estacionarios y no hay estacionalidad
+            # espuria; si son estacionarios, ∇ sólo sobrediferencia, y un
+            # patrón estacional fijo sobrevive a la diferencia en sus
+            # frecuencias. Es el mismo contraste que repite la llamada 4
+            # (`_estacional_del_nodo3`), así que deciden lo mismo.
+            sea     = describe_seasonality(ts)
+            _ruta_sea = _escribe_fig(sea.figure_b64, "seasonality")   # BUG-0113
+            sea_fig  = sea.figure_b64
+            sea_text = (
+                ("\n\n" + sea.summary) if sea.data.get("annual") else
+                "\n\n**Test HAC de estacionalidad (soporte):**\n"
+                + ("> Con d=0 el contraste se hace sobre ∇y, no sobre los "
+                   "niveles: un F sobre unos niveles que deambulan lee la "
+                   "tendencia como armónicos. Sobre ∇ vale en los dos casos "
+                   "—niveles estacionarios o no— y la decisión sobre d no "
+                   "cambia: sigue siendo d=0.\n\n" if d == 0 else "")
+                + sea.summary + "\n\n---\n" + sea.recommendation
+            )
+            # BUG-0023: el tope de un paso es RELATIVO al d actual, no una
+            # prohibición de d=2. Evaluada ya d y DESCARTADA la
+            # estacionalidad, la contaminación que invalidaba el ADF ha
+            # desaparecido y preguntar por d+1 es legítimo: es la segunda
+            # decisión de la escala, tomada con su instrumento delante y no
+            # de un salto. Con estacionalidad detectada NO se ofrece — ahí
+            # el ADF sigue sesgado hacia «vuelve a diferenciar» y lo que
+            # toca primero es tratarla.
+            hay_estacionalidad = bool(sea.data.get("seasonal_detected", False))
+            if not hay_estacionalidad:
+                from art.describe import describe_unit_root as _dur
+                _urt2  = _dur(ts, lam=lam, max_d=d + 1, current_d=d)
+                _rec2  = int(_urt2.data.get("recommended_d", d))
+                # BUG-0197: ONE decision about d, the policy's, said once.
+                # The table's consensus can sit at d+1 only because the ADF
+                # does not reject at d — with a short series or a cycle it
+                # lacks power. Another difference is invited only when BOTH
+                # tests at d say unit root; when they disagree it is a
+                # caveat, not an instruction (the muskrat: ADF p=0.14, KPSS
+                # accepts; d=2 is exactly the error there).
+                _row_d = next((r for r in _urt2.data.get("results", [])
+                               if r.get("d") == d), {})
+                _both  = _row_d.get("verdict") == "unit_root"
+                # La pregunta del nodo es «¿hace falta UNA MÁS?», no
+                # «redecide d desde cero». BUG-0227: la tabla ya sólo tiene
+                # las filas d y d+1 (`current_d=d`), así que `_rec2` no puede
+                # quedar POR DEBAJO de d — la rama que decía «la
+                # recomendación de la tabla es d=0» bajo una tabla cuyo único
+                # consenso era d=2 se ha ido con la fila que la provocaba.
+                if _rec2 > d and _both:
+                    _veredicto = (
+                        f"\n\n→ En d={d} los dos contrastes ven raíz unitaria (el ADF "
+                        f"no la rechaza y el KPSS rechaza la estacionariedad): "
+                        f"**hace falta otra diferencia**. Reentra con "
+                        f"`guided_identification(inp_path, lam={lam}, d={d + 1})`.")
+                elif _rec2 > d:
+                    _veredicto = (
+                        f"\n\n→ **Se sigue con d={d}.** La tabla llega al consenso "
+                        f"en d={_rec2}, pero en d={d} los contrastes no coinciden "
+                        f"(el ADF no rechaza la raíz unitaria; el KPSS no rechaza la "
+                        f"estacionariedad): no hay evidencia firme de otra diferencia, "
+                        f"y con una serie corta o un ciclo el ADF pierde potencia. "
+                        f"Salvedad, no instrucción: si el modelo estimado la pide, lo "
+                        f"dirán Shin-Fuller y el DCD de sobrediferenciación.")
+                elif _row_d.get("verdict") == "ambiguous":
+                    _veredicto = (
+                        f"\n\n→ **No hace falta otra diferencia.** En d={d} el ADF "
+                        f"rechaza la raíz unitaria; el KPSS rechaza la "
+                        f"estacionariedad, que con una media que se desplaza o una "
+                        f"serie larga es lo que hace. Una fila que se contradice no "
+                        f"es evidencia de d={d + 1}. Si sobra o falta una diferencia, "
+                        f"lo dictaminan Shin-Fuller y el DCD sobre el MODELO "
+                        f"ESTIMADO, no un ADF sobre la serie.")
                 else:
-                    # La otra mitad de la regla, dicha: con estacionalidad sin
-                    # tratar, ADF y KPSS no tienen potencia (la regresión del ADF
-                    # no lleva términos estacionales). La pregunta d → d+1 no se
-                    # contesta aquí: se aplaza a después de tratarla.
-                    d_next_text = (
-                        f"\n\n---\n\n### Una diferencia más (d={d} → d={d + 1}): todavía no\n\n"
-                        "**Esta pregunta todavía no se hace.** Hay estacionalidad sin tratar, y "
-                        "con ella ADF y KPSS pierden potencia: el patrón va a la "
-                        "varianza residual del ADF y lo sesga hacia «diferencia otra "
-                        "vez». Primero se trata la estacionalidad (B1 o B2); el orden "
-                        "de integración lo contrastan después Shin-Fuller y el DCD "
-                        "sobre el modelo estimado. Un paso cada vez: desde d=0 sólo "
-                        "d=1, y desde d=1 sólo d=2."
-                    )
+                    _veredicto = (
+                        f"\n\n→ La evidencia sostiene **d={d}**. No hace falta otra "
+                        f"diferencia.")
+                d_next_text = (
+                    f"\n\n---\n\n### ¿Hace falta una diferencia más? (d={d} → d={d + 1})\n\n"
+                    "Sin estacionalidad que contamine el contraste, esta "
+                    "pregunta ya es legítima y se responde con el mismo "
+                    "instrumento:\n\n"
+                    + _urt2.summary
+                    + _veredicto
+                    + "\n\nRecuerda que esto sigue siendo especificación inicial: "
+                      "el contraste que decide sobre el modelo estimado es "
+                      "Shin-Fuller, con el DCD de sobrediferenciación como par."
+                )
+            else:
+                # La otra mitad de la regla, dicha: con estacionalidad sin
+                # tratar, ADF y KPSS no tienen potencia (la regresión del ADF
+                # no lleva términos estacionales). La pregunta d → d+1 no se
+                # contesta aquí: se aplaza a después de tratarla.
+                d_next_text = (
+                    f"\n\n---\n\n### Una diferencia más (d={d} → d={d + 1}): todavía no\n\n"
+                    "**Esta pregunta todavía no se hace.** Hay estacionalidad sin tratar, y "
+                    "con ella ADF y KPSS pierden potencia: el patrón va a la "
+                    "varianza residual del ADF y lo sesga hacia «diferencia otra "
+                    "vez». Primero se trata la estacionalidad (B1 o B2); el orden "
+                    "de integración lo contrastan después Shin-Fuller y el DCD "
+                    "sobre el modelo estimado. Un paso cada vez: desde d=0 sólo "
+                    "d=1, y desde d=1 sólo d=2."
+                )
 
             n_harm = max(ts.freq // 2 - 1, 0)
             sname  = ts.name or "SERIE"
@@ -5941,18 +5950,15 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 # y en el mismo orden en que van los ImageContent de abajo.
                 + _nota_figura(_ruta_fig) + _nota_figura(_ruta_sea)
             )
-            if d > 0:
-                _sd = sea.data or {}
-                _dec = _sd.get("decision") or ("B1" if hay_estacionalidad else "A")
-                _g(_nodo_pendiente, "estacionalidad",
-                   ("estacional (B1: D=0 + armónicos)" if _dec == "B1"
-                    else "sin estacionalidad (D=0)"), valor=_dec,
-                   evidencia=(f"F-HAC={_sd['f_stat']:.2f}, p={_sd['p_value']:.4f}"
-                              if _sd.get("f_stat") is not None
-                              and _sd.get("p_value") is not None else ""))
-            else:
-                # En d=0 no se contrasta: el nodo queda abierto sin propuesta.
-                _g(_nodo_pendiente, "estacionalidad", "", valor=None)
+            # BUG-0223: también con d=0 el nodo lleva la propuesta del contraste.
+            _sd = sea.data or {}
+            _dec = _sd.get("decision") or ("B1" if hay_estacionalidad else "A")
+            _g(_nodo_pendiente, "estacionalidad",
+               ("estacional (B1: D=0 + armónicos)" if _dec == "B1"
+                else "sin estacionalidad (D=0)"), valor=_dec,
+               evidencia=(f"F-HAC={_sd['f_stat']:.2f}, p={_sd['p_value']:.4f}"
+                          if _sd.get("f_stat") is not None
+                          and _sd.get("p_value") is not None else ""))
             items = [TextContent(type="text", text=text)]
             if b64:
                 items.append(_imagen(b64, "guided_identification"))

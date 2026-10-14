@@ -1,11 +1,11 @@
 ---
 id: BUG-0223
 title: Con d=0 (serie de cointegración) el paso 3 no contrasta la estacionalidad y aun así dice «Decisión A — sin armónicos»
-status: open
+status: fixed
 severity: medium
 component: mcp-tools
 found_in: 0.2.3.dev0 @088933d
-fixed_in:
+fixed_in: 0.2.3.dev0
 reported: 2026-10-07
 reporter: David / Claude — revisión del paper de dolarización (Ecuador), Fase 1, ratio BXE = X/M
 tags:
@@ -59,6 +59,9 @@ p < 0.0001).
 
 ## Reproduction
 
+`python3 bugs/BUG-0223-repro/repro.py` — con la columna BXE copiada en
+`BXE.csv`; sale con 1 mientras el bug siga abierto.
+
 Datos: `/home/david/Dropbox/dolarization/Python/art_drvec/EXT/ext_q.csv`,
 columna `BXE` (cociente exportaciones/importaciones de bienes y servicios,
 Ecuador, trimestral 2003T1–2019T4, n = 68). Ecuador: X sin estacionalidad, M con
@@ -110,25 +113,40 @@ que tampoco se puede llamar con d = 0 tal cual.
 
 ## Fix
 
-Con cautela, sin tocar la ruta BJ por defecto:
+No se hizo lo propuesto (contrastar en NIVELES bajo justificación, con un
+parámetro `contrastar_en_niveles`): no hace falta. `describe_seasonality` →
+`detect_seasonality` contrasta sobre ∇y, y ese contraste vale también con
+d = 0. Si los niveles deambulan, ∇ los hace estacionarios y desaparece la
+estacionalidad espuria que motivaba el `d > 0`; si son estacionarios, ∇ sólo
+sobrediferencia, y un patrón estacional fijo sobrevive a la diferencia en sus
+frecuencias (BXE: F = 9.58 sobre ∇, el mismo de `seasonal_analysis`). Es,
+además, el contraste que ya repetía la llamada 4 con d = 0, D = 0
+(`_estacional_del_nodo3`, BUG-0209), así que los dos nodos deciden lo mismo.
 
-1. **Nunca** imprimir «Decisión A» sin haber contrastado: con d = 0 la salida
-   debe decir «estacionalidad NO contrastada (d = 0)» y ofrecer el contraste.
-2. Contraste en niveles **sólo bajo justificación de estacionariedad**: cuando
-   `objetivo="multivariante"`/cointegración, o cuando el analista lo pide
-   (`contrastar_en_niveles=True`). `detect_seasonality` acepta `d` (0 o 1) y la
-   figura lo rotula. La salida advierte que el F en niveles sólo es válido si la
-   serie es estacionaria, y remite al Shin-Fuller / DCD de subdiferenciación del
-   modelo estimado para confirmarlo.
-3. Con `objetivo="multivariante"` imprimir siempre la nota de objetivo (B1 como
-   requisito) aunque el test no detecte, porque la regla es de sistema, no de
-   la serie.
-4. `seasonal_analysis` suelto: aceptar `d` (por defecto el del flujo).
+En `guided_identification`, paso 3 (`src/art/mcp_server.py`):
+
+- el contraste HAC corre siempre, sin el `if d > 0:`; con d = 0 la salida lo
+  dice —«el contraste se hace sobre ∇y, no sobre los niveles… la decisión
+  sobre d no cambia»—;
+- la decisión A/B1 y sus ramas (las recetas B1/B2 con la nota de objetivo, o
+  la Decisión A) salen del contraste también con d = 0;
+- el nodo `estacionalidad` del guion queda pendiente con la propuesta del
+  contraste y su F, no vacío.
+
+Con `objetivo="multivariante"` la nota de objetivo aparece cuando hay
+estacionalidad que enrutar (BXE); sin estacionalidad no se imprime, como con
+d > 0: sin patrón estacional no hay ruta B1/B2 que fijar. `seasonal_analysis`
+no se toca: ya contrasta sobre ∇, que es lo que vale para d = 0.
+
+Test: `tests/test_bug_0223_d0_contrasta_la_estacionalidad.py` — serie
+estacionaria trimestral con d = 0: con un coseno, el paso 3 imprime el HAC,
+ofrece B1/B2 y deja la propuesta B1 en el guion; sin él, Decisión A con el
+contraste delante (propuesta A); con `objetivo="multivariante"`, la nota
+B1-requisito. Fallan sin el arreglo.
 
 ## Validation
 
-- Test: BXE con d = 0 → paso 3 incluye el bloque HAC, detecta f = 1 y ofrece
-  B1/B2.
-- Test: serie estacionaria sin estacionalidad (ruido blanco + μ) con d = 0 →
-  Decisión A, pero con el test impreso.
-- Test: `objetivo="multivariante"`, d = 0 → la nota B1-requisito aparece.
+`python3 bugs/BUG-0223-repro/repro.py` (BXE, `BXE.csv` en el directorio del
+repro) sale con 0: el paso 3 con d = 0 imprime «F-test HAC conjunto: F=9.58,
+p=0.0000 · Estacionalidad detectada: Sí · f=1», las rutas B1 y B2 y la nota del
+objetivo multivariante; sin «Decisión A». Antes del arreglo salía con 1.
