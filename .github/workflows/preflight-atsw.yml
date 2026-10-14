@@ -1,0 +1,159 @@
+# Prueba de instalación de atsw ANTES de cada publicación, en todas las
+# plataformas para las que se construyen ruedas. Manual: Actions → Preflight
+# atsw → Run workflow (se puede elegir la rama de cada repo).
+#
+# Construye los seis paquetes desde las cabezas de sus repos, con la versión de
+# publicación (el .devN se quita aquí, como en el commit de release):
+# las ruedas compiladas de fue y drvarma con cibuildwheel y la configuración de
+# sus propias publicaciones (manylinux y musllinux x86_64/aarch64, macOS arm64,
+# Windows AMD64; cp310–cp313), y las puras. Después, en cada sistema y Python,
+# instala atsw en limpio forzando las ruedas de fue y drvarma, y corre
+# atsw-suite/preflight/pruebas.py: procedencia y versiones, motores C cargados,
+# los tres asistentes, y el funcionamiento (art, mtram, sima por las dos rutas).
+#
+# aarch64 se construye en runner ARM nativo (la publicación usa QEMU): mismas
+# ruedas, minutos en vez de horas.
+name: Preflight atsw
+
+on:
+  workflow_dispatch:
+    inputs:
+      fue_ref: {description: "rama de fue-python", default: master}
+      pyfug_ref: {description: "rama de pyfug", default: master}
+      drvarma_ref: {description: "rama de drvarma-python", default: ladder}
+      drtran_ref: {description: "rama de drtran-python", default: master}
+      sima_ref: {description: "rama de sima-python", default: main}
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  ART_NO_VIEWER: "1"
+  MPLBACKEND: Agg
+
+jobs:
+  compiled:
+    name: Ruedas ${{ matrix.pkg }} — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-14, windows-latest]
+        pkg: [fue, drvarma]
+    steps:
+      - name: Checkout fue
+        if: matrix.pkg == 'fue'
+        uses: actions/checkout@v4
+        with: {repository: davidesg/fue-python, ref: "${{ inputs.fue_ref }}"}
+      - name: Checkout drvarma
+        if: matrix.pkg == 'drvarma'
+        uses: actions/checkout@v4
+        with: {repository: davidesg/drvarma-python, ref: "${{ inputs.drvarma_ref }}"}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: Versión de publicación (sin .devN)
+        shell: bash
+        run: |
+          sed -i.bak -E 's/^(version *= *"[^"]*)\.dev[0-9]+"/\1"/' pyproject.toml
+          grep -m1 '^version' pyproject.toml
+      - name: El registro de bugs dentro del paquete (drvarma)
+        if: matrix.pkg == 'drvarma'
+        shell: bash
+        run: python tools/sync_material.py && test -d src/drvarma/material/bugs
+      - name: Ruedas
+        # el paquete en la raíz: su test de humo es {project}/tests/test_smoke.py
+        uses: pypa/cibuildwheel@v2.22
+        env:
+          CIBW_ARCHS_LINUX: native   # x86_64 o aarch64, como la publicación (sin i686)
+          MACOSX_DEPLOYMENT_TARGET: ${{ runner.os == 'macOS' && '14.0' || '' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.pkg }}-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  pure:
+    name: Ruedas puras
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: art}
+      - uses: actions/checkout@v4
+        with: {repository: davidesg/pyfug, ref: "${{ inputs.pyfug_ref }}", path: pyfug}
+      - uses: actions/checkout@v4
+        with: {repository: davidesg/drtran-python, ref: "${{ inputs.drtran_ref }}", path: drtran}
+      - uses: actions/checkout@v4
+        with: {repository: davidesg/sima-python, ref: "${{ inputs.sima_ref }}", path: sima}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: Construir
+        run: |
+          pip install build
+          for p in pyfug art drtran sima art/atsw-suite; do
+            sed -i -E 's/^(version *= *"[^"]*)\.dev[0-9]+"/\1"/' $p/pyproject.toml
+            grep -m1 '^version' $p/pyproject.toml
+          done
+          (cd art && python tools/sync_material.py)
+          (cd sima && python tools/sync_material.py)
+          for p in pyfug art drtran sima art/atsw-suite; do python -m build --wheel --outdir wh $p; done
+          ls -la wh
+      - uses: actions/upload-artifact@v4
+        with: {name: wheels-pure, path: wh/*.whl}
+
+  test:
+    name: Prueba — ${{ matrix.os }} · Python ${{ matrix.python }}
+    needs: [compiled, pure]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-14, windows-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with: {sparse-checkout: atsw-suite/preflight}
+      - uses: actions/download-artifact@v4
+        with: {pattern: wheels-*, merge-multiple: true, path: wh}
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python }}"}
+      - name: Instalar en limpio, con las ruedas de fue y drvarma
+        shell: bash
+        run: |
+          python -m venv venv
+          if [ "$RUNNER_OS" = Windows ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          $PY -m pip install -q --upgrade pip
+          V=$(ls wh/atsw-*.whl | sed -E 's/.*atsw-([^-]+)-.*/\1/')
+          $PY -m pip install --find-links wh --only-binary fue,drvarma "atsw==$V"
+          $PY -m pip list | grep -i -E '^(fue|pyfug|drvarma|art-tseries|drtran|sima-tseries|atsw) '
+      - name: Pruebas
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          $PY atsw-suite/preflight/pruebas.py atsw-suite/preflight/data wh
+
+  musl:
+    name: Prueba — Alpine (musllinux) ${{ matrix.os }} · Python ${{ matrix.python }}
+    needs: [compiled, pure]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with: {sparse-checkout: atsw-suite/preflight}
+      - uses: actions/download-artifact@v4
+        with: {pattern: wheels-*, merge-multiple: true, path: wh}
+      # Las acciones JS no corren dentro de Alpine: el contenedor se lanza a mano.
+      - name: Instalar y probar en python:${{ matrix.python }}-alpine
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w \
+            -e PYTHONUTF8=1 -e ART_NO_VIEWER=1 -e MPLBACKEND=Agg \
+            python:${{ matrix.python }}-alpine sh -c '
+              set -e
+              # matplotlib no publica rueda musllinux aarch64: pip la compila
+              apk add --no-cache build-base pkgconf freetype-dev libpng-dev >/dev/null
+              python -m venv /venv
+              /venv/bin/pip install -q --upgrade pip
+              V=$(ls wh/atsw-*.whl | sed -E "s/.*atsw-([^-]+)-.*/\1/")
+              /venv/bin/pip install --find-links wh --only-binary fue,drvarma "atsw==$V"
+              /venv/bin/python atsw-suite/preflight/pruebas.py atsw-suite/preflight/data wh'
