@@ -213,7 +213,10 @@ def describe_boxcox(ts) -> Description:
             "escala interpretable (ver `policy.decide_lambda` y BUG-0040).",
         ]
 
-    if ambiguous:
+    # BUG-0247: con la horquilla el aviso genérico se contradecía con el de
+    # arriba («Ambas … son razonables» tras «Eso NO es "las dos son
+    # razonables"»). La horquilla ya dice qué hacer: decide el dominio.
+    if ambiguous and not horquilla:
         lines += [
             "",
             f"⚠ **Decisión ambigua** — la diferencia entre escalas es pequeña "
@@ -245,17 +248,27 @@ def describe_boxcox(ts) -> Description:
              "Si el dominio pide logaritmos, decide el dominio."),
         ]
 
-    if ambiguous:
+    # BUG-0247: el nodo que sigue a λ es d (la serie transformada y su
+    # ACF/PACF a d = 0), no la estacionalidad.
+    siguiente = "Siguiente paso: la serie transformada y su ACF/PACF a d = 0, para decidir d."
+    if horquilla:
+        rec = (
+            f"Signos opuestos: la λ correcta está entre 0 y 1, y este estadístico "
+            f"no la decide; la decide el dominio. Índice de precios o magnitud "
+            f"multiplicativa → λ=0.0 (log). "
+            f"{siguiente}"
+        )
+    elif ambiguous:
         rec = (
             f"Decisión ambigua (Δ={abs(gap):.3f}). "
             f"Si la serie es un índice de precios, confirma λ=0.0 (log) por convención. "
             f"Si no, puedes usar λ=1.0 (original). "
-            f"Siguiente paso: detección de estacionalidad."
+            f"{siguiente}"
         )
     else:
         rec = (
             f"Confirma λ={rec_lam}. "
-            f"Siguiente paso: detección de estacionalidad."
+            f"{siguiente}"
         )
 
     return Description(
