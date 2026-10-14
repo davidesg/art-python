@@ -50,7 +50,13 @@ dependencies = [
     # modelo que la figura de residuos necesita (BUG-0165, BUG-0190). Con la
     # 0.1.14 art no importa esas funciones: falla, no degrada. Y trae el
     # contrato de ficheros de fue/BUG-0017…0022, que art/BUG-0187…0189 supone.
-    "fue[report]>=0.1.16",
+    # >=0.1.17: los errores estándar por el hessiano en diferencias finitas y
+    # su método en `FitResult.se_method` (fue/BUG-0015), que art lee para
+    # decidir si sus defensas contra la ruta BFGS aplican, y el motor en el
+    # sello del guion (fue/BUG-0024). Con la 0.1.16 art funciona pero degrada:
+    # las defensas siguen activas y el sello no dice el motor. Y con la cota
+    # vieja `pip install -U art-tseries` no traería la 0.1.17.
+    "fue[report]>=0.1.17",
     # >=2.0.1: la 2.0.0 lanza UnboundLocalError en `plot_combined` con TODA
     # serie anual (pyfug/BUG-0002), que es la figura de identificación y la de
     # residuos de art: con una serie anual, art se quedaba sin figuras.

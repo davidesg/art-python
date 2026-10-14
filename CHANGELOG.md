@@ -6,6 +6,76 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+### The differencing contrasts: the AR bounded, the LR checked (BUG-0224, 0232, 0235, 0236, 0242, 0243)
+
+- The subdifferencing DCD bounds the restricted model's dominant AR root at
+  ρₘ = 1 − 4/n: under θ = 1 a free AR no longer rebuilds the cancelled ∇ and
+  takes the test's power away (Rc: «d−1 was enough» with θ̂ = −0.06 → the ∇
+  is genuine, LR 2.69). The verdict reads θ̂ and the AR, not only the LR
+  (BUG-0224).
+- A non-finite LR is no longer a verdict: it is «no calculable». Salamanca and
+  Chamartín (LR = −inf from an AR root at exactly 1) now give a finite LR with
+  the ∇ genuine. The closing no longer says «adecuado» while the lower
+  boundary does not close (BUG-0232).
+- From d = 2 no ∇³ candidate is built and Shin-Fuller does not propose d = 3.
+  New `formal_tests(..., modelo_d_menos_1=)`: the d−1/d boundary pair across
+  two models, with its truth table (Villaverde: ambiguous) (BUG-0235).
+- A negative LR or a negative witness refits the free model from the
+  restricted one; what still is not a statistic is «no calculable». «θ→+1 …
+  d confirmado ✓» only with the witness in the band of +1 (BUG-0236).
+- Shin-Fuller by over-fitting with a negative real root no longer stays
+  silent: it gives its φ̂, says the AR side does not support d+1, and the
+  closing reads it (BUG-0242).
+- The subdifferencing witness is the real MA(q) root nearest +1, not an MA(1)
+  added beside it (Moncloa: θ̂ 0.85). Overdifferencing keeps an MA(q ≥ 2)
+  next to the witness (BUG-0243).
+
+### Identification and the adequacy gate (BUG-0223, 0233, 0237, 0239, 0246)
+
+IDENTIFICACION_NOTES
+
+### Chaining from a .pre (BUG-0244, 0245, 0252) and the guion (BUG-0234)
+
+- Chaining (`confirm_and_estimate` with `base_pre_path`) takes `p` as a list
+  of factors, as the fresh mode: `p=[1, 2]` over-fits AR(1)·AR(2) keeping
+  interventions and harmonics. It used to die in a TypeError (BUG-0244).
+- Chaining with `n_harmonics`/`seasonal` no longer ignores them: it rebuilds
+  the harmonic block over the `.pre`'s (those already there keep their ω, new
+  ones start at 0) and the output says what changed. `n_harmonics` defaults to
+  `None`: 5 in a fresh model, inherited when chaining. Refused on a D = 1
+  `.pre` (BUG-0245).
+- Chaining with `ar_f_freqs` adds the fixed-frequency AR(2) factors the `.pre`
+  lacks; those it carries are structure (BUG-0034) and stay. It used to drop
+  the argument in silence (BUG-0252).
+- `guion_node(..., conclusion=True)` declares that a node concludes on models
+  already estimated (e.g. «d = ambiguo» hanging from the adopted one);
+  `guion_map` marks it «∎ conclusión» and stops counting it as a «decisión sin
+  modelo estimado detrás». It must hang from a model (BUG-0234).
+
+### What the run of sima's lutkepohl_poskitt example found (BUG-0247–0251)
+
+- Box-Cox: a fork (horquilla) and «ambigua» no longer print together; the
+  fork is the domain's to decide, and the next step is d (BUG-0247).
+- Five texts that did not match the model: the AR(2) note only for a complex
+  AR factor; «procede a la identificación ARMA» not on a chosen white noise;
+  no standard-error warning without parameters; fue's fixed AR placeholder is
+  not «the model's AR» (BUG-0248).
+- `intervention_analysis` call 1 also calibrates the model's own ARMA lags on
+  the series without it: «Este modelo ya tiene AR(1)» says whether the order
+  may be fabricated by the event (Minneapolis: marginal, the 12/1973–01/1974
+  pair makes 33 % of r(1)). Call 2 explains the legend's scale factor
+  (BUG-0249).
+- Chaining with p = q = 0 removes the base's AR (BUG-0250).
+- Adopting another model of a tie records `coincide = "empate"` and says
+  «elegido dentro del empate (la propuesta era …)»; `guion_map` marks it
+  «⇄ dentro del empate» (BUG-0251).
+
+### fue >= 0.1.17
+
+The finite-difference Hessian's standard errors and their method
+(`se_method`, fue/BUG-0015), which art reads to decide whether its BFGS-path
+defences apply, and the engine in the guion's seal (fue/BUG-0024).
+
 ### d moves one step at a time, from where it stands (BUG-0226, BUG-0227)
 
 - From d only d+1 is proposed, never a value below the confirmed d; from
@@ -1270,6 +1340,57 @@ instrucciones son el producto, y aquí había criterio escrito que no llegaba.
 - **BUG-0009 y BUG-0010 verificados y reproducidos**, ambos abiertos.
 - TODO: la pregunta del OBJETIVO (multivariante o previsión), analizada y sin
   implementar — el objetivo no manda sobre los datos, y ésa es la parte difícil.
+
+## atsw 2.0.0 — unreleased
+
+**sima es un asistente nuevo, en su propio paquete.** `sima-tseries` sustituye
+al servidor que viajaba dentro de drvarma (`drvarma[mcp]`), y drvarma 0.2.0 ya
+no lleva servidor: es el motor y entrega números. Los tres asistentes quedan
+como art: cada uno su paquete y su comando (`art-mcp`, `mtram`, `sima`), y el
+motor aparte.
+
+El sima nuevo sube la escalera desde los `.pre` de art (o desde la tabla cruda,
+por la ruta U o la V) y tiene las tres formas de identificación de un VARMA:
+- **Jenkins y Alavi**: los univariantes en la diagonal, la dinámica cruzada
+  encima, la puerta diagonal que certifica la base;
+- **Tiao y Box**: el vector primero, la M(l) por pasos, los univariantes sólo
+  como vara de medir;
+- **la forma echelon** de Lütkepohl y Poskitt: los índices de Kronecker, la
+  búsqueda y la estimación con índices, también sobre los modelos de art.
+
+Cada una con su ejemplo sobre los datos de sus autores (`examples()`), que se
+recorre nodo a nodo en el carril guiado.
+
+**Por qué mayor y no menor.** Las herramientas de `sima` son otras
+(`characterize_series`, `identify_varma_order`, `confirm_and_estimate`… ya no
+existen) y el punto de partida también: los modelos univariantes, no las series
+en bruto con un consenso de λ y d. Una conversación o un guion escritos para el
+sima viejo no funcionan con el nuevo. El comando sigue siendo `sima`, así que
+`atsw-mcp` no cambia el registro.
+
+**Las cotas, todas suben:**
+
+| paquete | antes | ahora | por qué |
+|---|---|---|---|
+| `fue` | >=0.1.16 | **>=0.1.17** | los errores estándar por el hessiano en diferencias finitas (fue BUG-0015), el reinicio del optimizador que paraba sin anular el gradiente (BUG-0005) y el Jarque-Bera con n/6 (BUG-0026); art 0.2.3 lee el método de los errores estándar |
+| `pyfug` | >=2.0.1 | **>=2.0.2** | `percent=` y `density=` (BUG-0008), que art 0.2.3 usa |
+| `art-tseries` | >=0.2.2 | **>=0.2.3** | los contrastes de diferenciación contestaban mal en casos reales (LR = −∞ publicado, ∇³ propuesto desde d = 2: BUG-0224, 0232, 0235, 0236, 0242, 0243), y el encadenamiento ignoraba argumentos en silencio (BUG-0245, 0250, 0252) |
+| `drtran[mcp]` | >=0.2.5 | **>=0.2.6** | la Ljung-Box por serie descuenta lo que descuenta el C (BUG-57), `mtram --help` contesta y sale, la búsqueda lineal de drvarma 0.2.0 (BUG-0016) |
+| `drvarma` | `[mcp]`>=0.1.7 | **>=0.2.0**, sin extra | el motor sin servidor; la escalera, la forma echelon |
+| `sima-tseries` | — | **`[raw]`>=0.1.0** | el asistente; `[raw]` trae art para la entrada desde la tabla cruda |
+
+**Quien actualiza desde 1.6.x** con `pip install -U atsw` recibe drvarma 0.2.0
+sin servidor y sima-tseries con el comando `sima`. El registro de Claude Code
+(`sima` → `sima`) sigue valiendo. Si alguien registró el servidor viejo por
+módulo (`python -m drvarma.mcp_server`), deja de arrancar: `atsw-mcp` lo
+registra de nuevo.
+
+**La validación** (`publish-atsw.yml`) importa ahora `sima.mcp_server` en vez
+de `drvarma.mcp_server`, en Python 3.10–3.13.
+
+**Orden de publicación** —cada uno necesita publicados los de antes—:
+fue 0.1.17 → pyfug 2.0.2 → drvarma 0.2.0 → art-tseries 0.2.3, drtran 0.2.6,
+sima-tseries 0.1.0 → atsw 2.0.0.
 
 ## atsw 1.6.1 — 2026-09-26
 

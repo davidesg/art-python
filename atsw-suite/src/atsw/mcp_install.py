@@ -187,7 +187,7 @@ def main(argv=None) -> int:
         print("These assistants are not installed: %s\n"
               "  pip install atsw            (the whole suite)\n"
               "  pip install 'drtran[mcp]'   (mtram alone)\n"
-              "  pip install 'drvarma[mcp]'  (sima alone)"
+              "  pip install 'sima-tseries[raw]'  (sima alone)"
               % ", ".join(missing), file=sys.stderr)
 
     if not a.dry_run and shutil.which("claude") is None:
