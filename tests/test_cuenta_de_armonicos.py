@@ -79,9 +79,11 @@ def test_los_dos_recuentos_tienen_nombres_distintos():
 
 def test_no_queda_ningun_tope_escrito_a_mano():
     """Había DOS copias del mismo `min`, y la de abajo era la que construía los
-    armónicos de verdad; la de arriba sólo prepara la semilla."""
+    armónicos de verdad; la de arriba sólo prepara la semilla. La tercera
+    llamada es la de encadenar con armónicos (`_rehaz_armonicos`, BUG-0245):
+    pasa por el mismo tope, que es lo que este test vigila."""
     src = _sin_comentarios("src/art/pipeline.py")
     assert "min(n_harmonics" not in src
     llamadas = [ln for ln in src.splitlines()
                 if "tope_de_armonicos(n_harmonics" in ln and not ln.startswith("def ")]
-    assert len(llamadas) == 2, llamadas
+    assert len(llamadas) == 3, llamadas

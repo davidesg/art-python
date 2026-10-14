@@ -1,11 +1,11 @@
 ---
 id: BUG-0247
 title: El nodo Box-Cox dice a la vez «Eso NO es "las dos son razonables"» y «Ambas transformaciones son razonables»
-status: open
+status: fixed
 severity: low
 component: describe
 found_in: 0.2.3.dev0
-fixed_in: 
+fixed_in: 0.2.3.dev0
 reported: 2026-10-14
 reporter: David / Claude — rodaje de art con el ejemplo lutkepohl_poskitt de sima (Buffalo, carril guiado)
 tags:
@@ -58,12 +58,24 @@ bloques; `ambiguous` no mira `horquilla`.
 
 ## Fix
 
-Con `horquilla`, omitir el bloque «Decisión ambigua» (o reducirlo a la regla
-del dominio, sin «Ambas … son razonables»), y en `rec` decir «la decide el
-dominio» en vez de «puedes usar λ=1.0». Cambiar «Siguiente paso: detección de
-estacionalidad» por el nodo real (d).
+En `describe_boxcox` (`src/art/describe.py`):
+
+- El bloque «Decisión ambigua» sólo sale con `ambiguous and not horquilla`:
+  con la horquilla ya está el aviso que remite al dominio, y el genérico lo
+  contradecía.
+- `rec` tiene una rama nueva para la horquilla: «Signos opuestos: la λ correcta
+  está entre 0 y 1, y este estadístico no la decide; la decide el dominio…»,
+  sin «puedes usar λ=1.0».
+- «Siguiente paso: detección de estacionalidad» pasa a ser, en las tres ramas,
+  «Siguiente paso: la serie transformada y su ACF/PACF a d = 0, para decidir d.»
+
+Test: `tests/test_bug_0247_boxcox_horquilla_sin_ambigua.py` — Buffalo
+(horquilla y Δ = 0.082): el resumen no contiene «Ambas transformaciones son
+razonables», la recomendación remite al dominio y el siguiente paso es d.
+Falla sin el arreglo.
 
 ## Validation
 
-Test en `tests/` con un par de correlaciones de signo opuesto y |Δ| < 0.10: el
-texto no contiene «Ambas transformaciones son razonables».
+El repro sale con 0: la llamada 1 sobre Buffalo saca sólo el aviso de la
+horquilla, y la recomendación manda a d. `tests/test_bug_0059_boxcox_conserva_el_signo.py`
+sigue pasando.

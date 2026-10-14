@@ -34,7 +34,7 @@ from .model_detection import suggest_orders
 from .diagnosis import diagnose, plot_diagnosis, q_label
 from .formal_tests import (dcd, dcd_s, dcd_f, rv, meg, shin_fuller, dcd_overdiff_regular,
                            shin_fuller_sobreajuste,
-                            dcd_underdiff_regular)
+                            dcd_underdiff_regular, D_MAX_REGULAR)
 from .interventions import diagnose_interventions
 from .full_report import _meg_suitable, _try
 
@@ -213,7 +213,10 @@ def describe_boxcox(ts) -> Description:
             "escala interpretable (ver `policy.decide_lambda` y BUG-0040).",
         ]
 
-    if ambiguous:
+    # BUG-0247: con la horquilla el aviso genérico se contradecía con el de
+    # arriba («Ambas … son razonables» tras «Eso NO es "las dos son
+    # razonables"»). La horquilla ya dice qué hacer: decide el dominio.
+    if ambiguous and not horquilla:
         lines += [
             "",
             f"⚠ **Decisión ambigua** — la diferencia entre escalas es pequeña "
@@ -245,17 +248,27 @@ def describe_boxcox(ts) -> Description:
              "Si el dominio pide logaritmos, decide el dominio."),
         ]
 
-    if ambiguous:
+    # BUG-0247: el nodo que sigue a λ es d (la serie transformada y su
+    # ACF/PACF a d = 0), no la estacionalidad.
+    siguiente = "Siguiente paso: la serie transformada y su ACF/PACF a d = 0, para decidir d."
+    if horquilla:
+        rec = (
+            f"Signos opuestos: la λ correcta está entre 0 y 1, y este estadístico "
+            f"no la decide; la decide el dominio. Índice de precios o magnitud "
+            f"multiplicativa → λ=0.0 (log). "
+            f"{siguiente}"
+        )
+    elif ambiguous:
         rec = (
             f"Decisión ambigua (Δ={abs(gap):.3f}). "
             f"Si la serie es un índice de precios, confirma λ=0.0 (log) por convención. "
             f"Si no, puedes usar λ=1.0 (original). "
-            f"Siguiente paso: detección de estacionalidad."
+            f"{siguiente}"
         )
     else:
         rec = (
             f"Confirma λ={rec_lam}. "
-            f"Siguiente paso: detección de estacionalidad."
+            f"{siguiente}"
         )
 
     return Description(
@@ -768,6 +781,69 @@ def describe_unit_root(ts, lam: float = 0.0, max_d: int = 2,
 # Identification (ACF/PACF + order suggestions)
 # ---------------------------------------------------------------------------
 
+#: Raíz inversa real y positiva a partir de la cual un factor «casi se cancela»
+#: con una diferencia (BUG-0239): φ̂ ≥ 0,9 apunta a una ∇ que falta; θ̂ ≥ 0,9, a
+#: una que sobra. Y siempre que el OTRO lado no la cancele (una raíz AR y una MA
+#: casi iguales se anulan entre sí, no con la diferencia): las dos a menos de
+#: `HOLGURA_CANCELACION` no avisan. Medido con 60 réplicas por caso (n = 200):
+#: 4 % de avisos en modelos sin persistencia (ruido, AR(1) 0,6, MA(1) 0,5,
+#: ARMA(1,1) 0,6/0,3); 72 % en ARMA(1,1) 0,95/0,7, 43 % en un I(2) con d = 1,
+#: 88-95 % sobrediferenciando un I(0).
+RAIZ_PERSISTENTE = 0.9
+HOLGURA_CANCELACION = 0.05
+
+
+def _raiz_real_mayor(coef) -> float:
+    """La mayor raíz inversa REAL y positiva de 1 − c₁B − … − cₖBᵏ (0 si no hay)."""
+    import numpy as np
+    c = [float(x) for x in (coef if coef is not None else [])]
+    if not c:
+        return 0.0
+    r = np.roots([1.0] + [-x for x in c])
+    reales = [float(z.real) for z in r if abs(z.imag) < 1e-8 and z.real > 0]
+    return max(reales, default=0.0)
+
+
+def _aviso_aicc_persistente(specs, d: int) -> str:
+    """El AICc como AVISO, no como columna — BUG-0239.
+
+    En la batería ARIMA el AICc sólo gana a la similitud en los mixtos casi
+    cancelados, y en los casos reales (Salamanca, Villaverde) su preferencia por
+    un ARMA(1,1) con φ ≈ 0,95 anunciaba que el orden de integración estaba
+    abierto. Eso es lo que se dice, y sólo eso: si el mejor de la lista por
+    AICc es un mixto con una raíz AR real ≥ 0,9, o lleva una raíz MA real
+    ≥ 0,9, y el otro lado no la cancela. No ordena nada.
+    """
+    import math
+    fin = [sp for sp in specs if getattr(sp, "aicc", None) is not None
+           and math.isfinite(sp.aicc) and getattr(sp, "coef", None) is not None]
+    if len(fin) < 2:
+        return ""
+    best = min(fin, key=lambda sp: sp.aicc)
+    phi, theta = best.coef[0], best.coef[1]
+    r_ar, r_ma = _raiz_real_mayor(phi), _raiz_real_mayor(theta)
+    nombre = f"ARIMA({best.p},{d},{best.q})" + (
+        f"({best.P},{best.D},{best.Q})" if best.P or best.Q else "")
+    pos = specs.index(best) + 1
+    donde = "es el 1.º de la lista" if pos == 1 else f"es el {pos}.º de la lista"
+    if (best.p > 0 and best.q > 0 and r_ar >= RAIZ_PERSISTENTE
+            and r_ma <= r_ar - HOLGURA_CANCELACION):
+        return (f"⚠ **Aviso del AICc** — prefiere {nombre} ({donde}), con una raíz "
+                f"AR real de {r_ar:.2f} y una MA de {r_ma:.2f}: un mixto persistente, "
+                f"con la raíz AR rozando la unidad. Es la señal de que el **orden de "
+                f"integración puede estar abierto** (con φ → 1 falta una diferencia). "
+                f"Contrástalo sobre "
+                f"el modelo estimado con `formal_tests` (Shin-Fuller y los DCD), no "
+                f"lo decidas por el AICc: el AICc no ordena esta lista.")
+    if best.q > 0 and r_ma >= RAIZ_PERSISTENTE and r_ar <= r_ma - HOLGURA_CANCELACION:
+        return (f"⚠ **Aviso del AICc** — prefiere {nombre} ({donde}), con una raíz "
+                f"MA real de {r_ma:.2f}: con θ → 1 la diferencia puede **sobrar**, y el "
+                f"orden de integración está abierto. Contrástalo sobre el modelo "
+                f"estimado con `formal_tests` (el DCD de sobrediferenciación), no lo "
+                f"decidas por el AICc: el AICc no ordena esta lista.")
+    return ""
+
+
 def describe_identification(ts, d: int, D: int, lam: float = 0.0,
                             npar: int = 0,
                             estacional: bool | None = None) -> Description:
@@ -836,17 +912,12 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
         if getattr(sp, "sparse_ma_lag", 0):
             disperso.append(f"MA sólo en B^{sp.sparse_ma_lag}")
         sufijo = f"  [{', '.join(disperso)}]" if disperso else ""
-        # 9-oct-2026: the ΔAICc is shown ONLY inside the tie of the first place,
-        # which is the one place it acts (the last key of `_nested_parsimony`,
-        # between candidates of equal size and purity). Shown beside every
-        # order, the analyst read it as a second criterion that the list does
-        # not follow (BUG-0198, option B).
-        _band = [c for c in completos if getattr(c, "tied", False)
-                 and getattr(c, "aicc", None) is not None and np.isfinite(c.aicc)]
-        _a = getattr(sp, "aicc", None)
-        _fit = ""
-        if getattr(sp, "tied", False) and _band and _a is not None and np.isfinite(_a):
-            _fit = f"  [empate: ΔAICc={_a - min(c.aicc for c in _band):+.1f}]"
+        # BUG-0239: el ΔAICc sale de la lista. Junto a la similitud se leía
+        # como un segundo criterio que la lista no sigue (BUG-0198, opción B),
+        # y dentro del empate tampoco se sabía qué significaba. La lista marca
+        # sólo quién está en la banda del empate; lo que el AICc aporta —un
+        # mixto persistente— va abajo, como aviso.
+        _fit = "  [empate]" if getattr(sp, "tied", False) else ""
         lines.append(
             f"{marker} {i}. ARIMA({sp.p},{sp.d},{sp.q})({sp.P},{sp.D},{sp.Q})_{sp.s}"
             f"{sufijo}  sim={sp.similarity:.3f}{_fit}  —  {label}"
@@ -905,22 +976,44 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
                 f"  · ARIMA({sp.p},{sp.d},{sp.q})({sp.P},{sp.D},{sp.Q})_{sp.s}"
                 f"  [{', '.join(d_)}]  sim={sp.similarity:.3f}")
 
-    # Ambiguity: top-2 gap < 0.05 — sobre el RANKING, no sobre los dispersos
+    # Ambiguity — sobre el RANKING, no sobre los dispersos
     specs = completos or specs
-    # |gap|: parsimony may put a slightly less similar candidate first (BUG-0198)
-    ambiguous = len(specs) >= 2 and abs(specs[0].similarity - specs[1].similarity) < 0.05
-    top_gap   = abs(specs[0].similarity - specs[1].similarity) if len(specs) >= 2 else 1.0
+    # BUG-0233: la ambigüedad es la BANDA DEL EMPATE del primer puesto (la de
+    # `_nested_parsimony`, la de la ficha), no «los dos primeros de la lista».
+    # La lista va por parsimonia dentro de bandas de 0,04 de similitud, así que
+    # el 2.º puede salir de la banda SIGUIENTE: en Salamanca el aviso nombraba
+    # (1,1,1) y (3,1,0) mientras la ficha comparaba (1,1,1), (1,1,2) y (2,1,1).
+    banda = [sp for sp in specs if getattr(sp, "tied", False)]
+    ambiguous = len(banda) >= 2
+    top_gap = (max(sp.similarity for sp in banda) - min(sp.similarity for sp in banda)
+               if ambiguous else
+               abs(specs[0].similarity - specs[1].similarity) if len(specs) >= 2
+               else 1.0)
+    _nombre = lambda sp: (f"ARIMA({sp.p},{d},{sp.q})"
+                          if int(getattr(ts, "freq", 1) or 1) <= 1 or _sin_est else
+                          f"SARIMA({sp.p},{d},{sp.q})({sp.P},{D},{sp.Q})")
+    _enum = lambda xs: (", ".join(xs[:-1]) + " y " + xs[-1]) if len(xs) > 1 else "".join(xs)
 
+    if len(specs) >= 2:
+        lines += ["", "*Orden de la lista: por parsimonia dentro de bandas de 0,04 de "
+                  "similitud —en cada banda, menos parámetros primero y un modelo puro "
+                  "antes que un mixto—; no por similitud ni por AICc. `[empate]`: en "
+                  "la banda del primer puesto.*"]
     if ambiguous:
         lines += [
             "",
-            f"⚠ **Decisión ambigua** — los dos primeros candidatos difieren en sólo "
-            f"{top_gap:.3f} de similitud. El patrón ACF/PACF no discrimina claramente "
-            f"entre ellos.",
-            "  Recomendación: estimar ambos y comparar AIC/BIC y calidad de residuos.",
+            f"⚠ **Decisión ambigua** — {_enum([_nombre(sp) for sp in banda])} quedan en "
+            f"la banda del primer puesto (a menos de 0,04 de similitud; "
+            f"diferencia máxima {top_gap:.3f}). El patrón ACF/PACF no los separa.",
+            "  Recomendación: estimarlos y comparar AIC/BIC y calidad de residuos.",
         ]
     elif specs:
-        lines += ["", f"El patrón favorece claramente el modelo 1 (gap={top_gap:.3f})."]
+        lines += ["", "El patrón favorece el modelo 1: ningún otro candidato queda en "
+                  "su banda de empate (0,04 de similitud)."]
+    # BUG-0239: lo que el AICc aporta, como aviso y no como columna.
+    _aviso_aicc = _aviso_aicc_persistente(specs, d)
+    if _aviso_aicc:
+        lines += ["", _aviso_aicc]
 
     # THE CARD OF IMPLIED DYNAMICS — the domain procedure (docs/DISENO-dominio-
     # en-los-ordenes.md, decided 2026-09-30): generated here, by itself, when
@@ -992,13 +1085,12 @@ def describe_identification(ts, d: int, D: int, lam: float = 0.0,
             seasonal_note = "D=1: sin armónicos. Especifica P, Q en confirm_and_estimate."
 
     if ambiguous:
-        sp0, sp1 = specs[0], specs[1]
+        # BUG-0233: los de la ficha, si la hay; si no, los de la banda.
+        _emp = tied if len(tied) >= 2 else banda
         rec = (
-            (f"Decisión ambigua entre ARIMA({sp0.p},{d},{sp0.q}) y "
-             f"ARIMA({sp1.p},{d},{sp1.q}). " if _freq <= 1 or _sin_est else
-             f"Decisión ambigua entre SARIMA({sp0.p},{d},{sp0.q})({sp0.P},{D},{sp0.Q}) y "
-             f"SARIMA({sp1.p},{d},{sp1.q})({sp1.P},{D},{sp1.Q}). ")
-            + f"Estima ambos y elige por AIC/BIC y diagnosis de residuos. "
+            f"Decisión ambigua entre {_enum([_nombre(sp) for sp in _emp])}. "
+            + ("Estima ambos" if len(_emp) == 2 else "Estímalos")
+            + " y elige por AIC/BIC y diagnosis de residuos. "
             + seasonal_note
         )
     else:
@@ -2131,13 +2223,35 @@ def describe_diagnosis(model) -> Description:
     #     Check RV test (Bloque F) before concluding over-parametrization.
     #   • FLT transfer function (ω + δ): gain and decay rate are jointly identified from
     #     the impulse response ω·δ^t → high corr(ω, δ) is inherent, not redundant.
+    #
+    # BUG-0248: la nota del AR(2) salía en TODO par AR–MA. En un ARMA(1,1) con
+    # corr(φ̂, θ̂) ≈ +0.99 —(1 − .33B) y (1 − .19B), casi el mismo factor— es
+    # el caso de manual de factor común, y la nota apuntaba a la explicación
+    # benigna. Sólo va si el AR del par tiene un factor de orden ≥ 2 con raíces
+    # complejas (los AR_f lo son por construcción).
+    def _ar_complejo(lbl_ar: str) -> bool:
+        if lbl_ar.startswith("AR_f"):
+            return True
+        facs = model.ar_s if lbl_ar.startswith("AR_s") else model.ar
+        for fac in (facs or []):
+            c = [float(x) for x in fac]
+            if len(c) < 2:
+                continue
+            r = np.roots([-x for x in reversed(c)] + [1.0])
+            if np.any(np.abs(np.imag(r)) > 1e-8):
+                return True
+        return False
+
     def _overpar_note(lbl_i: str, lbl_j: str) -> str:
         ar_ma = (lbl_i.startswith("AR") and lbl_j.startswith("MA")) or \
                 (lbl_i.startswith("MA") and lbl_j.startswith("AR"))
         flt   = (lbl_i.startswith("ω(") and lbl_j.startswith("δ")) or \
                 (lbl_i.startswith("δ") and lbl_j.startswith("ω("))
         if ar_ma:
-            return " ℹ puede ser normal en AR(2) con raíces complejas — verificar con test RV"
+            if _ar_complejo(lbl_i if lbl_i.startswith("AR") else lbl_j):
+                return " ℹ puede ser normal en AR(2) con raíces complejas — verificar con test RV"
+            return (" ⚠ factor común probable: compara las raíces AR y MA — si "
+                    "casi coinciden, se cancelan y sobra el par")
         if flt:
             return " ℹ normal en FLT (ω y δ se identifican conjuntamente)"
         return ""
@@ -2363,8 +2477,80 @@ def describe_diagnosis(model) -> Description:
 BANDA_CUASI_CANCELACION = 0.10
 
 
+def _estado_subdif(r) -> str:
+    """Cómo se lee el DCD de subdiferenciación: 'no_calculable', 'genuina',
+    'cancelada' o 'no_concluyente'.
+
+    BUG-0224 / BUG-0232: el veredicto se decidía SÓLO por `lr < crít`, así que
+    un LR de −inf (fallo numérico) o uno bajo con θ̂ = −0,06 se publicaban como
+    «testigo NO invertible (θ→+1)». «Cancelada» exige además que el testigo
+    esté de verdad en la frontera (a BANDA_CUASI_CANCELACION de +1 o menos) y
+    que el AR del restringido no haya tenido que acotarse — si lo tuvo, el
+    modelo en d−1 quería una raíz en ρₘ o más: por el lado AR la ∇ hace falta.
+    """
+    if not r.calculable:
+        return "no_calculable"
+    if r.lr >= r._crit['5%']:
+        return "genuina"
+    if (not r.raices_complejas and not r.ar_acotado
+            and 1.0 - r.coef_free <= BANDA_CUASI_CANCELACION):
+        return "cancelada"
+    return "no_concluyente"
+
+
+def _texto_subdif(r) -> str:
+    """El veredicto del DCD de subdiferenciación, con lo que hace falta para
+    leerlo (BUG-0224, 0232, 0236, 0243)."""
+    e = _estado_subdif(r)
+    c5 = r._crit['5%']
+    if e == "no_calculable":
+        return (f"**no calculable** — {r.motivo_no_calculable or 'LR no finito'} "
+                f"(θ̂={r.coef_free:+.4f}). Un LR así no es un estadístico: "
+                "este lado NO da veredicto")
+    if r.raices_complejas:
+        _t = (f"el MA del modelo sólo tiene raíces complejas (módulo "
+              f"{r.coef_free:.4f}): ninguna puede ser la (1 − B) que cancelaría "
+              f"la ∇. LR de la restricción={r.lr:.3f} (crít 5%={c5:.2f}) → ")
+        return _t + ("la ∇ es genuina → d confirmado por abajo ✓" if e == "genuina"
+                     else "no se rechaza, pero sin raíz real que se apile en +1: "
+                          "**no concluyente**")
+    cab = f"θ̂={r.coef_free:+.4f}, LR={r.lr:.3f} (crít 5%={c5:.2f}) → "
+    if e == "genuina":
+        return cab + ("testigo invertible → la ∇ es genuina → d confirmado por "
+                      "abajo ✓")
+    if e == "cancelada":
+        return cab + ("testigo en la frontera (θ̂→+1) → la ∇ está CANCELADA "
+                      "→ con d−1 bastaba ✗")
+    if r.ar_acotado:
+        return cab + ("no se rechaza θ=1, pero **no concluyente**: con θ=1 el AR "
+                      f"del modelo en d−1 se va a φ̂={r.phi_restringido:.4f} "
+                      f"(≥ ρₘ={r.rho_m:.4f}) y reconstruye la ∇ cancelada; por el "
+                      "lado AR la ∇ hace falta")
+    return cab + (f"no se rechaza θ=1, pero θ̂ está a {1.0 - r.coef_free:.4f} de "
+                  "la frontera: el LR es bajo porque la verosimilitud es plana, "
+                  "no porque el testigo se apile en +1 → **no concluyente**")
+
+
+def _texto_sobredif_no_rechaza(r) -> str:
+    """El titular del DCD de sobrediferenciación cuando el LR no rechaza θ=1.
+
+    BUG-0236: se escribía «testigo NO invertible (θ→+1) … d confirmado ✓» con
+    θ̂ = −0,19 o con θ̂ = 0,80. «θ→+1» sólo si el testigo está en la banda de
+    +1; en el eje negativo mide la frecuencia π y no da veredicto sobre d."""
+    if r.coef_free < 0.0:
+        return ("el testigo se fue al eje de π (θ̂ < 0): **no mide f=0**, así "
+                "que este lado no da veredicto sobre d")
+    if 1.0 - r.coef_free <= BANDA_CUASI_CANCELACION:
+        return ("testigo en la frontera (θ̂→+1) → la ∇ extra sobre-diferencia "
+                "→ d confirmado ✓")
+    return (f"no se rechaza θ=1, pero el testigo no se apila en +1 (está a "
+            f"{1.0 - r.coef_free:.4f}): la ∇ extra no se demuestra necesaria → "
+            "d basta por este lado, sin confirmación fuerte")
+
+
 def describe_formal_tests(model, run_meg: bool = True,
-                          subdiferenciacion: bool = False) -> Description:
+                          subdiferenciacion: bool = False,
+                          modelo_d_menos_1=None) -> Description:
     """Run Shin-Fuller, DCD, DCD_f, RV, MEG and summarize for the LLM.
 
     `subdiferenciacion` — EL CONTRASTE d−1 SE PIDE, NO SE OFRECE (BUG-0167).
@@ -2395,9 +2581,17 @@ def describe_formal_tests(model, run_meg: bool = True,
     Y mientras se pide sin saber lo que trae, además está BUG-0167: con un AR de
     orden 1 el brazo nulo gasta su única raíz en la unitaria y el LR mide
     dinámica perdida, no frontera.
+
+    `modelo_d_menos_1` — el modelo AJUSTADO de la misma serie en d−1 (BUG-0235).
+    Con él se forma el par de la frontera d−1/d, que cruza dos modelos: el DCD
+    de subdiferenciación de éste (lado MA) y el Shin-Fuller de aquél (lado AR).
+    Pasarlo es pedir el lado d−1, así que implica `subdiferenciacion`.
     """
     if model._result is None:
         raise RuntimeError("Model has not been fitted — call model.fit() first.")
+    if modelo_d_menos_1 is not None:
+        subdiferenciacion = True
+    _d = int(getattr(model, "d", 0) or 0)
 
     # BUG-0025: los contrastes formales son la ULTIMA etapa del ciclo y
     # presuponen un modelo adecuado — sus nulas se derivan bajo residuos que son
@@ -2429,9 +2623,14 @@ def describe_formal_tests(model, run_meg: bool = True,
     _dg_fallos: list[str] = []
     _dg_avisos: list[str] = []
     if _dg is not None:
-        _q_min = min(_dg.q_pvalues) if _dg.q_pvalues else 1.0
         if not _dg.white_noise:
-            _dg_fallos.append(f"ruido blanco (Q): p mínimo = {_q_min:.4f}")
+            # BUG-0237: se cita la Q que DECIDE —la del retardo 3f+3, con sus
+            # g.l. descontando el ARMA—, no el p mínimo de los cuatro retardos,
+            # que no es el que cierra la puerta y hacía creer que sí.
+            _l = _dg.q_lag_cancerbero
+            _dg_fallos.append(
+                f"ruido blanco (Q): Q({_l}) con {_l - _dg.q_df_correction} g.l., "
+                f"p = {_dg.q_p_cancerbero:.4f}")
         if not _dg.normal:
             _dg_fallos.append(
                 f"normalidad (JB): {_dg.jb_stat:.3f}, p = {_dg.jb_pvalue:.4f}")
@@ -2522,9 +2721,16 @@ def describe_formal_tests(model, run_meg: bool = True,
 
     # Shin-Fuller (non-stationarity of AR component)
     # Φ̂₁ᵤ = L_free − L_constrained  (eq. 3.5); compare to Table II critical values.
+    # BUG-0235: desde d = D_MAX_REGULAR no se sube (regla de un paso), así que
+    # un no-rechazo no propone d+1: se dice qué es.
+    sf_tope = _d >= D_MAX_REGULAR
     if sf_res is not None:
         sf_verdict = ("Estacionario ✓" if sf_res.stationary
-                      else "Raíz unitaria — considerar d+1 ✗")
+                      else f"no rechaza la raíz unitaria, pero con d={_d} no se "
+                           "sube: un AR casi en 1 se lee como persistencia del "
+                           "modelo, no como otra diferencia ⚠"
+                      if sf_tope else
+                      "Raíz unitaria — considerar d+1 ✗")
         lines.append(
             f"\n**Shin-Fuller (no estacionariedad AR)** "
             f"(H₀: ρ≈1−4/n={sf_res.phi_null:.4f},  n={sf_res.n})"
@@ -2610,6 +2816,27 @@ def describe_formal_tests(model, run_meg: bool = True,
 
     # DCD sobre-diferenciación regular — confirmatorio del ORDEN DE INTEGRACIÓN
     # (distinto del DCD estándar de arriba: impone ∇ extra + testigo MA(1) θ⁰=+0.85).
+    # BUG-0235: desde d=2 no hay candidato ∇³, y se dice por qué.
+    if od_res is None and _d >= D_MAX_REGULAR:
+        lines.append(
+            f"\n**DCD sobre-diferenciación regular** — no se contrasta desde "
+            f"d={_d}: con la regla de un paso d no sube de {D_MAX_REGULAR}, y una "
+            "tercera diferencia no es una hipótesis. La duda de este modelo es la "
+            "de ABAJO —¿sobraba la última ∇?—, y su par cruza dos modelos: el DCD "
+            "de subdiferenciación de éste y el Shin-Fuller del modelo en "
+            f"d={_d - 1}"
+            + (" (más abajo)." if modelo_d_menos_1 is not None else
+               " (`formal_tests(..., modelo_d_menos_1=<.pre en d−1>)`)."))
+    # BUG-0232 / BUG-0236: un LR que no es un estadístico no da veredicto, y no
+    # entra en el par: el bloque lo dice y el lado se trata como ausente.
+    od_nc = None
+    if od_res is not None and not od_res.calculable:
+        od_nc, od_res = od_res, None
+        lines.append("\n**DCD sobre-diferenciación regular** — confirmatorio del "
+                     "orden de integración (testigo θ⁰=+0.85, H₀: θ=1, ley s=1)")
+        lines.append(f"- θ̂={od_nc.coef_free:+.4f} → **no calculable**: "
+                     f"{od_nc.motivo_no_calculable or 'LR no finito o negativo'}. "
+                     "Este lado NO da veredicto sobre d.")
     if od_res is not None:
         c5 = od_res._crit['5%']
         # BUG-0055. El titular decía «→ considerar d+1 ✗» en negrita y tres
@@ -2635,8 +2862,7 @@ def describe_formal_tests(model, run_meg: bool = True,
         _salvedades = bool(_n_det) or _sin_par
 
         if od_res.lr < c5:
-            verdict = ("testigo NO invertible (θ→+1) → la ∇ extra sobre-diferencia "
-                       "→ d confirmado ✓")
+            verdict = _texto_sobredif_no_rechaza(od_res)        # BUG-0236
         elif _salvedades:
             _por = []
             if _otros:
@@ -2673,13 +2899,19 @@ def describe_formal_tests(model, run_meg: bool = True,
                            if not frees or i >= len(frees) or frees[i][j])
                        for i, f in enumerate(fs or []))
         _p_ar = _libres(model.ar, model.ar_free)
-        _n_ma = _libres(model.ma, model.ma_free)
+        # BUG-0243: un MA(q≥2) ya no se sustituye, se conserva junto al testigo.
+        _maq = [len(f) for f in (model.ma or []) if len(f) >= 2]
+        _n_ma = _libres([f for f in (model.ma or []) if len(f) == 1],
+                        [fl for f, fl in zip(model.ma or [], model.ma_free or [])
+                         if len(f) == 1] if model.ma_free else None)
         lines.append(
             f"  ℹ Candidato: ∇^{int(getattr(model, 'd', 0)) + 1}"
             + (f", con el AR regular del modelo (AR({_p_ar}), reestimado) dentro"
                if _p_ar else ", sin AR regular")
             + (f", su MA regular ({_n_ma} coef.) sustituido por el testigo"
                if _n_ma else "")
+            + "".join(f", su MA({q}) conservado (reestimado) junto al testigo"
+                      for q in _maq)
             + ", sin media. θ̂ mide la persistencia de ∇^d y que "
             + ("ESE AR no explica: depende del modelo base, y sobre otro AR "
                "sale otro θ̂." if _p_ar else "nada más explica.")
@@ -2738,7 +2970,10 @@ def describe_formal_tests(model, run_meg: bool = True,
                 "la verosimilitud exacta del estudio; esa validación se hizo "
                 "sobre candidatos SIN AR). Esa persistencia es la que el par en "
                 "f=0 tiene que leer."
-                + ("" if not (model.ar or []) else
+                # BUG-0248: `model.ar` es [[0.0]] fijo cuando no hay ARMA; lo
+                # que cuenta son los coeficientes libres, como en la línea del
+                # candidato de arriba.
+                + ("" if not _p_ar else
                    " Este candidato lleva el AR del modelo, y con AR esa "
                    "validación de fue no está hecha."))
         if sf_res is None:
@@ -2764,7 +2999,27 @@ def describe_formal_tests(model, run_meg: bool = True,
                    "de frontera se leen en pareja. Antes de mover `d`, estima el "
                    "candidato d+1 y compáralo por diagnosis y criterios de "
                    "información."))
-            if sf_sobre is not None and sf_sobre.convergido:
+            if (sf_sobre is not None and sf_sobre.convergido
+                    and sf_sobre.sin_raiz_positiva):
+                # BUG-0242: la raíz recuperada es negativa. No hay Φ̂₁ᵤ —sobre una
+                # raíz negativa no significaría nada (BUG-0215)—, pero sí lectura.
+                lines += [
+                    "",
+                    f"  **Lado AR recuperado por SOBREAJUSTE** (rama de "
+                    f"diagnóstico, no un modelo): estimado un "
+                    f"AR({sf_sobre.p_ampliado}) en lugar del "
+                    f"AR({sf_sobre.p_original}), su raíz real sale NEGATIVA "
+                    f"(φ̂={sf_sobre.phi_real:+.4f}), lejos de ρ=+1. No hay "
+                    "Φ̂₁ᵤ —Shin-Fuller no contrasta una raíz negativa—, pero la "
+                    "lectura existe: el AR ampliado tuvo sitio para una raíz "
+                    "cerca de +1 y no la puso, así que **el lado AR no apoya d+1**.",
+                    f"  - ΔAIC del sobreajuste = {sf_sobre.delta_aic:+.2f}"
+                    + ("  → la raíz añadida **no compra nada**: es espuria."
+                       if sf_sobre.la_raiz_parece_espuria else
+                       "  → el AR ampliado mejora, pero no con una raíz en f=0."),
+                    "  ⚠ **No adoptes este modelo.** Existe para poder preguntar.",
+                ]
+            elif sf_sobre is not None and sf_sobre.convergido:
                 _s = sf_sobre.sf
                 _v = ("estacionario ✓ — d basta por el lado AR" if _s.stationary
                       else "**raíz unitaria → d+1** por el lado AR")
@@ -2793,18 +3048,31 @@ def describe_formal_tests(model, run_meg: bool = True,
     # miran los DOS hacia arriba —«¿basta d, o hace falta d+1?»— y ninguno
     # pregunta si con d−1 habría bastado, que es justo la duda cuando la tabla
     # ADF/KPSS recomienda una d menor que la adoptada.
+    # BUG-0224 / 0232 / 0236 / 0243: el veredicto ya no sale sólo de `lr < crít`
+    # — ver `_estado_subdif` —, y el bloque dice de dónde sale el testigo y qué
+    # hizo el AR del restringido, que es lo que permite leer el LR.
+    ud_estado = _estado_subdif(ud_res) if ud_res is not None else None
     if ud_res is not None:
-        c5u = ud_res._crit['5%']
-        if ud_res.lr < c5u:
-            ver_u = ("testigo NO invertible (θ→+1) → la ∇ está CANCELADA "
-                     "→ con d−1 bastaba ✗")
-        else:
-            ver_u = ("testigo invertible → la ∇ es genuina → d confirmado "
-                     "por abajo ✓")
         lines.append("\n**DCD sub-diferenciación regular** — ¿sobraba la ÚLTIMA "
                      "diferencia? (H₀: θ=1, ley s=1)")
-        lines.append(f"- θ̂={ud_res.coef_free:+.4f}, LR={ud_res.lr:.3f} "
-                     f"(crít 5%={c5u:.2f}) → {ver_u}")
+        lines.append(f"- {_texto_subdif(ud_res)}")
+        if getattr(ud_res, "testigo", ""):
+            lines.append(f"  ℹ Testigo: {ud_res.testigo}.")
+        if ud_res.phi_restringido is not None and ud_res.calculable:
+            if ud_res.ar_acotado:
+                lines.append(
+                    f"  ℹ Con θ=1 —el modelo en d−1— el AR libre se iba a "
+                    f"φ̂={ud_res.phi_restringido:.4f}, en ρₘ={ud_res.rho_m:.4f} o "
+                    "por encima: (1 − φB) con φ → 1 es otra vez (1 − B), y "
+                    "reconstruía la ∇ que el MA acaba de cancelar. Se acota en "
+                    "ρₘ, el umbral de Shin-Fuller, y el LR es contra «d−1 con un "
+                    "AR estacionario» (BUG-0224). Por eso no es el LR de la "
+                    "frontera sola: suma la distancia del AR a ρₘ.")
+            else:
+                lines.append(
+                    f"  ℹ AR del restringido (el modelo en d−1): raíz real "
+                    f"dominante φ̂={ud_res.phi_restringido:.4f}, por debajo de "
+                    f"ρₘ={ud_res.rho_m:.4f}: no reconstruye la ∇.")
 
     # ── EL PAR CONFIRMATORIO EN f=0 ───────────────────────────────────────
     # Shin-Fuller y el DCD de sobrediferenciación tienen nulas OPUESTAS y
@@ -2987,13 +3255,13 @@ def describe_formal_tests(model, run_meg: bool = True,
             # sostenían — ambos miran hacia d+1. Acotarlo por los dos lados
             # requiere el de sub-diferenciación.
             if ud_res is not None:
-                if ud_res.lr >= ud_res._crit['5%']:
+                if ud_estado == "genuina":
                     lines.append("  ✓ Y acotado por ABAJO: la última ∇ es genuina "
                                  "(sub-diferenciación LR="
                                  f"{ud_res.lr:.3f} ≥ {ud_res._crit['5%']:.2f}), "
                                  "así que d−1 no habría bastado. Las dos "
                                  "direcciones cierran sobre la misma d.")
-                else:
+                elif ud_estado == "cancelada":
                     lines.append("  ⚠ **Pero por ABAJO no cierra:** el testigo de "
                                  "sub-diferenciación se apila en θ=+1 (LR="
                                  f"{ud_res.lr:.3f} < {ud_res._crit['5%']:.2f}), "
@@ -3001,6 +3269,13 @@ def describe_formal_tests(model, run_meg: bool = True,
                                  "bastaba. El orden de integración NO está fijado: "
                                  "estima el candidato d−1 y compáralo por "
                                  "diagnosis y criterios de información.")
+                else:
+                    lines.append("  ⚠ **Por ABAJO no hay veredicto:** el DCD de "
+                                 "sub-diferenciación "
+                                 + ("no es calculable" if ud_estado == "no_calculable"
+                                    else "no es concluyente")
+                                 + " (ver arriba). El orden queda acotado sólo "
+                                 "por arriba.")
             else:
                 lines.append("  ℹ Sólo por arriba: no se pudo contrastar si con "
                              "d−1 habría bastado, así que esta conclusión acota "
@@ -3012,22 +3287,114 @@ def describe_formal_tests(model, run_meg: bool = True,
     # raíces complejas donde SF no aplica-- se perdía una conclusión que sí
     # estaba calculada, justo en los modelos donde más falta hace, porque son los
     # que se quedan con un solo lado.
-    if ud_res is not None and not (sf_res is not None and od_res is not None):
+    # BUG-0235: con el modelo en d−1 dado, el par cruzado (más abajo) es la
+    # lectura de la cota inferior; repetirla aquí «sin par» la contradecía.
+    _hay_cruzado = (modelo_d_menos_1 is not None
+                    and int(getattr(modelo_d_menos_1, "d", -1) or 0) == _d - 1)
+    if (ud_res is not None and not (sf_res is not None and od_res is not None)
+            and not _hay_cruzado):
         c5u = ud_res._crit['5%']
         _sin_lado_ar = not (sf_sobre is not None and sf_sobre.convergido)
         lines.append("\n**Cota inferior del orden de integración**"
                      + (" (sin par: el lado AR no está disponible)"
                         if _sin_lado_ar else
                         " (el lado AR está arriba, recuperado por sobreajuste)"))
-        if ud_res.lr >= c5u:
+        if ud_estado == "genuina":
             lines.append(f"  ✓ Queda acotado por ABAJO: la última ∇ es genuina "
                          f"(sub-diferenciación LR={ud_res.lr:.3f} ≥ {c5u:.2f}), "
                          f"así que d−1 no habría bastado.")
-        else:
+        elif ud_estado == "cancelada":
             lines.append(f"  ⚠ Pero por ABAJO no cierra: el testigo se apila en θ=+1 "
                          f"(LR={ud_res.lr:.3f} < {c5u:.2f}), o sea que la última "
                          f"∇ está cancelada y con d−1 bastaba. Estima el "
                          f"candidato d−1 y compáralo.")
+        else:
+            lines.append("  ⚠ Por ABAJO no hay veredicto: el DCD de "
+                         "sub-diferenciación "
+                         + ("no es calculable" if ud_estado == "no_calculable"
+                            else "no es concluyente") + " (ver arriba).")
+
+    # ── EL PAR DE LA FRONTERA d−1/d, CRUZANDO DOS MODELOS — BUG-0235 ─────────
+    # El lado MA es el DCD de subdiferenciación de ESTE modelo; el lado AR, el
+    # Shin-Fuller del modelo en d−1. `formal_tests` mira un solo modelo y no
+    # podía formarlo: el analista lo leía a mano (Villaverde). Tabla de verdad
+    # de docs/ARBOL-orden-de-integracion.md §1 y §6.
+    par_cruzado = None
+    if modelo_d_menos_1 is not None and ud_res is not None:
+        _d1 = int(getattr(modelo_d_menos_1, "d", -1) or 0)
+        lines.append(f"\n**Par de la frontera {_d - 1}/{_d}** — cruza dos modelos: "
+                     f"el DCD de subdiferenciación de éste (d={_d}) y el "
+                     f"Shin-Fuller del modelo en d={_d - 1}")
+        sf1, sf1_txt = None, ""
+        if _d1 != _d - 1:
+            lines.append(f"  ⚠ El modelo dado tiene d={_d1}, no d={_d - 1}: no "
+                         "forma el par con éste.")
+        else:
+            try:
+                sf1 = shin_fuller(modelo_d_menos_1)
+                sf1_lado = "basta" if sf1.stationary else "raiz"
+                sf1_txt = (f"Φ̂₁ᵤ={sf1.phi_1u:.3f} (crít 5%={sf1.crit_5pct:.2f}), "
+                           + ("ρ<1: con d−1 basta"
+                              if sf1.stationary else "no rechaza ρ=1: hace falta la ∇"))
+            except Exception as _e1:
+                sf1_lado = None
+                _so1 = (_try(lambda: shin_fuller_sobreajuste(modelo_d_menos_1), None)
+                        if "raíz REAL" in str(_e1) else None)
+                if _so1 is not None and _so1.convergido:
+                    if _so1.sin_raiz_positiva:
+                        sf1_lado = "basta"
+                        sf1_txt = (f"por sobreajuste, raíz real recuperada "
+                                   f"φ̂={_so1.phi_real:+.4f} (negativa): no apoya "
+                                   "otra ∇")
+                    else:
+                        sf1_lado = "basta" if _so1.sf.stationary else "raiz"
+                        sf1_txt = (f"por sobreajuste, Φ̂₁ᵤ={_so1.sf.phi_1u:.3f} "
+                                   f"(crít 5%={_so1.sf.crit_5pct:.2f})")
+                else:
+                    sf1_txt = f"no aplicable ({str(_e1).split(':')[0]})"
+            lines.append(f"- lado AR (Shin-Fuller en d={_d - 1}, H₀: ρ=1): {sf1_txt}")
+            lines.append(f"- lado MA (DCD subdiferenciación en d={_d}, H₀: θ=1): "
+                         + {"genuina": "la ∇ es genuina",
+                            "cancelada": "la ∇ está cancelada",
+                            "no_concluyente": "no concluyente",
+                            "no_calculable": "no calculable"}[ud_estado])
+            _ma = {"genuina": "d", "cancelada": "d-1"}.get(ud_estado)
+            _ar = {"basta": "d-1", "raiz": "d"}.get(sf1_lado)
+            dist_u = 1.0 - ud_res.coef_free
+            if _ma is None or _ar is None:
+                par_cruzado = "incompleto"
+                lines.append("  ⚠ Falta un lado: el par no se forma.")
+            elif _ma == _ar == "d":
+                par_cruzado = "d"
+                lines.append(f"  ✓ Coinciden en d={_d}: la última ∇ es genuina por "
+                             "los dos lados.")
+            elif _ma == _ar == "d-1":
+                par_cruzado = "d-1"
+                lines.append(f"  ⚠ Coinciden en d={_d - 1}: la última ∇ sobra por "
+                             "los dos lados.")
+            elif _ar == "d-1":
+                # SF rechaza (d−1 basta) y el DCD también (la ∇ es genuina)
+                if dist_u <= BANDA_CUASI_CANCELACION:
+                    par_cruzado = "ambiguo"
+                    lines.append(
+                        f"  ⚠ **Los dos rechazan su nula, con θ̂={ud_res.coef_free:+.4f}"
+                        f" a {dist_u:.4f} de la frontera: banda de "
+                        "cuasi-cancelación → AMBIGUO.** Los datos no discriminan "
+                        f"entre d={_d - 1} y d={_d}; decide la diagnosis, la "
+                        "parsimonia o la previsión fuera de muestra.")
+                else:
+                    par_cruzado = "discrepan"
+                    lines.append(
+                        f"  ⚠ Los dos rechazan su nula y θ̂={ud_res.coef_free:+.4f} "
+                        f"está a {dist_u:.4f} de la frontera: NO es la banda. Las "
+                        "dos representaciones difieren de verdad; manda el resto "
+                        "de la evidencia (diagnosis, criterios de información).")
+            else:
+                par_cruzado = "indeterminado"
+                lines.append(
+                    "  ⚠ Ninguno rechaza su nula: los contrastes no tienen "
+                    f"potencia aquí → indeterminado; por parsimonia, d={_d - 1}, "
+                    "y dilo.")
 
     # DCD_f
     if dcd_f_res:
@@ -3167,6 +3534,14 @@ def describe_formal_tests(model, run_meg: bool = True,
             "frontera). El orden de integración no queda fijado: estima el "
             "candidato d+1 y compáralo por diagnosis y criterios de información."
         )
+    elif sf_res is not None and not sf_res.stationary and sf_tope:
+        # BUG-0235: desde d=2 no se propone d=3.
+        pendientes.append(
+            f"Shin-Fuller no rechaza la raíz unitaria (Φ̂₁ᵤ={sf_res.phi_1u:.3f} ≤ "
+            f"{sf_res.crit_5pct:.2f}), pero con d={_d} no se sube: el AR casi en 1 "
+            "es persistencia del modelo. La duda que queda es la frontera de "
+            f"abajo: pásale el modelo en d={_d - 1} (`modelo_d_menos_1`)."
+        )
     elif sf_res is not None and not sf_res.stationary:
         issues.append(
             f"Shin-Fuller no rechaza H₀ (Φ̂₁ᵤ={sf_res.phi_1u:.3f} ≤ {sf_res.crit_5pct:.2f}): "
@@ -3183,6 +3558,49 @@ def describe_formal_tests(model, run_meg: bool = True,
             "el candidato d+1 y compáralo por diagnosis y criterios de "
             "información."
         )
+    elif (sf_res is None and od_res is not None
+          and od_res.lr >= od_res._crit['5%']):
+        # BUG-0242: con el lado AR recuperado por sobreajuste, el cierre lo lee
+        # —antes caía a «adecuado» con el DCD pidiendo d+1—. Una raíz recuperada
+        # negativa, o un Φ̂₁ᵤ que rechaza, dicen que el lado AR no apoya d+1.
+        _ar_basta = (sf_sobre.sin_raiz_positiva or sf_sobre.sf.stationary)
+        pendientes.append(
+            f"El DCD de sobrediferenciación apunta a d+1 (LR={od_res.lr:.3f}, θ̂="
+            f"{od_res.coef_free:+.4f}) y el lado AR, recuperado por sobreajuste, "
+            + ("NO lo apoya" + (f" (raíz real recuperada φ̂={sf_sobre.phi_real:+.4f})"
+                                if sf_sobre.sin_raiz_positiva else "")
+               + ": el par discrepa y d no queda fijado."
+               if _ar_basta else "también: los dos lados apuntan a d+1.")
+            + " Estima el candidato d+1 y compáralo por diagnosis y criterios de "
+            "información."
+        )
+    # BUG-0232: un lado que no se pudo calcular, o un lado d−1 que no cierra,
+    # tampoco deja decir «el modelo es adecuado» — el cierre lee lo que el
+    # bloque acaba de imprimir.
+    if od_nc is not None:
+        pendientes.append(
+            "El DCD de sobrediferenciación no es calculable "
+            f"({od_nc.motivo_no_calculable or 'LR no finito o negativo'}): el "
+            "lado MA de la frontera de arriba no da veredicto.")
+    if ud_estado == "cancelada":
+        pendientes.append(
+            f"Por abajo no cierra: el DCD de subdiferenciación no rechaza θ=1 "
+            f"(θ̂={ud_res.coef_free:+.4f}, LR={ud_res.lr:.3f}) y la última ∇ "
+            "puede sobrar. Estima el candidato d−1 y compáralo.")
+    elif ud_estado in ("no_concluyente", "no_calculable"):
+        pendientes.append(
+            "El DCD de subdiferenciación "
+            + ("no es calculable" if ud_estado == "no_calculable"
+               else "no es concluyente")
+            + ": la frontera de abajo queda sin veredicto por ese lado.")
+    if par_cruzado == "d-1":
+        issues.append(
+            f"El par de la frontera {_d - 1}/{_d} coincide en d={_d - 1}: la última "
+            f"∇ sobra por los dos lados. Estima el modelo en d={_d - 1}.")
+    elif par_cruzado in ("ambiguo", "discrepan", "indeterminado"):
+        pendientes.append(
+            f"El par de la frontera {_d - 1}/{_d} no fija d ({par_cruzado}): ver "
+            "el bloque del par.")
     non_invertible_ma = [r for r in dcd_res if r.lr < 1.94]
     for r in non_invertible_ma:
         issues.append(
@@ -3298,6 +3716,21 @@ def describe_formal_tests(model, run_meg: bool = True,
             "diagnosis_failures": list(_dg_fallos),
             # BUG-0215: lo que impide cerrar sin pedir reformular.
             "pendientes": list(pendientes),
+            # BUG-0224/0232/0236/0243: el lado d−1 con su lectura, y el lado
+            # MA de arriba cuando no fue calculable.
+            "underdiff_regular": (
+                {"lr": ud_res.lr, "coef": ud_res.coef_free,
+                 "crit_5pct": ud_res._crit['5%'], "estado": ud_estado,
+                 "calculable": ud_res.calculable,
+                 "phi_restringido": ud_res.phi_restringido,
+                 "ar_acotado": ud_res.ar_acotado,
+                 "raices_complejas": ud_res.raices_complejas,
+                 "testigo": ud_res.testigo}
+                if ud_res is not None else None
+            ),
+            "overdiff_no_calculable": (od_nc.motivo_no_calculable or "LR no finito"
+                                       if od_nc is not None else None),
+            "par_d_menos_1": par_cruzado,                       # BUG-0235
         },
     )
 

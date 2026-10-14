@@ -283,7 +283,7 @@ Compare two estimated models: spec diff, stats table, nested LR test.
 | `q` | integer | no | `1` |
 | `ar_seeds` | — | no | `None` |
 | `ar_f_freqs` | — | no | `None` |
-| `n_harmonics` | integer | no | `5` |
+| `n_harmonics` | — | no | `None` |
 | `P` | integer | no | `0` |
 | `Q` | integer | no | `0` |
 | `base_pre_path` | string | no | `` |
@@ -365,10 +365,21 @@ Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
                       This is the CONTRASTABLE version of «this factor is
                       seasonal» — nested in the free factor, so a likelihood
                       ratio with 1 d.f. decides it. Without it the only way to
-                      claim a factor is seasonal was to impose it.
+                      claim a factor is seasonal was to impose it. With
+                      base_pre_path it ADDS the factors the .pre lacks; those
+                      it carries are inherited unchanged (BUG-0252).
     q               : regular MA order
-    n_harmonics     : harmonic pairs cos/sin (D=0 fresh only; ignored when
-                      base_pre_path is given — harmonics come from the .pre)
+    n_harmonics     : harmonic pairs cos/sin (D=0). None (default) = 5 in a
+                      fresh model (capped to what fits the frequency) and
+                      INHERITED from the .pre with base_pre_path.
+                      **Con `base_pre_path`, pasarlo (o `seasonal`) rehace el
+                      bloque de armónicos del .pre** (BUG-0245): pares cos/sin
+                      k=1..n (el `alter` del .pre se hereda; si el .pre no tiene
+                      bloque, va con el nuevo); los que ya estaban conservan su ω,
+                      los nuevos parten de 0, y la salida lo dice. Así se AÑADEN
+                      armónicos a un modelo con intervenciones (n_harmonics=2,
+                      seasonal=True) o se quitan (seasonal=False). Antes se
+                      ignoraban en silencio. Con un .pre de D=1 se rechaza.
     easter          : add the EASTER (Semana Santa) calendar regressor. MONTHLY
                       series only — the engine builds it itself: 1.0 in the month
                       of Easter Sunday, split 0.5 March + 0.5 April when Good
@@ -383,7 +394,8 @@ Build the .inp for the confirmed spec, estimate and show diagnosis immediately.
                       aceptaba el argumento y se descartaba en silencio, con lo
                       que no quedaba NINGUNA vía para añadirlo a un modelo ya
                       construido sin volver al `.inp` fresco y perder todas las
-                      intervenciones. `n_harmonics` sigue viniendo del `.pre`.
+                      intervenciones. Los armónicos, con `n_harmonics`/`seasonal`
+                      (BUG-0245).
     seasonal        : on/off switch for the whole deterministic seasonal package
                       (cos/sin pairs + Nyquist alter). None (default) => derive from
                       n_harmonics>0, correct for freq>=4. Pass False for a
@@ -664,6 +676,7 @@ EXTIENDE la muestra de un modelo: el mismo modelo, más observaciones.
 | `inp_path` | string | yes | — |
 | `run_meg` | boolean | no | `True` |
 | `subdiferenciacion` | boolean | no | `False` |
+| `modelo_d_menos_1` | — | no | `None` |
 
 Run formal hypothesis tests on a fitted model.
 
@@ -756,6 +769,12 @@ Run formal hypothesis tests on a fitted model.
                Y cuando lo pidas, lee BUG-0167: con un AR de orden 1 el brazo
                nulo gasta su única raíz en la unitaria y el LR mide dinámica
                perdida, no frontera.
+    modelo_d_menos_1 : .pre/.inp del modelo de la MISMA serie en d−1 (BUG-0235).
+               Forma el par de la frontera d−1/d, que cruza dos modelos: el DCD
+               de subdiferenciación de éste y el Shin-Fuller de aquél, con su
+               tabla de verdad. Es la forma de mirar un modelo en d=2 —desde d=2
+               no se contrasta una tercera diferencia—. Implica
+               `subdiferenciacion=True`.
 
 ---
 
@@ -1299,6 +1318,7 @@ Show the analysis as a MAP: what descends from what, what was adopted, and
 | `criterio` | string | no | `` |
 | `propuesta` | string | no | `` |
 | `coincide` | string | no | `` |
+| `conclusion` | boolean | no | `False` |
 
 Record a DECISION NODE in the guion — a specification choice, not a model.
 
@@ -1350,6 +1370,13 @@ Record a DECISION NODE in the guion — a specification choice, not a model.
                    "estadístico" | "dominio" | "uso". "dominio" requires a
                    `dominio` node with expectations in this guion: the decision
                    cites them. So these decisions can be audited and COUNTED.
+    conclusion   : True when the node CONCLUDES on models already estimated
+                   instead of specifying a new one — «d = ambiguo: I(1) con el
+                   AR(4), I(2) con el IMA(1); los dos son adecuados». It must
+                   hang from a model (`parent`). Without it a "d"/"ordenes"/…
+                   node hung from a model and with nothing below reads as a
+                   reformulation still to estimate, and guion_map lists it as
+                   «decisión sin modelo estimado detrás» (BUG-0234).
 
     THE DECISION BETWEEN TIED CANDIDATES (docs/DISENO-dominio-en-los-ordenes.md
     §4.4), in `razon`, with this fixed format:

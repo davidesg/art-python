@@ -78,12 +78,13 @@ jobs:
           print("atsw", version("atsw"), "— cotas satisfechas")
           PY
           # 2. los tres asistentes levantan de verdad: art, mtram (drtran) y
-          #    sima (drvarma). Importar su servidor es lo que falla si alguno
-          #    usa sintaxis que esta versión de Python no acepta.
+          #    sima (sima-tseries desde atsw 2.0.0; drvarma ya no lleva
+          #    servidor). Importar su servidor es lo que falla si alguno usa
+          #    sintaxis que esta versión de Python no acepta.
           python - <<'PY'
           import asyncio, importlib, sys
           for mod, minimo in (("art.mcp_server", 30), ("drtran.mcp_server", 10),
-                              ("drvarma.mcp_server", 10)):
+                              ("sima.mcp_server", 20)):
               n = len(asyncio.run(importlib.import_module(mod).mcp.list_tools()))
               print(f"{mod}: {n} herramientas (Python {sys.version.split()[0]})")
               assert n >= minimo, (mod, n)

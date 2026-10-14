@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "1.6.1"
+version         = "2.0.0"
 description     = "ATSW — A Time Series Workshop: the Box-Jenkins-Treadway suite (univariate exact-ML estimation, graphics, model building, transfer functions and multivariate VARMA) with three MCP assistants for LLM-driven analysis"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -31,6 +31,7 @@ classifiers     = [
 #     art     one series: ARIMA + interventions        engine: fue      -> art-mcp
 #     mtram   transfer functions and networks (a DAG)  engine: drtran   -> mtram
 #     sima    simultaneous VARMA                       engine: drvarma  -> sima
+#             (since atsw 2.0.0 its own package, sima-tseries; drvarma is the engine)
 # NONE of these lower bounds is cosmetic. Every one of them is the first version
 # of its package that actually works in a clean environment:
 #
@@ -70,10 +71,15 @@ dependencies = [
     # igual por art, pero una cota que miente sobre la suite no se sostiene.
     # >=0.1.16 desde atsw 1.5.0: la que exige art-tseries 0.2.2 (fue/BUG-0023,
     # el conocimiento del modelo que la figura de residuos de art necesita).
-    "fue>=0.1.16",            # univariate estimation engine + FUF forecasting
+    # >=0.1.17 desde atsw 2.0.0: la que exige art-tseries 0.2.3 (los errores
+    # estándar por el hessiano en diferencias finitas, fue/BUG-0015; el
+    # reinicio del optimizador, BUG-0005; el Jarque-Bera con n/6, BUG-0026).
+    "fue>=0.1.17",            # univariate estimation engine + FUF forecasting
     # >=2.0.1 desde atsw 1.5.0: la 2.0.0 rompe con toda serie anual
     # (pyfug/BUG-0002).
-    "pyfug>=2.0.1",           # Jenkins-Treadway graphics
+    # >=2.0.2 desde atsw 2.0.0: `percent=` y `density=` (pyfug/BUG-0008), que
+    # art 0.2.3 usa en sus figuras.
+    "pyfug>=2.0.2",           # Jenkins-Treadway graphics
     # >=0.1.12 es de una CLASE DISTINTA a las demás cotas de este fichero, y
     # conviene decirlo en vez de disfrazarlo. Todas las anteriores son «la
     # primera versión que instala y arranca»: por debajo, el paquete no se
@@ -107,7 +113,11 @@ dependencies = [
     # >=0.2.2 desde atsw 1.5.0: en la 0.2.1 las tres herramientas de previsión
     # fallan en toda instalación limpia (BUG-0191), y la Q del texto tiene un
     # grado de libertad de más por cada factor de frecuencia fija (BUG-0190).
-    "art-tseries>=0.2.2",     # model building + MCP server (art-mcp)
+    # >=0.2.3 desde atsw 2.0.0: los contrastes de diferenciación con el AR
+    # acotado y el LR comprobado (BUG-0224, 0232, 0235, 0236, 0242, 0243) —la
+    # clase de la cota de 0.1.12: contestaban mal—, y el encadenamiento que
+    # ignoraba argumentos en silencio (BUG-0245, 0250, 0252).
+    "art-tseries>=0.2.3",     # model building + MCP server (art-mcp)
     # >=0.2.0 is NOT housekeeping. Up to 0.1.1 drtran related each series
     # differenced by ITS OWN operator, so whenever the output and the input
     # carried different differencing the fitted transfer was nu(B)*Delta(B) and
@@ -119,12 +129,22 @@ dependencies = [
     # >=3.10 (drtran BUG-51)—, y la puerta diagonal medía la muestra común sin
     # las raíces de `ifadf`. Con la cota vieja, quien ya tiene atsw no recibe
     # la 0.2.5 con `pip install -U atsw`.
-    "drtran[mcp]>=0.2.5",     # transfer functions and networks + MCP server (mtram)
+    # >=0.2.6 desde atsw 2.0.0: la Ljung-Box por serie descuenta lo que
+    # descuenta el C (BUG-57), `mtram --help` contesta y sale, y la búsqueda
+    # lineal de drvarma 0.2.0 (drvarma BUG-0016), que drtran usa.
+    "drtran[mcp]>=0.2.6",     # transfer functions and networks + MCP server (mtram)
     # >=0.1.7 desde atsw 1.6.1: en la 0.1.6 el optimizador —el de drvarma y el
     # de drtran, que usa el mismo `_qnewt`— se colgaba para siempre con un
     # objetivo NaN o infinito (drvarma BUG-0006). Con la cota vieja, quien ya
     # tiene atsw no recibe la 0.1.7 con `pip install -U atsw`.
-    "drvarma[mcp]>=0.1.7",    # multivariate VARMA + MCP server (sima)
+    #
+    # Desde atsw 2.0.0 drvarma NO lleva servidor: el extra `mcp` ya no existe
+    # (pip avisaría y lo ignoraría, y `sima` desaparecería). >=0.2.0: el motor
+    # de la escalera y de la forma echelon que sima-tseries necesita.
+    "drvarma>=0.2.0",         # multivariate VARMA engine
+    # El asistente sima, su propio paquete. [raw] trae art para la entrada
+    # desde la tabla cruda (load_data, characterize, rutas U y V).
+    "sima-tseries[raw]>=0.1.0",  # simultaneous VARMA + MCP server (sima)
 ]
 
 # One console script, and deliberately nothing else. The umbrella INSTALLS; it

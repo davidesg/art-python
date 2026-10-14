@@ -654,8 +654,8 @@ ETAPA 2 — ESTIMACIÓN DEL MODELO ARMA ELEGIDO
     ÓPTIMO en forma re-ejecutable: encadenar hereda armónicos, intervenciones y
     la media YA estimados y solo añade el ARMA. Sin base_pre_path el modelo se
     reconstruye desde cero, se re-estima lo ya resuelto y la media se pierde
-    (BUG-0014). Con base_pre_path, n_harmonics se ignora: los armónicos vienen
-    del .pre.
+    (BUG-0014). Con base_pre_path los armónicos vienen del .pre; pasar
+    n_harmonics o seasonal los REHACE sobre él (BUG-0245), no los ignora.
     Este tool construye el INP, estima y devuelve la ECUACIÓN + diagnosis en una sola respuesta.
     NO llames model_equation_display por separado — la ecuación ya viene incluida.
   → PRESENTA la ecuación del modelo (verbatim) y MUESTRA el gráfico diagnóstico Treadway
@@ -1117,7 +1117,7 @@ from art.pipeline import (
     # El sitio que llama declara lo que necesita, y por eso `mirar` no avisa:
     # no promete nada que un `.pre` estropee.
     _load_ts_model, _write_bare_inp, _load_fitted, mirar as _mirar, _obs_to_date,
-    _write_inp, _build_arma_on_model, _make_model,
+    _write_inp, _build_arma_on_model, _make_model, terminos_armonicos,
     ModelSpec, FitResult, build_and_fit, run_full,
     _RESCALE_FACTOR,
 )
@@ -4261,7 +4261,8 @@ def overparameterization_analysis(inp_path: str, threshold: float = 0.7) -> list
 
 @mcp.tool()
 def formal_tests(inp_path: str, run_meg: bool = True,
-                 subdiferenciacion: bool = False) -> list:
+                 subdiferenciacion: bool = False,
+                 modelo_d_menos_1: str | None = None) -> list:
     """
     Run formal hypothesis tests on a fitted model.
 
@@ -4354,14 +4355,22 @@ def formal_tests(inp_path: str, run_meg: bool = True,
                Y cuando lo pidas, lee BUG-0167: con un AR de orden 1 el brazo
                nulo gasta su única raíz en la unitaria y el LR mide dinámica
                perdida, no frontera.
+    modelo_d_menos_1 : .pre/.inp del modelo de la MISMA serie en d−1 (BUG-0235).
+               Forma el par de la frontera d−1/d, que cruza dos modelos: el DCD
+               de subdiferenciación de éste y el Shin-Fuller de aquél, con su
+               tabla de verdad. Es la forma de mirar un modelo en d=2 —desde d=2
+               no se contrasta una tercera diferencia—. Implica
+               `subdiferenciacion=True`.
     """
     try:
         from mcp.types import TextContent
         from art.describe import describe_formal_tests
         from art.diagnosis import diagnose
         ts, m = _load_fitted(inp_path)
+        m1 = _load_fitted(modelo_d_menos_1)[1] if modelo_d_menos_1 else None
         desc = describe_formal_tests(m, run_meg=run_meg,
-                                     subdiferenciacion=subdiferenciacion)
+                                     subdiferenciacion=subdiferenciacion,
+                                     modelo_d_menos_1=m1)
 
         # Ésta es la etapa de CIERRE: el analista da aquí el vistazo final, y
         # tiene que dárselo AL MODELO, no sólo a los contrastes. La ecuación con
@@ -5258,7 +5267,8 @@ def save_identification_report(inp_path: str, output_path: str,
 
 def _auto_scan_section(ts, m, lam: float, d: int, D: int,
                         p: int, q: int, P: int, Q: int,
-                        inp_path: str, pre_path: str
+                        inp_path: str, pre_path: str,
+                        guion_path: str = ""
                         ) -> "tuple[str, str | None]":
     """Auto-scan model residuals for outlier impact; return (text_section, b64).
 
@@ -5296,6 +5306,21 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
             _n_free(m.ar_s, m.ar_s_free) > 0,
             _n_free(m.ma_s, m.ma_s_free) > 0,
         ])
+        # BUG-0248: sin ARMA libre no quiere decir que falte identificarlo. Un
+        # ruido blanco ELEGIDO —(0,1,0) tras la llamada 4— decía «procede a la
+        # identificación ARMA» con el pie en «contrastes formales». Los órdenes
+        # están por decidir sólo en el m00 de la ruta B1 y sus descendientes de
+        # intervención (con deterministas), y mientras el guion no tenga nodo
+        # `ordenes`: ese nodo lo abre la llamada 4.
+        ordenes_decididos = has_arma or not (m.interventions or [])
+        if not ordenes_decididos and guion_path:
+            try:
+                _gp = os.path.expanduser(guion_path)
+                if os.path.exists(_gp):
+                    ordenes_decididos = _ultimo_nodo(
+                        _abre_guion(_gp), "ordenes") is not None
+            except Exception:
+                pass
         level = scan.data.get("distortion_level", "none")
         n_out = scan.data.get("n_outliers", 0)
         var_o = scan.data.get("var_outlier_pct", 0.0)
@@ -5307,7 +5332,7 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
         if level != "strong":
             if n_out == 0:
                 note = "anómalos revisados, ninguno significativo"
-                nxt = ("procede a la identificación ARMA" if not has_arma
+                nxt = ("procede a la identificación ARMA" if not ordenes_decididos
                        else "procede a contrastes formales")
                 return ("\n\n---\n\n*✓ Escaneo de anómalos (latente): " + note
                         + " → " + nxt + ".*"), None
@@ -5336,7 +5361,7 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
             if cambia is None:
                 cuerpo = (cab + " — no se pudo calibrar el correlograma; "
                           "llama a `residual_outlier_scan` antes de fijar órdenes")
-                nxt = ("procede a la identificación ARMA" if not has_arma
+                nxt = ("procede a la identificación ARMA" if not ordenes_decididos
                        else "procede a contrastes formales")
             elif cambia:
                 ar = ", ".join(f"PACF({k})" for k in sd.get("flips_ar", []))
@@ -5387,13 +5412,13 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
                 # El siguiente paso depende del veredicto, no del sitio del
                 # flujo: decir "interviene ANTES de identificar → procede a
                 # identificar" sería la misma contradicción.
-                nxt = ("procede a la identificación ARMA" if not has_arma
+                nxt = ("procede a la identificación ARMA" if not ordenes_decididos
                        else "procede a contrastes formales")
             return ("\n\n---\n\n*Escaneo de anómalos (latente): " + cuerpo
                     + " → " + nxt + ".*"), None
 
         # Distortion STRONG → surface the decision node (calibration + A/B + figure).
-        if has_arma:
+        if ordenes_decididos:
             ab_choice = (
                 "\n\n**PUNTO DE DECISIÓN (analista).** Anómalos grandes distorsionan con "
                 "fuerza la ACF/PACF. Claude: presenta la distorsión calibrada y SUGIERE; "
@@ -5559,8 +5584,13 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             _g(_confirma_nodo, "d", str(int(d)), valor=int(d),
                razon=razon if D < 0 else "")
         if D >= 0:
+            # BUG-0246: tener `pre_path` no es estar en la ruta B1 —también la
+            # Decisión A calibra anómalos con un base y vuelve con su `.pre`—.
+            # La ruta la dice el `.pre`; con la etiqueta correcta, el nodo ya
+            # confirmado con el mismo valor no se duplica.
+            _ruta_pre = _ruta_estacional_del_pre(pre_path) if pre_path else ""
             _g(_confirma_nodo, "estacionalidad",
-               lambda pv: _texto_D(D, seasonal_hint=pv or "", b1=bool(pre_path)),
+               lambda pv: _texto_D(D, seasonal_hint=_ruta_pre or pv or ""),
                valor=int(D), razon=razon, coincide_fn=_coincide_D)
 
         # D2: las expectativas pueden llegar en cualquier llamada, no sólo en
@@ -5766,103 +5796,112 @@ def guided_identification(inp_path: str, lam: float = -1.0,
             sym     = {0: "", 1: "∇", 2: "∇²"}.get(d, f"∇^{d}")
             _ruta_fig = _escribe_fig(b64, f"series_d{d}")        # BUG-0113
 
-            sea_text = ""
-            sea_fig  = None
-            _ruta_sea = ""
             d_next_text = ""
-            hay_estacionalidad = False
-            if d > 0:
-                sea     = describe_seasonality(ts)
-                _ruta_sea = _escribe_fig(sea.figure_b64, "seasonality")   # BUG-0113
-                sea_fig  = sea.figure_b64
-                sea_text = (
-                    ("\n\n" + sea.summary) if sea.data.get("annual") else
-                    "\n\n**Test HAC de estacionalidad (soporte):**\n"
-                    + sea.summary + "\n\n---\n" + sea.recommendation
-                )
-                # BUG-0023: el tope de un paso es RELATIVO al d actual, no una
-                # prohibición de d=2. Evaluada ya d y DESCARTADA la
-                # estacionalidad, la contaminación que invalidaba el ADF ha
-                # desaparecido y preguntar por d+1 es legítimo: es la segunda
-                # decisión de la escala, tomada con su instrumento delante y no
-                # de un salto. Con estacionalidad detectada NO se ofrece — ahí
-                # el ADF sigue sesgado hacia «vuelve a diferenciar» y lo que
-                # toca primero es tratarla.
-                hay_estacionalidad = bool(sea.data.get("seasonal_detected", False))
-                if not hay_estacionalidad:
-                    from art.describe import describe_unit_root as _dur
-                    _urt2  = _dur(ts, lam=lam, max_d=d + 1, current_d=d)
-                    _rec2  = int(_urt2.data.get("recommended_d", d))
-                    # BUG-0197: ONE decision about d, the policy's, said once.
-                    # The table's consensus can sit at d+1 only because the ADF
-                    # does not reject at d — with a short series or a cycle it
-                    # lacks power. Another difference is invited only when BOTH
-                    # tests at d say unit root; when they disagree it is a
-                    # caveat, not an instruction (the muskrat: ADF p=0.14, KPSS
-                    # accepts; d=2 is exactly the error there).
-                    _row_d = next((r for r in _urt2.data.get("results", [])
-                                   if r.get("d") == d), {})
-                    _both  = _row_d.get("verdict") == "unit_root"
-                    # La pregunta del nodo es «¿hace falta UNA MÁS?», no
-                    # «redecide d desde cero». BUG-0227: la tabla ya sólo tiene
-                    # las filas d y d+1 (`current_d=d`), así que `_rec2` no puede
-                    # quedar POR DEBAJO de d — la rama que decía «la
-                    # recomendación de la tabla es d=0» bajo una tabla cuyo único
-                    # consenso era d=2 se ha ido con la fila que la provocaba.
-                    if _rec2 > d and _both:
-                        _veredicto = (
-                            f"\n\n→ En d={d} los dos contrastes ven raíz unitaria (el ADF "
-                            f"no la rechaza y el KPSS rechaza la estacionariedad): "
-                            f"**hace falta otra diferencia**. Reentra con "
-                            f"`guided_identification(inp_path, lam={lam}, d={d + 1})`.")
-                    elif _rec2 > d:
-                        _veredicto = (
-                            f"\n\n→ **Se sigue con d={d}.** La tabla llega al consenso "
-                            f"en d={_rec2}, pero en d={d} los contrastes no coinciden "
-                            f"(el ADF no rechaza la raíz unitaria; el KPSS no rechaza la "
-                            f"estacionariedad): no hay evidencia firme de otra diferencia, "
-                            f"y con una serie corta o un ciclo el ADF pierde potencia. "
-                            f"Salvedad, no instrucción: si el modelo estimado la pide, lo "
-                            f"dirán Shin-Fuller y el DCD de sobrediferenciación.")
-                    elif _row_d.get("verdict") == "ambiguous":
-                        _veredicto = (
-                            f"\n\n→ **No hace falta otra diferencia.** En d={d} el ADF "
-                            f"rechaza la raíz unitaria; el KPSS rechaza la "
-                            f"estacionariedad, que con una media que se desplaza o una "
-                            f"serie larga es lo que hace. Una fila que se contradice no "
-                            f"es evidencia de d={d + 1}. Si sobra o falta una diferencia, "
-                            f"lo dictaminan Shin-Fuller y el DCD sobre el MODELO "
-                            f"ESTIMADO, no un ADF sobre la serie.")
-                    else:
-                        _veredicto = (
-                            f"\n\n→ La evidencia sostiene **d={d}**. No hace falta otra "
-                            f"diferencia.")
-                    d_next_text = (
-                        f"\n\n---\n\n### ¿Hace falta una diferencia más? (d={d} → d={d + 1})\n\n"
-                        "Sin estacionalidad que contamine el contraste, esta "
-                        "pregunta ya es legítima y se responde con el mismo "
-                        "instrumento:\n\n"
-                        + _urt2.summary
-                        + _veredicto
-                        + "\n\nRecuerda que esto sigue siendo especificación inicial: "
-                          "el contraste que decide sobre el modelo estimado es "
-                          "Shin-Fuller, con el DCD de sobrediferenciación como par."
-                    )
+            # BUG-0223: con d=0 no se contrastaba, y la rama «sin
+            # estacionalidad» decía «Decisión A» sobre una bandera que nadie
+            # había calculado (BXE = X/M, F-HAC = 9.58). El contraste va SIEMPRE
+            # sobre ∇y, también con d=0, y ahí está su validez: si los niveles
+            # deambulan, ∇ los hace estacionarios y no hay estacionalidad
+            # espuria; si son estacionarios, ∇ sólo sobrediferencia, y un
+            # patrón estacional fijo sobrevive a la diferencia en sus
+            # frecuencias. Es el mismo contraste que repite la llamada 4
+            # (`_estacional_del_nodo3`), así que deciden lo mismo.
+            sea     = describe_seasonality(ts)
+            _ruta_sea = _escribe_fig(sea.figure_b64, "seasonality")   # BUG-0113
+            sea_fig  = sea.figure_b64
+            sea_text = (
+                ("\n\n" + sea.summary) if sea.data.get("annual") else
+                "\n\n**Test HAC de estacionalidad (soporte):**\n"
+                + ("> Con d=0 el contraste se hace sobre ∇y, no sobre los "
+                   "niveles: un F sobre unos niveles que deambulan lee la "
+                   "tendencia como armónicos. Sobre ∇ vale en los dos casos "
+                   "—niveles estacionarios o no— y la decisión sobre d no "
+                   "cambia: sigue siendo d=0.\n\n" if d == 0 else "")
+                + sea.summary + "\n\n---\n" + sea.recommendation
+            )
+            # BUG-0023: el tope de un paso es RELATIVO al d actual, no una
+            # prohibición de d=2. Evaluada ya d y DESCARTADA la
+            # estacionalidad, la contaminación que invalidaba el ADF ha
+            # desaparecido y preguntar por d+1 es legítimo: es la segunda
+            # decisión de la escala, tomada con su instrumento delante y no
+            # de un salto. Con estacionalidad detectada NO se ofrece — ahí
+            # el ADF sigue sesgado hacia «vuelve a diferenciar» y lo que
+            # toca primero es tratarla.
+            hay_estacionalidad = bool(sea.data.get("seasonal_detected", False))
+            if not hay_estacionalidad:
+                from art.describe import describe_unit_root as _dur
+                _urt2  = _dur(ts, lam=lam, max_d=d + 1, current_d=d)
+                _rec2  = int(_urt2.data.get("recommended_d", d))
+                # BUG-0197: ONE decision about d, the policy's, said once.
+                # The table's consensus can sit at d+1 only because the ADF
+                # does not reject at d — with a short series or a cycle it
+                # lacks power. Another difference is invited only when BOTH
+                # tests at d say unit root; when they disagree it is a
+                # caveat, not an instruction (the muskrat: ADF p=0.14, KPSS
+                # accepts; d=2 is exactly the error there).
+                _row_d = next((r for r in _urt2.data.get("results", [])
+                               if r.get("d") == d), {})
+                _both  = _row_d.get("verdict") == "unit_root"
+                # La pregunta del nodo es «¿hace falta UNA MÁS?», no
+                # «redecide d desde cero». BUG-0227: la tabla ya sólo tiene
+                # las filas d y d+1 (`current_d=d`), así que `_rec2` no puede
+                # quedar POR DEBAJO de d — la rama que decía «la
+                # recomendación de la tabla es d=0» bajo una tabla cuyo único
+                # consenso era d=2 se ha ido con la fila que la provocaba.
+                if _rec2 > d and _both:
+                    _veredicto = (
+                        f"\n\n→ En d={d} los dos contrastes ven raíz unitaria (el ADF "
+                        f"no la rechaza y el KPSS rechaza la estacionariedad): "
+                        f"**hace falta otra diferencia**. Reentra con "
+                        f"`guided_identification(inp_path, lam={lam}, d={d + 1})`.")
+                elif _rec2 > d:
+                    _veredicto = (
+                        f"\n\n→ **Se sigue con d={d}.** La tabla llega al consenso "
+                        f"en d={_rec2}, pero en d={d} los contrastes no coinciden "
+                        f"(el ADF no rechaza la raíz unitaria; el KPSS no rechaza la "
+                        f"estacionariedad): no hay evidencia firme de otra diferencia, "
+                        f"y con una serie corta o un ciclo el ADF pierde potencia. "
+                        f"Salvedad, no instrucción: si el modelo estimado la pide, lo "
+                        f"dirán Shin-Fuller y el DCD de sobrediferenciación.")
+                elif _row_d.get("verdict") == "ambiguous":
+                    _veredicto = (
+                        f"\n\n→ **No hace falta otra diferencia.** En d={d} el ADF "
+                        f"rechaza la raíz unitaria; el KPSS rechaza la "
+                        f"estacionariedad, que con una media que se desplaza o una "
+                        f"serie larga es lo que hace. Una fila que se contradice no "
+                        f"es evidencia de d={d + 1}. Si sobra o falta una diferencia, "
+                        f"lo dictaminan Shin-Fuller y el DCD sobre el MODELO "
+                        f"ESTIMADO, no un ADF sobre la serie.")
                 else:
-                    # La otra mitad de la regla, dicha: con estacionalidad sin
-                    # tratar, ADF y KPSS no tienen potencia (la regresión del ADF
-                    # no lleva términos estacionales). La pregunta d → d+1 no se
-                    # contesta aquí: se aplaza a después de tratarla.
-                    d_next_text = (
-                        f"\n\n---\n\n### Una diferencia más (d={d} → d={d + 1}): todavía no\n\n"
-                        "**Esta pregunta todavía no se hace.** Hay estacionalidad sin tratar, y "
-                        "con ella ADF y KPSS pierden potencia: el patrón va a la "
-                        "varianza residual del ADF y lo sesga hacia «diferencia otra "
-                        "vez». Primero se trata la estacionalidad (B1 o B2); el orden "
-                        "de integración lo contrastan después Shin-Fuller y el DCD "
-                        "sobre el modelo estimado. Un paso cada vez: desde d=0 sólo "
-                        "d=1, y desde d=1 sólo d=2."
-                    )
+                    _veredicto = (
+                        f"\n\n→ La evidencia sostiene **d={d}**. No hace falta otra "
+                        f"diferencia.")
+                d_next_text = (
+                    f"\n\n---\n\n### ¿Hace falta una diferencia más? (d={d} → d={d + 1})\n\n"
+                    "Sin estacionalidad que contamine el contraste, esta "
+                    "pregunta ya es legítima y se responde con el mismo "
+                    "instrumento:\n\n"
+                    + _urt2.summary
+                    + _veredicto
+                    + "\n\nRecuerda que esto sigue siendo especificación inicial: "
+                      "el contraste que decide sobre el modelo estimado es "
+                      "Shin-Fuller, con el DCD de sobrediferenciación como par."
+                )
+            else:
+                # La otra mitad de la regla, dicha: con estacionalidad sin
+                # tratar, ADF y KPSS no tienen potencia (la regresión del ADF
+                # no lleva términos estacionales). La pregunta d → d+1 no se
+                # contesta aquí: se aplaza a después de tratarla.
+                d_next_text = (
+                    f"\n\n---\n\n### Una diferencia más (d={d} → d={d + 1}): todavía no\n\n"
+                    "**Esta pregunta todavía no se hace.** Hay estacionalidad sin tratar, y "
+                    "con ella ADF y KPSS pierden potencia: el patrón va a la "
+                    "varianza residual del ADF y lo sesga hacia «diferencia otra "
+                    "vez». Primero se trata la estacionalidad (B1 o B2); el orden "
+                    "de integración lo contrastan después Shin-Fuller y el DCD "
+                    "sobre el modelo estimado. Un paso cada vez: desde d=0 sólo "
+                    "d=1, y desde d=1 sólo d=2."
+                )
 
             n_harm = max(ts.freq // 2 - 1, 0)
             sname  = ts.name or "SERIE"
@@ -5941,18 +5980,15 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                 # y en el mismo orden en que van los ImageContent de abajo.
                 + _nota_figura(_ruta_fig) + _nota_figura(_ruta_sea)
             )
-            if d > 0:
-                _sd = sea.data or {}
-                _dec = _sd.get("decision") or ("B1" if hay_estacionalidad else "A")
-                _g(_nodo_pendiente, "estacionalidad",
-                   ("estacional (B1: D=0 + armónicos)" if _dec == "B1"
-                    else "sin estacionalidad (D=0)"), valor=_dec,
-                   evidencia=(f"F-HAC={_sd['f_stat']:.2f}, p={_sd['p_value']:.4f}"
-                              if _sd.get("f_stat") is not None
-                              and _sd.get("p_value") is not None else ""))
-            else:
-                # En d=0 no se contrasta: el nodo queda abierto sin propuesta.
-                _g(_nodo_pendiente, "estacionalidad", "", valor=None)
+            # BUG-0223: también con d=0 el nodo lleva la propuesta del contraste.
+            _sd = sea.data or {}
+            _dec = _sd.get("decision") or ("B1" if hay_estacionalidad else "A")
+            _g(_nodo_pendiente, "estacionalidad",
+               ("estacional (B1: D=0 + armónicos)" if _dec == "B1"
+                else "sin estacionalidad (D=0)"), valor=_dec,
+               evidencia=(f"F-HAC={_sd['f_stat']:.2f}, p={_sd['p_value']:.4f}"
+                          if _sd.get("f_stat") is not None
+                          and _sd.get("p_value") is not None else ""))
             items = [TextContent(type="text", text=text)]
             if b64:
                 items.append(_imagen(b64, "guided_identification"))
@@ -6863,12 +6899,19 @@ def _confirma_nodo(guion_path: str, nodo: str, decidido: str, valor=None,
         ult.coincide = coinc
         ult.decision = f"{nodo} = {decidido}"
         ult.rationale = (razon.strip() or (
+            "elegido dentro del empate que propuso la herramienta — razón sin "
+            "escribir: anótala con `guion_annotate(…, campo=\"razon\")`"
+            if coinc == "empate" else
             "se toma la propuesta de la herramienta" if coinc else
             "el analista decidió otra cosa que la propuesta — razón sin "
             "escribir: anótala con `guion_annotate(…, campo=\"razon\")`"
             if coinc is False else "confirmado en el carril guiado"))
         save_guion(g, gp)
-        marca = ("" if coinc is None else " — coincide con la propuesta" if coinc
+        # BUG-0251: dentro de un empate, ni coincide ni corrige.
+        marca = ("" if coinc is None else
+                 f" — elegido dentro del empate (la propuesta era {ult.propuesta})"
+                 if coinc == "empate" else
+                 " — coincide con la propuesta" if coinc
                  else f" — **corrige la propuesta** ({ult.propuesta})")
         return f"◆ guion n{ult.version}: **{nodo} = {decidido}**{marca}"
     if ult is not None and (ult.node or {}).get("decidido") == decidido:
@@ -6897,15 +6940,29 @@ def _texto_ordenes(p, q, P=0, Q=0, s=12) -> str:
     return f"ARMA({p},{q})" + (f"×({P},{Q})_{s}" if (P or Q) else "")
 
 
-def _texto_D(D: int, seasonal_hint: str = "", b1: bool = False) -> str:
+def _texto_D(D: int, seasonal_hint: str = "") -> str:
     """El valor del nodo estacionalidad, dicho con su ruta."""
     if int(D) >= 1:
         return f"D={int(D)} (B2, diferencia estacional)"
-    if b1 or seasonal_hint == "B1":
+    if seasonal_hint == "B1":
         return "D=0 (B1, armónicos deterministas)"
     if seasonal_hint == "A":
         return "D=0 (sin estacionalidad)"
     return "D=0"
+
+
+def _ruta_estacional_del_pre(pre_path: str) -> str:
+    """La ruta estacional de un modelo: «B1» si lleva armónicos (cos/sin/alter),
+    «A» si no — BUG-0246. "" si el fichero no se puede leer."""
+    try:
+        import fue
+        _, m = fue.load(os.path.expanduser(pre_path))
+    except Exception as e:
+        _warn("ruta estacional del .pre", e)
+        return ""
+    return ("B1" if any(getattr(i, "type", "") in ("cos", "sin", "alter")
+                        for i in (getattr(m, "interventions", None) or []))
+            else "A")
 
 
 def _coincide_D(propuesta, D) -> bool | None:
@@ -7269,7 +7326,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                           p: int | list[int] = 0, q: int = 1,
                           ar_seeds: list | None = None,
                           ar_f_freqs: list | None = None,
-                          n_harmonics: int = 5,
+                          n_harmonics: int | None = None,
                           P: int = 0, Q: int = 0,
                           base_pre_path: str = "",
                           estimate_mu: bool = False,
@@ -7350,10 +7407,21 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                       This is the CONTRASTABLE version of «this factor is
                       seasonal» — nested in the free factor, so a likelihood
                       ratio with 1 d.f. decides it. Without it the only way to
-                      claim a factor is seasonal was to impose it.
+                      claim a factor is seasonal was to impose it. With
+                      base_pre_path it ADDS the factors the .pre lacks; those
+                      it carries are inherited unchanged (BUG-0252).
     q               : regular MA order
-    n_harmonics     : harmonic pairs cos/sin (D=0 fresh only; ignored when
-                      base_pre_path is given — harmonics come from the .pre)
+    n_harmonics     : harmonic pairs cos/sin (D=0). None (default) = 5 in a
+                      fresh model (capped to what fits the frequency) and
+                      INHERITED from the .pre with base_pre_path.
+                      **Con `base_pre_path`, pasarlo (o `seasonal`) rehace el
+                      bloque de armónicos del .pre** (BUG-0245): pares cos/sin
+                      k=1..n (el `alter` del .pre se hereda; si el .pre no tiene
+                      bloque, va con el nuevo); los que ya estaban conservan su ω,
+                      los nuevos parten de 0, y la salida lo dice. Así se AÑADEN
+                      armónicos a un modelo con intervenciones (n_harmonics=2,
+                      seasonal=True) o se quitan (seasonal=False). Antes se
+                      ignoraban en silencio. Con un .pre de D=1 se rechaza.
     easter          : add the EASTER (Semana Santa) calendar regressor. MONTHLY
                       series only — the engine builds it itself: 1.0 in the month
                       of Easter Sunday, split 0.5 March + 0.5 April when Good
@@ -7368,7 +7436,8 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                       aceptaba el argumento y se descartaba en silencio, con lo
                       que no quedaba NINGUNA vía para añadirlo a un modelo ya
                       construido sin volver al `.inp` fresco y perder todas las
-                      intervenciones. `n_harmonics` sigue viniendo del `.pre`.
+                      intervenciones. Los armónicos, con `n_harmonics`/`seasonal`
+                      (BUG-0245).
     seasonal        : on/off switch for the whole deterministic seasonal package
                       (cos/sin pairs + Nyquist alter). None (default) => derive from
                       n_harmonics>0, correct for freq>=4. Pass False for a
@@ -7497,14 +7566,31 @@ def confirm_and_estimate(inp_path: str, output_path: str,
             # argumento y se descartaba en silencio al encadenar.
             # Con otra d, estimate_mu=True siembra una media NUEVA sobre ∇^d:
             # la del .pre no es la misma cantidad y no se hereda.
+            # BUG-0245: los armónicos pedidos se aplican sobre los del .pre
+            # en vez de descartarse en silencio. Con D=1 no hay bloque
+            # determinista que añadir: se rechaza, como una λ distinta.
+            _pide_arm = (seasonal is True
+                         or (n_harmonics is not None and int(n_harmonics) > 0))
+            if _pide_arm and _Db != 0:
+                return _err(
+                    f"armónicos pedidos (n_harmonics={n_harmonics}, "
+                    f"seasonal={seasonal}) sobre un .pre con D={_Db}: la "
+                    f"estacionalidad ya la toma la diferencia estacional y "
+                    f"los armónicos deterministas serían redundantes. Para "
+                    f"la ruta determinista, estima desde el .inp con D=0.")
+            arm_base = terminos_armonicos(m_base.interventions)
             m = _build_arma_on_model(m_base, p=p, q=q, P=P, Q=Q,
                                      estimate_mu=estimate_mu, easter=easter,
-                                     d=d)
+                                     d=d, ar_seeds=ar_seeds,
+                                     n_harmonics=n_harmonics,
+                                     seasonal=seasonal,
+                                     ar_f_freqs=ar_f_freqs)
             _write_inp(ts, m, output_path)
         else:
             lam = 0.0 if lam is None else float(lam)
             d = 1 if d is None else int(d)
             D = 0 if D is None else int(D)
+            n_harmonics = 5 if n_harmonics is None else int(n_harmonics)
             m_fresh = _make_model(ts, lam=lam, d=d, D=D, p=p, q=q,
                                   n_harmonics=n_harmonics, P=P, Q=Q,
                                   estimate_mu=estimate_mu, seasonal=seasonal,
@@ -7543,11 +7629,51 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                    ": el modelo va SIN μ — pasa estimate_mu=True si la "
                    "deriva de la serie diferenciada lo pide."))
 
+        # BUG-0245: lo que se hereda y lo que cambia en los armónicos, dicho.
+        # «se conservan sus intervenciones y armónicos» salía aunque el .pre
+        # no tuviera armónicos, o aunque se acabaran de cambiar.
+        aviso_arm = encadenado = ""
+        if base_pre_path and ar_f_freqs:
+            # BUG-0252: los AR(2) de frecuencia fija pedidos, dichos
+            _base_ff = {int(f.freq) for f in (m_base.ar_f or [])}
+            _nuevos_ff = [int(k) for k in dict.fromkeys(ar_f_freqs)
+                          if int(k) not in _base_ff]
+            _ya_ff = [int(k) for k in dict.fromkeys(ar_f_freqs) if int(k) in _base_ff]
+            aviso_arm += (
+                (f"\n\n> **AR(2) de frecuencia fija añadidos**: k = "
+                 f"{', '.join(map(str, _nuevos_ff))}." if _nuevos_ff else "")
+                + (f"\n\n> k = {', '.join(map(str, _ya_ff))}: el `.pre` ya lleva ese "
+                   f"factor de frecuencia fija y se hereda con su estimación."
+                   if _ya_ff else ""))
+        if base_pre_path:
+            arm_m = terminos_armonicos(m.interventions)
+            _otros = [i for i in (m_base.interventions or [])
+                      if not terminos_armonicos([i])]
+            _cambia = sorted(arm_m) != sorted(arm_base)
+            hered = (["intervenciones"] if _otros else []) + (
+                ["armónicos"] if arm_base and not _cambia else [])
+            encadenado = (f"\n\n*Encadenado desde "
+                          f"`{os.path.basename(base_pre_path)}`: "
+                          + (f"se conservan sus {' y '.join(hered)}, y "
+                             if hered else "")
+                          + "se sustituye el ARMA.*")
+            if _cambia:
+                _l = lambda t: ", ".join(t) if t else "ninguno"
+                _nuevos = [t for t in arm_m if t not in arm_base]
+                aviso_arm += (
+                    f"\n\n> **Armónicos cambiados** respecto de "
+                    f"`{os.path.basename(base_pre_path)}`: {_l(arm_base)} → "
+                    f"{_l(arm_m)}."
+                    + (f" Los nuevos ({_l(_nuevos)}) parten de 0; los que ya "
+                       f"estaban conservan su ω." if _nuevos else ""))
+
         # Parameter table
         if base_pre_path:
-            n_itvs = len(m.interventions) if m.interventions else 0
-            spec_str = (f"ARIMA({p},{d},{q}) + {n_itvs} interv. "
-                        f"[desde {os.path.basename(base_pre_path)}]")
+            n_term_arm = len(terminos_armonicos(m.interventions))
+            n_itvs = len(m.interventions or []) - n_term_arm
+            spec_str = (f"ARIMA({p},{d},{q}) + {n_itvs} interv."
+                        + (f" + {n_term_arm} térm. armónicos" if n_term_arm else "")
+                        + f" [desde {os.path.basename(base_pre_path)}]")
         elif D == 1 and (P > 0 or Q > 0):
             spec_str = f"SARIMA({p},{d},{q})({P},{D},{Q})_{ts.freq}"
         elif D == 1:
@@ -7687,6 +7813,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
         scan_section, scan_b64 = _auto_scan_section(
             ts, m, lam=lam, d=d, D=D, p=p, q=q, P=P, Q=Q,
             inp_path=inp_path, pre_path=pre_path,
+            guion_path=guion_path or _derive_guion_path(output_path, m),
         )
 
         text = (
@@ -7710,10 +7837,7 @@ def confirm_and_estimate(inp_path: str, output_path: str,
                     guion_path=guion_path or _derive_guion_path(output_path, m)),
                 especificacion=(
                     spec_line + aviso_dom
-                    + (f"\n\n*Encadenado desde "
-                       f"`{os.path.basename(base_pre_path)}`: se conservan sus "
-                       f"intervenciones y armónicos, y se sustituye el ARMA.*"
-                       if base_pre_path else "")
+                    + encadenado + aviso_arm
                     + aviso_d
                     # Encadenar desde un `.pre` hereda sus intervenciones, y
                     # una rampa heredada sigue fijando la previsión (BUG-0182).
@@ -7981,13 +8105,17 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                 quien = f" [{e.decided_by}]" if e.decided_by else ""
                 # BUG-0110: dónde el analista corrigió al asistente
                 corr = (" ✎ corregido" if getattr(e, "coincide", None) is False else
-                        " ≈ parcial" if getattr(e, "coincide", None) == "parcial" else "")
+                        " ≈ parcial" if getattr(e, "coincide", None) == "parcial" else
+                        " ⇄ dentro del empate"                       # BUG-0251
+                        if getattr(e, "coincide", None) == "empate" else "")
                 # Un nodo que el carril guiado dejó PENDIENTE (BUG-0207 D1).
                 _val = (f"⏳ pendiente (propuesta: {e.propuesta or '—'})"
                         if nd.get("pendiente") else _rec(nd.get('decidido', ''), 190))
+                # BUG-0234: un nodo que concluye sobre lo estimado lo dice.
+                fin = "  ∎ conclusión" if nd.get("conclusion") else ""
                 lines.append(f"{sangria}{rama}◆ n{e.version} {nd.get('nodo', e.name)}"
-                             f" = {_val}{quien}{corr}")
-                if getattr(e, "coincide", None) in (False, "parcial") \
+                             f" = {_val}{quien}{corr}{fin}")
+                if getattr(e, "coincide", None) in (False, "parcial", "empate") \
                         and getattr(e, "propuesta", ""):
                     lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
                                  f"el asistente propuso: {_rec(e.propuesta)}")
@@ -8038,13 +8166,17 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
         if _con:
             _corr = [e for e in _con if e.coincide is False]
             _parc = [e for e in _con if e.coincide == "parcial"]
+            _empa = [e for e in _con if e.coincide == "empate"]       # BUG-0251
             lines.append(f"Propuestas registradas: {len(_con)} nodos; el analista corrigió "
                          f"{len(_corr)}" + (": " + ", ".join(
                              f"n{e.version} {(e.node or {}).get('nodo', e.name)}"
                              for e in _corr) if _corr else "")
                          + (f"; en parte {len(_parc)}: " + ", ".join(
                              f"n{e.version} {(e.node or {}).get('nodo', e.name)}"
-                             for e in _parc) if _parc else "") + "."
+                             for e in _parc) if _parc else "")
+                         + (f"; dentro de un empate {len(_empa)}: " + ", ".join(
+                             f"n{e.version} {(e.node or {}).get('nodo', e.name)}"
+                             for e in _empa) if _empa else "") + "."
                          + (f" Carril: {g.carril}." if getattr(g, "carril", "") else ""))
 
         # LA CUENTA DE ITERACIONES. Un modelo estimado cierra una iteración; los
@@ -8339,7 +8471,7 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                alternativas: str = "", decidido_por: str = "",
                parent: int = -1, expectativas: str = "",
                criterio: str = "", propuesta: str = "",
-               coincide: str = "") -> list:
+               coincide: str = "", conclusion: bool = False) -> list:
     """
     Record a DECISION NODE in the guion — a specification choice, not a model.
 
@@ -8391,6 +8523,13 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                    "estadístico" | "dominio" | "uso". "dominio" requires a
                    `dominio` node with expectations in this guion: the decision
                    cites them. So these decisions can be audited and COUNTED.
+    conclusion   : True when the node CONCLUDES on models already estimated
+                   instead of specifying a new one — «d = ambiguo: I(1) con el
+                   AR(4), I(2) con el IMA(1); los dos son adecuados». It must
+                   hang from a model (`parent`). Without it a "d"/"ordenes"/…
+                   node hung from a model and with nothing below reads as a
+                   reformulation still to estimate, and guion_map lists it as
+                   «decisión sin modelo estimado detrás» (BUG-0234).
 
     THE DECISION BETWEEN TIED CANDIDATES (docs/DISENO-dominio-en-los-ordenes.md
     §4.4), in `razon`, with this fixed format:
@@ -8481,6 +8620,8 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                     coinc = (True if _emp and _ords in [list(c) for c in _emp] else
                              mismo_valor(prop, decidido, nodo) if prop else None)
             _nd.pop("pendiente", None)
+            if conclusion:
+                _nd["conclusion"] = True
             _nd.update({"decidido": decidido, "evidencia": evidencia or _nd.get("evidencia", ""),
                         "alternativas": alternativas,
                         **({"criterio": "estadístico" if crit == "estadistico" else crit}
@@ -8507,16 +8648,29 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                 + (f"\n   criterio: {crit}" if crit else "")
                 + f"\n\n*mapa:* `guion_map(\"{gp}\")`"))]
         version = (max(e.version for e in g.entries) + 1) if g.entries else 1
+        padre = int(parent) if parent >= 0 else infer_parent(g)
+        # BUG-0234: una conclusión es SOBRE modelos estimados; colgada de un
+        # nodo o de nada no concluiría sobre nada, y el mapa dejaría de
+        # avisar de una especificación que sí está pendiente.
+        if conclusion:
+            _pv = next((e for e in g.entries if e.version == padre), None)
+            if _pv is None or _pv.is_node:
+                return _err(
+                    "`conclusion=True` marca un nodo que concluye sobre modelos "
+                    "YA estimados, así que cuelga de uno: pasa `parent=<versión "
+                    f"del modelo>` (ahora el padre es "
+                    f"{'ninguno' if _pv is None else f'el nodo n{padre}'}).")
         entry = GuionEntry(
             version=version, name=nodo, inp_path="", 
             timestamp=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             spec={}, stats=None, equation="",
             decision=f"{nodo} = {decidido}",
             rationale=razon, problems_found="", next_version="",
-            parent=(int(parent) if parent >= 0 else infer_parent(g)),
+            parent=padre,
             kind="node",
             node={"nodo": nodo, "decidido": decidido,
                   "evidencia": evidencia, "alternativas": alternativas,
+                  **({"conclusion": True} if conclusion else {}),
                   **({"expectativas": expectativas.strip()} if expectativas.strip() else {}),
                   **({"criterio": "estadístico" if crit == "estadistico" else crit}
                      if crit else {})},
@@ -8531,6 +8685,8 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
         return [TextContent(type="text", text=(
             f"◆ nodo n{version} registrado: **{nodo} = {decidido}**"
             + (f"  [{decidido_por}]" if decidido_por else "")
+            + (f"\n   ∎ conclusión sobre v{padre}: no especifica nada que "
+               f"estimar" if conclusion else "")
             + (f"\n   propuesta del asistente: {prop} — "
                + ("el analista la tomó en parte" if coinc == "parcial" else
                   "el analista la tomó" if coinc else
@@ -8768,10 +8924,16 @@ def guion_adopt(guion_path: str, version: int, why: str) -> list:
                        int(_sp.get("P", 0)), int(_sp.get("Q", 0))],
                 razon=why,
                 # Con empate, elegir CUALQUIERA de los candidatos empatados
-                # coincide con lo propuesto: la propuesta era el empate.
+                # no corrige la propuesta: la propuesta era el empate. Pero
+                # tampoco COINCIDE con ella si es otro orden (BUG-0251): el
+                # guion decía `coincide: true` junto a una propuesta distinta
+                # de lo decidido, y la elección del analista dentro del empate
+                # desaparecía. Se registra como "empate".
                 coincide_fn=lambda a, b: (
-                    list(b) in [list(c) for c in ((_ult.node or {}).get("empate") or [])]
-                    or [_tot(x) for x in a] == list(b)))
+                    True if [_tot(x) for x in a] == list(b) else
+                    "empate" if list(b) in [list(c) for c in
+                                            ((_ult.node or {}).get("empate") or [])]
+                    else False))
             if _nt:
                 txt += ["", _nt]
         otros = [x for x in g.entries
@@ -9249,6 +9411,96 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
 
     except Exception:
         return _err(traceback.format_exc())
+
+
+# ---------------------------------------------------------------------------
+# La serie de identificación de un modelo con ARMA — BUG-0249
+# ---------------------------------------------------------------------------
+#
+# La llamada 1 de `guided_intervention` calibra los RESIDUOS del modelo que se
+# le pasa. Si ese modelo ya tiene el orden que un anómalo pudo fabricar, el
+# orden se comió la señal y la calibración no puede verla: sobre el AR(1) de
+# Minneapolis, r(1) +0.009 → −0.110; sobre la misma serie sin el AR, +0.221 →
+# +0.071, y el par 12/1973–01/1974 hace un tercio. Con dos escalones en 12/1973
+# el φ cae de 0.229 (t 2.34) a 0.118 (t 1.16). La pregunta del nodo —¿este
+# orden es estructura o lo hace un suceso?— quedaba sin respuesta justo cuando
+# el orden ya está en el modelo, que es el caso normal tras identificar.
+
+def _ordenes_arma(m) -> "dict[str, int]":
+    """Los órdenes con algún coeficiente LIBRE: {"AR": p, "MA": q, "AR_s": P,
+    "MA_s": Q}, sin los nulos. El relleno `ar=[[0.0]]` fijo no cuenta."""
+    out = {}
+    for clave, atr in (("AR", "ar"), ("MA", "ma"), ("AR_s", "ar_s"),
+                       ("MA_s", "ma_s")):
+        fs = getattr(m, atr, None) or []
+        fl = getattr(m, atr + "_free", None) or []
+        libre = any(
+            (fl[i][j] if i < len(fl) and fl[i] is not None and j < len(fl[i])
+             else True)
+            for i, f in enumerate(fs) for j in range(len(f)))
+        if libre:
+            out[clave] = sum(len(f) for f in fs)
+    return out
+
+
+def _texto_ordenes_arma(o: "dict[str, int]") -> str:
+    """«AR(1)», «AR(1) y MA(1)», «MA estacional (1)»…"""
+    nom = {"AR": "AR({})", "MA": "MA({})", "AR_s": "AR estacional ({})",
+           "MA_s": "MA estacional ({})"}
+    partes = [nom[k].format(v) for k, v in o.items()]
+    return " y ".join(partes) if len(partes) <= 2 else \
+        ", ".join(partes[:-1]) + " y " + partes[-1]
+
+
+def _sin_arma(m):
+    """El mismo modelo SIN su ARMA —deterministas, intervenciones, d, D y
+    factores de frecuencia fija heredados—, estimado. Sus residuos son la serie
+    de identificación: ∇^d ∇_s^D y(λ) menos los deterministas. None si falla."""
+    try:
+        from art.pipeline import _build_arma_on_model
+        m0 = _build_arma_on_model(m, p=0, q=0, P=0, Q=0)
+        m0.fit()
+        if getattr(m0, "_result", None) is None or m0._result.residuals is None:
+            return None
+        return m0
+    except Exception as e:
+        _warn("guided_intervention: la serie sin el ARMA no se pudo estimar", e)
+        return None
+
+
+def _orden_y_anomalos(m, cal0, ordenes: "dict[str, int]") -> "tuple[list, list]":
+    """Sobre la calibración `cal0` de la serie SIN el ARMA, los retardos de los
+    órdenes del modelo y lo que les hacen los anómalos.
+
+    Devuelve `(filas, sospechas)`. Cada fila es `(clave, función, k, obs, cal,
+    estado, Distorsion)` con `estado` ∈ {"fabricada", "marginal", None}:
+    «fabricada» es el cambio de veredicto con margen (BUG-0212); «marginal»,
+    fuera de banda y dentro al omitirlos, sin el margen. El AR se lee en la
+    PACF y el MA en la ACF, como en la tabla de la llamada 1."""
+    s = int(getattr(getattr(m, "series", None), "freq", 0) or 0)
+    por_lag = {d.lag: d for d in cal0.distorsiones}
+    filas = []
+    for clave, n in ordenes.items():
+        paso = s if clave.endswith("_s") and s > 1 else 1
+        if clave.endswith("_s") and paso == 1:
+            continue
+        pacf = clave.startswith("AR")
+        for j in range(1, n + 1):
+            d = por_lag.get(j * paso)
+            if d is None:
+                continue
+            obs, cal = ((d.pacf_obs, d.pacf_cal) if pacf
+                        else (d.acf_obs, d.acf_cal))
+            flip = d.pacf_flip if pacf else d.acf_flip
+            if flip == "fabricada":
+                estado = "fabricada"
+            elif abs(obs) > cal0.banda and abs(cal) < cal0.banda:
+                estado = "marginal"
+            else:
+                estado = None
+            filas.append((clave, "PACF" if pacf else "ACF", d.lag, obs, cal,
+                          estado, d))
+    return filas, [f for f in filas if f[5]]
 
 
 # ---------------------------------------------------------------------------
@@ -9730,7 +9982,7 @@ def guided_intervention(inp_path: str,
                         # hipótesis caía sobre datos que no le corresponden.
                         # `Candidato.arranque_resid` ya trae la posición buena,
                         # 1-based en residuos, que es el índice de `at`.
-                        _fig2 = describe_superposicion(
+                        _sup = describe_superposicion(
                             m._result.residuals,
                             at=int(getattr(mejor, "arranque_resid", ep.inicio)),
                             omega=_om, entrada=_ent,
@@ -9738,7 +9990,20 @@ def guided_intervention(inp_path: str,
                             freq=_f, start=getattr(ts, "start", ()),
                             desfase=_desfase_obs(m),      # BUG-0172
                             etiqueta=f"{mejor.etiqueta} — {mejor.en_palabras}",
-                        ).figure_b64
+                        )
+                        _fig2 = _sup.figure_b64
+                        # BUG-0249: la leyenda dice «hypothesis × 0.88» y nada
+                        # lo explicaba — el texto de la superposición, que sí lo
+                        # dice, no se publica en esta llamada.
+                        _esc = (_sup.data or {}).get("escala")
+                        if _esc is not None:
+                            L += ["", f"*En la figura, «hypothesis × {_esc:.3g}» "
+                                  "es la respuesta de la forma ganadora, con sus "
+                                  "ω estimados, multiplicada por el factor que "
+                                  "mejor la encaja en lo observado (mínimos "
+                                  "cuadrados por el origen). Cerca de 1, la "
+                                  "amplitud estimada es la que se ve; lejos de "
+                                  "1, la forma puede valer pero la amplitud no.*"]
                 except Exception as _se:
                     _warn(f"guided_intervention: superposición no disponible: {_se}")
 
@@ -9789,12 +10054,83 @@ def guided_intervention(inp_path: str,
              "pueden cambiar de veredicto en sentidos opuestos en el mismo "
              "retardo.", "", "---", "", d_cal.summary, ""]
 
+        # BUG-0249: con ARMA, los residuos no ven si el orden lo fabrica un
+        # anómalo — el orden ya se comió esa señal. Se calibra TAMBIÉN la serie
+        # de identificación (el modelo sin su ARMA) en los retardos del modelo.
+        _ords = _ordenes_arma(m)
+        fabricado, sospecha = [], []
+        if _ords:
+            _m0 = _sin_arma(m)
+            if _m0 is not None:
+                try:
+                    _cal0 = calibra_correlograma(
+                        _m0._result.residuals, umbral=threshold, freq=_f,
+                        start=getattr(ts, "start", ()),
+                        desfase=_desfase_obs(_m0),
+                        estacional=estacionalidad_del_modelo(_m0))
+                    filas, sospecha = _orden_y_anomalos(m, _cal0, _ords)
+                except Exception as _ce:
+                    _warn("guided_intervention: calibración sin el ARMA", _ce)
+                    filas = []
+                if filas:
+                    from art.calibracion import CUOTA_PAR_DOMINANTE as _CUOTA
+                    _ot = _texto_ordenes_arma(_ords)
+                    fabricado = [f for f in sospecha if f[5] == "fabricada"]
+                    L += ["---", "", f"### Este modelo ya tiene {_ot}", "",
+                          f"La tabla de arriba calibra los **residuos** de este "
+                          f"modelo, y su {_ot} ya se comió la señal que un "
+                          "anómalo pudo fabricar en sus retardos: sobre ellos no "
+                          "se ve si ese orden es estructura o lo hace un suceso. "
+                          "Se calibra también la **serie de identificación** —la "
+                          "misma sin el ARMA: ∇^d ∇_s^D y(λ) menos los "
+                          f"deterministas—, banda ±{_cal0.banda:.3f}:", "",
+                          "| orden | retardo | serie sin ARMA | sin anómalos |",
+                          "|---|---|---|---|"]
+                    for clave, fun, k, o, c, _e, _d in filas:
+                        L.append(f"| {clave} | {fun}({k}) | {o:+.3f} | {c:+.3f} |")
+                    L.append("")
+                    for clave, fun, k, o, c, est, d in sospecha:
+                        _par = ""
+                        if (d.pares and abs(d.acf_obs) > 1e-9
+                                and abs(d.pares[0][2] / d.acf_obs) >= _CUOTA):
+                            i, j, cp = d.pares[0]
+                            _par = (f" El par {_cal0.fecha(i)}–{_cal0.fecha(j)} "
+                                    f"hace {cp:+.3f} de r({k}) "
+                                    f"({100 * cp / d.acf_obs:.0f} %).")
+                        L.append(
+                            (f"⚠ **El {clave}({k}) lo fabrican los anómalos**: al "
+                             f"omitirlos, {fun}({k}) pasa de {o:+.3f}, claramente "
+                             f"fuera de banda, a {c:+.3f}, claramente dentro."
+                             if est == "fabricada" else
+                             f"⚠ **El {clave}({k}) puede estar fabricado por los "
+                             f"anómalos**: al omitirlos, {fun}({k}) pasa de "
+                             f"{o:+.3f}, fuera de banda, a {c:+.3f}, dentro —sin "
+                             "el margen que haría falta para cambiar de "
+                             "veredicto, pero es el retardo del orden.")
+                            + _par)
+                        L.append("")
+                    if sospecha:
+                        L += ["Para saberlo, interviene el suceso y mira si el "
+                              "orden sobrevive: si su t cae, lo hacía el suceso. "
+                              "O vuelve al modelo sin el orden (`p=0, q=0` con "
+                              "`base_pre_path`) y pasa aquí ese `.pre`.", ""]
+                    else:
+                        L += [f"Sobre la serie sin el ARMA los anómalos tampoco "
+                              f"mueven los retardos del {_ot}: ese orden no lo "
+                              "fabrican ellos.", ""]
+
         cambia = bool(getattr(cal, "flips_ar", []) or getattr(cal, "flips_ma", []))
         L += ["---", "", "## Veredicto", ""]
         if cambia:
             L += ["**Los anómalos SÍ cambian la identificación.** Intervenir "
                   "está justificado: sin hacerlo se estaría eligiendo el orden "
                   "de los operadores sobre un correlograma contaminado.", ""]
+        elif fabricado:
+            L += ["**Sobre los residuos los anómalos no cambian nada, pero el "
+                  "orden del modelo lo fabrican ellos** (arriba). Intervenir "
+                  "está justificado: el orden se eligió sobre un correlograma "
+                  "contaminado, y los residuos de este modelo no pueden "
+                  "enseñarlo.", ""]
         else:
             L += ["**Los anómalos NO cambian la identificación.** Ningún "
                   "retardo cambia de veredicto al omitirlos, ni en la ACF ni "
@@ -9804,6 +10140,9 @@ def guided_intervention(inp_path: str,
                   "residuo sube de |z| y pide su turno. El criterio de parada "
                   "es éste — cuando la calibración deja de decir que los "
                   "anómalos cambian la identificación, se para.", ""]
+            if sospecha:
+                L += ["⚠ **Salvo el orden del modelo** (arriba): puede ser del "
+                      "suceso, y esta parada no lo cubre.", ""]
 
         ext = [(i + 1, float(z[i])) for i in range(len(z))
                if abs(z[i]) > threshold]
@@ -9840,9 +10179,20 @@ def guided_intervention(inp_path: str,
             _warn(f"guided_intervention: figura del escaneo no disponible: {_fe}")
         return _result(Description(summary="\n".join(L),
                                    figure_b64=_fig,
-                                   recommendation=d_cal.recommendation,
+                                   recommendation=(
+                                       "El orden del modelo lo fabrican los "
+                                       "anómalos (BUG-0249): interviene el suceso "
+                                       "y mira si el orden sobrevive."
+                                       if fabricado and not cambia else
+                                       d_cal.recommendation
+                                       + (" Salvo el orden del modelo, que puede "
+                                          "ser del suceso: interviene y mira si "
+                                          "sobrevive." if sospecha and not cambia
+                                          else "")),
                                    data=dict(llamada=1,
-                                             cambia_identificacion=cambia)))
+                                             cambia_identificacion=cambia,
+                                             orden_fabricado=bool(fabricado),
+                                             orden_sospechoso=bool(sospecha))))
     except Exception:
         return _err(traceback.format_exc())
 
@@ -10375,6 +10725,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
             ts, m_fit, lam=lam_fit, d=d_fit, D=D_fit,
             p=p_fit, q=q_fit, P=P_fit, Q=Q_fit,
             inp_path=inp_path, pre_path=new_pre_path,
+            guion_path=guion_path or _derive_guion_path(output_path, m_fit),
         )
 
         _forma_txt = form.upper() + (f" ({n_omega} escalones en el nivel)"

@@ -209,6 +209,17 @@ def _dcd_crit_s(s: int) -> dict:
 _DCD_CRIT_MA_F = _dcd_crit(None, complex_pair=True)
 
 
+# Tolerancia numérica del LR de frontera (BUG-0236). Un LR algo negativo es el
+# ruido del optimizador entre dos máximos iguales (se lee como 0); por debajo
+# de −_TOL_LR el ajuste libre no llegó a su máximo y el LR no es un estadístico.
+_TOL_LR = 1e-3
+
+# La d regular más alta que se contrasta (BUG-0235). La regla de un paso
+# (policy._un_paso_desde) mueve d entre 0, 1 y 2: desde d=2 no se sube, así que
+# una tercera diferencia no es una hipótesis, y el candidato ∇³ no se construye.
+D_MAX_REGULAR = 2
+
+
 def _model_n(model) -> int | None:
     """Effective sample size for the finite-sample critical values."""
     try:
@@ -275,6 +286,7 @@ class ShinFullerResult:
     n: int
     s: int
     phi_dominant: float | None = None   # raíz dominante en forma AR (BUG-0065)
+    d: int | None = None                # diferencias regulares del modelo (BUG-0235)
 
     @property
     def lr(self) -> float:
@@ -321,9 +333,17 @@ class ShinFullerResult:
             f"  logL(constrained) = {self.loglik_constrained:.4f}",
             f"  Φ̂₁ᵤ = {self.phi_1u:.4f}  {stars}",
             f"  Crit. vals (Table II): 10%={self.crit_10pct:.2f}  5%={self.crit_5pct:.2f}  1%={self.crit_1pct:.2f}",
-            f"  → {'ESTACIONARIO ✓' if self.stationary else 'RAÍZ UNITARIA — considerar d+1 ✗'}",
+            f"  → {'ESTACIONARIO ✓' if self.stationary else self._no_estacionario()}",
         ]
         return "\n".join(lines)
+
+    def _no_estacionario(self) -> str:
+        # BUG-0235: desde D_MAX_REGULAR no se propone otra diferencia; la
+        # frontera que queda por mirar es la de abajo (modelo_d_menos_1)
+        if self.d is not None and self.d >= D_MAX_REGULAR:
+            return (f"RAÍZ UNITARIA — con d = {self.d} no se propone d+1: "
+                    "contrasta la frontera d−1/d ✗")
+        return "RAÍZ UNITARIA — considerar d+1 ✗"
 
 
 def _count_free_ar(model) -> int:
@@ -367,6 +387,27 @@ def _free_scalars(component, free_lists) -> list[float]:
 def _extract_ar_params(model) -> list[float]:
     """Estimated free regular AR coefficients (flat), via the canonical unpacker."""
     return _free_scalars(_unpack(model)[2], model.ar_free)
+
+
+def _deflacta(coefs, raiz: float) -> list[float]:
+    """El factor (1 − c₁B − …) dividido por (1 − B/raíz), con raíz REAL.
+
+    Devuelve los coeficientes del cociente en la misma convención (1 − c₁B − …):
+    es la semilla del factor que queda al aislar esa raíz."""
+    num = np.array([1.0] + [-c for c in coefs])
+    den = np.array([1.0, -1.0 / raiz])
+    coc, _res = np.polydiv(num, den)
+    coc = np.real_if_close(coc)
+    return [float(-c) for c in (np.real(coc) / np.real(coc[0]))[1:]]
+
+
+def _es_real(z) -> bool:
+    return abs(z.imag) <= 1e-8 * max(1.0, abs(z.real))
+
+
+def _raices_en_B(coefs):
+    """Raíces en B del factor (1 − c₁B − … − c_pB^p)."""
+    return np.roots([-c for c in reversed(list(coefs))] + [1.0])
 
 
 def shin_fuller(model) -> ShinFullerResult:
@@ -519,11 +560,7 @@ def shin_fuller(model) -> ShinFullerResult:
             # así que el factor restante existe de verdad. Deflactar por una raíz
             # COMPLEJA daría coeficientes complejos cuya parte imaginaria
             # `float()` descarta EN SILENCIO — un factor que no es el del modelo.
-            num = _np.array([1.0] + [-c for c in f])          # 1 − φ₁B − …
-            den = _np.array([1.0, -1.0 / raiz_dom])           # 1 − (1/raíz)B
-            coc, _res = _np.polydiv(num, den)
-            coc = _np.real_if_close(coc)
-            semilla = [float(-c) for c in (coc / coc[0])[1:]]
+            semilla = _deflacta(f, raiz_dom)
             nuevos_f.append([phi_null]);  nuevos_l.append([False])
             nuevos_f.append(semilla);     nuevos_l.append([True] * len(semilla))
 
@@ -554,6 +591,7 @@ def shin_fuller(model) -> ShinFullerResult:
         pvalue=pvalue,
         n=n,
         s=s,
+        d=int(getattr(model, "d", 0) or 0),
     )
 
 
@@ -569,7 +607,7 @@ class SobreajusteSFResult:
     espuria por construcción cuando no hay raíz unitaria, y adoptarla
     contaminaría la selección.
     """
-    sf: "ShinFullerResult"
+    sf: "ShinFullerResult | None"   # None: el AR(p+1) no tiene raíz real positiva (BUG-0242)
     p_original: int
     p_ampliado: int
     aic_original: float
@@ -592,6 +630,13 @@ class SobreajusteSFResult:
     def la_raiz_parece_espuria(self) -> bool:
         """ΔAIC ≥ 0: el sobreajuste no compra nada, la raíz nueva sobra."""
         return self.delta_aic >= 0.0
+
+    @property
+    def sin_raiz_positiva(self) -> bool:
+        """La raíz real recuperada es NEGATIVA (BUG-0242): no hay Φ̂₁ᵤ, pero sí
+        lectura — el AR(p+1) tuvo sitio para una raíz cerca de +1 y no la puso,
+        así que el lado AR no apoya d+1."""
+        return self.sf is None
 
 
 def shin_fuller_sobreajuste(model) -> SobreajusteSFResult:
@@ -666,13 +711,26 @@ def shin_fuller_sobreajuste(model) -> SobreajusteSFResult:
 
     r = mc._result
     convergido = bool(getattr(r, "converged", True))
-    sf = shin_fuller(mc)                          # ahora sí hay raíz real
 
     raices_amp = _np.roots([-c for c in reversed(mc.ar[0])] + [1.0])
-    # La que `shin_fuller` aísla: la POSITIVA más cercana a +1 (BUG-0215).
-    reales = [1.0 / z.real for z in raices_amp
-              if abs(z.imag) <= 1e-8 * max(1.0, abs(z.real)) and z.real > 0]
-    phi_real = max(reales) if reales else None
+    reales = [1.0 / z.real for z in raices_amp if _es_real(z)]
+    positivas = [p for p in reales if p > 0]
+    if positivas:
+        # La que `shin_fuller` aísla: la POSITIVA más cercana a +1 (BUG-0215).
+        sf = shin_fuller(mc)                      # ahora sí hay raíz real
+        phi_real = max(positivas)
+    elif not reales:
+        sf = shin_fuller(mc)          # sin ninguna raíz real: lanza, como siempre
+        phi_real = None
+    else:
+        # BUG-0242. Un AR(p+1) de orden impar siempre tiene una raíz real, pero
+        # puede salir NEGATIVA. `shin_fuller` no la contrasta —una raíz negativa
+        # no tiene nada que ver con `d` (BUG-0215)— y su excepción se convertía
+        # en `None` aguas arriba: el informe decía «el lado AR no existe». Sí
+        # existe, y dice algo: el sobreajuste tuvo sitio para una raíz cerca de
+        # +1 y la puso lejos, en el lado negativo. Sin estadístico, con su φ̂.
+        sf = None
+        phi_real = max(reales)
 
     return SobreajusteSFResult(
         sf=sf,
@@ -701,6 +759,26 @@ class DCDResult:
     lr: float                 # 2·(L_free − L_constrained)
     n: int | None = None      # sample size (for the finite-sample complex crit)
     complex_pair: bool = False  # True for interior frequencies (s=2 law)
+    # Lo que hace falta para LEER el LR, no sólo compararlo con el crítico
+    # (BUG-0224, BUG-0232, BUG-0236, BUG-0243). Con los valores por defecto el
+    # resultado es el de siempre.
+    motivo_no_calculable: str | None = None   # fallo numérico: no hay veredicto
+    phi_restringido: float | None = None      # raíz AR real positiva dominante del restringido
+    ar_acotado: bool = False                  # esa raíz se acotó en ρₘ (BUG-0224)
+    rho_m: float | None = None                # ρₘ = 1 − 4/n del acotamiento
+    raices_complejas: bool = False            # el MA del modelo no tiene raíz real (BUG-0243)
+    testigo: str = ""                         # de dónde sale el testigo, para el informe
+
+    @property
+    def calculable(self) -> bool:
+        """El LR es un estadístico: finito y no negativo (BUG-0232, BUG-0236).
+
+        Un LR de −inf, o uno negativo, dice que alguno de los dos ajustes
+        falló —el restringido no puede superar al libre, del que es un caso
+        particular—, no que la nula se sostenga. Leerlo contra el crítico daba
+        «no invertible» por un fallo numérico."""
+        return (self.motivo_no_calculable is None and math.isfinite(self.lr)
+                and self.lr >= -_TOL_LR)
 
     @property
     def _crit(self) -> dict:
@@ -715,15 +793,15 @@ class DCDResult:
 
     @property
     def rejects_10pct(self) -> bool:
-        return self.lr > self._crit['10%']
+        return self.calculable and self.lr > self._crit['10%']
 
     @property
     def rejects_5pct(self) -> bool:
-        return self.lr > self._crit['5%']
+        return self.calculable and self.lr > self._crit['5%']
 
     @property
     def rejects_1pct(self) -> bool:
-        return self.lr > self._crit['1%']
+        return self.calculable and self.lr > self._crit['1%']
 
     @property
     def invertible(self) -> bool:
@@ -748,7 +826,9 @@ class DCDResult:
             f"  logL(constrained) = {self.loglik_constrained:.4f}",
             f"  LR = {self.lr:.4f}  {pct}",
             f"  Critical values: 10%={crit['10%']}, 5%={crit['5%']}, 1%={crit['1%']}",
-            f"  → {'INVERTIBLE ✓' if self.invertible else 'NO INVERTIBLE — revisar d ✗'}",
+            (f"  → NO CALCULABLE: {self.motivo_no_calculable or 'LR no finito o negativo'}"
+             if not self.calculable else
+             f"  → {'INVERTIBLE ✓' if self.invertible else 'NO INVERTIBLE — revisar d ✗'}"),
         ]
         return "\n".join(lines)
 
@@ -855,6 +935,134 @@ def dcd(model) -> list[DCDResult]:
     return results
 
 
+def _raiz_ar_dominante(model):
+    """La raíz AR real POSITIVA más cercana a +1, en los factores regulares con
+    algún coeficiente libre: (φ, índice del factor, raíz en B), o None."""
+    ar = _unpack(model)[2] or []
+    cand = None
+    for i, f in enumerate(ar):
+        fl = (model.ar_free[i] if model.ar_free and i < len(model.ar_free)
+              else [True] * len(f))
+        if not f or not any(fl):
+            continue
+        for z in _raices_en_B(f):
+            if _es_real(z) and z.real > 0:
+                phi = 1.0 / float(z.real)
+                if cand is None or phi > cand[0]:
+                    cand = (phi, i, float(z.real))
+    return cand
+
+
+def _acota_ar(mk, rho: float):
+    """Reajusta el restringido con su raíz AR real positiva dominante FIJA en ρₘ
+    mientras quede alguna en ρₘ o por encima.
+
+    Devuelve (modelo ajustado, se acotó). Es la construcción de `shin_fuller`
+    —la raíz se aísla partiendo el factor y el resto queda libre—, aplicada
+    aquí como cota y no como nula."""
+    acotado = False
+    for _ in range(max(1, _count_free_ar(mk))):
+        cand = _raiz_ar_dominante(mk)
+        if cand is None or cand[0] < rho:
+            break
+        _phi, i, raiz = cand
+        ar = [list(f) for f in _unpack(mk)[2]]
+        fl = ([list(f) for f in mk.ar_free] if mk.ar_free
+              else [[True] * len(f) for f in ar])
+        resto = _deflacta(ar[i], raiz) if len(ar[i]) > 1 else []
+        mb = copy.deepcopy(mk)
+        mb._result = None
+        mb.ar = ar[:i] + [[rho]] + ([resto] if resto else []) + ar[i + 1:]
+        mb.ar_free = (fl[:i] + [[False]] + ([[True] * len(resto)] if resto else [])
+                      + fl[i + 1:])
+        mb.fit()
+        mk, acotado = mb, True
+    return mk, acotado
+
+
+def _frontera_theta_uno(mk, idx: int, L_free: float, theta: float, *,
+                        acotar_ar: bool = False, n_eff=None,
+                        libre=None) -> "DCDResult":
+    """El LR de H₀: θ = 1 en el factor MA `idx` de `mk` (restringido SIN ajustar,
+    con ese factor ya fijado en [1.0]), contra un libre de log-verosimilitud
+    `L_free` y testigo `theta`. El código común de los dos DCD del orden de
+    integración, con las tres comprobaciones que les faltaban:
+
+    * **BUG-0224 / BUG-0232 — el AR del restringido no puede reconstruir la ∇.**
+      Bajo H₀ (1 − φB)∇ = (1 − B)·a es (1 − φB)·N = a, y con φ → 1 el AR rehace
+      la diferencia que el MA acaba de cancelar: el LR se hunde aunque θ̂ esté
+      lejísimos de +1 (Rc: θ̂ = −0,06, φ̂ del restringido 0,979, LR 1,57), o el
+      AR cae EXACTAMENTE en la unidad, se cancela con el MA y la verosimilitud
+      se va a +∞ (Salamanca, Chamartín: LR = −inf). Con `acotar_ar`, la raíz
+      real positiva dominante del restringido se acota en ρₘ = 1 − 4/n, el
+      umbral de Shin-Fuller: H₀ pasa a ser «d−1 con un AR estacionario», que es
+      lo que «con d−1 bastaba» quiere decir. Si la cota no muerde, el LR es el
+      de siempre.
+    * **BUG-0236 — un LR negativo es un libre que no llegó a su máximo**, no
+      evidencia: el restringido es un caso particular del libre. Si el LR sale
+      negativo, o el testigo libre se fue al lado negativo (θ̂ < 0, la
+      frecuencia π), se reajusta el libre ARRANCANDO del restringido con
+      θ⁰ = 0,95 y se toma el mejor de los dos máximos.
+    * Lo que siga sin ser un estadístico (no finito, o negativo tras el
+      reintento) sale marcado `motivo_no_calculable`: nunca un veredicto.
+    """
+    def _fit(m):
+        try:
+            m.fit()
+            return float(m._result.loglik), True
+        except Exception:
+            return float("nan"), False
+
+    L_const, ok = _fit(mk)
+    mk0 = mk
+    rho = phi_r = None
+    acotado = False
+    nobs = int(getattr(getattr(mk, "series", None), "nobs", 0) or 0)
+    if acotar_ar and ok and nobs > 4:
+        rho = 1.0 - 4.0 / nobs                  # el ρₘ de Shin-Fuller
+        cand = _raiz_ar_dominante(mk)
+        phi_r = cand[0] if cand is not None else None
+        try:
+            mk, acotado = _acota_ar(mk, rho)
+            L_const = float(mk._result.loglik)
+        except Exception:
+            L_const = float("nan")
+
+    # BUG-0236: el reintento del libre, desde el restringido SIN acotar (es un
+    # punto del modelo libre; el acotado tiene el AR fijado).
+    lr = 2.0 * (L_free - L_const)
+    if (math.isfinite(L_const) and (lr < 0.0 or theta < 0.0) and ok
+            and math.isfinite(float(mk0._result.loglik))):
+        mr = copy.deepcopy(mk0)
+        mr._result = None
+        mr.ma[idx] = [0.95]
+        mr.ma_free[idx] = [True]
+        L_r, _ok = _fit(mr)
+        if _ok and math.isfinite(L_r) and L_r > L_free:
+            L_free, theta = L_r, _extract_ma_param(mr, idx)
+            lr = 2.0 * (L_free - L_const)
+
+    motivo = None
+    if not math.isfinite(L_const):
+        motivo = (f"la verosimilitud del modelo restringido (θ=1) no es finita "
+                  f"(ℓ={L_const}): el ajuste falló")
+    elif not math.isfinite(L_free):
+        motivo = (f"la verosimilitud del modelo libre no es finita (ℓ={L_free}): "
+                  "el ajuste falló")
+    elif lr < -_TOL_LR:
+        motivo = (f"el modelo libre queda POR DEBAJO del restringido (LR={lr:.3f}) "
+                  "aun reintentando desde él: el máximo libre no se alcanzó")
+    elif lr < 0.0:
+        lr = 0.0                                   # ruido del optimizador
+
+    return DCDResult(
+        factor_index=idx, freq=None, coef_free=float(theta), coef_null=1.0,
+        loglik_free=L_free, loglik_constrained=L_const, lr=lr, n=n_eff,
+        motivo_no_calculable=motivo, phi_restringido=phi_r,
+        ar_acotado=acotado, rho_m=rho,
+    )
+
+
 def dcd_underdiff_regular(model, witness_init: float = 0.85) -> "DCDResult":
     """¿Sobraba la ÚLTIMA diferencia regular? El lado `d−1` del orden de integración.
 
@@ -877,15 +1085,21 @@ def dcd_underdiff_regular(model, witness_init: float = 0.85) -> "DCDResult":
     +1: `(1 − B)` contra `(1 − θB)` con θ→1. Así que se mira el MA regular del
     modelo con H₀: θ=1.
 
-    * Si el modelo YA tiene un MA regular libre, ése es el testigo y se contrasta
-      con `dcd()` — no hace falta añadir nada.
+    * Si el modelo YA tiene un MA regular libre, el testigo es su raíz real más
+      cercana a +1, en un factor de cualquier orden (BUG-0243) — no hace falta
+      añadir nada. Si su MA sólo tiene raíces complejas, ninguna puede ser la
+      (1 − B); se calcula el LR de la restricción y se marca `raices_complejas`.
     * Si no lo tiene —un AR(2) puro, por ejemplo— no hay nada que mirar, y ahí
       estaba el hueco: se AÑADE un testigo MA(1) libre inicializado en +0.85, del
       mismo modo que `dcd_overdiff_regular` añade el suyo, y se contrasta.
 
+    En los dos casos el AR del restringido se acota en ρₘ (BUG-0224, BUG-0232)
+    y el LR se comprueba antes de leerlo (BUG-0236): ver `_frontera_theta_uno`.
+
     Veredicto (ley s=1, DCD crít 5% ≈ 1.94):
       θ → +1, NO invertible (LR < crít) ⇒ la ∇ está cancelada ⇒ **d−1 bastaba**
       θ  <  1, invertible    (LR ≥ crít) ⇒ la ∇ es genuina    ⇒ **d confirmado**
+      `calculable` falso                 ⇒ fallo numérico    ⇒ **sin veredicto**
 
     Con `d = 0` no hay diferencia que cuestionar: devuelve None.
 
@@ -898,17 +1112,56 @@ def dcd_underdiff_regular(model, witness_init: float = 0.85) -> "DCDResult":
     if int(getattr(model, "d", 0) or 0) < 1:
         return None
 
-    libres = [i for i, fac in enumerate(model.ma or [])
-              if len(fac) == 1 and (model.ma_free is None
-                                    or i >= len(model.ma_free)
-                                    or model.ma_free[i][0])]
-    if libres:
-        # El modelo trae su propio testigo: el MA regular que cancelaría la ∇.
-        # Se toma el que más cerca esté de +1, que es el que la cancela.
-        res = dcd(model)
-        if not res:
-            return None
-        return max(res, key=lambda r: r.coef_free)
+    # EL TESTIGO ES UNA RAÍZ, NO UN FACTOR DE ORDEN 1 — BUG-0243. Se buscaba
+    # entre los factores MA de longitud 1, así que un MA(2) escrito como un solo
+    # factor no contaba: el código creía que no había MA y AÑADÍA un MA(1) libre
+    # al lado del MA(2) (Moncloa, ARIMA(1,2,2): θ̂ = −0,12, LR = 50,6, sin
+    # significado). La pregunta es si el MA del modelo tiene una raíz en +1, y
+    # ésa puede estar en un factor de cualquier orden: se toma la raíz REAL más
+    # cercana a +1 de todos los factores libres, y el factor se parte en
+    # (1 − θB)·MA(q−1) para el restringido.
+    ma = _unpack(model)[4] or []
+    cand, compleja = None, None
+    for i, fac in enumerate(ma):
+        fl = (model.ma_free[i] if model.ma_free and i < len(model.ma_free)
+              else [True] * len(fac))
+        if not fac or not all(fl):
+            continue
+        for z in _raices_en_B(fac):
+            if _es_real(z):
+                th = 1.0 / float(z.real)
+                if cand is None or th > cand[0]:
+                    cand = (th, i, float(z.real))
+            elif compleja is None:
+                compleja = (abs(1.0 / z), i)
+
+    L_free = float(model._result.loglik)
+    if cand is not None or compleja is not None:
+        if cand is not None:
+            theta, i, raiz = cand
+            resto = _deflacta(ma[i], raiz) if len(ma[i]) > 1 else []
+            testigo = ("el MA(1) del modelo" if len(ma[i]) == 1 else
+                       f"la raíz real del MA({len(ma[i])}) más cercana a +1")
+        else:
+            # Sólo raíces complejas: ninguna puede ser la (1 − B) que cancelaría
+            # la ∇. La restricción sigue existiendo —el MA(q) con una raíz en +1
+            # y las demás libres— y su LR se calcula, pero θ̂ no es una raíz.
+            theta, i = compleja
+            resto = [0.0] * (len(ma[i]) - 1)
+            testigo = f"el MA({len(ma[i])}) del modelo, de raíces complejas"
+        mk = copy.deepcopy(model)
+        mk._result = None
+        mk.ma = ([list(f) for f in ma[:i]] + [[1.0]]
+                 + ([resto] if resto else []) + [list(f) for f in ma[i + 1:]])
+        fl0 = ([list(f) for f in model.ma_free] if model.ma_free
+               else [[True] * len(f) for f in ma])
+        mk.ma_free = (fl0[:i] + [[False]] + ([[True] * len(resto)] if resto else [])
+                      + fl0[i + 1:])
+        r = _frontera_theta_uno(mk, i, L_free, float(theta), acotar_ar=True,
+                                n_eff=_model_n(model))
+        r.raices_complejas = cand is None
+        r.testigo = testigo
+        return r
 
     # Sin MA regular no hay nada que mirar — el hueco. Se añade el testigo.
     mc = copy.deepcopy(model)
@@ -924,14 +1177,10 @@ def dcd_underdiff_regular(model, witness_init: float = 0.85) -> "DCDResult":
     mk._result = None
     mk.ma[idx] = [1.0]
     mk.ma_free[idx] = [False]
-    mk.fit()
-    L_const = float(mk._result.loglik)
-
-    return DCDResult(
-        factor_index=idx, freq=None, coef_free=theta, coef_null=1.0,
-        loglik_free=L_free, loglik_constrained=L_const,
-        lr=2.0 * (L_free - L_const), n=_model_n(mc),
-    )
+    r = _frontera_theta_uno(mk, idx, L_free, theta, acotar_ar=True,
+                            n_eff=_model_n(mc))
+    r.testigo = "un MA(1) añadido"
+    return r
 
 
 def dcd_s(model) -> list["DCDResult"]:
@@ -1048,6 +1297,15 @@ def dcd_overdiff_regular(model, witness_init: float = 0.85) -> "DCDResult":
     """
     if model._result is None:
         raise RuntimeError("Model has not been fitted — call model.fit() first.")
+    # BUG-0235. `mc.d = d + 1` sin tope: sobre un modelo con d=2 se construía
+    # ∇³ y se publicaba «d confirmado ✓» como confirmatorio del orden de
+    # integración. Con la regla de un paso d no sube de D_MAX_REGULAR, así que
+    # una diferencia más no es una hipótesis: no hay candidato. La duda de un
+    # modelo en d=2 es la de ABAJO (¿sobraba la segunda ∇?), y ésa la contesta
+    # el par cruzado: `dcd_underdiff_regular` aquí y Shin-Fuller en el modelo
+    # en d=1.
+    if int(getattr(model, "d", 0) or 0) >= D_MAX_REGULAR:
+        return None
 
     # Over-differenced candidate: one extra regular difference, with the witness as
     # the SOLE regular MA(1) (replace any existing regular MA), initialised positive.
@@ -1089,33 +1347,35 @@ def dcd_overdiff_regular(model, witness_init: float = 0.85) -> "DCDResult":
         mc.ma_free = [list(f) for f in (mc.ma_free or [])] + [[True]]
         witness_idx = len(mc.ma) - 1
     else:
-        mc.ma = [[float(witness_init)]]
-        mc.ma_free = [[True]]
-        witness_idx = 0
+        # BUG-0243. Un MA(1) se sustituye por el testigo —misma dimensión, y es
+        # el comportamiento validado (BUG-0011)—, pero un MA(q≥2) no: sustituirlo
+        # tiraba q−1 parámetros de estructura que el testigo no puede absorber, y
+        # bajo H₀ (θ = 1) el candidato ya no era el modelo base por (1 − B)/(1 − B).
+        # Se conserva, libre, y el testigo va en su propio factor.
+        _ma = [list(f) for f in (mc.ma or [])]
+        _fl = ([list(f) for f in mc.ma_free] if mc.ma_free
+               else [[True] * len(f) for f in _ma])
+        _quedan = [i for i, f in enumerate(_ma) if len(f) >= 2]
+        mc.ma = [_ma[i] for i in _quedan] + [[float(witness_init)]]
+        mc.ma_free = [_fl[i] for i in _quedan] + [[True]]
+        witness_idx = len(mc.ma) - 1
 
     mc.fit()
     L_free = float(mc._result.loglik)
     theta_hat = _extract_ma_param(mc, witness_idx)
 
-    # Constrain the witness at the non-invertibility boundary θ=1.
+    # Constrain the witness at the non-invertibility boundary θ=1. El LR se
+    # comprueba antes de leerlo, y un libre por debajo del restringido se
+    # reintenta desde él (BUG-0236): ver `_frontera_theta_uno`. Aquí el AR no
+    # se acota: el restringido ES el modelo base, sin la media.
     mk = copy.deepcopy(mc)
     mk._result = None
     mk.ma[witness_idx] = [1.0]
     mk.ma_free[witness_idx] = [False]
-    mk.fit()
-    L_const = float(mk._result.loglik)
-
-    lr = 2.0 * (L_free - L_const)
-    return DCDResult(
-        factor_index=witness_idx,
-        freq=None,               # real root ⇒ s=1 law (crit 1.00/1.94/4.41)
-        coef_free=theta_hat,
-        coef_null=1.0,
-        loglik_free=L_free,
-        loglik_constrained=L_const,
-        lr=lr,
-        n=_model_n(mc),
-    )
+    r = _frontera_theta_uno(mk, witness_idx, L_free, theta_hat,
+                            n_eff=_model_n(mc))   # freq=None ⇒ ley s=1
+    r.testigo = "un MA(1) añadido sobre ∇^(d+1)"
+    return r
 
 
 # ---------------------------------------------------------------------------

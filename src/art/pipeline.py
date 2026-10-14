@@ -285,9 +285,16 @@ def aviso_se_no_fiable(model) -> str:
     el `.inp` y no hay nada que avisar. Sólo si fue cayó al BFGS —o es un fue
     anterior, sin `se_method`— el `.pre` vuelve a ser la causa del problema.
     """
-    from art.diagnosis import se_del_hessiano
+    from art.diagnosis import se_del_hessiano, _build_param_labels
     if not viene_de_pre(model) or se_del_hessiano(getattr(model, "_result", None)):
         return ""
+    # BUG-0248: sin parámetros libres —un (0,1,0) sin deterministas— no hay
+    # ninguna desviación típica a la que afecte el aviso.
+    try:
+        if not _build_param_labels(model):
+            return ""
+    except Exception:
+        pass
     return "\n\n" + AVISO_SE_DESDE_PRE
 
 
@@ -964,10 +971,14 @@ def _mu_seed(ts, lam, d, D, estimate_mu, refactor=_RESCALE_FACTOR):
         return 0.0
 
 
-def _build_arma_on_model(m_base, p: int, q: int,
+def _build_arma_on_model(m_base, p, q: int,
                          P: int = 0, Q: int = 0,
                          estimate_mu=None, easter: bool = False,
-                         d: int | None = None):
+                         d: int | None = None,
+                         ar_seeds: list | None = None,
+                         n_harmonics: int | None = None,
+                         seasonal: bool | None = None,
+                         ar_f_freqs: list | None = None):
     """
     Return a new unfitted fue.Model that keeps all interventions and harmonics
     from m_base but replaces the ARMA specification with (p, q, P, Q).
@@ -1012,7 +1023,9 @@ def _build_arma_on_model(m_base, p: int, q: int,
 
     No llevan interruptor porque no son un orden que el llamador especifique:
     `(p, q, P, Q)` nombran los operadores regulares y de retardo estacional, y
-    los de frecuencia fija son estructura, como las intervenciones.
+    los de frecuencia fija son estructura, como las intervenciones. Lo que sí
+    se puede es AÑADIR AR(2) de frecuencia fija con `ar_f_freqs`, como en el
+    modo nuevo (BUG-0252): los heredados se quedan como están.
 
     **`easter` SÍ lleva interruptor — BUG-0170.** Es el único determinista que
     el analista puede querer AÑADIR a un modelo ya construido, y no había forma:
@@ -1040,6 +1053,24 @@ def _build_arma_on_model(m_base, p: int, q: int,
     `estimate_mu=True` se siembra de nuevo sobre la d nueva. λ y D no se
     cambian aquí (λ cambia la escala de todos los ω; D choca con los armónicos
     o el `ifadf` del base): eso lo rechaza el llamador.
+
+    **`p` es un entero o una lista de órdenes por FACTOR — BUG-0244**, como en
+    `_make_model`: `p=[1, 2]` construye (1−φB)(1−φ₁B−φ₂B²). `ar_seeds` son las
+    semillas por factor (las de `ar_factorization`); sin ellas, semillas
+    neutras, porque las de Yule-Walker son las del operador completo.
+
+    **`n_harmonics` / `seasonal` rehacen el bloque de armónicos — BUG-0245.**
+    `None` en los dos (por defecto) lo hereda del base. Si llega alguno, el
+    bloque estacional determinista pasa a ser el pedido, con el convenio de
+    `_make_model`: `seasonal` decide si hay bloque (por defecto `n_harmonics >
+    0`) y `n_harmonics` cuenta PARES cos/sin k = 1…n. El `alter` va con un
+    bloque nuevo; si el base ya tiene bloque, se hereda como esté. `seasonal=
+    True` sin `n_harmonics` sólo exige que haya bloque: si el base ya lo trae
+    se hereda tal cual (con los pares que una simplificación le haya quitado),
+    y si no, se añade completo. Los términos que ya estaban
+    conservan su ω estimada; los nuevos parten de 0. Antes se descartaban en
+    silencio y el modelo «con armónicos» era el base. Con D = 1 no hay bloque
+    que añadir: eso lo rechaza el llamador.
     """
     import fue
     import numpy as np
@@ -1055,11 +1086,22 @@ def _build_arma_on_model(m_base, p: int, q: int,
     except Exception:
         resid = None
     s_freq = int(getattr(m_base.series, "freq", 12))
-    ar_i, ma_i, ars_i, mas_i = _arma_starts(resid, p, q, P, Q, s_freq)
+    # BUG-0244: `p` llegaba tal cual a `_arma_starts`, que sólo acepta enteros,
+    # y una lista de factores moría en un TypeError. Se reparte como en el modo
+    # nuevo: semillas del operador TOTAL si hay un solo factor; si hay varios,
+    # las del llamador o neutras.
+    _ords = ordenes_ar(int(p) if isinstance(p, np.integer) else p)
+    ar_i, ma_i, ars_i, mas_i = _arma_starts(resid, sum(_ords), q, P, Q, s_freq)
 
-    if p > 0:
+    if len(_ords) == 1:
         ar   = [ar_i]
-        ar_f = [[True] * p]
+        ar_f = [[True] * _ords[0]]
+    elif _ords:
+        if ar_seeds and len(ar_seeds) == len(_ords):
+            ar = [[float(c) for c in fac] for fac in ar_seeds]
+        else:
+            ar = [[0.0] * o for o in _ords]
+        ar_f = [[True] * o for o in _ords]
     elif q == 0 and P == 0 and Q == 0:
         # Sin ARMA: fue necesita un AR de relleno, FIJO a cero. Nunca el del
         # base (BUG-0250): `m_base.ar or ...` heredaba el AR libre, y encadenar
@@ -1084,6 +1126,12 @@ def _build_arma_on_model(m_base, p: int, q: int,
     # como las intervenciones.
     ar_f_val = list(m_base.ar_f or [])
     ma_f_val = list(m_base.ma_f or [])
+    # BUG-0252: `ar_f_freqs` AÑADE los AR(2) de frecuencia fija que pide y que
+    # la base no tiene, como en el modo nuevo. Los heredados no se tocan: son
+    # estructura (arriba). Antes se descartaba en silencio.
+    _hay = {int(f.freq) for f in ar_f_val}
+    ar_f_val += [fue.FixedFreqFactor(freq=int(k), coef=-0.5, free=True)
+                 for k in dict.fromkeys(ar_f_freqs or []) if int(k) not in _hay]
 
     # THE MEAN, carried like the interventions above. `mu0` is where fue keeps
     # the mean -- the seed before a fit, the estimate after one -- so inheriting
@@ -1108,6 +1156,12 @@ def _build_arma_on_model(m_base, p: int, q: int,
         itvs.append(fue.Intervention("easter", at=0, omega=[0.0],
                                      omega_free=[True]))
 
+    # LOS ARMÓNICOS — BUG-0245. Se heredaban siempre, y `n_harmonics` /
+    # `seasonal` se aceptaban y se descartaban sin decirlo. Si llegan, el
+    # bloque pasa a ser el pedido (ver docstring).
+    if n_harmonics is not None or seasonal is not None:
+        itvs = _rehaz_armonicos(itvs, s_freq, n_harmonics, seasonal)
+
     return fue.Model(
         m_base.series,
         d=d_new, D=m_base.D, boxlam=m_base.boxlam,
@@ -1123,6 +1177,52 @@ def _build_arma_on_model(m_base, p: int, q: int,
         estimate_mu=est_mu,
         refactor=m_base.refactor,
     )
+
+
+def terminos_armonicos(itvs) -> list[str]:
+    """Los términos del bloque estacional determinista, como «cos 1», «alter»."""
+    out = []
+    for i in itvs or []:
+        t = getattr(i, "type", "")
+        if t in ("cos", "sin"):
+            out.append(f"{t} {int(round(float(getattr(i, 'harmonic', 0))))}")
+        elif t == "alter":
+            out.append("alter")
+    return out
+
+
+def _rehaz_armonicos(itvs, freq: int, n_harmonics, seasonal) -> list:
+    """`itvs` con el bloque de armónicos que piden `n_harmonics`/`seasonal`.
+
+    El resto de deterministas se deja tal cual y en su orden; de los armónicos
+    del base se quedan los pedidos, con su ω, y los que faltan se añaden al
+    final con semilla 0 (BUG-0245).
+    """
+    import fue
+    hay = terminos_armonicos(itvs)
+    con_bloque = (int(n_harmonics) > 0) if seasonal is None else bool(seasonal)
+    if not con_bloque:
+        pedidos = []
+    elif n_harmonics is None and hay:
+        return list(itvs)            # seasonal=True y el base ya lo trae
+    else:
+        n = (maximo_de_armonicos(freq) if n_harmonics is None
+             else tope_de_armonicos(n_harmonics, freq, avisa=True))
+        pedidos = [f"{t} {k}" for k in range(1, n + 1) for t in ("cos", "sin")]
+        # El `alter` va con el bloque NUEVO; si el base ya tiene bloque, se
+        # hereda como esté: `n_harmonics` cuenta pares, y un Nyquist que una
+        # simplificación quitó no vuelve por cambiar los pares.
+        if ("alter" in hay) if hay else freq >= 2:
+            pedidos.append("alter")
+    nuevos = [i for i in itvs
+              if (terminos_armonicos([i]) or [None])[0] in (None, *pedidos)]
+    for term in pedidos:
+        if term not in hay:
+            t, _, k = term.partition(" ")
+            nuevos.append(fue.Intervention(t, at=0, omega=[0.0],
+                                           omega_free=[True],
+                                           **({"harmonic": float(k)} if k else {})))
+    return nuevos
 
 
 #: EL CONVENIO DE CUENTA DE LOS ARMÓNICOS, en un solo sitio.

@@ -1,8 +1,11 @@
 """Repro de BUG-0232…0234: el carril guiado de Salamanca (P02, 8-oct-2026).
 
 Uso:  ART_NO_VIEWER=1 python repro.py   (trabaja en un directorio temporal)
+
+El código de salida es el de BUG-0232 (sale 1 mientras siga abierto): sus
+bloques sobre Salamanca y Chamartín. Los bloques 0233 y 0234 sólo imprimen.
 """
-import os, re, shutil, tempfile
+import os, re, shutil, sys, tempfile
 os.environ.setdefault("ART_NO_VIEWER", "1")
 import art.mcp_server as s
 
@@ -22,6 +25,13 @@ s.confirm_and_estimate(inp, os.path.join(w, "m01.inp"), p=4, q=0, guion_path=g,
 ft = T(s.formal_tests(os.path.join(w, "m01.pre"), run_meg=False, subdiferenciacion=True))
 print("0232", grep(r"DCD sub-diferenciación", ft) + grep(r"LR=-inf", ft))
 print("0232", grep(r"Pero por ABAJO no cierra", ft)[:1], grep(r"El modelo es adecuado", ft))
+abierto_0232 = bool(grep(r"LR=-inf", ft)) or (
+    bool(grep(r"Pero por ABAJO no cierra|no hay veredicto", ft))
+    and bool(grep(r"El modelo es adecuado", ft)))
+ftc = T(s.formal_tests(os.path.join(HERE, "Chamartin_m02.pre"), run_meg=False,
+                       subdiferenciacion=True))
+print("0232 Chamartín", grep(r"LR=-inf|bastaba", ftc))
+abierto_0232 |= bool(grep(r"LR=-inf|bastaba", ftc))
 
 # 0233 — paso 4: el empate que se declara no es el de la ficha
 t4 = T(s.guided_identification(inp, lam=0, d=1, D=0))
@@ -34,3 +44,5 @@ s.guion_node(g, "d", "ambiguo: I(1) con el AR(4)", razon="conclusión sobre m01"
 mp = T(s.guion_map(g))
 print("0234", grep(r"sin modelo estimado detrás", mp))
 print("tmp:", w)
+print("BUG-0232", "ABIERTO" if abierto_0232 else "arreglado")
+sys.exit(1 if abierto_0232 else 0)

@@ -43,11 +43,21 @@ nada que reformular (en el carril autónomo, a añadir órdenes).
 
 ## Reproduction
 
-`ART_NO_VIEWER=1 python bugs/BUG-0236-repro/repro.py`, bloques «0237».
+`python3 bugs/BUG-0237-repro/repro.py` — los 21 modelos verdaderos de la batería; sale con 1
+mientras el bug siga abierto (hoy: 5 de 21 con la puerta cerrada).
 
 ## Root cause
 
-Cada criterio de la puerta se evalúa al 5 % por separado, y la Q por el mínimo de sus p.
+Cada criterio de la puerta (Q, JB, media, estacionalidad residual) bloquea por separado al 5 %.
+
+**Corrección (2026-10-14): la Q NO decide por el p mínimo.** La puerta de `formal_tests`
+(`describe.py`, `_dg_fallos`) usa `DiagnosisResult.white_noise`, que decide con el p del
+retardo 3s+3 (39 en mensual), con los grados de libertad descontando los parámetros ARMA
+(BUG-0075, BUG-0166). Lo que es el p mínimo es el TEXTO: «ruido blanco (Q): p mínimo = …»
+cita el menor p de los cuatro retardos, no el que decidió. De ahí salió esta lectura.
+El texto ya está corregido en 0.2.3: «ruido blanco (Q): Q(39) con 38 g.l., p = 0,0163»
+(test `tests/test_bug_0237_puerta_cita_la_q_que_decide.py`). El bug sigue abierto por la
+otra mitad: qué criterios cierran la puerta.
 
 ## Fix
 
@@ -64,3 +74,24 @@ Medir antes y después con la fase 2 (docs/PLAN-bateria-orden-integracion-fase2.
 
 Con muchas réplicas de modelos verdaderos, la tasa de «no adecuado» se acerca al tamaño
 conjunto elegido.
+
+## Una opción medida, no adoptada (2026-10-14)
+
+Al arreglar los bugs para 0.2.3 se probó Bonferroni (cada criterio al 5 %/k, k = 4 en
+estacional y 3 en anual) sin decidirlo con el analista, y se retiró de la 0.2.3. Lo medido,
+como dato para la decisión (n = 200, f = 12, 100 réplicas por caso):
+
+| | verdaderos declarados inadecuados | mal especificados detectados |
+|---|---|---|
+| hoy (cada criterio al 5 %) | 15,9 % | 69,8 % |
+| Bonferroni | 6,1 % | 59,6 % |
+
+La potencia caía en los errores sutiles (ARMA(1,1) estimado como AR(1): 20 % → 6 % con
+d = 0), no en los gruesos (85–100 %). En el caso de tesis Colombia el carril autónomo pasaba
+de B1 (MEG) a B2 (adecuación). En el repro, 5 → 1 de 21.
+
+La regla del analista (2026-10-14): la Q en s·3+3 con sus grados de libertad (restando los
+parámetros ARMA) es el contraste que decide la adecuación; los demás son informativos y pueden
+ser contradictorios. Es la opción «la Q por su retardo de decisión y las demás como salvedad»
+de arriba. Queda por decidir aparte.
+
