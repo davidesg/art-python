@@ -8036,8 +8036,10 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                 # Un nodo que el carril guiado dejó PENDIENTE (BUG-0207 D1).
                 _val = (f"⏳ pendiente (propuesta: {e.propuesta or '—'})"
                         if nd.get("pendiente") else _rec(nd.get('decidido', ''), 190))
+                # BUG-0234: un nodo que concluye sobre lo estimado lo dice.
+                fin = "  ∎ conclusión" if nd.get("conclusion") else ""
                 lines.append(f"{sangria}{rama}◆ n{e.version} {nd.get('nodo', e.name)}"
-                             f" = {_val}{quien}{corr}")
+                             f" = {_val}{quien}{corr}{fin}")
                 if getattr(e, "coincide", None) in (False, "parcial") \
                         and getattr(e, "propuesta", ""):
                     lines.append(f"{sangria}{'   ' if ultimo else '│  '}   "
@@ -8390,7 +8392,7 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                alternativas: str = "", decidido_por: str = "",
                parent: int = -1, expectativas: str = "",
                criterio: str = "", propuesta: str = "",
-               coincide: str = "") -> list:
+               coincide: str = "", conclusion: bool = False) -> list:
     """
     Record a DECISION NODE in the guion — a specification choice, not a model.
 
@@ -8442,6 +8444,13 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                    "estadístico" | "dominio" | "uso". "dominio" requires a
                    `dominio` node with expectations in this guion: the decision
                    cites them. So these decisions can be audited and COUNTED.
+    conclusion   : True when the node CONCLUDES on models already estimated
+                   instead of specifying a new one — «d = ambiguo: I(1) con el
+                   AR(4), I(2) con el IMA(1); los dos son adecuados». It must
+                   hang from a model (`parent`). Without it a "d"/"ordenes"/…
+                   node hung from a model and with nothing below reads as a
+                   reformulation still to estimate, and guion_map lists it as
+                   «decisión sin modelo estimado detrás» (BUG-0234).
 
     THE DECISION BETWEEN TIED CANDIDATES (docs/DISENO-dominio-en-los-ordenes.md
     §4.4), in `razon`, with this fixed format:
@@ -8532,6 +8541,8 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                     coinc = (True if _emp and _ords in [list(c) for c in _emp] else
                              mismo_valor(prop, decidido, nodo) if prop else None)
             _nd.pop("pendiente", None)
+            if conclusion:
+                _nd["conclusion"] = True
             _nd.update({"decidido": decidido, "evidencia": evidencia or _nd.get("evidencia", ""),
                         "alternativas": alternativas,
                         **({"criterio": "estadístico" if crit == "estadistico" else crit}
@@ -8558,16 +8569,29 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
                 + (f"\n   criterio: {crit}" if crit else "")
                 + f"\n\n*mapa:* `guion_map(\"{gp}\")`"))]
         version = (max(e.version for e in g.entries) + 1) if g.entries else 1
+        padre = int(parent) if parent >= 0 else infer_parent(g)
+        # BUG-0234: una conclusión es SOBRE modelos estimados; colgada de un
+        # nodo o de nada no concluiría sobre nada, y el mapa dejaría de
+        # avisar de una especificación que sí está pendiente.
+        if conclusion:
+            _pv = next((e for e in g.entries if e.version == padre), None)
+            if _pv is None or _pv.is_node:
+                return _err(
+                    "`conclusion=True` marca un nodo que concluye sobre modelos "
+                    "YA estimados, así que cuelga de uno: pasa `parent=<versión "
+                    f"del modelo>` (ahora el padre es "
+                    f"{'ninguno' if _pv is None else f'el nodo n{padre}'}).")
         entry = GuionEntry(
             version=version, name=nodo, inp_path="", 
             timestamp=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             spec={}, stats=None, equation="",
             decision=f"{nodo} = {decidido}",
             rationale=razon, problems_found="", next_version="",
-            parent=(int(parent) if parent >= 0 else infer_parent(g)),
+            parent=padre,
             kind="node",
             node={"nodo": nodo, "decidido": decidido,
                   "evidencia": evidencia, "alternativas": alternativas,
+                  **({"conclusion": True} if conclusion else {}),
                   **({"expectativas": expectativas.strip()} if expectativas.strip() else {}),
                   **({"criterio": "estadístico" if crit == "estadistico" else crit}
                      if crit else {})},
@@ -8582,6 +8606,8 @@ def guion_node(guion_path: str, nodo: str, decidido: str,
         return [TextContent(type="text", text=(
             f"◆ nodo n{version} registrado: **{nodo} = {decidido}**"
             + (f"  [{decidido_por}]" if decidido_por else "")
+            + (f"\n   ∎ conclusión sobre v{padre}: no especifica nada que "
+               f"estimar" if conclusion else "")
             + (f"\n   propuesta del asistente: {prop} — "
                + ("el analista la tomó en parte" if coinc == "parcial" else
                   "el analista la tomó" if coinc else

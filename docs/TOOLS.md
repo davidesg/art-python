@@ -1309,6 +1309,7 @@ Show the analysis as a MAP: what descends from what, what was adopted, and
 | `criterio` | string | no | `` |
 | `propuesta` | string | no | `` |
 | `coincide` | string | no | `` |
+| `conclusion` | boolean | no | `False` |
 
 Record a DECISION NODE in the guion — a specification choice, not a model.
 
@@ -1360,6 +1361,13 @@ Record a DECISION NODE in the guion — a specification choice, not a model.
                    "estadístico" | "dominio" | "uso". "dominio" requires a
                    `dominio` node with expectations in this guion: the decision
                    cites them. So these decisions can be audited and COUNTED.
+    conclusion   : True when the node CONCLUDES on models already estimated
+                   instead of specifying a new one — «d = ambiguo: I(1) con el
+                   AR(4), I(2) con el IMA(1); los dos son adecuados». It must
+                   hang from a model (`parent`). Without it a "d"/"ordenes"/…
+                   node hung from a model and with nothing below reads as a
+                   reformulation still to estimate, and guion_map lists it as
+                   «decisión sin modelo estimado detrás» (BUG-0234).
 
     THE DECISION BETWEEN TIED CANDIDATES (docs/DISENO-dominio-en-los-ordenes.md
     §4.4), in `razon`, with this fixed format:

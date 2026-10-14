@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**248 report(s), 19 open.**
+**248 report(s), 18 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -14,7 +14,6 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0224](BUG-0224-dcd-subdiferenciacion-con-ar-libre.md) | open | high | formal-tests | DCD de subdiferenciación sin potencia con AR libre — bajo H₀ el AR va a ≈1 y reconstruye la ∇ cancelada; el texto dice «θ→+1» con θ̂ = −0.06 | — |
 | [BUG-0232](BUG-0232-formal-tests-lr-menos-infinito-y-cierre-adecuado.md) | open | high | formal-tests | formal_tests sobre un AR(4): la subdiferenciación da LR = −inf con θ̂ = 0,659 y lo publica como «testigo NO invertible, con d−1 bastaba», y la salida cierra «El modelo es adecuado» debajo de «el orden de integración NO está fijado» | — |
 | [BUG-0233](BUG-0233-paso-4-empate-declarado-no-es-el-de-la-ficha.md) | open | low | identification | Paso 4: declara el empate «entre ARIMA(1,1,1) y ARIMA(3,1,0)» —el primero y el segundo de la lista— mientras la ficha del empate compara (1,1,1), (1,1,2) y (2,1,1); la lista no va por similitud ni por AICc | — |
-| [BUG-0234](BUG-0234-guion-map-nodo-conclusivo-sin-modelo.md) | open | low | guion | guion_map cuenta como «decisión sin modelo estimado detrás» un nodo que concluye sobre modelos ya estimados (nodo d = «ambiguo», colgado del modelo adoptado) | — |
 | [BUG-0235](BUG-0235-integracion-d2-contrasta-d3.md) | open | medium | formal-tests | formal_tests sobre un modelo con d=2 contrasta d=3 (candidato ∇³) y lo presenta como «confirmatorio del orden de integración… d confirmado ✓»; el par que corresponde —subdiferenciación del modelo en d=2 con el Shin-Fuller del modelo en d=1— no existe | — |
 | [BUG-0236](BUG-0236-dcd-lr-negativo-y-testigo-negativo.md) | open | high | formal-tests | DCD de sobrediferenciación: un LR negativo (el modelo libre peor que el restringido) y un testigo que se va a θ̂ < 0 se publican como «testigo NO invertible (θ→+1) … d confirmado ✓» | — |
 | [BUG-0237](BUG-0237-puerta-de-adecuacion-sin-correccion-multiple.md) | open | medium | diagnosis | La puerta de adecuación declara «todavía NO es adecuado» a 5 de 21 modelos VERDADEROS: varios contrastes al 5 % sin corrección por multiplicidad (Q en 12/24/36/39, JB, media, estacionalidad residual) | — |
@@ -247,6 +246,7 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0229](BUG-0229-el-primer-modelo-cierra-el-nodo-ordenes.md) | fixed | medium | guion | El primer modelo estimado cierra el nodo `ordenes` con su orden, aunque sea uno de varios candidatos empatados; la decisión final aparece como «corrección» del analista y el mapa dice «decisión sin modelo estimado detrás» | 0.2.3.dev0 |
 | [BUG-0230](BUG-0230-adoptar-una-sobreparametrizacion.md) | fixed | medium | mcp-tools | La sección 4 ofrece «A) Adoptar este modelo — nada en la diagnosis pide cambiarlo» para modelos sobreparametrizados (φ̂₂ con t ≈ −1; ARMA(1,1) sin ningún coeficiente significativo), y la opción B «sobreparametrizar» llama a una herramienta que no añade parámetros | 0.2.3.dev0 |
 | [BUG-0231](BUG-0231-la-diagnosis-solo-cita-la-q-de-39.md) | fixed | medium | diagnosis | La diagnosis de confirm_and_estimate sólo cita la Q(39) («decide 3f+3»); la Q en s y 2s (12 y 24) no aparece, aunque el método y el guion la piden | 0.2.3.dev0 |
+| [BUG-0234](BUG-0234-guion-map-nodo-conclusivo-sin-modelo.md) | fixed | low | guion | guion_map cuenta como «decisión sin modelo estimado detrás» un nodo que concluye sobre modelos ya estimados (nodo d = «ambiguo», colgado del modelo adoptado) | 0.2.3.dev0 |
 | [BUG-0241](BUG-0241-guion-adopt-arma00-se-cierra-como-ar1.md) | fixed | medium | guion | guion_adopt cierra el nodo «ordenes» de un ARMA(0,0) como ARMA(1,0) — cuenta el relleno AR(1) fijo a cero del .inp | 0.2.3.dev0 (sin commit) |
 | [BUG-0244](BUG-0244-confirm-and-estimate-incremental-p-lista.md) | fixed | low | pipeline | confirm_and_estimate con base_pre_path no acepta `p` como lista de factores (TypeError en _arma_starts), así que no se puede sobreajustar AR(1)·AR(2) conservando las intervenciones | 0.2.3.dev0 |
 | [BUG-0245](BUG-0245-confirm-and-estimate-con-base-pre-path-ignora-en.md) | fixed | medium | pipeline | confirm_and_estimate con base_pre_path ignora en silencio n_harmonics/seasonal: estima el modelo SIN armónicos, lo registra en el guion con el nombre y la razón de los armónicos y dice «se conservan sus armónicos» | 0.2.3.dev0 |

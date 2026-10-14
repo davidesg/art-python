@@ -1076,11 +1076,14 @@ def especificadas_sin_estimar(guion: "Guion") -> list[Iteracion]:
     # BUG-0229: un nodo que ELIGE entre modelos ya estimados —lleva `criterio`
     # (empate) y cuelga de un modelo— no especifica nada que estimar: decide
     # sobre lo estimado. El mapa lo contaba como «decisión sin modelo detrás».
+    # BUG-0234: lo mismo un nodo marcado como CONCLUSIÓN (`guion_node(...,
+    # conclusion=True)`): «d = ambiguo» colgado del modelo adoptado resume, no
+    # reformula. Sin la marca no se distingue de una reformulación pendiente.
     modelos = {e.version for e in guion.entries if not e.is_node}
 
     def _especifica(e) -> bool:
         nd = e.node or {}
-        if nd.get("criterio") and e.parent in modelos:
+        if (nd.get("criterio") or nd.get("conclusion")) and e.parent in modelos:
             return False
         return (nd.get("nodo") or e.nodo or "").strip().lower() in NODOS_DE_ESPECIFICACION
 
