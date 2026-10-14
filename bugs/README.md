@@ -4,12 +4,13 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**249 report(s), 3 open.**
+**249 report(s), 4 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
 | [BUG-0116](BUG-0116-la-descripcion-de-la-herramienta-no-sobrevive-al-cliente.md) | open | high | mcp-tools | La descripción de las herramientas no sobrevive al cliente — lo que DECIDE está detrás del recorte, y easter, ar_f_freqs y Shin-Fuller se pierden | — |
 | [BUG-0186](BUG-0186-la-lista-de-objetivos-se-sigue-reformulando.md) | open | medium | protocolo | La lista de objetivos se sigue reformulando con BUG-0183 dentro — el protocolo no basta, porque la pregunta se hace con la herramienta del cliente antes de llamar a art | — |
+| [BUG-0237](BUG-0237-puerta-de-adecuacion-sin-correccion-multiple.md) | open | medium | diagnosis | La puerta de adecuación declara «todavía NO es adecuado» a 5 de 21 modelos VERDADEROS: varios contrastes al 5 % sin corrección por multiplicidad (Q en 12/24/36/39, JB, media, estacionalidad residual) | — |
 | [BUG-0240](BUG-0240-c-candidatos-por-mlp-en-la-senal-mas-ruido.md) | open | medium | identification (C) | El identificador en C (atsw-gui) acierta el 18 % del ARMA(1,1) señal + ruido (0,95/0,7) frente al 64 % de art-python: sus candidatos salen del MLP y no de los filtros de corte | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
@@ -238,7 +239,6 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0234](BUG-0234-guion-map-nodo-conclusivo-sin-modelo.md) | fixed | low | guion | guion_map cuenta como «decisión sin modelo estimado detrás» un nodo que concluye sobre modelos ya estimados (nodo d = «ambiguo», colgado del modelo adoptado) | 0.2.3.dev0 |
 | [BUG-0235](BUG-0235-integracion-d2-contrasta-d3.md) | fixed | medium | formal-tests | formal_tests sobre un modelo con d=2 contrasta d=3 (candidato ∇³) y lo presenta como «confirmatorio del orden de integración… d confirmado ✓»; el par que corresponde —subdiferenciación del modelo en d=2 con el Shin-Fuller del modelo en d=1— no existe | 0.2.3.dev0 |
 | [BUG-0236](BUG-0236-dcd-lr-negativo-y-testigo-negativo.md) | fixed | high | formal-tests | DCD de sobrediferenciación: un LR negativo (el modelo libre peor que el restringido) y un testigo que se va a θ̂ < 0 se publican como «testigo NO invertible (θ→+1) … d confirmado ✓» | 0.2.3.dev0 |
-| [BUG-0237](BUG-0237-puerta-de-adecuacion-sin-correccion-multiple.md) | fixed | medium | diagnosis | La puerta de adecuación declara «todavía NO es adecuado» a 5 de 21 modelos VERDADEROS: varios contrastes al 5 % sin corrección por multiplicidad (Q en 12/24/36/39, JB, media, estacionalidad residual) | 0.2.3.dev0 |
 | [BUG-0239](BUG-0239-el-aicc-como-aviso-no-como-columna.md) | fixed | low | identification | Mejora: el AICc del identificador, de columna a AVISO — no ordena (BUG-0198) y en la lista no se sabe qué significa; donde aporta es al señalar un mixto persistente (orden de integración abierto) | 0.2.3.dev0 |
 | [BUG-0241](BUG-0241-guion-adopt-arma00-se-cierra-como-ar1.md) | fixed | medium | guion | guion_adopt cierra el nodo «ordenes» de un ARMA(0,0) como ARMA(1,0) — cuenta el relleno AR(1) fijo a cero del .inp | 0.2.3.dev0 (sin commit) |
 | [BUG-0242](BUG-0242-sf-sobreajuste-raiz-negativa-se-calla.md) | fixed | medium | formal_tests | formal_tests calla el Shin-Fuller por sobreajuste cuando la raíz real recuperada es NEGATIVA y dice «el lado AR no existe», cuando sí es informativa | 0.2.3.dev0 |

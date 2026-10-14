@@ -30,7 +30,7 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
   added beside it (Moncloa: θ̂ 0.85). Overdifferencing keeps an MA(q ≥ 2)
   next to the witness (BUG-0243).
 
-### Identification and the adequacy gate (BUG-0223, 0233, 0237, 0239, 0246)
+### Identification (BUG-0223, 0233, 0239, 0246)
 
 - With d = 0, step 3 of `guided_identification` also tests seasonality (on
   ∇y, valid whether the levels are stationary or not) and decides A/B1 with the
@@ -43,15 +43,6 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
   place— not «the first two of the list», which can come from different bands
   (Salamanca: (1,1,1)/(1,1,2)/(2,1,1), not (1,1,1)/(3,1,0)); the list says by
   which criterion it is ordered (BUG-0233).
-- **The adequacy gate tests each criterion at 5 %/k (Bonferroni)**: the
-  verdict, `formal_tests`' gate and the outlier loop. Joint size ≤ 5 %
-  (measured 15.9 % → 6.1 %); what rejects at 5 % alone is published as a
-  caveat. In the repro, 5 → 1 of 21 true models «not adequate». The price,
-  measured: power drops on subtle misspecifications (ARMA(1,1) fitted as
-  AR(1): 20 % → 6 % at d = 0); gross ones are still caught at 85–100 %. In
-  the thesis case Colombia, the autonomous lane now adopts B2 by adequacy
-  (its JB no longer rejects at 1.25 %) where the MEG used to choose B1
-  (BUG-0237).
 - ΔAICc leaves the candidates' list (it marks only `[empate]`; the order does
   not change). When the best model by AICc is a persistent mixed one, a
   warning says the integration order may be open and points to `formal_tests`

@@ -33,30 +33,6 @@ from .seasonal_detection import detect_seasonality, SeasonalDetectionResult
 # Result dataclass
 # ---------------------------------------------------------------------------
 
-# EL TAMAÑO CONJUNTO DE LA PUERTA — BUG-0237.
-#
-# La adecuación es UNA afirmación —el modelo vale— hecha con k contrastes: la Q
-# en 3f+3, la JB, la media residual y, con f > 1, la estacionalidad residual.
-# Cada uno al 5 % daba un tamaño conjunto cercano a 1 − 0,95ᵏ: en la batería, 16 %
-# de modelos VERDADEROS declarados «todavía NO adecuados» (5 de 21 en el repro).
-# Ahora cada criterio va al 5 %/k (Bonferroni; para «¿rechaza alguno?» Holm da
-# lo mismo), y el tamaño conjunto queda por debajo del 5 % sin suponer nada
-# sobre la dependencia entre los contrastes —la Q y la media, por ejemplo, no son
-# independientes—. Medido (1400 modelos verdaderos, n = 200): 15,9 % → 6,1 %.
-# El precio es potencia frente a errores SUTILES (un ARMA(1,1) ajustado como
-# AR(1) pasa más), no frente a los gruesos (un AR(1) 0,6 ajustado como ruido
-# sigue cayendo el 100 %). Lo que rechaza al 5 % aislado y no al nivel de la
-# puerta se publica como SALVEDAD (`rechazos_aislados`), como los retardos no
-# cancerberos de la Q: dice dónde mirar sin bloquear.
-ALFA_ADECUACION = 0.05
-
-
-def alfa_por_criterio(freq: int) -> float:
-    """El nivel de cada criterio: 5 % entre los k que forman la adecuación."""
-    k = 4 if int(freq or 1) > 1 else 3
-    return ALFA_ADECUACION / k
-
-
 @dataclass
 class DiagnosisResult:
     # residuals
@@ -95,9 +71,6 @@ class DiagnosisResult:
     # residuos (BUG-0218). El índice cambia con d —con d=2 todo se corre una
     # observación— y el enunciado pide fechas; vacío si no se pudo fechar.
     extreme_dates: dict = field(default_factory=dict)
-    # El nivel de CADA criterio de la adecuación (BUG-0237): `diagnose` pone
-    # 5 %/k; el 5 % por defecto es el de un resultado construido a mano.
-    alfa: float = ALFA_ADECUACION
 
     def etiqueta_extremo(self, obs: int, z: float | None = None) -> str:
         """«11/2008 (obs 82, z=-5.50)»: la fecha primero; el índice y la z,
@@ -137,7 +110,7 @@ class DiagnosisResult:
         pasar «con salvedad» sea consciente y no un descuido.
         """
         p = self.q_p_cancerbero
-        return True if p is None else p > self.alfa
+        return True if p is None else p > 0.05
 
     @property
     def salvedades_q(self) -> list[tuple[int, float]]:
@@ -177,37 +150,8 @@ class DiagnosisResult:
 
     @property
     def normal(self) -> bool:
-        """True if JB p-value > alfa (cannot reject normality; BUG-0237)."""
-        return self.jb_pvalue > self.alfa
-
-    @property
-    def t_media_critico(self) -> float:
-        """El umbral de |t| de la media residual: el 2 de Brajín al 5 %, el
-        cuantil de la t al nivel de la puerta (BUG-0237)."""
-        if self.alfa >= ALFA_ADECUACION:
-            return 2.0
-        return float(sp_stats.t.ppf(1.0 - self.alfa / 2.0, max(self.nobs - 1, 1)))
-
-    @property
-    def rechazos_aislados(self) -> list[str]:
-        """Criterios que rechazan al 5 % AISLADO y pasan al nivel de la puerta.
-
-        No bloquean —la adecuación es una afirmación conjunta, BUG-0237— pero
-        se dicen: un p = 0,03 en la Q sigue diciendo dónde mirar."""
-        if self.alfa >= ALFA_ADECUACION:
-            return []
-        out = []
-        p = self.q_p_cancerbero
-        if p is not None and self.alfa < p <= ALFA_ADECUACION:
-            out.append(f"Q({self.q_lag_cancerbero}) p = {p:.4f}")
-        if self.alfa < self.jb_pvalue <= ALFA_ADECUACION:
-            out.append(f"JB p = {self.jb_pvalue:.4f}")
-        if 2.0 < abs(self.mean_t) <= self.t_media_critico:
-            out.append(f"media residual t = {self.mean_t:+.2f}")
-        sp = getattr(self.seasonal, "p_value", None) if self.seasonal is not None else None
-        if sp is not None and self.alfa < sp <= ALFA_ADECUACION:
-            out.append(f"estacionalidad residual p = {sp:.4f}")
-        return out
+        """True if JB p-value > 0.05 (cannot reject normality)."""
+        return self.jb_pvalue > 0.05
 
     @property
     def centred(self) -> bool:
@@ -225,7 +169,7 @@ class DiagnosisResult:
         and Q and Jarque-Bera run on centred residuals too. All three verdicts
         could not see it (BUG-0013).
         """
-        return abs(self.mean_t) <= self.t_media_critico
+        return abs(self.mean_t) <= 2.0
 
     @property
     def residuals_ok(self) -> bool:
@@ -262,7 +206,7 @@ class DiagnosisResult:
             # Quién DECIDE y quién es salvedad, dicho en la propia tabla: si no
             # se marca, los cuatro se leen como cuatro veredictos.
             if l == self.q_lag_cancerbero:
-                flag = "  <- DECIDE (3f+3)" + ("" if p > self.alfa else "  *** RECHAZA")
+                flag = "  <- DECIDE (3f+3)" + ("" if p > 0.05 else "  *** RECHAZA")
             else:
                 flag = "" if p > 0.05 else "  (salvedad)"
             lines.append(f"    lag={l:3d}  df={l - self.q_df_correction:3d}  Q={q:6.2f}"
@@ -1073,14 +1017,12 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
     # --- Seasonal detection on residuals ---
     # Use lam=1.0 (identity, no Box-Cox): residuals are already transformed.
     seasonal = None
-    alfa = alfa_por_criterio(s)                         # BUG-0237
     if s > 1:
         try:
             # BUG-0206: on residuals the OLS F. Their H0 is white noise, the
             # HAC F's worst case (18% false alarms at n=216, 30% at n=120),
             # and this verdict stops the outlier loop and makes "clean".
-            seasonal = detect_seasonality(r_ts, d=0, lam=1.0, test="ols",
-                                          significance=alfa)
+            seasonal = detect_seasonality(r_ts, d=0, lam=1.0, test="ols")
         except Exception:
             pass
 
@@ -1114,7 +1056,6 @@ def diagnose(model, z_threshold: float = 3.0) -> DiagnosisResult:
         param_labels=param_labels,
         param_corr=param_corr,
         high_corr_pairs=high_corr_pairs,
-        alfa=alfa,
     )
 
 
