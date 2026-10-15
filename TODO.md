@@ -1,10 +1,11 @@
 # art-python — TODO
 
-## PRÓXIMA VERSIÓN — revisión a fondo del identificador ARMA (decidido 29-sep-2026)
+## ~~PRÓXIMA VERSIÓN — revisión a fondo del identificador ARMA~~ — HECHO (0.2.3, 2026-10-15)
 
-Con su reproducción en **BUG-0198** (la rata almizclera: FAP en 2 y 6, ciclo de
-~10 años, y la lista no propone ni el AR(2) ni el AR(6)); relacionados
-BUG-0192, BUG-0194 y BUG-0196.
+Decidida el 29-sep-2026 con la reproducción en **BUG-0198** (la rata almizclera:
+FAP en 2 y 6, ciclo de ~10 años); cerrados BUG-0198, 0192, 0194 y 0196, y
+publicada en art-tseries 0.2.3. Lo que el identificador C aún hace distinto está
+en `atsw-gui/engines/art/BUGS.md`.
 
 ## Arquitectura
 
@@ -151,19 +152,15 @@ y 0.3.0 hay un trabajo de depurar y un cambio importante de arquitectura»*.
       `fue[report]`—, y pandas/openpyxl llegaban de rebote por pyfug. Declarados,
       con una prueba que exige que todo lo importado esté declarado. Encontrado
       probando las ruedas en un entorno limpio: `docs/PUBLISHING.md` §5.
-- [ ] **Que el smoke test del CI llame a una herramienta que escriba un informe**
-      (p. ej. `generate_forecast` sobre un `.pre` de ejemplo): el de hoy sólo
-      comprueba que el servidor arranca, y por eso BUG-0191 pasó a PyPI.
-- [ ] **Versiones y CHANGELOG preparados (25-sep)**: pyfug 2.0.1, fue 0.1.16, art
-      0.2.2, atsw 1.5.0, con las cotas subidas. Falta: la prueba en entorno
-      limpio (PUBLISHING §5), los `workflow_dispatch`, y las etiquetas.
-- [ ] **Publicar antes de la 0.2.2, en este orden**: pyfug 2.0.1 (los 3 commits
-      de BUG-0002 sin subir: la 2.0.0 de PyPI rompe con TODA serie anual), fue con
-      BUG-0017…0023, y entonces `fue>=` esa versión en `pyproject.toml`: art
-      llama ya a `fue.diagnostics.free_arma_count`, `default_lags`,
-      `differencing_offset` y `residuals_start`, que la 0.1.14 no tiene.
-      Ojo con la numeración de fue: `pyproject` dice 0.1.15 (sin publicar) y los
-      informes 0017…0023 dicen `fixed_in: 0.1.16`.
+- [x] **Que una prueba llame a herramientas que escriban de verdad** (2026-10-15):
+      el workflow manual *Preflight atsw* (`.github/workflows/preflight-atsw.yml`,
+      `atsw-suite/preflight/pruebas.py`) instala en limpio en todas las
+      plataformas con ruedas y estima con art, mtram y sima. Con `origen=repos`
+      antes del tag; con `origen=pypi`, lo publicado.
+- [x] **Versiones, CHANGELOG y publicación** (2026-10-15): superado por atsw
+      2.0.0 —fue 0.1.17, pyfug 2.0.2, drvarma 0.2.0, art-tseries 0.2.3, drtran
+      0.2.6, sima-tseries 0.1.0—, probado desde PyPI en 20 combinaciones de
+      sistema y Python (run 38706724154).
 
 - [ ] **`README.md` —la página de PyPI— define mal el carril autónomo**: dice
       *«Autonomous — Claude/heuristic decides every step»*, que es justo lo que
