@@ -5,7 +5,7 @@ status: fixed
 severity: medium
 component: mcp-tools
 found_in: 0.2.3.dev0 @088933d
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-07
 reporter: David / Claude — revisión del paper de dolarización (Ecuador), Fase 1, ratio BXE = X/M
 tags:

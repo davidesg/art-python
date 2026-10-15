@@ -5,7 +5,7 @@ status: fixed
 severity: medium
 component: identification
 found_in: 0.2.3.dev0
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-09-29
 reporter: David / Claude — análisis guiado de la rata almizclera (Jenkins y Alavi 1981)
 tags:

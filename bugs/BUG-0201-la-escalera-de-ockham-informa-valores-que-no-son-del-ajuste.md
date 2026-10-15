@@ -5,7 +5,7 @@ status: fixed
 severity: medium
 component: interventions
 found_in: 0.2.3.dev0
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-02
 reporter: David / Claude — evaluación del carril autónomo (IPC_ES del pass-through)
 tags:

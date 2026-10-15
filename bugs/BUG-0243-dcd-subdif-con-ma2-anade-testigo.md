@@ -5,7 +5,7 @@ status: fixed
 severity: medium
 component: formal_tests
 found_in: 0.2.3.dev0 (+ arreglos sin commit)
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-09
 reporter: David / Claude — análisis guiado de Moncloa (P02)
 tags: [dcd, subdiferenciacion, bug-0045, bug-0224]

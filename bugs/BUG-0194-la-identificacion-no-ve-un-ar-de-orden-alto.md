@@ -5,7 +5,7 @@ status: fixed
 severity: high
 component: identification
 found_in: 0.2.3.dev0
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-09-29
 reporter: David — análisis guiado del HICP de España 2002-2019 (P03 de Econometría Aplicada)
 tags:

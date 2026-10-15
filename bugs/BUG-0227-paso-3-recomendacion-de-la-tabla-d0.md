@@ -5,7 +5,7 @@ status: fixed
 severity: low
 component: identification
 found_in: 0.2.3.dev0 @088933d
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-08
 reporter: David / Claude — análisis GUIADO del IPC de España (P02, Econometría Aplicada UCM)
 tags:

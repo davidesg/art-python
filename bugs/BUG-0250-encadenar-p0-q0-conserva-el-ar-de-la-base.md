@@ -5,7 +5,7 @@ status: fixed
 severity: high
 component: pipeline
 found_in: 0.2.3.dev0
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-14
 reporter: David / Claude — rodaje de art con el ejemplo lutkepohl_poskitt de sima (Minneapolis, carril guiado)
 tags:

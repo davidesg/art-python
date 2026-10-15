@@ -5,7 +5,7 @@ status: fixed
 severity: high
 component: seasonal_detection
 found_in: 0.2.3.dev0
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-04
 reporter: David / Claude — al llevar la F de art a la desestacionalización de drvarma (drvarma BUG-0003)
 tags:

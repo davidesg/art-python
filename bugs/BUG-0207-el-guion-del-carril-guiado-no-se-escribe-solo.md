@@ -5,7 +5,7 @@ status: fixed
 severity: high
 component: guion
 found_in: 0.2.3.dev0 @a33b893
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-06
 reporter: David / Claude — P04 de Econometría Aplicada (UCM), el IPC de España en modo guiado, preparando la clase sobre cómo se escribe un guion
 tags:

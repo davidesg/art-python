@@ -5,7 +5,7 @@ status: fixed
 severity: medium
 component: pipeline
 found_in: 0.2.3.dev0
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-14
 reporter: David / Claude — al arreglar BUG-0245 (la misma clase, con los armónicos)
 tags:

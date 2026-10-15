@@ -5,7 +5,7 @@ status: fixed
 severity: high
 component: interventions
 found_in: 0.2.3.dev0
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-03
 reporter: David / Claude — carril autónomo de WTI para los fixtures de drtran
 tags:

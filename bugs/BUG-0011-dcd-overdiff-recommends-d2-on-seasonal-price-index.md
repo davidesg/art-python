@@ -5,7 +5,7 @@ status: fixed
 severity: medium
 component: formal-tests
 found_in: 0.1.4
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-08-08
 reporter: David / IPC_ES passthrough
 tags:

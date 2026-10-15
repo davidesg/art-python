@@ -5,7 +5,7 @@ status: fixed
 severity: low
 component: identification
 found_in: 0.2.3.dev0 @088933d (+ arreglos sin commit de BUG-0225…0231)
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-08
 reporter: David / Claude — análisis GUIADO de Salamanca (P02, Econometría Aplicada UCM)
 tags:

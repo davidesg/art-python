@@ -5,7 +5,7 @@ status: fixed
 severity: high
 component: formal-tests
 found_in: 0.2.3.dev0
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-09-28
 reporter: David — análisis guiado del airline (serie G de Box-Jenkins), preparación de la P03
 tags:

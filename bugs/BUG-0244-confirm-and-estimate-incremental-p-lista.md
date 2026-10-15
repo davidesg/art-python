@@ -5,7 +5,7 @@ status: fixed
 severity: low
 component: pipeline
 found_in: 0.2.3.dev0 (+ arreglos sin commit)
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-09
 reporter: David / Claude — análisis guiado de IPC_US (P02)
 tags: [confirm_and_estimate, factores, sobreajuste]

@@ -5,7 +5,7 @@ status: fixed
 severity: medium
 component: pipeline
 found_in: 0.2.3.dev0
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-09
 reporter: David / Claude — revisión del paper de dolarización (GDPDEC guiado)
 tags:

@@ -4,7 +4,7 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
-## art-tseries — unreleased
+## art-tseries 0.2.3 — 2026-10-15
 
 ### The differencing contrasts: the AR bounded, the LR checked (BUG-0224, 0232, 0235, 0236, 0242, 0243)
 
@@ -501,7 +501,7 @@ longer imports `fue.plots`.
 
 *In English from here on.*
 
-- **What changed in fue.** fue 0.1.17 (unreleased) computes standard errors
+- **What changed in fue.** fue 0.1.17 computes standard errors
   from the finite-difference Hessian at the optimum and says so in
   `FitResult.se_method` (`"fdhess"`, `"bfgs (fdhess: …)"`, `"none (…)"`) and
   in the `.out` (`Standard errors: <method>`).

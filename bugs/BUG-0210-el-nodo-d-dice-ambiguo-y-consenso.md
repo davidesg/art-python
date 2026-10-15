@@ -5,7 +5,7 @@ status: fixed
 severity: low
 component: identification
 found_in: 0.2.3.dev0 @a33b893
-fixed_in: 0.2.3.dev0
+fixed_in: 0.2.3
 reported: 2026-10-06
 reporter: David / Claude — resolución de la P02 de Econometría Aplicada (UCM) con art en modo autónomo, 15 series y cuatro analistas
 tags:

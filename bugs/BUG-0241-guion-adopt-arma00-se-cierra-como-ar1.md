@@ -5,7 +5,7 @@ status: fixed
 severity: medium
 component: guion
 found_in: 0.2.3.dev0 (+ arreglos sin commit de BUG-0225…0231)
-fixed_in: 0.2.3.dev0 (sin commit)
+fixed_in: 0.2.3 (sin commit)
 reported: 2026-10-09
 reporter: David / Claude — análisis guiado de IPC_DE (P02)
 tags: [guion, ordenes, bug-0229]
