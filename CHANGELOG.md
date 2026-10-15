@@ -1355,7 +1355,7 @@ instrucciones son el producto, y aquí había criterio escrito que no llegaba.
 - TODO: la pregunta del OBJETIVO (multivariante o previsión), analizada y sin
   implementar — el objetivo no manda sobre los datos, y ésa es la parte difícil.
 
-## atsw 2.0.0 — unreleased
+## atsw 2.0.0 — 2026-10-15
 
 **sima es un asistente nuevo, en su propio paquete.** `sima-tseries` sustituye
 al servidor que viajaba dentro de drvarma (`drvarma[mcp]`), y drvarma 0.2.0 ya
