@@ -11,7 +11,8 @@
     python pruebas.py DATA_DIR WHEELS_DIR   # sale con 1 si algo falla
 
 Las versiones esperadas son las de las ruedas de WHEELS_DIR: lo construido es
-lo que tiene que quedar instalado.
+lo que tiene que quedar instalado. Con origen PyPI, WHEELS_DIR tiene las ruedas
+que `pip download` elige para esta plataforma (la última de cada paquete).
 """
 import asyncio, importlib, json, os, shutil, subprocess, sys, sysconfig, tempfile, warnings
 warnings.filterwarnings("ignore")
@@ -60,6 +61,13 @@ print("2. Motores compilados")
 import fue._engine as FE, drvarma._engine as DE
 check("fue: motor C", FE.engine_backend() == "c", f"{FE.engine_backend()} {FE.engine_load_error() or ''}")
 check("drvarma: motor C", DE.engine_backend() == "c", f"{DE.engine_backend()} {DE.engine_load_error() or ''}")
+# la rueda instalada: la de esta plataforma, no la pura ni una compilada en sitio
+from importlib.metadata import distribution
+for dist in ("fue", "drvarma"):
+    w = distribution(dist).read_text("WHEEL") or ""
+    tags = [l.split(":", 1)[1].strip() for l in w.splitlines() if l.startswith("Tag:")]
+    pura = "Root-Is-Purelib: true" in w
+    check(f"{dist}: rueda binaria", tags and not pura and "none-any" not in tags[0], ", ".join(tags))
 
 print("3. Asistentes")
 for mod, minimo in (("art.mcp_server", 30), ("drtran.mcp_server", 10), ("sima.mcp_server", 20)):
