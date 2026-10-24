@@ -1436,6 +1436,9 @@ def aviso_rampa(model) -> str:
         refac = float(getattr(model, "refactor", 1.0) or 1.0)
         en_pct = (lam is not None and float(lam) == 0.0 and refac == 100.0)
         u = "%" if en_pct else " (unidades de la serie transformada)"
+        # BUG-0253: fuera del tanto por ciento, el ω del motor viene ×refactor
+        from art.interventions import escala_omega
+        _s_om = escala_omega(model)
         filas = []
         for i, it in rampas:
             om = None
@@ -1448,6 +1451,8 @@ def aviso_rampa(model) -> str:
             _om = getattr(it, "omega", None)
             if om is None and _om is not None and _np.size(_om) > 0:
                 om = float(_np.ravel(_om)[0])
+            if om is not None:
+                om = om / _s_om
             try:
                 yr, per = model.series._obs_to_date(int(it.at) + 1)
                 fecha = f"{per:02d}/{yr}" if freq > 1 else str(yr)
@@ -9982,10 +9987,15 @@ def guided_intervention(inp_path: str,
                         # hipótesis caía sobre datos que no le corresponden.
                         # `Candidato.arranque_resid` ya trae la posición buena,
                         # 1-based en residuos, que es el índice de `at`.
+                        # BUG-0253: residuos y ω en las unidades de σ̂ₐ (con
+                        # λ=1 el motor los da ×refactor); la escala y el R²
+                        # de la superposición no cambian.
+                        from art.interventions import escala_omega
+                        _s_om = escala_omega(m)
                         _sup = describe_superposicion(
-                            m._result.residuals,
+                            [float(x) / _s_om for x in m._result.residuals],
                             at=int(getattr(mejor, "arranque_resid", ep.inicio)),
-                            omega=_om, entrada=_ent,
+                            omega=[w / _s_om for w in _om], entrada=_ent,
                             d=int(getattr(m, "d", 0)),
                             freq=_f, start=getattr(ts, "start", ()),
                             desfase=_desfase_obs(m),      # BUG-0172
