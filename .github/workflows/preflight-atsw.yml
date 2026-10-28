@@ -2,14 +2,17 @@
 # plataformas para las que se construyen ruedas. Manual: Actions → Preflight
 # atsw → Run workflow (se puede elegir la rama de cada repo).
 #
-# Construye los seis paquetes desde las cabezas de sus repos, con la versión de
-# publicación (el .devN se quita aquí, como en el commit de release):
+# Construye los paquetes de la suite desde las cabezas de sus repos, con la
+# versión de publicación (el .devN se quita aquí, como en el commit de release):
 # las ruedas compiladas de fue y drvarma con cibuildwheel y la configuración de
 # sus propias publicaciones (manylinux y musllinux x86_64/aarch64, macOS arm64,
-# Windows AMD64; cp310–cp313), y las puras. Después, en cada sistema y Python,
-# instala atsw en limpio forzando las ruedas de fue y drvarma, y corre
+# Windows AMD64; cp310–cp313), la de drvec igual (una por plataforma, py3-none:
+# su C es un ejecutable, no una extensión; sin musllinux, donde va su rueda
+# pura), y las puras. Después, en cada sistema y Python, instala atsw en limpio
+# forzando las ruedas de fue, drvarma y drvec, y corre
 # atsw-suite/preflight/pruebas.py: procedencia y versiones, motores C cargados,
-# los tres asistentes, y el funcionamiento (art, mtram, sima por las dos rutas).
+# los tres asistentes, y el funcionamiento (art, mtram, sima por las dos rutas
+# y el VEC).
 #
 # aarch64 se construye en runner ARM nativo (la publicación usa QEMU): mismas
 # ruedas, minutos en vez de horas.
@@ -27,7 +30,8 @@ on:
       atsw_version: {description: "con origen pypi: versión de atsw (vacío = la última)", default: ""}
       fue_ref: {description: "rama de fue-python", default: master}
       pyfug_ref: {description: "rama de pyfug", default: master}
-      drvarma_ref: {description: "rama de drvarma-python", default: ladder}
+      drvarma_ref: {description: "rama de drvarma-python", default: master}
+      drvec_ref: {description: "rama de drvec-python", default: main}
       drtran_ref: {description: "rama de drtran-python", default: master}
       sima_ref: {description: "rama de sima-python", default: main}
 
@@ -46,7 +50,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-14, windows-latest]
-        pkg: [fue, drvarma]
+        pkg: [fue, drvarma, drvec]
     steps:
       - name: Checkout fue
         if: matrix.pkg == 'fue'
@@ -56,8 +60,30 @@ jobs:
         if: matrix.pkg == 'drvarma'
         uses: actions/checkout@v4
         with: {repository: davidesg/drvarma-python, ref: "${{ inputs.drvarma_ref }}"}
+      - name: Checkout drvec
+        if: matrix.pkg == 'drvec'
+        uses: actions/checkout@v4
+        with: {repository: davidesg/drvec-python, ref: "${{ inputs.drvec_ref }}"}
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
+      # drvec en Windows: MinGW-w64 gcc y GSL de MSYS2, como su publish.yml
+      - name: MinGW-w64 gcc y GSL (drvec, Windows)
+        if: matrix.pkg == 'drvec' && runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-gsl
+      - name: La construcción, a ellos (drvec, Windows)
+        if: matrix.pkg == 'drvec' && runner.os == 'Windows'
+        shell: bash
+        run: |
+          U=$(cygpath -m "${{ steps.msys2.outputs.msys2-location }}/ucrt64")
+          echo "DRVEC_CC=$U/bin/gcc.exe" >> "$GITHUB_ENV"
+          echo "DRVEC_GSL_PREFIX=$U" >> "$GITHUB_ENV"
       - name: Versión de publicación (sin .devN)
         shell: bash
         run: |
@@ -73,6 +99,10 @@ jobs:
         env:
           CIBW_ARCHS_LINUX: native   # x86_64 o aarch64, como la publicación (sin i686)
           MACOSX_DEPLOYMENT_TARGET: ${{ runner.os == 'macOS' && '14.0' || '' }}
+      - name: La rueda de drvec lleva su C, y corre
+        if: matrix.pkg == 'drvec'
+        shell: bash
+        run: python tools/check_wheel.py wheelhouse/*.whl
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.pkg }}-${{ matrix.os }}
@@ -91,6 +121,8 @@ jobs:
         with: {repository: davidesg/drtran-python, ref: "${{ inputs.drtran_ref }}", path: drtran}
       - uses: actions/checkout@v4
         with: {repository: davidesg/sima-python, ref: "${{ inputs.sima_ref }}", path: sima}
+      - uses: actions/checkout@v4
+        with: {repository: davidesg/drvec-python, ref: "${{ inputs.drvec_ref }}", path: drvec}
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - name: Construir
@@ -103,6 +135,9 @@ jobs:
           (cd art && python tools/sync_material.py)
           (cd sima && python tools/sync_material.py)
           for p in pyfug art drtran sima art/atsw-suite; do python -m build --wheel --outdir wh $p; done
+          # la rueda pura de drvec (sin su C): la de Alpine, que no tiene binaria
+          sed -i -E 's/^(version *= *"[^"]*)\.dev[0-9]+"/\1"/' drvec/pyproject.toml
+          DRVEC_NO_C=1 python -m build --wheel --outdir wh drvec
           ls -la wh
       - uses: actions/upload-artifact@v4
         with: {name: wheels-pure, path: wh/*.whl}
@@ -125,7 +160,7 @@ jobs:
         with: {pattern: wheels-*, merge-multiple: true, path: wh}
       - uses: actions/setup-python@v5
         with: {python-version: "${{ matrix.python }}"}
-      - name: Instalar en limpio, con las ruedas de fue y drvarma
+      - name: Instalar en limpio, con las ruedas de fue, drvarma y drvec
         shell: bash
         env: {ORIGEN: "${{ inputs.origen }}", ATSW_V: "${{ inputs.atsw_version }}"}
         run: |
@@ -135,15 +170,15 @@ jobs:
           if [ "$ORIGEN" = pypi ]; then
             A="atsw${ATSW_V:+==$ATSW_V}"
             $PY -m pip download -q --no-cache-dir --no-deps --only-binary :all: -d wh \
-              "$A" fue pyfug drvarma art-tseries drtran sima-tseries
+              "$A" fue pyfug drvarma drvec art-tseries drtran sima-tseries
             ls wh
-            $PY -m pip install --no-cache-dir --only-binary fue,drvarma "$A"
+            $PY -m pip install --no-cache-dir --only-binary fue,drvarma,drvec "$A"
           else
             V=$(ls wh/atsw-*.whl | sed -E 's/.*atsw-([^-]+)-.*/\1/')
-            $PY -m pip install --find-links wh --only-binary fue,drvarma "atsw==$V"
+            $PY -m pip install --find-links wh --only-binary fue,drvarma,drvec "atsw==$V"
           fi
           $PY -m pip check
-          $PY -m pip list | grep -i -E '^(fue|pyfug|drvarma|art-tseries|drtran|sima-tseries|atsw) '
+          $PY -m pip list | grep -i -E '^(fue|pyfug|drvarma|drvec|art-tseries|drtran|sima-tseries|atsw) '
       - name: Pruebas
         shell: bash
         run: |
@@ -181,12 +216,12 @@ jobs:
               if [ "$ORIGEN" = pypi ]; then
                 A="atsw${ATSW_V:+==$ATSW_V}"
                 /venv/bin/pip download -q --no-cache-dir --no-deps -d wh "$A" pyfug art-tseries drtran sima-tseries
-                /venv/bin/pip download -q --no-cache-dir --no-deps --only-binary :all: -d wh fue drvarma
+                /venv/bin/pip download -q --no-cache-dir --no-deps --only-binary :all: -d wh fue drvarma drvec
                 ls wh
-                /venv/bin/pip install --no-cache-dir --only-binary fue,drvarma "$A"
+                /venv/bin/pip install --no-cache-dir --only-binary fue,drvarma,drvec "$A"
               else
                 V=$(ls wh/atsw-*.whl | sed -E "s/.*atsw-([^-]+)-.*/\1/")
-                /venv/bin/pip install --find-links wh --only-binary fue,drvarma "atsw==$V"
+                /venv/bin/pip install --find-links wh --only-binary fue,drvarma,drvec "atsw==$V"
               fi
               /venv/bin/pip check
               /venv/bin/python atsw-suite/preflight/pruebas.py atsw-suite/preflight/data wh'

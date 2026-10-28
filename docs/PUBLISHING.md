@@ -17,8 +17,20 @@ test que el workflow hace antes de publicar.
 |---|---|---|---|---|
 | **fue** | `atws/fue/fue` | `.github/workflows/wheels.yml` | `v*` | extensión C → **cibuildwheel**, ruedas por plataforma |
 | **pyfug** | `atws/fug/pyfug` | `.github/workflows/publish.yml` | `v*` | puro Python; **activo sólo desde el 2026-09-25** (ver abajo) |
+| **drvarma** | `drvarma_source/drvarma` | `.github/workflows/publish.yml` | `v*` | verosimilitud exacta compilada → ruedas por plataforma (con GSL) |
+| **drvec** | `drvec-python` | `.github/workflows/publish.yml` | `v*` | **desde atsw 2.1.0**; el C (sólo para los bootstraps) va en las ruedas de plataforma, y hay rueda pura de reserva |
 | **art-tseries** | `ART/art-python` | `.github/workflows/publish-art.yml` | `art-v*` | **con smoke test** antes de publicar |
+| **drtran** | `drtran-python` | `.github/workflows/publish.yml` | `v*` | puro Python, sobre fue y drvarma; servidor `mtram` |
+| **sima-tseries** | `sima-python` | `.github/workflows/publish-sima.yml` | `sima-v*` | puro Python, sobre drvarma y drvec; servidor `sima` (su `docs/PUBLISHING.md`) |
 | **atsw** | `ART/art-python` (`atsw-suite/`) | `.github/workflows/publish-atsw.yml` | `atsw-v*` | meta-paquete |
+
+**drvec, el último en entrar.** Su primera publicación necesita en PyPI un
+*trusted publisher* **pendiente**, porque el proyecto aún no existe: en
+<https://pypi.org/manage/account/publishing/>, *Add a new pending publisher*,
+GitHub, proyecto `drvec`, propietario `davidesg`, repositorio `drvec-python`,
+workflow `publish.yml`, entorno `pypi`. Y en el repositorio, *Settings →
+Environments → New environment*, uno llamado `pypi`. Sin los dos, el job que
+publica falla al pedir el token OIDC.
 
 **pyfug: su workflow no funcionó hasta el 2026-09-25.** Estaba en el repo desde
 julio, pero GitHub nunca lo registró (la lista de workflows sólo tenía
@@ -28,12 +40,21 @@ aparece en `gh workflow list`, ése es el remedio. Publicar por él exige un
 *trusted publisher* en PyPI para `davidesg/pyfug`, workflow `publish.yml`,
 entorno `pypi`.
 
-**Orden de publicación** (respeta dependencias): `fue → pyfug → art-tseries →
-atsw`. Sólo hace falta el paquete que cambia; los demás se quedan donde están.
+**Orden de publicación** (respeta dependencias):
+
+```
+fue → pyfug → drvarma → drvec → art-tseries → drtran → sima-tseries → atsw
+```
+
+drvarma pide fue; drvec, fue y drvarma; art, fue y pyfug; drtran, fue y
+drvarma; sima-tseries, fue, pyfug, drvarma y drvec (y art con `[raw]`). Cada
+paquete se etiqueta cuando los que pide ya están en PyPI: el smoke test de su
+workflow instala desde PyPI, y fallaría. Sólo hace falta el paquete que
+cambia; los demás se quedan donde están.
 
 ## 1. Validar SIN publicar — `workflow_dispatch`
 
-Los cuatro workflows tienen `workflow_dispatch`, y el job que publica está
+Los ocho workflows tienen `workflow_dispatch`, y el job que publica está
 condicionado a la etiqueta:
 
 ```yaml
@@ -71,7 +92,8 @@ El workflow construye, hace el smoke test, y sólo entonces publica con OIDC. Si
 el smoke test falla, la publicación **se detiene**, que es lo correcto: mejor una
 versión bloqueada que una publicada que nadie puede instalar.
 
-Para `fue` la etiqueta es `v*`; para `atsw`, `atsw-v*`.
+Para fue, pyfug, drvarma, drvec y drtran la etiqueta es `v*` (cada uno es el
+único paquete de su repositorio); para sima, `sima-v*`; para `atsw`, `atsw-v*`.
 
 ## 3. TestPyPI: cuándo sí y cuándo no
 
@@ -96,13 +118,23 @@ se reserva para cuando de verdad se quiere probar la instalación.
 
 ## 4. El meta-paquete `atsw`
 
-`atsw-suite/pyproject.toml` **fija las versiones mínimas** de los tres paquetes.
-Publicar una versión nueva de `art-tseries` no obliga a tocar `atsw`, pero si se
-quiere que la suite arrastre los arreglos hay que:
+`atsw-suite/pyproject.toml` **fija las versiones mínimas** de los paquetes de la
+suite. Publicar una versión nueva de `art-tseries` no obliga a tocar `atsw`, pero
+si se quiere que la suite arrastre los arreglos hay que:
 
 1. subir el pin (`art-tseries>=X.Y.Z`),
 2. versionar `atsw`,
-3. etiquetar `atsw-v*`.
+3. lanzar el *Preflight atsw* (`preflight-atsw.yml`) con `origen = repos`: construye
+   desde las cabezas de los repos las ruedas de los motores compilados (fue,
+   drvarma y drvec) y las puras, instala atsw en limpio en cada sistema y Python,
+   y corre `atsw-suite/preflight/pruebas.py`,
+4. etiquetar `atsw-v*`,
+5. y repetir el preflight con `origen = pypi`: es la prueba de lo publicado.
+
+Los motores compilados son tres desde atsw 2.1.0. drvec se pide explícito
+aunque sima-tseries ya lo arrastre, como fue y drvarma: es un motor con su
+propia rueda binaria, y la cota del paraguas es la que dice qué motor trae la
+suite.
 
 Los comentarios de ese `pyproject` explican por qué cada cota mínima es la que
 es. **No las subas sin leerlos**: varias no son mantenimiento sino la frontera de

@@ -18,7 +18,8 @@ pure-Python fallback, so the suite installs everywhere.
 | **ART** | `art-tseries` | Model building, diagnosis, formal tests + the `art-mcp` server |
 | **DRTRAN** | `drtran` | Transfer functions and networks by exact ML + the `mtram` server |
 | **DRVARMA** | `drvarma` | Multivariate VARMA by exact ML: the engine of the ladder and the echelon form |
-| **SIMA** | `sima-tseries` | The `sima` server: Jenkins and Alavi, Tiao and Box, and the echelon form, from art's models or the raw table |
+| **DRVEC** | `drvec` | Cointegrated VARMA-VEC by exact ML: the rank by parametric bootstrap, the long run |
+| **SIMA** | `sima-tseries` | The `sima` server: Jenkins and Alavi, Tiao and Box, and the echelon form, from art's models or the raw table; the VEC when the series are cointegrated |
 
 ## The three assistants, and when to move between them
 
@@ -30,7 +31,7 @@ one ladder with three rungs, and each assistant knows when to hand over.
 |---|---|---|
 | `art` | One series: what ARIMA model, what interventions? | `fue` |
 | `mtram` | How does X move Y? Transfer functions, and networks of them (a DAG) | `drtran` |
-| `sima` | Everything moves everything: a simultaneous VARMA (`sima-tseries`) | `drvarma` |
+| `sima` | Everything moves everything: a simultaneous VARMA, or a VEC when the series are cointegrated (`sima-tseries`) | `drvarma`, `drvec` |
 
 `mtram` starts from the `.pre` files `art` writes, so the univariate rung is
 already climbed and committed to a file you can read. The handoff to `sima` is
@@ -43,7 +44,7 @@ is therefore simultaneous. `mtram` says so and stops.
 ```bash
 claude mcp add art   -- art-mcp     # one series
 claude mcp add mtram -- mtram       # transfer functions and networks
-claude mcp add sima  -- sima        # simultaneous VARMA
+claude mcp add sima  -- sima        # simultaneous VARMA and VEC
 ```
 
 Then ask Claude to analyse a series (attach a CSV/Excel, or point to an `.inp`).

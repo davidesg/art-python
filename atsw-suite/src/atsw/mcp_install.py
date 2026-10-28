@@ -30,7 +30,7 @@ import sys
 SERVERS = {
     "art":   ("art-mcp", "one series: ARIMA + interventions (engine: fue)"),
     "mtram": ("mtram",   "transfer functions and networks, a DAG (engine: drtran)"),
-    "sima":  ("sima",    "simultaneous VARMA (engine: drvarma)"),
+    "sima":  ("sima",    "simultaneous VARMA and VEC (engines: drvarma, drvec)"),
 }
 
 
@@ -102,9 +102,9 @@ half-removed setup behind:
    by a user-scope command.)
 
 2. UNINSTALL the packages. `pip uninstall atsw` removes ONLY the umbrella —
-   it is a meta-package with no code of its own, so the five components stay:
+   it is a meta-package with no code of its own, so the seven components stay:
 
-       pip uninstall atsw fue pyfug art-tseries drtran drvarma
+       pip uninstall atsw fue pyfug art-tseries drtran drvarma drvec sima-tseries
 
    If you installed into a dedicated virtualenv, which is the arrangement this
    command is happiest with, the whole of step 2 is:
@@ -236,7 +236,7 @@ def main(argv=None) -> int:
         print("\nRestart Claude Code so it picks them up. The ladder:\n"
               "  art    build each series on its own, it writes a .pre\n"
               "  mtram  how X moves Y: transfer functions and networks\n"
-              "  sima   everything moves everything: simultaneous VARMA\n"
+              "  sima   everything moves everything: simultaneous VARMA, or a VEC\n"
               "mtram starts from art's .pre files, and hands over to sima when the\n"
               "network it proposes contains a cycle — that is a test, not a taste.")
     return 0

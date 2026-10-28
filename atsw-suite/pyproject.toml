@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "2.0.0"
-description     = "ATSW — A Time Series Workshop: the Box-Jenkins-Treadway suite (univariate exact-ML estimation, graphics, model building, transfer functions and multivariate VARMA) with three MCP assistants for LLM-driven analysis"
+version         = "2.1.0"
+description     = "ATSW — A Time Series Workshop: the Box-Jenkins-Treadway suite (univariate exact-ML estimation, graphics, model building, transfer functions, multivariate VARMA and cointegrated VEC) with three MCP assistants for LLM-driven analysis"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
 requires-python = ">=3.10"
 authors         = [
     { name = "David E. Guerrero", email = "davidesg@ucm.es" },
 ]
-keywords        = ["time series", "ARIMA", "VARMA", "multivariate", "Box-Jenkins", "Treadway", "MCP", "suite"]
+keywords        = ["time series", "ARIMA", "VARMA", "VEC", "cointegration", "multivariate", "Box-Jenkins", "Treadway", "MCP", "suite"]
 classifiers     = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -30,8 +30,10 @@ classifiers     = [
 #
 #     art     one series: ARIMA + interventions        engine: fue      -> art-mcp
 #     mtram   transfer functions and networks (a DAG)  engine: drtran   -> mtram
-#     sima    simultaneous VARMA                       engine: drvarma  -> sima
-#             (since atsw 2.0.0 its own package, sima-tseries; drvarma is the engine)
+#     sima    simultaneous VARMA, and the VEC when     engine: drvarma  -> sima
+#             the series are cointegrated                      + drvec
+#             (since atsw 2.0.0 its own package, sima-tseries; drvarma is the engine;
+#             since atsw 2.1.0 drvec, the port of the drvec C program, the VEC's)
 # NONE of these lower bounds is cosmetic. Every one of them is the first version
 # of its package that actually works in a clean environment:
 #
@@ -74,7 +76,11 @@ dependencies = [
     # >=0.1.17 desde atsw 2.0.0: la que exige art-tseries 0.2.3 (los errores
     # estándar por el hessiano en diferencias finitas, fue/BUG-0015; el
     # reinicio del optimizador, BUG-0005; el Jarque-Bera con n/6, BUG-0026).
-    "fue>=0.1.17",            # univariate estimation engine + FUF forecasting
+    # >=0.1.18 desde atsw 2.1.0: la que exigen drvec 0.1.0 y sima-tseries 0.2.0.
+    # El componente determinista por UNA rutina de la suite (lib/fuedet, el
+    # paso [5] de fue.c), sumado y restado una vez, como lo construye el C de
+    # drvec que el porte reproduce (drvec BUG-40).
+    "fue>=0.1.18",            # univariate estimation engine + FUF forecasting
     # >=2.0.1 desde atsw 1.5.0: la 2.0.0 rompe con toda serie anual
     # (pyfug/BUG-0002).
     # >=2.0.2 desde atsw 2.0.0: `percent=` y `density=` (pyfug/BUG-0008), que
@@ -141,10 +147,26 @@ dependencies = [
     # Desde atsw 2.0.0 drvarma NO lleva servidor: el extra `mcp` ya no existe
     # (pip avisaría y lo ignoraría, y `sima` desaparecería). >=0.2.0: el motor
     # de la escalera y de la forma echelon que sima-tseries necesita.
-    "drvarma>=0.2.0",         # multivariate VARMA engine
+    # >=0.3.0 desde atsw 2.1.0: la que exigen drvec 0.1.0 y sima-tseries 0.2.0.
+    # La previsión desde parámetros dados con raíces unitarias
+    # (`forecast_given`), que es por donde sima prevé un VEC escrito en niveles
+    # —un solo previsor, el del VARMA—, y los autovalores de GSL desde el motor
+    # compilado (`gensymmv`, `eigen_nonsymm`), con los que el arranque de
+    # Johansen de drvec da los bits de su C en toda plataforma.
+    "drvarma>=0.3.0",         # multivariate VARMA engine
+    # Nuevo en atsw 2.1.0: el motor del VEC, el porte de drvec. sima-tseries ya
+    # lo arrastra, pero va explícito como fue y drvarma: es un motor con su
+    # propia rueda binaria (el C de drvec, para los bootstraps), y la lista de
+    # dependencias del paraguas es la que dice qué motores trae la suite.
+    # >=0.1.0: la primera publicada.
+    "drvec>=0.1.0",           # cointegrated VEC engine
     # El asistente sima, su propio paquete. [raw] trae art para la entrada
     # desde la tabla cruda (load_data, characterize, rutas U y V).
-    "sima-tseries[raw]>=0.1.0",  # simultaneous VARMA + MCP server (sima)
+    # >=0.2.0 desde atsw 2.1.0: los sistemas cointegrados (el nodo N1c, el
+    # rango por bootstrap paramétrico, el VEC y su largo plazo, los trabajos
+    # en segundo plano). Con la cota vieja, quien ya tiene atsw no recibe la
+    # 0.2.0 con `pip install -U atsw`.
+    "sima-tseries[raw]>=0.2.0",  # simultaneous VARMA and VEC + MCP server (sima)
 ]
 
 # One console script, and deliberately nothing else. The umbrella INSTALLS; it
