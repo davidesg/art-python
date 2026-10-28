@@ -4,6 +4,32 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## atsw 2.1.0 — sin publicar
+
+**sima modela sistemas cointegrados, y la suite trae un motor nuevo: drvec**, el
+porte del programa drvec en C (el VARMA-VEC por verosimilitud exacta). sima
+0.2.0 lo usa para el nodo N1c (la pregunta de la cointegración), el rango por
+bootstrap paramétrico, el VEC y su largo plazo, y la previsión del VEC en
+niveles por el previsor de drvarma. Los bootstraps corren en el C de drvec, que
+viaja dentro de su rueda de plataforma.
+
+**Las cotas:**
+
+| paquete | antes | ahora | por qué |
+|---|---|---|---|
+| `fue` | >=0.1.17 | **>=0.1.18** | el componente determinista por una sola rutina de la suite (lib/fuedet), como lo construye el C de drvec; la piden drvec 0.1.0 y sima 0.2.0 |
+| `drvarma` | >=0.2.0 | **>=0.3.0** | la previsión desde parámetros dados con raíces unitarias (`forecast_given`) y los autovalores de GSL desde el motor; la piden drvec 0.1.0 y sima 0.2.0 |
+| `drvec` | — | **>=0.1.0** | nuevo: el motor del VEC, explícito como fue y drvarma |
+| `sima-tseries[raw]` | >=0.1.0 | **>=0.2.0** | los sistemas cointegrados |
+
+pyfug, art-tseries y drtran no cambian.
+
+**La publicación** (`docs/PUBLISHING.md`) lista ya los ocho paquetes con su
+orden, `fue → pyfug → drvarma → drvec → art-tseries → drtran → sima-tseries →
+atsw`, y el *Preflight atsw* construye y prueba drvec como tercer motor
+compilado: su C encontrado en la rueda, un bootstrap pequeño por él, y el VEC de
+r = 1 del E1 de Lütkepohl por sima. En Alpine drvec va con su rueda pura.
+
 ## art-tseries 0.2.3 — 2026-10-15
 
 ### The differencing contrasts: the AR bounded, the LR checked (BUG-0224, 0232, 0235, 0236, 0242, 0243)

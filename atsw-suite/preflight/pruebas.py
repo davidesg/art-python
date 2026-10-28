@@ -2,11 +2,14 @@
 
 1. Procedencia: cada paquete se importa del entorno (no de otra instalación)
    con la versión de publicación, y las cotas de atsw se cumplen.
-2. Motores: fue y drvarma cargan su motor C (el que trae la rueda).
+2. Motores: fue y drvarma cargan su motor C (el que trae la rueda), y drvec
+   encuentra su C (drvec/_bin) y corre un bootstrap pequeño con él. En Alpine
+   (musllinux) drvec no tiene rueda binaria: va la pura, y su C no se pide.
 3. Asistentes: los tres servidores arrancan y los comandos responden.
 4. Funcionamiento: art estima, mtram estima una transferencia, sima reproduce
    el VAR(1) restringido de Lütkepohl y Poskitt (logL -669.129921) por las
-   dos rutas.
+   dos rutas, y el VEC de r = 1 del E1 de Lütkepohl (logL 750.524709), con el
+   rango del bootstrap que el ejemplo trae en caché.
 
     python pruebas.py DATA_DIR WHEELS_DIR   # sale con 1 si algo falla
 
@@ -44,9 +47,9 @@ for w in os.listdir(WHEELS):
     if w.endswith(".whl"):
         dist, v = w.split("-")[:2]
         esperado[dist.replace("_", "-").lower()] = v
-for dist in ("fue", "pyfug", "drvarma", "art-tseries", "drtran", "sima-tseries", "atsw"):
+for dist in ("fue", "pyfug", "drvarma", "drvec", "art-tseries", "drtran", "sima-tseries", "atsw"):
     check(f"rueda de {dist} construida", dist in esperado)
-modulo = {"fue": "fue", "pyfug": "pyfug", "drvarma": "drvarma", "art-tseries": "art",
+modulo = {"fue": "fue", "pyfug": "pyfug", "drvarma": "drvarma", "drvec": "drvec", "art-tseries": "art",
           "drtran": "drtran", "sima-tseries": "sima"}
 for dist, v in sorted(esperado.items()):
     check(f"{dist} {v}", version(dist) == v, f"instalado {version(dist)}")
@@ -61,9 +64,20 @@ print("2. Motores compilados")
 import fue._engine as FE, drvarma._engine as DE
 check("fue: motor C", FE.engine_backend() == "c", f"{FE.engine_backend()} {FE.engine_load_error() or ''}")
 check("drvarma: motor C", DE.engine_backend() == "c", f"{DE.engine_backend()} {DE.engine_load_error() or ''}")
+# drvec: su C no es una extensión sino un ejecutable dentro del paquete
+# (drvec/_bin), y sólo lo usan los bootstraps; Alpine lleva la rueda pura
+ALPINE = os.path.exists("/etc/alpine-release")
+from drvec import c_engine as VE
+if not ALPINE:
+    try:
+        b = VE.find()
+        check("drvec: su C, el de la rueda", b.source == "bundled" and b.version == VE.C_VERSION,
+              f"{b.source} {b.version} {b.path}")
+    except VE.CEngineUnavailable as e:
+        check("drvec: su C, el de la rueda", False, str(e)[:90])
 # la rueda instalada: la de esta plataforma, no la pura ni una compilada en sitio
 from importlib.metadata import distribution
-for dist in ("fue", "drvarma"):
+for dist in ("fue", "drvarma") + (() if ALPINE else ("drvec",)):
     w = distribution(dist).read_text("WHEEL") or ""
     tags = [l.split(":", 1)[1].strip() for l in w.splitlines() if l.startswith("Tag:")]
     pura = "Root-Is-Purelib: true" in w
@@ -132,6 +146,31 @@ check("sima ruta V: VAR(1) de L&P", "exact log-likelihood -669.1299" in e,
       next((l for l in e.splitlines() if "exact log-likelihood" in l), "")[:60])
 ev = fn(M.evaluate)("v", 1, 0, estwin=72, horizon=6, zeros=Z)
 check("sima evaluate (N5) nombra la vara", "the yardstick is" in ev)
+
+# el VEC (drvec): N1c, el rango (el ejemplo trae en caché el bootstrap de
+# B = 499, el job de 30 s que no cabe aquí) y el VEC de r = 1
+e1 = os.path.join(tmp, "e1")
+t = fn(M.load_example)("lutkepohl_e1", session="c", dest=e1)
+check("sima load_example (VEC)", "prepare_vec" in t)
+check("sima VEC: puerta", "GATE: PASSED" in fn(M.run_gate)("c"))
+fn(M.canonical_analysis)("c")
+fn(M.prepare_vec)("c", purpose="long run", p=2, case="2")
+rk = fn(M.rank_test)("c", B=499)
+check("sima VEC: el rango del E1 (caché)", "Proposed r-hat, read from the bootstrap's critical values: 1" in rk,
+      next((l.strip() for l in rk.splitlines() if l.strip().startswith("r=0")), "")[:70])
+ve = fn(M.estimate_vec)("c", r=1)
+check("sima VEC de r = 1 del E1", "logL 750.5247" in ve,
+      next((l for l in ve.splitlines() if "logL" in l), "")[:70])
+if not ALPINE:
+    # un bootstrap del rango de verdad, por el C de la rueda
+    import drvec
+    e1pre = [os.path.join(e1, "art", f"e1{s}.pre") for s in ("invest", "income", "cons")]
+    rt = drvec.rank_test(e1pre, 2, 0, case=2, bootstrap=10, engine="c",
+                         folder=os.path.join(tmp, "e1boot"))
+    pv = rt.provenance
+    check("drvec: bootstrap por su C", pv.engine == "c" and pv.extra.get("source") == "bundled"
+          and all(len(bs.reps) == 10 for bs in rt.bootstraps),
+          f"{pv.engine} {pv.extra.get('source')} {pv.extra.get('elapsed', 0):.1f} s")
 
 print()
 print("TODO BIEN" if not fallos else f"FALLAN {len(fallos)}: " + "; ".join(fallos))
