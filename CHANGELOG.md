@@ -4,7 +4,7 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
-## atsw 2.1.0 — sin publicar
+## atsw 2.1.0 — 2026-10-28
 
 **sima modela sistemas cointegrados, y la suite trae un motor nuevo: drvec**, el
 porte del programa drvec en C (el VARMA-VEC por verosimilitud exacta). sima
