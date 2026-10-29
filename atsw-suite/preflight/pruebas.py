@@ -156,9 +156,22 @@ check("sima VEC: puerta", "GATE: PASSED" in fn(M.run_gate)("c"))
 fn(M.canonical_analysis)("c")
 fn(M.prepare_vec)("c", purpose="long run", p=2, case="2")
 rk = fn(M.rank_test)("c", B=499)
-check("sima VEC: el rango del E1 (caché)", "Proposed r-hat, read from the bootstrap's critical values: 1" in rk,
-      next((l.strip() for l in rk.splitlines() if l.strip().startswith("r=0")), "")[:70])
-ve = fn(M.estimate_vec)("c", r=1)
+from sima.provenance import platform_tier
+if platform_tier() == "exact":
+    check("sima VEC: el rango del E1 (caché)", "Proposed r-hat, read from the bootstrap's critical values: 1" in rk,
+          next((l.strip() for l in rk.splitlines() if l.strip().startswith("r=0")), "")[:70])
+    ve = fn(M.estimate_vec)("c", r=1)
+else:
+    # la clave de la caché lleva el nivel de plataforma: fuera de linux-x86_64
+    # no casa y el rango es un job nuevo. Se comprueba que arranca, se cancela
+    # y el VEC de r = 1 se estima sobre teoría
+    import re
+    jid = re.search(r"job id: `([0-9a-f]{16})`", rk)
+    check("sima VEC: el rango del E1 (job; la caché es de linux-x86_64)", jid is not None,
+          jid.group(1) if jid else rk.splitlines()[0][:70])
+    if jid:
+        fn(M.job_cancel)(jid.group(1))
+    ve = fn(M.estimate_vec)("c", r=1, theory="preflight: la caché del rango es de linux-x86_64")
 check("sima VEC de r = 1 del E1", "logL 750.5247" in ve,
       next((l for l in ve.splitlines() if "logL" in l), "")[:70])
 if not ALPINE:
