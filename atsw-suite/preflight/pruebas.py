@@ -157,12 +157,13 @@ fn(M.canonical_analysis)("c")
 fn(M.prepare_vec)("c", purpose="long run", p=2, case="2")
 rk = fn(M.rank_test)("c", B=499)
 from sima.provenance import platform_tier
-if platform_tier() == "exact":
+if platform_tier() == "exact" and not ALPINE:
     check("sima VEC: el rango del E1 (caché)", "Proposed r-hat, read from the bootstrap's critical values: 1" in rk,
           next((l.strip() for l in rk.splitlines() if l.strip().startswith("r=0")), "")[:70])
     ve = fn(M.estimate_vec)("c", r=1)
 else:
-    # la clave de la caché lleva el nivel de plataforma: fuera de linux-x86_64
+    # la clave de la caché lleva el nivel de plataforma y el motor del bootstrap:
+    # fuera de linux-x86_64 con glibc (en Alpine no hay C de drvec)
     # no casa y el rango es un job nuevo. Se comprueba que arranca, se cancela
     # y el VEC de r = 1 se estima sobre teoría
     import re
