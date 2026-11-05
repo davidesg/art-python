@@ -21,6 +21,15 @@
 # cada sistema y Python se instala atsw desde PyPI en limpio (sin caché), y las
 # versiones esperadas son las últimas de PyPI, en las ruedas que `pip download`
 # elige para esa plataforma.
+#
+# Con origen = pypi y suites marcado, además, en macOS (arm64 e Intel) y
+# Windows: las siete suites completas (fue, pyfug, drvarma, drvec, drtran,
+# sima, art) contra lo instalado desde PyPI. Cada repo se clona en la tag de
+# la versión que pip instaló; el plugin canario.py comprueba que cada paquete
+# viene del venv y no del árbol. Es lo que el sandbox de distros hace en Linux.
+# El job no falla por un test (hay fallos conocidos): falla si una suite no
+# llega a correr o si el canario ve un paquete de fuera; el resumen del job
+# lleva la tabla, y los registros van de artefacto.
 name: Preflight atsw
 
 on:
@@ -34,6 +43,7 @@ on:
       drvec_ref: {description: "rama de drvec-python", default: main}
       drtran_ref: {description: "rama de drtran-python", default: master}
       sima_ref: {description: "rama de sima-python", default: main}
+      suites: {description: "con origen pypi: además, las suites completas en macOS y Windows (1-2 h)", type: boolean, default: false}
 
 env:
   PYTHONUTF8: "1"
@@ -233,3 +243,87 @@ jobs:
               fi
               /venv/bin/pip check
               /venv/bin/python atsw-suite/preflight/pruebas.py atsw-suite/preflight/data wh'
+
+  suites:
+    name: Suites — ${{ matrix.os }} · Python ${{ matrix.python }}
+    if: inputs.origen == 'pypi' && inputs.suites
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, windows-latest]
+        python: ["3.12"]
+    env:
+      DRVEC_TEST_INSTALLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with: {sparse-checkout: atsw-suite/preflight}
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python }}"}
+      - name: Instalar atsw desde PyPI, con las ruedas de fue, drvarma y drvec
+        shell: bash
+        env: {ATSW_V: "${{ inputs.atsw_version }}"}
+        run: |
+          python -m venv venv
+          if [ "$RUNNER_OS" = Windows ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          echo "PY=$PY" >> "$GITHUB_ENV"
+          $PY -m pip install -q --upgrade pip
+          $PY -m pip install --no-cache-dir --only-binary fue,drvarma,drvec "atsw${ATSW_V:+==$ATSW_V}"
+          $PY -m pip install -q --no-cache-dir pytest statsmodels pandas openpyxl
+          $PY -m pip check
+          $PY -m pip list | grep -i -E '^(fue|pyfug|drvarma|drvec|art-tseries|drtran|sima-tseries|atsw) '
+          $PY -c "import shutil, sysconfig; shutil.copy('atsw-suite/preflight/canario.py', sysconfig.get_paths()['purelib'])"
+          $PY -c "import fue._engine as F, drvarma._engine as D; print('motores: fue', F.engine_backend(), '| drvarma', D.engine_backend())"
+          $PY -c "from drvec import c_engine as V
+          try: e = V.find(); print('drvec C:', e.source, e.version, e.path)
+          except Exception as x: print('drvec C: no disponible', str(x)[:120])"
+      - name: Los repos, en la tag de cada versión instalada
+        shell: bash
+        run: |
+          v() { $PY -c "import importlib.metadata as m; print(m.version('$1'))"; }
+          clona() {  # repo tag dir
+            for i in 1 2 3; do git clone -q --depth 1 --branch "$2" "https://github.com/davidesg/$1" "s/$3" && return; sleep 10; done
+            echo "::error::no se pudo clonar $1 en $2"; exit 1; }
+          clona fue-python     "v$(v fue)"                fue
+          clona pyfug          "v$(v pyfug)"              pyfug
+          clona drvarma-python "v$(v drvarma)"            drvarma
+          clona drvec-python   "v$(v drvec)"              drvec
+          clona drtran-python  "v$(v drtran)"             drtran
+          clona sima-python    "sima-v$(v sima-tseries)"  sima
+          clona art-python     "art-v$(v art-tseries)"    art
+          cp -r s/pyfug/tests s/t_pyfug   # pyfug es plano: su raíz lo taparía
+          for d in s/*/; do echo "$d $(git -C $d describe --tags 2>/dev/null)"; done
+      - name: Las suites, contra lo instalado
+        shell: bash
+        run: |
+          RAIZ=$PWD; PY=$RAIZ/$PY; mkdir -p logs; malo=0
+          echo "| suite | rc | resultado | canario |" > tabla.md
+          echo "|---|---|---|---|" >> tabla.md
+          for d in fue pyfug drvarma drvec drtran sima art; do
+            echo "::group::suite $d"
+            case $d in
+              fue)   cd s/fue; A="--import-mode=importlib tests" ;;
+              pyfug) cd s;     A="t_pyfug" ;;
+              *)     cd s/$d;  A="tests" ;;
+            esac
+            # el bash de Actions va con -e y pipefail: el rc se recoge a mano
+            rc=0; $PY -m pytest -q -p no:cacheprovider -p canario $A > "$RAIZ/logs/suite_$d.log" 2>&1 || rc=$?
+            cd "$RAIZ"; L=logs/suite_$d.log
+            { grep -E "^(FAILED|ERROR) " $L || true; } | head -40; tail -1 $L
+            c=$({ grep "^CANARIO" $L || true; } | tr '\n' ' ')
+            echo "rc=$rc $c"
+            echo "| $d | $rc | $(tail -1 $L) | $c |" >> tabla.md
+            # rc 0 = todo bien, 1 = hay tests que fallan; otro rc = la suite no corrió
+            if [ $rc -gt 1 ] || ! grep -q "^CANARIO\[end\]: ok" $L || grep -q "FUERA DEL VENV" $L; then malo=1; fi
+            echo "::endgroup::"
+          done
+          { echo "### Suites — $RUNNER_OS $(uname -m) · Python ${{ matrix.python }}"; cat tabla.md
+            echo; echo "<details><summary>FAILED/ERROR</summary>"; echo; echo '```'
+            { grep -hE "^(FAILED|ERROR) " logs/*.log || true; } | cut -c1-200; echo '```'; echo "</details>"; } >> "$GITHUB_STEP_SUMMARY"
+          exit $malo
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: suites-${{ matrix.os }}-py${{ matrix.python }}
+          path: logs/
