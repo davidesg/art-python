@@ -5,6 +5,8 @@
 2. Motores: fue y drvarma cargan su motor C (el que trae la rueda), y drvec
    encuentra su C (drvec/_bin) y corre un bootstrap pequeño con él. En Alpine
    (musllinux) drvec no tiene rueda binaria: va la pura, y su C no se pide.
+   En un Mac Intel no hay ruedas binarias de ninguno de los tres (política de
+   sus publicaciones): van las puras, y se pide que corran en Python.
 3. Asistentes: los tres servidores arrancan y los comandos responden.
 4. Funcionamiento: art estima, mtram estima una transferencia, sima reproduce
    el VAR(1) restringido de Lütkepohl y Poskitt (logL -669.129921) por las
@@ -61,14 +63,19 @@ for spec in requires("atsw") or []:
     check(f"cota {r}", r.specifier.contains(version(r.name), prereleases=True))
 
 print("2. Motores compilados")
+import platform
 import fue._engine as FE, drvarma._engine as DE
-check("fue: motor C", FE.engine_backend() == "c", f"{FE.engine_backend()} {FE.engine_load_error() or ''}")
-check("drvarma: motor C", DE.engine_backend() == "c", f"{DE.engine_backend()} {DE.engine_load_error() or ''}")
 # drvec: su C no es una extensión sino un ejecutable dentro del paquete
-# (drvec/_bin), y sólo lo usan los bootstraps; Alpine lleva la rueda pura
+# (drvec/_bin), y sólo lo usan los bootstraps; Alpine lleva la rueda pura.
+# Un Mac Intel lleva las tres puras: los motores de fue y drvarma en Python
 ALPINE = os.path.exists("/etc/alpine-release")
+MAC_INTEL = sys.platform == "darwin" and platform.machine() == "x86_64"
+SIN_C_DRVEC = ALPINE or MAC_INTEL
+motor = "python" if MAC_INTEL else "c"
+check(f"fue: motor {motor}", FE.engine_backend() == motor, f"{FE.engine_backend()} {FE.engine_load_error() or ''}")
+check(f"drvarma: motor {motor}", DE.engine_backend() == motor, f"{DE.engine_backend()} {DE.engine_load_error() or ''}")
 from drvec import c_engine as VE
-if not ALPINE:
+if not SIN_C_DRVEC:
     try:
         b = VE.find()
         check("drvec: su C, el de la rueda", b.source == "bundled" and b.version == VE.C_VERSION,
@@ -77,7 +84,7 @@ if not ALPINE:
         check("drvec: su C, el de la rueda", False, str(e)[:90])
 # la rueda instalada: la de esta plataforma, no la pura ni una compilada en sitio
 from importlib.metadata import distribution
-for dist in ("fue", "drvarma") + (() if ALPINE else ("drvec",)):
+for dist in (() if MAC_INTEL else ("fue", "drvarma")) + (() if SIN_C_DRVEC else ("drvec",)):
     w = distribution(dist).read_text("WHEEL") or ""
     tags = [l.split(":", 1)[1].strip() for l in w.splitlines() if l.startswith("Tag:")]
     pura = "Root-Is-Purelib: true" in w
@@ -157,7 +164,7 @@ fn(M.canonical_analysis)("c")
 fn(M.prepare_vec)("c", purpose="long run", p=2, case="2")
 rk = fn(M.rank_test)("c", B=499)
 from sima.provenance import platform_tier
-if platform_tier() == "exact" and not ALPINE:
+if platform_tier() == "exact" and not SIN_C_DRVEC:
     check("sima VEC: el rango del E1 (caché)", "Proposed r-hat, read from the bootstrap's critical values: 1" in rk,
           next((l.strip() for l in rk.splitlines() if l.strip().startswith("r=0")), "")[:70])
     ve = fn(M.estimate_vec)("c", r=1)
@@ -175,7 +182,7 @@ else:
     ve = fn(M.estimate_vec)("c", r=1, theory="preflight: la caché del rango es de linux-x86_64")
 check("sima VEC de r = 1 del E1", "logL 750.5247" in ve,
       next((l for l in ve.splitlines() if "logL" in l), "")[:70])
-if not ALPINE:
+if not SIN_C_DRVEC:
     # un bootstrap del rango de verdad, por el C de la rueda
     import drvec
     e1pre = [os.path.join(e1, "art", f"e1{s}.pre") for s in ("invest", "income", "cons")]

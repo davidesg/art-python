@@ -150,8 +150,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-14, windows-latest]
-        python: ["3.10", "3.11", "3.12", "3.13"]
+        # macos-15: GitHub retiró macos-14 el 2-nov-2026. macos-15-intel (las
+        # ruedas puras) y Python 3.14 sólo con origen pypi: lo construido
+        # desde los repos no tiene ni rueda x86_64 de macOS ni cp314
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-latest]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        exclude:
+          - os: ${{ inputs.origen == 'pypi' && 'ninguno' || 'macos-15-intel' }}
+          - python: ${{ inputs.origen == 'pypi' && 'ninguno' || '3.14' }}
     steps:
       - uses: actions/checkout@v4
         with: {sparse-checkout: atsw-suite/preflight}
@@ -194,7 +200,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
-        python: ["3.10", "3.13"]
+        python: ["3.10", "3.13", "3.14"]
+        exclude:
+          - python: ${{ inputs.origen == 'pypi' && 'ninguno' || '3.14' }}
     steps:
       - uses: actions/checkout@v4
         with: {sparse-checkout: atsw-suite/preflight}
