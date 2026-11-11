@@ -28,8 +28,9 @@
 # la versión que pip instaló; el plugin canario.py comprueba que cada paquete
 # viene del venv y no del árbol. Es lo que el sandbox de distros hace en Linux.
 # El job no falla por un test (hay fallos conocidos): falla si una suite no
-# llega a correr o si el canario ve un paquete de fuera; el resumen del job
-# lleva la tabla, y los registros van de artefacto.
+# llega a correr o si el canario ve un paquete de fuera; el resumen de cada
+# job lleva su resultado, y los registros van de artefacto. Una suite por job
+# (21 jobs): en el Mac Intel, sin motores en C, no caben todas en uno.
 name: Preflight atsw
 
 on:
@@ -245,15 +246,18 @@ jobs:
               /venv/bin/python atsw-suite/preflight/pruebas.py atsw-suite/preflight/data wh'
 
   suites:
-    name: Suites — ${{ matrix.os }} · Python ${{ matrix.python }}
+    # una suite por job: en el Mac Intel (motores en Python) sima y art pasan
+    # de las dos horas cada una, y juntas no caben en las 6 h de un runner
+    name: Suite ${{ matrix.suite }} — ${{ matrix.os }} · Python ${{ matrix.python }}
     if: inputs.origen == 'pypi' && inputs.suites
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 300
+    timeout-minutes: 330
     strategy:
       fail-fast: false
       matrix:
         os: [macos-15, macos-15-intel, windows-latest]
         python: ["3.12"]
+        suite: [fue, pyfug, drvarma, drvec, drtran, sima, art]
     env:
       DRVEC_TEST_INSTALLED: "1"
     steps:
@@ -278,52 +282,53 @@ jobs:
           $PY -c "from drvec import c_engine as V
           try: e = V.find(); print('drvec C:', e.source, e.version, e.path)
           except Exception as x: print('drvec C: no disponible', str(x)[:120])"
-      - name: Los repos, en la tag de cada versión instalada
+      - name: El repo de la suite, en la tag de la versión instalada
         shell: bash
+        env: {SUITE: "${{ matrix.suite }}"}
         run: |
           v() { $PY -c "import importlib.metadata as m; print(m.version('$1'))"; }
-          clona() {  # repo tag dir
-            for i in 1 2 3; do git clone -q --depth 1 --branch "$2" "https://github.com/davidesg/$1" "s/$3" && return; sleep 10; done
-            echo "::error::no se pudo clonar $1 en $2"; exit 1; }
-          clona fue-python     "v$(v fue)"                fue
-          clona pyfug          "v$(v pyfug)"              pyfug
-          clona drvarma-python "v$(v drvarma)"            drvarma
-          clona drvec-python   "v$(v drvec)"              drvec
-          clona drtran-python  "v$(v drtran)"             drtran
-          clona sima-python    "sima-v$(v sima-tseries)"  sima
-          clona art-python     "art-v$(v art-tseries)"    art
-          cp -r s/pyfug/tests s/t_pyfug   # pyfug es plano: su raíz lo taparía
-          for d in s/*/; do echo "$d $(git -C $d describe --tags 2>/dev/null)"; done
-      - name: Las suites, contra lo instalado
-        shell: bash
-        run: |
-          RAIZ=$PWD; PY=$RAIZ/$PY; mkdir -p logs; malo=0
-          echo "| suite | rc | resultado | canario |" > tabla.md
-          echo "|---|---|---|---|" >> tabla.md
-          for d in fue pyfug drvarma drvec drtran sima art; do
-            echo "::group::suite $d"
-            case $d in
-              fue)   cd s/fue; A="--import-mode=importlib tests" ;;
-              pyfug) cd s;     A="t_pyfug" ;;
-              *)     cd s/$d;  A="tests" ;;
-            esac
-            # el bash de Actions va con -e y pipefail: el rc se recoge a mano
-            rc=0; $PY -m pytest -q -p no:cacheprovider -p canario $A > "$RAIZ/logs/suite_$d.log" 2>&1 || rc=$?
-            cd "$RAIZ"; L=logs/suite_$d.log
-            { grep -E "^(FAILED|ERROR) " $L || true; } | head -40; tail -1 $L
-            c=$({ grep "^CANARIO" $L || true; } | tr '\n' ' ')
-            echo "rc=$rc $c"
-            echo "| $d | $rc | $(tail -1 $L) | $c |" >> tabla.md
-            # rc 0 = todo bien, 1 = hay tests que fallan; otro rc = la suite no corrió
-            if [ $rc -gt 1 ] || ! grep -q "^CANARIO\[end\]: ok" $L || grep -q "FUERA DEL VENV" $L; then malo=1; fi
-            echo "::endgroup::"
+          case $SUITE in
+            fue)     R=fue-python;     T="v$(v fue)" ;;
+            pyfug)   R=pyfug;          T="v$(v pyfug)" ;;
+            drvarma) R=drvarma-python; T="v$(v drvarma)" ;;
+            drvec)   R=drvec-python;   T="v$(v drvec)" ;;
+            drtran)  R=drtran-python;  T="v$(v drtran)" ;;
+            sima)    R=sima-python;    T="sima-v$(v sima-tseries)" ;;
+            art)     R=art-python;     T="art-v$(v art-tseries)" ;;
+          esac
+          # los ficheros tal como están en el repo: con el autocrlf de Windows
+          # fallan los tests que comparan bytes con el repo (CRLF, fuedet)
+          for i in 1 2 3; do
+            git -c core.autocrlf=false clone -q --depth 1 --branch "$T" "https://github.com/davidesg/$R" "s/$SUITE" && break
+            [ $i = 3 ] && { echo "::error::no se pudo clonar $R en $T"; exit 1; }; sleep 10
           done
-          { echo "### Suites — $RUNNER_OS $(uname -m) · Python ${{ matrix.python }}"; cat tabla.md
-            echo; echo "<details><summary>FAILED/ERROR</summary>"; echo; echo '```'
-            { grep -hE "^(FAILED|ERROR) " logs/*.log || true; } | cut -c1-200; echo '```'; echo "</details>"; } >> "$GITHUB_STEP_SUMMARY"
-          exit $malo
+          echo "$R en $T: $(git -C s/$SUITE rev-parse --short HEAD)"
+          [ $SUITE = pyfug ] && cp -r s/pyfug/tests s/t_pyfug   # pyfug es plano: su raíz lo taparía
+          true
+      - name: La suite, contra lo instalado
+        shell: bash
+        env: {SUITE: "${{ matrix.suite }}"}
+        run: |
+          RAIZ=$PWD; PY=$RAIZ/$PY; mkdir -p logs; L=$RAIZ/logs/suite_$SUITE.log
+          case $SUITE in
+            fue)   cd s/fue; A="--import-mode=importlib tests" ;;
+            pyfug) cd s;     A="t_pyfug" ;;
+            *)     cd s/$SUITE; A="tests" ;;
+          esac
+          # el bash de Actions va con -e y pipefail: el rc se recoge a mano
+          rc=0; $PY -m pytest -q -p no:cacheprovider -p canario $A > "$L" 2>&1 || rc=$?
+          cd "$RAIZ"
+          F=$({ grep -E "^(FAILED|ERROR) " "$L" || true; } | cut -c1-200)
+          echo "$F"; tail -1 "$L"
+          c=$({ grep "^CANARIO" "$L" || true; } | tr '\n' ' ')
+          echo "rc=$rc $c"
+          { echo "### $SUITE — $RUNNER_OS $(uname -m) · Python ${{ matrix.python }}"
+            echo; echo "rc=$rc · $(tail -1 "$L")"; echo; echo "$c"
+            if [ -n "$F" ]; then echo; echo '```'; echo "$F"; echo '```'; fi; } >> "$GITHUB_STEP_SUMMARY"
+          # rc 0 = todo bien, 1 = hay tests que fallan; otro rc = la suite no corrió
+          if [ $rc -gt 1 ] || ! grep -q "^CANARIO\[end\]: ok" "$L" || grep -q "FUERA DEL VENV" "$L"; then exit 1; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: suites-${{ matrix.os }}-py${{ matrix.python }}
+          name: suite-${{ matrix.suite }}-${{ matrix.os }}-py${{ matrix.python }}
           path: logs/
