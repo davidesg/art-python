@@ -21,6 +21,16 @@
 # cada sistema y Python se instala atsw desde PyPI en limpio (sin caché), y las
 # versiones esperadas son las últimas de PyPI, en las ruedas que `pip download`
 # elige para esa plataforma.
+#
+# Con origen = pypi y suites marcado, además, en macOS (arm64 e Intel) y
+# Windows: las siete suites completas (fue, pyfug, drvarma, drvec, drtran,
+# sima, art) contra lo instalado desde PyPI. Cada repo se clona en la tag de
+# la versión que pip instaló; el plugin canario.py comprueba que cada paquete
+# viene del venv y no del árbol. Es lo que el sandbox de distros hace en Linux.
+# El job no falla por un test (hay fallos conocidos): falla si una suite no
+# llega a correr o si el canario ve un paquete de fuera; el resumen de cada
+# job lleva su resultado, y los registros van de artefacto. Una suite por job
+# (21 jobs): en el Mac Intel, sin motores en C, no caben todas en uno.
 name: Preflight atsw
 
 on:
@@ -34,6 +44,7 @@ on:
       drvec_ref: {description: "rama de drvec-python", default: main}
       drtran_ref: {description: "rama de drtran-python", default: master}
       sima_ref: {description: "rama de sima-python", default: main}
+      suites: {description: "con origen pypi: además, las suites completas en macOS y Windows (1-2 h)", type: boolean, default: false}
 
 env:
   PYTHONUTF8: "1"
@@ -233,3 +244,94 @@ jobs:
               fi
               /venv/bin/pip check
               /venv/bin/python atsw-suite/preflight/pruebas.py atsw-suite/preflight/data wh'
+
+  suites:
+    # una suite por job: en el Mac Intel (motores en Python) sima y art pasan
+    # de las dos horas cada una, y juntas no caben en las 6 h de un runner
+    name: Suite ${{ matrix.suite }} — ${{ matrix.os }} · Python ${{ matrix.python }}
+    if: inputs.origen == 'pypi' && inputs.suites
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel, windows-latest]
+        python: ["3.12"]
+        suite: [fue, pyfug, drvarma, drvec, drtran, sima, art]
+    env:
+      DRVEC_TEST_INSTALLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with: {sparse-checkout: atsw-suite/preflight}
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python }}"}
+      - name: Instalar atsw desde PyPI, con las ruedas de fue, drvarma y drvec
+        shell: bash
+        env: {ATSW_V: "${{ inputs.atsw_version }}"}
+        run: |
+          python -m venv venv
+          if [ "$RUNNER_OS" = Windows ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          echo "PY=$PY" >> "$GITHUB_ENV"
+          $PY -m pip install -q --upgrade pip
+          $PY -m pip install --no-cache-dir --only-binary fue,drvarma,drvec "atsw${ATSW_V:+==$ATSW_V}"
+          $PY -m pip install -q --no-cache-dir pytest statsmodels pandas openpyxl
+          $PY -m pip check
+          $PY -m pip list | grep -i -E '^(fue|pyfug|drvarma|drvec|art-tseries|drtran|sima-tseries|atsw) '
+          $PY -c "import shutil, sysconfig; shutil.copy('atsw-suite/preflight/canario.py', sysconfig.get_paths()['purelib'])"
+          $PY -c "import fue._engine as F, drvarma._engine as D; print('motores: fue', F.engine_backend(), '| drvarma', D.engine_backend())"
+          $PY -c "from drvec import c_engine as V
+          try: e = V.find(); print('drvec C:', e.source, e.version, e.path)
+          except Exception as x: print('drvec C: no disponible', str(x)[:120])"
+      - name: El repo de la suite, en la tag de la versión instalada
+        shell: bash
+        env: {SUITE: "${{ matrix.suite }}"}
+        run: |
+          v() { $PY -c "import importlib.metadata as m; print(m.version('$1'))"; }
+          case $SUITE in
+            fue)     R=fue-python;     T="v$(v fue)" ;;
+            pyfug)   R=pyfug;          T="v$(v pyfug)" ;;
+            drvarma) R=drvarma-python; T="v$(v drvarma)" ;;
+            drvec)   R=drvec-python;   T="v$(v drvec)" ;;
+            drtran)  R=drtran-python;  T="v$(v drtran)" ;;
+            sima)    R=sima-python;    T="sima-v$(v sima-tseries)" ;;
+            art)     R=art-python;     T="art-v$(v art-tseries)" ;;
+          esac
+          # los ficheros tal como están en el repo: con el autocrlf de Windows
+          # fallan los tests que comparan bytes con el repo (CRLF, fuedet)
+          for i in 1 2 3; do
+            git -c core.autocrlf=false clone -q --depth 1 --branch "$T" "https://github.com/davidesg/$R" "s/$SUITE" && break
+            [ $i = 3 ] && { echo "::error::no se pudo clonar $R en $T"; exit 1; }; sleep 10
+          done
+          echo "$R en $T: $(git -C s/$SUITE rev-parse --short HEAD)"
+          [ $SUITE = pyfug ] && cp -r s/pyfug/tests s/t_pyfug   # pyfug es plano: su raíz lo taparía
+          true
+      - name: La suite, contra lo instalado
+        shell: bash
+        env: {SUITE: "${{ matrix.suite }}"}
+        run: |
+          RAIZ=$PWD; PY=$RAIZ/$PY; mkdir -p logs; L=$RAIZ/logs/suite_$SUITE.log
+          case $SUITE in
+            fue)   cd s/fue; A="--import-mode=importlib tests" ;;
+            pyfug) cd s;     A="t_pyfug" ;;
+            *)     cd s/$SUITE; A="tests" ;;
+          esac
+          # el bash de Actions va con -e y pipefail: el rc se recoge a mano
+          rc=0; $PY -m pytest -q -p no:cacheprovider -p canario $A > "$L" 2>&1 || rc=$?
+          cd "$RAIZ"
+          F=$({ grep -E "^(FAILED|ERROR) " "$L" || true; } | cut -c1-200)
+          echo "$F"; tail -1 "$L"
+          c=$({ grep "^CANARIO" "$L" || true; } | tr '\n' ' ')
+          echo "rc=$rc $c"
+          { echo "### $SUITE — $RUNNER_OS $(uname -m) · Python ${{ matrix.python }}"
+            echo; echo "rc=$rc · $(tail -1 "$L")"; echo; echo "$c"
+            if [ -n "$F" ]; then echo; echo '```'; echo "$F"; echo '```'; fi; } >> "$GITHUB_STEP_SUMMARY"
+          # rc 0 = todo bien, 1 = hay tests que fallan; otro rc = la suite no corrió
+          if [ $rc -gt 1 ] || ! grep -q "^CANARIO\[end\]: ok" "$L" || grep -q "FUERA DEL VENV" "$L"; then exit 1; fi
+      # un fallo del servicio de artefactos (run 43094293797) no es un fallo
+      # de la suite: el resultado ya está en el resumen del job
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: suite-${{ matrix.suite }}-${{ matrix.os }}-py${{ matrix.python }}
+          path: logs/
