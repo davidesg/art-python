@@ -8,10 +8,19 @@ fichero que lleva el protocolo entero.
 """
 import os
 import subprocess
+import sys
+
+import pytest
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+# En una copia sacada con git en Windows el CRLF es lo que toca: `text=auto`
+# deja que cada copia de trabajo use el final de su plataforma (.gitattributes),
+# y git lo vuelve a LF al comitear. Lo que esta prueba caza es el CRLF que
+# trae el Dropbox a una copia de Linux o macOS, donde git no lo pondría.
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="en Windows, text=auto saca la copia de trabajo en CRLF")
 def test_ningun_fuente_lleva_CRLF():
     malos = []
     for sub in ("src", "tests", "bugs", "docs"):
