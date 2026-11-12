@@ -444,6 +444,25 @@ class InterventionTestResult:
         return "\n".join(lines)
 
 
+def escala_omega(model) -> float:
+    """El divisor que lleva los ω del motor a las unidades en que se presentan.
+
+    BUG-0253. fue estima sobre `refactor`·y(λ). Con λ=0 y refactor=100 eso es
+    tanto por ciento y los ω se leen tal cual. Con cualquier otro λ (en
+    particular λ=1, los niveles) los ω salen en las unidades de la serie
+    transformada MULTIPLICADAS por `refactor`: un salto de 0.82 puntos se
+    imprimía como 81.71 al lado de un σ̂ₐ = 0.22 ya devuelto a las unidades de
+    la serie (BUG-0033). Es la misma regla que la de σ̂ₐ: se divide al
+    PRESENTAR; el `.pre` y el motor siguen en su escala. Los contrastes (t,
+    Wald) no cambian: son cocientes.
+    """
+    rf = float(getattr(model, "refactor", None) or 1.0)
+    lam = getattr(model, "boxlam", None)
+    if rf >= 10 and not (lam is not None and float(lam) == 0.0):
+        return rf
+    return 1.0
+
+
 def _intervention_param_start(model, itv_idx: int) -> int:
     """
     Return the index in model._result.params where intervention itv_idx's
@@ -600,6 +619,16 @@ def test_intervention(model, itv_idx: int,
                 wald_p    = float(sp_stats.chi2.sf(wald_stat, df=1))
 
     significant = any(pv < alpha for pv in omega_p)
+
+    # BUG-0253: los ω y su ganancia, en las unidades en que se presentan; las
+    # t, los p y el Wald son cocientes y no cambian.
+    s = escala_omega(model)
+    if s != 1.0:
+        omega_est = [v / s for v in omega_est]
+        omega_se = [v / s for v in omega_se]
+        omega_1 = None if omega_1 is None else omega_1 / s
+        gain = None if gain is None else gain / s
+        se_om1 = None if se_om1 is None else se_om1 / s
 
     return InterventionTestResult(
         itv_index  = itv_idx,
@@ -790,6 +819,12 @@ def net_gain(model, itv_idxs: "Sequence[int]",
             se_neta   = float(np.sqrt(V))
             wald_stat = neta ** 2 / V
             wald_p    = float(sp_stats.chi2.sf(wald_stat, df=1))
+
+    s = escala_omega(model)                                  # BUG-0253
+    if s != 1.0:
+        g_i = [g / s for g in g_i]
+        neta = neta / s
+        se_neta = None if se_neta is None else se_neta / s
 
     return GananciaNeta(idx=idx, omega_1=g_i, neta=neta, se_neta=se_neta,
                         wald_stat=wald_stat, wald_p=wald_p, df=df,

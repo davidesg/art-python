@@ -1240,6 +1240,9 @@ def model_equation(ts, model, errores_tipicos: "bool | list" = True) -> str:
     D       = model.D
     lam     = model.boxlam
     ts_name = (ts.name or "y").strip()
+    # BUG-0253: los ω de las intervenciones, en las unidades de σ̂ₐ
+    from art.interventions import escala_omega
+    s_om    = escala_omega(model)
 
     # ── formatting helpers ────────────────────────────────────────────────
 
@@ -1504,6 +1507,7 @@ def model_equation(ts, model, errores_tipicos: "bool | list" = True) -> str:
 
             if len(om) == 1:
                 v, se = (pi.pop() if om_f[0] else (om[0], 0.0))
+                v, se = v / s_om, se / s_om                     # BUG-0253
                 tl = _TwoLine()
                 tl.add(f"  {_sign_det(v)} ")
                 tl.add(_fv(abs(v)), _fse(se) if om_f[0] else "", align_dot=True)
@@ -1520,6 +1524,7 @@ def model_equation(ts, model, errores_tipicos: "bool | list" = True) -> str:
                 tl.add("  + (")
                 for i, (v0, free) in enumerate(zip(om, om_f)):
                     v, se = (pi.pop() if free else (v0, 0.0))
+                    v, se = v / s_om, se / s_om                 # BUG-0253
                     if i == 0:
                         tl.add(_fv(v), _fse(se) if free else "", align_dot=True)
                     else:
