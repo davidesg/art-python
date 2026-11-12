@@ -327,8 +327,11 @@ jobs:
             if [ -n "$F" ]; then echo; echo '```'; echo "$F"; echo '```'; fi; } >> "$GITHUB_STEP_SUMMARY"
           # rc 0 = todo bien, 1 = hay tests que fallan; otro rc = la suite no corrió
           if [ $rc -gt 1 ] || ! grep -q "^CANARIO\[end\]: ok" "$L" || grep -q "FUERA DEL VENV" "$L"; then exit 1; fi
+      # un fallo del servicio de artefactos (run 43094293797) no es un fallo
+      # de la suite: el resultado ya está en el resumen del job
       - uses: actions/upload-artifact@v4
         if: always()
+        continue-on-error: true
         with:
           name: suite-${{ matrix.suite }}-${{ matrix.os }}-py${{ matrix.python }}
           path: logs/
