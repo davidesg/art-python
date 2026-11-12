@@ -104,11 +104,21 @@ jobs:
         if: matrix.pkg == 'drvarma'
         shell: bash
         run: python tools/sync_material.py && test -d src/drvarma/material/bugs
-      - name: Ruedas
-        # el paquete en la raíz: su test de humo es {project}/tests/test_smoke.py
-        uses: pypa/cibuildwheel@v2.22
+      # el paquete en la raíz: su test de humo es {project}/tests/test_smoke.py.
+      # Cada uno con el cibuildwheel de su propia publicación: fue y drvarma
+      # pasaron a la 3 (su pyproject usa `test-environment`, que la 2 rechaza);
+      # drvec sigue en la 2.22.
+      - name: Ruedas (fue, drvarma)
+        if: matrix.pkg != 'drvec'
+        uses: pypa/cibuildwheel@v3.4.1
         env:
           CIBW_ARCHS_LINUX: native   # x86_64 o aarch64, como la publicación (sin i686)
+          MACOSX_DEPLOYMENT_TARGET: ${{ runner.os == 'macOS' && '14.0' || '' }}
+      - name: Ruedas (drvec)
+        if: matrix.pkg == 'drvec'
+        uses: pypa/cibuildwheel@v2.22
+        env:
+          CIBW_ARCHS_LINUX: native
           MACOSX_DEPLOYMENT_TARGET: ${{ runner.os == 'macOS' && '14.0' || '' }}
       - name: La rueda de drvec lleva su C, y corre
         if: matrix.pkg == 'drvec'
