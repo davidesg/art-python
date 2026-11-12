@@ -1,11 +1,11 @@
 ---
 id: BUG-0256
 title: El marcador de dos lados de los falsos positivos del MEG fija [1, 6], y el f = 1 está en el filo — una perturbación de 1e-12 lo cambia
-status: open
+status: fixed
 severity: low
 component: tests
 found_in: 0.2.3
-fixed_in:
+fixed_in: 0.2.4
 reported: 2026-10-30
 reporter: David / Claude — prueba de instalación limpia de atsw 2.1.0 en diez distribuciones
 tags:
@@ -37,8 +37,8 @@ que se puso: avisar de que el MEG ha cambiado.
 ## Reproduction
 
 `bugs/BUG-0256-repro/repro.py` repite el ajuste y el MEG de la prueba sobre la
-serie tal cual y multiplicada por 1 + 1e-12 cos(t). Sale con 1 mientras el
-veredicto cambie.
+serie tal cual y multiplicada por 1 + 1e-12 cos(t), y corre la prueba sobre
+las dos. Sale con 1 mientras la prueba falle en alguna (ver «Arreglo»).
 
     PYTHONPATH=src python3 bugs/BUG-0256-repro/repro.py
 
@@ -58,3 +58,23 @@ una en la que ningún armónico quede en el filo. No se toca el MEG.
 ## Validation
 
 El repro, y la prueba en glibc, musl y el motor puro de fue.
+
+## Arreglo
+
+No se toca el MEG; se arregla el marcador. La especificidad sigue fijada por
+los dos lados, pero sólo sobre los veredictos determinados: f = 1 de la serie
+determinista se anota como FRONTERA y no se fija en ningún sentido, y el resto
+se compara con `[6]`. Así f = 6 tiene que seguir saliendo, y cualquier falso
+positivo nuevo fuera de la frontera (o la desaparición de f = 6) sigue
+fallando: el marcador conserva lo que tenía de alarma y pierde sólo lo que era
+de la libm. La sensibilidad (lo que hay, se encuentra) no cambia.
+
+Se eligió esto y no cambiar la serie de la prueba porque la serie y sus cifras
+están medidas y documentadas desde el 14-ago-2026, y buscar otra en la que
+ningún armónico quede en el filo en ninguna plataforma no se puede garantizar
+sin probarla en todas.
+
+El repro ya no compara los veredictos del MEG (el de f = 1 sigue cambiando con
+1e-12, y debe: es la frontera), sino que corre la PRUEBA sobre la serie tal
+cual y perturbada; sale con 1 si falla en alguna. Contra la prueba vieja sale
+con 1 (`antes [1, 6], ahora [6]`); con la nueva, con 0.

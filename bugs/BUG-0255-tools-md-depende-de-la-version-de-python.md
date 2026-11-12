@@ -1,11 +1,11 @@
 ---
 id: BUG-0255
 title: docs/TOOLS.md depende de la versión de Python — desde 3.13 el compilador quita la sangría de los docstrings y gen_tools_md la copia tal cual
-status: open
+status: fixed
 severity: low
 component: docs
 found_in: 0.2.3
-fixed_in:
+fixed_in: 0.2.4
 reported: 2026-10-30
 reporter: David / Claude — prueba de instalación limpia de atsw 2.1.0 en diez distribuciones
 tags:
@@ -52,3 +52,12 @@ en todos los intérpretes), y regenerar `docs/TOOLS.md` una vez.
 ## Validation
 
 El repro, y `test_TOOLS_md_esta_regenerado` en 3.12 y en 3.13.
+
+## Arreglo
+
+`tools/gen_tools_md.py` normaliza la descripción con `inspect.cleandoc` (la
+función `_doc`) antes de usarla, en la tabla y en el cuerpo. Es la forma que da
+el compilador desde 3.13, así que la página sale igual en todos los
+intérpretes. `docs/TOOLS.md` se regeneró una vez en 3.12: el cambio es sólo de
+sangría (`git diff -w` vacío) en las líneas de continuación. El repro sale con
+0 y `test_TOOLS_md_esta_regenerado` pasa en 3.12.

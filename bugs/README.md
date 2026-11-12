@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**253 report(s), 7 open.**
+**253 report(s), 4 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -12,9 +12,6 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0186](BUG-0186-la-lista-de-objetivos-se-sigue-reformulando.md) | open | medium | protocolo | La lista de objetivos se sigue reformulando con BUG-0183 dentro — el protocolo no basta, porque la pregunta se hace con la herramienta del cliente antes de llamar a art | — |
 | [BUG-0237](BUG-0237-puerta-de-adecuacion-sin-correccion-multiple.md) | open | medium | diagnosis | La puerta de adecuación declara «todavía NO es adecuado» a 5 de 21 modelos VERDADEROS: varios contrastes al 5 % sin corrección por multiplicidad (Q en 12/24/36/39, JB, media, estacionalidad residual) | — |
 | [BUG-0240](BUG-0240-c-candidatos-por-mlp-en-la-senal-mas-ruido.md) | open | medium | identification (C) | El identificador en C (atsw-gui) acierta el 18 % del ARMA(1,1) señal + ruido (0,95/0,7) frente al 64 % de art-python: sus candidatos salen del MLP y no de los filtros de corte | — |
-| [BUG-0254](BUG-0254-una-prueba-de-la-version-del-instrumento-exige-git-y-un-checkout.md) | open | low | tests | test_avisa_si_el_arbol_tiene_cambios_sin_commitear exige git y un checkout; con art instalado y sin git, falla en vez de saltarse | — |
-| [BUG-0255](BUG-0255-tools-md-depende-de-la-version-de-python.md) | open | low | docs | docs/TOOLS.md depende de la versión de Python — desde 3.13 el compilador quita la sangría de los docstrings y gen_tools_md la copia tal cual | — |
-| [BUG-0256](BUG-0256-el-marcador-de-falsos-positivos-del-meg-esta-en-el-filo.md) | open | low | tests | El marcador de dos lados de los falsos positivos del MEG fija [1, 6], y el f = 1 está en el filo — una perturbación de 1e-12 lo cambia | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
 | [BUG-0003](BUG-0003-display-tools-no-persist.md) | fixed | medium | mcp-tools | Clean estimation display-tools do not persist .pre/.out (only confirm_and_estimate does, and it carries BUG-0001) | 0.1.2 |
@@ -256,6 +253,9 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0251](BUG-0251-adoptar-dentro-del-empate-dice-coincide-con-la-propuesta.md) | fixed | low | guion | Adoptar un modelo del empate dice «coincide con la propuesta» y guarda coincide=True junto a una propuesta que es OTRO orden | 0.2.3 |
 | [BUG-0252](BUG-0252-encadenar-ignora-ar-f-freqs.md) | fixed | medium | pipeline | confirm_and_estimate con base_pre_path ignora en silencio ar_f_freqs y estima el modelo sin el factor de frecuencia fija | 0.2.3 |
 | [BUG-0253](BUG-0253-con-lambda-1-los-omega-salen-en-la-escala-x100-de-fue.md) | fixed | medium | describe/interventions | con λ=1 los ω de una intervención salen en la escala ×100 de fue, al lado de un σ̂ₐ ya devuelto a las unidades de la serie | 0.2.4 |
+| [BUG-0254](BUG-0254-una-prueba-de-la-version-del-instrumento-exige-git-y-un-checkout.md) | fixed | low | tests | test_avisa_si_el_arbol_tiene_cambios_sin_commitear exige git y un checkout; con art instalado y sin git, falla en vez de saltarse | 0.2.4 |
+| [BUG-0255](BUG-0255-tools-md-depende-de-la-version-de-python.md) | fixed | low | docs | docs/TOOLS.md depende de la versión de Python — desde 3.13 el compilador quita la sangría de los docstrings y gen_tools_md la copia tal cual | 0.2.4 |
+| [BUG-0256](BUG-0256-el-marcador-de-falsos-positivos-del-meg-esta-en-el-filo.md) | fixed | low | tests | El marcador de dos lados de los falsos positivos del MEG fija [1, 6], y el f = 1 está en el filo — una perturbación de 1e-12 lo cambia | 0.2.4 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 | [BUG-0205](BUG-0205-el-intervalo-de-prevision-sale-simetrico-en-nivel.md) | wontfix | low | mcp-tools | El intervalo al 95 % de la tabla de previsión sale simétrico en nivel en modelos en logaritmos — es la aproximación del método delta, no exp(ŷ ± 1,96 s); a 24 meses del airline, [383, 668] frente a [401, 689] | — |

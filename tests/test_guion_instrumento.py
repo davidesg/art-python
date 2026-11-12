@@ -65,9 +65,17 @@ def test_la_version_lleva_paquete_y_commit():
 def test_avisa_si_el_arbol_tiene_cambios_sin_commitear():
     """Con el árbol sucio el SHA identifica el último commit, no el código que
     corrió. Marcarlo es lo honesto: ese registro no se reproduce con el SHA."""
-    import subprocess, os, art
+    import subprocess, os, shutil, art
     raiz = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(art.__file__))))
+    # El «+sucio» sólo tiene sentido en un checkout. Con art instalado desde
+    # una rueda `raiz` es el lib/ del entorno, y en una máquina sin git no hay
+    # nada que comprobar: se salta, no se cae (BUG-0254).
+    if shutil.which("git") is None:
+        pytest.skip("sin git en el PATH")
+    if subprocess.run(["git", "-C", raiz, "rev-parse", "--git-dir"],
+                      capture_output=True, text=True).returncode != 0:
+        pytest.skip("art no es un checkout")
     sucio = bool(subprocess.run(["git", "-C", raiz, "status", "--porcelain"],
                                 capture_output=True, text=True).stdout.strip())
     assert ("+sucio" in version_instrumento()) == sucio

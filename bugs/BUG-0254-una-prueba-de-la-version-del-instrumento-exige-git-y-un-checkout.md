@@ -1,11 +1,11 @@
 ---
 id: BUG-0254
 title: test_avisa_si_el_arbol_tiene_cambios_sin_commitear exige git y un checkout; con art instalado y sin git, falla en vez de saltarse
-status: open
+status: fixed
 severity: low
 component: tests
 found_in: 0.2.3
-fixed_in:
+fixed_in: 0.2.4
 reported: 2026-10-30
 reporter: David / Claude — prueba de instalación limpia de atsw 2.1.0 en diez distribuciones
 tags:
@@ -51,3 +51,14 @@ SHA— sólo tiene sentido en un checkout.
 ## Validation
 
 El repro, y la suite de art contra una instalación limpia sin git.
+
+## Arreglo
+
+La prueba se salta, en vez de caerse, cuando no hay git en el PATH
+(`shutil.which("git")`) o cuando la raíz que calcula no es un checkout
+(`git rev-parse --git-dir` falla). Es lo que proponía el informe: el «+sucio»
+del SHA sólo tiene sentido en un checkout, y `version_instrumento` ya se
+degrada sin git (no pone SHA ni «+sucio»); lo único que suponía el entorno de
+desarrollo era la prueba. Con git y un checkout comprueba lo mismo que antes.
+Cambia sólo `tests/test_guion_instrumento.py`. El repro sale con 0: la prueba
+se salta con un PATH sin git.

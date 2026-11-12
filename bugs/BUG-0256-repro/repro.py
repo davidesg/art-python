@@ -10,7 +10,10 @@ says [6] (clean-install test of atsw 2.1.0, 2026-10-30), and reads as a
 regression or an improvement when it is neither.
 
 The repro runs the test's own fit and MEG on the deterministic case, as is and
-with the series multiplied by 1 + 1e-12 cos(t). Expected: the same verdict.
+with the series multiplied by 1 + 1e-12 cos(t), and then runs the TEST itself
+on both. The MEG's verdict on f = 1 does change (that is the knife edge, and
+the MEG is not touched); what is expected is that the test's verdict does not:
+it must pass on both series.
 
     python3 bugs/BUG-0256-repro/repro.py   # exits 1 while open
 """
@@ -26,13 +29,20 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
 import fue                                                         # noqa: E402
 from art.formal_tests import meg                                   # noqa: E402
-from tests.test_pipeline_regression import _serie, caso_determinista  # noqa: E402
+from tests.test_pipeline_regression import (                       # noqa: E402
+    _serie, caso_determinista,
+    test_el_meg_encuentra_la_estacionalidad_que_hay_y_no_otra as prueba)
+
+
+def caso(eps):
+    c = caso_determinista()
+    y = np.asarray(c["y"], float) * (1 + eps * np.cos(np.arange(len(c["y"]))))
+    return dict(c, y=y)
 
 
 def declared(eps):
-    c = caso_determinista()
-    y = np.asarray(c["y"], float) * (1 + eps * np.cos(np.arange(len(c["y"]))))
-    c = dict(c, y=y)
+    c = caso(eps)
+    y = c["y"]
     iv = []
     for f in range(1, c["freq"] // 2):
         iv.append(fue.Intervention("cos", harmonic=float(f), omega=[0.1]))
@@ -44,7 +54,19 @@ def declared(eps):
     return sorted({r.freq for r in meg(m) if getattr(r, "stochastic", False)})
 
 
+def test_passes(eps):
+    try:
+        prueba(lambda: caso(eps))
+        return True
+    except AssertionError as e:
+        print("   ", str(e).splitlines()[0])
+        return False
+
+
 a, b = declared(0.0), declared(1e-12)
 print("declared stochastic, the series as is:      ", a)
 print("declared stochastic, perturbed by 1e-12:    ", b)
-sys.exit(1 if a != b else 0)
+ta, tb = test_passes(0.0), test_passes(1e-12)
+print("the test passes, the series as is:          ", ta)
+print("the test passes, perturbed by 1e-12:        ", tb)
+sys.exit(0 if ta and tb else 1)
