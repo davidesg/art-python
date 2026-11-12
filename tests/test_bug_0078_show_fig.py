@@ -106,6 +106,8 @@ def test_un_visor_que_no_existe_devuelve_el_motivo(monkeypatch):
     def _revienta(*a, **k):
         raise FileNotFoundError("xdg-open")
 
+    # la vía de subprocess (xdg-open); en Windows sería os.startfile
+    monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr(subprocess, "run", _revienta)
     assert "no está instalado" in srv._abrir_visor("/tmp/x.png")
 
@@ -118,6 +120,8 @@ def test_un_visor_que_sale_con_error_devuelve_su_mensaje(monkeypatch):
         stderr = "no display"
         stdout = ""
 
+    # la vía de subprocess (xdg-open); en Windows sería os.startfile
+    monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _R())
     assert srv._abrir_visor("/tmp/x.png") == "no display"
 
@@ -129,6 +133,8 @@ def test_un_visor_que_se_queda_en_primer_plano_NO_es_un_fallo(monkeypatch):
     def _cuelga(*a, **k):
         raise subprocess.TimeoutExpired("xdg-open", 5)
 
+    # la vía de subprocess (xdg-open); en Windows sería os.startfile
+    monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr(subprocess, "run", _cuelga)
     assert srv._abrir_visor("/tmp/x.png") == ""
 
