@@ -15,7 +15,16 @@ never registered shows up as missing here too — that has happened (BUG-4).
 """
 import asyncio
 import importlib
+import inspect
 import sys
+
+
+def _doc(t) -> str:
+    """The description NORMALISED, so the page does not depend on the
+    interpreter. Since Python 3.13 the compiler strips the common leading
+    whitespace of every docstring; up to 3.12 it is kept. `inspect.cleandoc`
+    gives the 3.13 form on every interpreter (BUG-0255)."""
+    return inspect.cleandoc(t.description or "")
 
 
 def render(mod_name: str, server: str) -> str:
@@ -32,7 +41,7 @@ def render(mod_name: str, server: str) -> str:
     out.append("| tool | what it answers |")
     out.append("|---|---|")
     for t in tools:
-        first = (t.description or "").strip().split("\n")[0] or "—"
+        first = _doc(t).split("\n")[0] or "—"
         out.append(f"| [`{t.name}`](#{t.name.replace('_', '-')}) | {first} |")
     out += ["", "---", ""]
 
@@ -51,7 +60,7 @@ def render(mod_name: str, server: str) -> str:
                     n, sp.get("type", "—"), "yes" if n in req else "no",
                     "`%s`" % sp["default"] if "default" in sp else "—"))
             out.append("")
-        body = (t.description or "").strip()
+        body = _doc(t)
         if body:
             out.append(body)
             out.append("")

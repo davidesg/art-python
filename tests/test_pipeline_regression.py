@@ -257,12 +257,24 @@ def test_el_meg_encuentra_la_estacionalidad_que_hay_y_no_otra(caso):
     #
     # El marcador es de DOS LADOS a propósito: si mejora, esta prueba falla y hay
     # que actualizar la cifra; si empeora, también.
+    #
+    # Pero sólo sobre los veredictos DETERMINADOS (BUG-0256). El f=1 de la serie
+    # determinista está en el filo: su MA_f converge a −0.99999994, y una
+    # perturbación relativa de la serie de 1e-12 —menos de lo que cambia otra
+    # libm— lo vuelve determinista. En glibc sale [1, 6]; en musl y en el motor
+    # puro de fue, [6]. Ese veredicto no es del MEG sino de los últimos bits de
+    # la plataforma, así que se anota como FRONTERA y no se fija en ningún
+    # sentido. El resto sigue fijado por los dos lados: f=6 tiene que seguir
+    # saliendo, y cualquier falso positivo nuevo fuera de la frontera falla.
     falsos = [f for f in declaradas if f not in verdad]
-    esperados = {"DET": [1, 6], "MIXTA": []}[c["name"]]
-    assert falsos == esperados, (
+    frontera = {"DET": {1}, "MIXTA": set()}[c["name"]]
+    esperados = {"DET": [6], "MIXTA": []}[c["name"]]
+    estables = [f for f in falsos if f not in frontera]
+    assert estables == esperados, (
         f"{c['name']}: los falsos positivos del MEG han cambiado — antes "
-        f"{esperados}, ahora {falsos}. Si es una mejora, actualiza la cifra y "
-        f"la nota; si no, hay una regresión.")
+        f"{esperados}, ahora {estables} (sin contar la frontera "
+        f"{sorted(frontera)}). Si es una mejora, actualiza la cifra y la nota; "
+        f"si no, hay una regresión.")
 
 
 @pytest.mark.parametrize("caso", CASOS, ids=IDS)
