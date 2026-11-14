@@ -4,7 +4,7 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
-## art-tseries 0.2.4 — unreleased
+## art-tseries 0.2.4 — 2026-11-15
 
 **With λ = 1 the intervention ω are shown in the series' units (BUG-0253).**
 The suite estimates with `refactor=100`; with λ = 1 the scaled residual is the
