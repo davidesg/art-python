@@ -4,6 +4,38 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.2.4 — 2026-11-15
+
+**With λ = 1 the intervention ω are shown in the series' units (BUG-0253).**
+The suite estimates with `refactor=100`; with λ = 1 the scaled residual is the
+series' units ×100, and since BUG-0033 σ̂ₐ is divided back, but the ω were
+not: the same equation showed σ̂ₐ in the series' units and the ω a hundred
+times larger (the Fed Funds rate, 1985–1995: `(81.710 − 45.000·B)` for a
+0.82 jump). `interventions.escala_omega(model)` applies σ̂ₐ's rule to the ω
+when they are PRESENTED: `test_intervention`, `net_gain`, the configuration
+table, the ladder, `describe`'s equation, the ramp warning and
+`guided_intervention`'s figure. The `.pre` and the engine keep their scale;
+the t, p and Wald statistics are ratios and do not change, and with λ = 0 (or
+`refactor` < 10) nothing changes.
+
+**Tests that failed only outside the development machine**, found by the clean
+install test of atsw 2.1.0 in ten distributions and by the suites on macOS and
+Windows (`preflight-atsw.yml`):
+
+- **BUG-0254:** the test of the instrument's version required git and a
+  checkout; with art installed and without git it now skips.
+- **BUG-0255:** `docs/TOOLS.md` depended on the Python version (from 3.13 the
+  compiler strips the docstrings' indentation). `tools/gen_tools_md.py`
+  normalises them with `inspect.cleandoc`; the page is the same on every
+  interpreter.
+- **BUG-0256:** the MEG false-positive marker pinned `[1, 6]` on both sides,
+  and f = 1 is on the edge (its MA_f converges to −0.99999994; another libm
+  makes it deterministic). f = 1 is now marked as a boundary, not pinned
+  either way; the rest is still compared with `[6]`. The MEG does not change.
+- On Windows, the `show_fig` tests fix `sys.platform` (they replace the
+  xdg-open/open path, which Windows does not take), and the line-endings test
+  skips a Windows checkout, which has CRLF by design.
+
 ## atsw 2.1.0 — 2026-10-28
 
 **sima modela sistemas cointegrados, y la suite trae un motor nuevo: drvec**, el
