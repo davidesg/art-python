@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**253 report(s), 4 open.**
+**256 report(s), 7 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -12,6 +12,9 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0186](BUG-0186-la-lista-de-objetivos-se-sigue-reformulando.md) | open | medium | protocolo | La lista de objetivos se sigue reformulando con BUG-0183 dentro — el protocolo no basta, porque la pregunta se hace con la herramienta del cliente antes de llamar a art | — |
 | [BUG-0237](BUG-0237-puerta-de-adecuacion-sin-correccion-multiple.md) | open | medium | diagnosis | La puerta de adecuación declara «todavía NO es adecuado» a 5 de 21 modelos VERDADEROS: varios contrastes al 5 % sin corrección por multiplicidad (Q en 12/24/36/39, JB, media, estacionalidad residual) | — |
 | [BUG-0240](BUG-0240-c-candidatos-por-mlp-en-la-senal-mas-ruido.md) | open | medium | identification (C) | El identificador en C (atsw-gui) acierta el 18 % del ARMA(1,1) señal + ruido (0,95/0,7) frente al 64 % de art-python: sus candidatos salen del MLP y no de los filtros de corte | — |
+| [BUG-0257](BUG-0257-el-factor-de-reescala-es-100-sea-cual-sea-lambda.md) | open | high | pipeline | El factor de reescala es 100 sea cual sea λ y el tamaño de la serie — nadie comprueba que lo que el optimizador recibe esté en la banda en que trabaja | — |
+| [BUG-0258](BUG-0258-con-lambda-1-mu-y-los-armonicos-salen-en-la-escala-x100.md) | open | medium | describe | Con λ=1 μ, los coeficientes de los armónicos y la media residual salen en la escala ×100 de fue, al lado de un σ̂ₐ ya devuelto a las unidades de la serie | — |
+| [BUG-0259](BUG-0259-la-semilla-de-mu-usa-otra-box-cox-que-fue.md) | open | high | pipeline | La semilla de μ transforma con |y|^λ y fue con (y^λ − 1)/λ — con λ fuera de {0, 1} el ajuste cae en el óptimo degenerado de BUG-0001 | — |
 | [BUG-0001](BUG-0001-mu-collapse-rescale.md) | fixed | high | inp-builder | Rescaling ×100 + μ seeded at 0 collapses the mean to ~0 and grows a spurious near-unit AR root | 0.1.2 |
 | [BUG-0002](BUG-0002-over-differencing-kpss.md) | fixed | medium | identification | guided_identification over-specifies d — KPSS overrides a strong ADF rejection of the unit root | 0.1.2 |
 | [BUG-0003](BUG-0003-display-tools-no-persist.md) | fixed | medium | mcp-tools | Clean estimation display-tools do not persist .pre/.out (only confirm_and_estimate does, and it carries BUG-0001) | 0.1.2 |
