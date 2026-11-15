@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "2.1.0"
+version         = "2.1.1"
 description     = "ATSW — A Time Series Workshop: the Box-Jenkins-Treadway suite (univariate exact-ML estimation, graphics, model building, transfer functions, multivariate VARMA and cointegrated VEC) with three MCP assistants for LLM-driven analysis"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -80,12 +80,17 @@ dependencies = [
     # El componente determinista por UNA rutina de la suite (lib/fuedet, el
     # paso [5] de fue.c), sumado y restado una vez, como lo construye el C de
     # drvec que el porte reproduce (drvec BUG-40).
-    "fue>=0.1.18",            # univariate estimation engine + FUF forecasting
+    # >=0.1.20 desde atsw 2.1.1: las ruedas de macOS 11 para arm64 e Intel
+    # (hasta 0.1.19 sólo macosx_14_0_arm64: un Mac Intel, o anterior a macOS
+    # 14, recibía la rueda pura y fue corría sin su motor C).
+    "fue>=0.1.20",            # univariate estimation engine + FUF forecasting
     # >=2.0.1 desde atsw 1.5.0: la 2.0.0 rompe con toda serie anual
     # (pyfug/BUG-0002).
     # >=2.0.2 desde atsw 2.0.0: `percent=` y `density=` (pyfug/BUG-0008), que
     # art 0.2.3 usa en sus figuras.
-    "pyfug>=2.0.2",           # Jenkins-Treadway graphics
+    # >=2.0.3 desde atsw 2.1.1: importar pyfug.graphics ya no cambia el
+    # backend de matplotlib de todo el proceso (pyfug/BUG-0009).
+    "pyfug>=2.0.3",           # Jenkins-Treadway graphics
     # >=0.1.12 es de una CLASE DISTINTA a las demás cotas de este fichero, y
     # conviene decirlo en vez de disfrazarlo. Todas las anteriores son «la
     # primera versión que instala y arranca»: por debajo, el paquete no se
@@ -123,7 +128,10 @@ dependencies = [
     # acotado y el LR comprobado (BUG-0224, 0232, 0235, 0236, 0242, 0243) —la
     # clase de la cota de 0.1.12: contestaban mal—, y el encadenamiento que
     # ignoraba argumentos en silencio (BUG-0245, 0250, 0252).
-    "art-tseries>=0.2.3",     # model building + MCP server (art-mcp)
+    # >=0.2.4 desde atsw 2.1.1: con λ = 1 los ω de las intervenciones salían
+    # cien veces mayores que σ̂ₐ en la misma ecuación (BUG-0253) —la clase de
+    # la cota de 0.1.12: contestaba mal—.
+    "art-tseries>=0.2.4",     # model building + MCP server (art-mcp)
     # >=0.2.0 is NOT housekeeping. Up to 0.1.1 drtran related each series
     # differenced by ITS OWN operator, so whenever the output and the input
     # carried different differencing the fitted transfer was nu(B)*Delta(B) and
@@ -153,20 +161,28 @@ dependencies = [
     # —un solo previsor, el del VARMA—, y los autovalores de GSL desde el motor
     # compilado (`gensymmv`, `eigen_nonsymm`), con los que el arranque de
     # Johansen de drvec da los bits de su C en toda plataforma.
-    "drvarma>=0.3.0",         # multivariate VARMA engine
+    # >=0.3.2 desde atsw 2.1.1: las ruedas de macOS 11 para arm64 e Intel,
+    # como fue 0.1.20.
+    "drvarma>=0.3.2",         # multivariate VARMA engine
     # Nuevo en atsw 2.1.0: el motor del VEC, el porte de drvec. sima-tseries ya
     # lo arrastra, pero va explícito como fue y drvarma: es un motor con su
     # propia rueda binaria (el C de drvec, para los bootstraps), y la lista de
     # dependencias del paraguas es la que dice qué motores trae la suite.
     # >=0.1.0: la primera publicada.
-    "drvec>=0.1.0",           # cointegrated VEC engine
+    # >=0.1.1 desde atsw 2.1.1: las ruedas de macOS 11 para arm64 e Intel, con
+    # el C de drvec dentro (hasta 0.1.0 los bootstraps corrían en Python en un
+    # Mac Intel).
+    "drvec>=0.1.1",           # cointegrated VEC engine
     # El asistente sima, su propio paquete. [raw] trae art para la entrada
     # desde la tabla cruda (load_data, characterize, rutas U y V).
     # >=0.2.0 desde atsw 2.1.0: los sistemas cointegrados (el nodo N1c, el
     # rango por bootstrap paramétrico, el VEC y su largo plazo, los trabajos
     # en segundo plano). Con la cota vieja, quien ya tiene atsw no recibe la
     # 0.2.0 con `pip install -U atsw`.
-    "sima-tseries[raw]>=0.2.0",  # simultaneous VARMA and VEC + MCP server (sima)
+    # >=0.2.2 desde atsw 2.1.1: un MA(1) propio parado en el pliegue ya no se
+    # da por convergido (BUG-0008), los .pre de la ruta U vuelven a fue
+    # (BUG-0007), y las cachés de los ejemplos casan con los motores de 2.1.1.
+    "sima-tseries[raw]>=0.2.2",  # simultaneous VARMA and VEC + MCP server (sima)
 ]
 
 # One console script, and deliberately nothing else. The umbrella INSTALLS; it

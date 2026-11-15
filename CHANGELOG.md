@@ -4,6 +4,29 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## atsw 2.1.1 — unreleased
+
+**Los motores en todo Mac desde macOS 11, Apple silicon e Intel, y los arreglos
+de art, sima y pyfug.** Hasta ahora la única rueda de macOS de fue, drvarma y
+drvec era `macosx_14_0_arm64`: un Mac Intel, o uno anterior a macOS 14,
+recibía las ruedas puras, y la suite corría allí sin sus motores compilados.
+GitHub retiró el runner macos-14 el 2 de noviembre de 2026, y las ruedas se
+construyen ahora en macos-15 y macos-15-intel para macOS 11, el mismo suelo que
+los .dmg de atsw-gui.
+
+**Las cotas:**
+
+| paquete | antes | ahora | por qué |
+|---|---|---|---|
+| `fue` | >=0.1.18 | **>=0.1.20** | las ruedas de macOS 11, arm64 e Intel |
+| `drvarma` | >=0.3.0 | **>=0.3.2** | las ruedas de macOS 11, arm64 e Intel |
+| `drvec` | >=0.1.0 | **>=0.1.1** | las ruedas de macOS 11, con el C de drvec para los bootstraps |
+| `pyfug` | >=2.0.2 | **>=2.0.3** | importar `pyfug.graphics` ya no cambia el backend de matplotlib del proceso (BUG-0009) |
+| `art-tseries` | >=0.2.3 | **>=0.2.4** | con λ = 1 los ω de las intervenciones salían ×100 junto a σ̂ₐ (BUG-0253) |
+| `sima-tseries[raw]` | >=0.2.0 | **>=0.2.2** | el pliegue de un MA(1) propio ya no se da por convergido (BUG-0008), los `.pre` de la ruta U (BUG-0007), el nivel exacto con la libc (BUG-0009), y las cachés de los ejemplos para estos motores |
+
+drtran no cambia: su único arreglo desde 0.2.6 es de sus pruebas (BUG-65).
+
 ## art-tseries 0.2.4 — 2026-11-15
 
 **With λ = 1 the intervention ω are shown in the series' units (BUG-0253).**
