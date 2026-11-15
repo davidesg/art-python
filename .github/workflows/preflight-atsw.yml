@@ -30,7 +30,8 @@
 # El job no falla por un test (hay fallos conocidos): falla si una suite no
 # llega a correr o si el canario ve un paquete de fuera; el resumen de cada
 # job lleva su resultado, y los registros van de artefacto. Una suite por job
-# (21 jobs): en el Mac Intel, sin motores en C, no caben todas en uno.
+# (21 jobs): no caben todas en uno (en el Mac Intel, antes de atsw 2.1.1,
+# los motores iban en Python).
 name: Preflight atsw
 
 on:
@@ -171,8 +172,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-15: GitHub retiró macos-14 el 2-nov-2026. macos-15-intel (las
-        # ruedas puras) y Python 3.14 sólo con origen pypi: lo construido
+        # macos-15: GitHub retiró macos-14 el 2-nov-2026. macos-15-intel (sus
+        # ruedas, desde atsw 2.1.1) y Python 3.14 sólo con origen pypi: lo construido
         # desde los repos no tiene ni rueda x86_64 de macOS ni cp314
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-latest]
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
@@ -256,8 +257,9 @@ jobs:
               /venv/bin/python atsw-suite/preflight/pruebas.py atsw-suite/preflight/data wh'
 
   suites:
-    # una suite por job: en el Mac Intel (motores en Python) sima y art pasan
-    # de las dos horas cada una, y juntas no caben en las 6 h de un runner
+    # una suite por job: en el Mac Intel con motores en Python (antes de
+    # atsw 2.1.1) sima y art pasaban de las dos horas cada una, y juntas no
+    # cabían en las 6 h de un runner
     name: Suite ${{ matrix.suite }} — ${{ matrix.os }} · Python ${{ matrix.python }}
     if: inputs.origen == 'pypi' && inputs.suites
     runs-on: ${{ matrix.os }}
