@@ -1,11 +1,11 @@
 ---
 id: BUG-0257
 title: El factor de reescala es 100 sea cual sea λ y el tamaño de la serie — nadie comprueba que lo que el optimizador recibe esté en la banda en que trabaja
-status: open
+status: fixed
 severity: high
 component: pipeline
 found_in: 0.2.4
-fixed_in:
+fixed_in: 0.2.5 (unreleased)
 reported: 2026-11-15
 reporter: David / Claude — revisión de incoherencias entre componentes antes de mtram
 tags:
@@ -108,21 +108,28 @@ que λ exista.
 
 ## Fix
 
-Decidido con David el 15-nov-2026, tras el estudio:
+`pipeline.factor_de_reescala`, con la regla de `fue.scale` (fue ≥ 0.1.22), una
+para toda la suite:
 
-- **100 sigue siendo la convención.** No se elige el factor por los datos en
-  logaritmos: no hace falta, cambiaría ficheros que funcionan, y factores
-  distintos en las series de un sistema dañan la inferencia (medido en drvec).
-- art mide lo que va a recibir el optimizador al fijar λ, d y D. Solo si con
-  100 la dispersión cae fuera de [0.1, 1000] elige otra potencia de 10 que el
-  formato aguante (el `.inp` escribe el factor con dos decimales: 0.001 se
-  relee como 1), y lo dice. Si no la hay, o la razón nivel/dispersión pasa de
-  ~10⁶, se lo dice al analista: cambiar las unidades de la serie o
-  diferenciar. El factor se hereda del fichero base.
-- El aviso de BUG-0085 y las comparaciones entre escalas dejan de suprimir: se
-  compara con ℓ en unidades de y, ℓ + n·ln(factor) + (λ − 1)·Σ ln y, que es
-  invariante al factor y comparable entre λ.
+- **100 sigue siendo la convención.** Con logaritmos cae siempre dentro de la
+  banda y no se elige por los datos.
+- Al construir el modelo —con λ, d y D ya fijados— se mide lo que recibirá el
+  optimizador. Si con 100 la dispersión cae fuera de [0.1, 1000] se elige otra
+  potencia de 10 que el formato aguante; el factor del fichero base se hereda
+  mientras valga.
+- La ecuación avisa (`describe.aviso_de_escala`) cuando la serie queda fuera
+  de la banda con el factor que trae el fichero —p. ej. logaritmos con factor
+  1, lo que escribe la GUI de atsw-gui— o cuando el nivel es más de un millón
+  de veces la dispersión, que ningún factor arregla.
+- `_write_inp` escribe el factor sin perderlo (0.001 salía «0.00») y su aviso
+  de BUG-0085 compara con la regla, no con 100.
+
+Queda para después: `compare_versions` y el mapa del guion siguen AVISANDO y
+suprimiendo la comparación entre escalas distintas; pueden compararse con
+`fue.scale.loglik_y`, que no depende del factor.
 
 ## Validation
 
-Pendiente.
+El repro sale 0: nivel 10 000 con λ = 1, factor 1 (d.t. 122); con λ = −1,
+factor 10⁶ (d.t. 1.21). `tests/test_bug_0257_0258_0259_escala.py`. La batería:
+2 446 pasan.

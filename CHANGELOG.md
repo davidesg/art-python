@@ -4,6 +4,29 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.2.5 — unreleased
+
+**El factor de reescala, con la regla única de la suite (`fue.scale`; fue ≥ 0.1.22).**
+Del estudio de la escala y la auditoría de la escalera completa (atsw-gui,
+`docs/ESTUDIO-escala.md`).
+
+- **BUG-0259 (alto): la semilla de μ usa la Box-Cox de fue.** Con λ fuera de
+  {0, 1} y d = 0 la semilla caía en otro espacio y fue acababa en el óptimo
+  degenerado de BUG-0001: φ = 1.0000 y 26-31 puntos de ℓ por debajo, con
+  `converged=True`.
+- **BUG-0258: la ecuación dice lo mismo venga el fichero con el factor que
+  venga.** μ, los armónicos y la media residual salían en la escala del motor
+  al lado de un σ̂ₐ ya convertido (μ = 9959 para una serie de 100), y la regla
+  miraba la magnitud del factor: con 10 o 1000, σ̂ₐ salía 0.11 % u 11 % para
+  un 1.1 %. Ahora todo pasa por `fue.scale.display_scale`. Con logaritmos y
+  factor 100 no cambia nada de lo que se leía.
+- **BUG-0257: 100 salvo que no valga.** art mide lo que recibirá el
+  optimizador al construir el modelo; si con 100 la dispersión de la serie
+  estacionaria cae fuera de [0.1, 1000] elige otra potencia de 10, y hereda
+  el factor del fichero base mientras sirva. La ecuación avisa cuando la
+  escala del fichero queda fuera de la banda o cuando el nivel es más de un
+  millón de veces la dispersión. El factor se escribe sin perderlo.
+
 ## atsw 2.1.1 — 2026-11-15
 
 **Los motores en todo Mac desde macOS 11, Apple silicon e Intel, y los arreglos

@@ -1434,7 +1434,9 @@ def aviso_rampa(model) -> str:
         freq = int(getattr(model.series, "freq", 1) or 1)
         lam = getattr(model, "boxlam", None)
         refac = float(getattr(model, "refactor", 1.0) or 1.0)
-        en_pct = (lam is not None and float(lam) == 0.0 and refac == 100.0)
+        # BUG-0258: tras dividir por `escala_omega` el ω va en % con λ = 0,
+        # sea cual sea el factor del fichero.
+        en_pct = (lam is not None and float(lam) == 0.0)
         u = "%" if en_pct else " (unidades de la serie transformada)"
         # BUG-0253: fuera del tanto por ciento, el ω del motor viene ×refactor
         from art.interventions import escala_omega

@@ -773,7 +773,12 @@ def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> No
 
     if refactor is None:
         refactor = float(getattr(model, "refactor", None) or _RESCALE_FACTOR)
-        if abs(refactor - _RESCALE_FACTOR) > 1e-9:
+        # BUG-0257: se compara con el factor que da la regla para esta serie
+        # y esta transformación (100 salvo que deje la serie fuera de la
+        # banda), no con 100 a secas.
+        _de_regla = factor_de_reescala(ts, getattr(model, "boxlam", 1.0),
+                                       getattr(model, "d", 0), getattr(model, "D", 0))
+        if abs(refactor - _RESCALE_FACTOR) > 1e-9 and abs(refactor - _de_regla) > 1e-9:
             import warnings
             warnings.warn(
                 f"art: se escribe {output_path} con factor de reescala "
@@ -788,7 +793,7 @@ def _write_inp(ts, model, output_path: str, refactor: float | None = None) -> No
     cbands = float(getattr(model, "cbands", 0.0) or 0.0)
     lines += [
         "** ACF/PACF bands (0 Automatic) and reescaling factor:",
-        f" {cbands:.2f} {float(refactor):.2f}" if cbands else f" 0 {float(refactor):.2f}",
+        (f" {cbands:.2f} " if cbands else " 0 ") + _formato_del_factor(refactor),
         "** Time series (stochastic and non-standard deterministic variables):",
     ]
     # BUG-0187. Detrás de la serie va UNA COLUMNA POR CADA DETERMINISTA NO
@@ -939,6 +944,37 @@ def _arma_starts(resid, p, q, P, Q, s):
 _RESCALE_FACTOR = 100.0
 
 
+def _formato_del_factor(refactor) -> str:
+    """Dos decimales si es exacto (100 sigue «100.00»), la forma exacta más
+    corta si no: con dos decimales 0.001 salía «0.00» y se releía como 1."""
+    from fue.scale import format_refactor
+    return format_refactor(float(refactor))
+
+
+def factor_de_reescala(ts, lam, d, D, base=None) -> float:
+    """El factor de reescala que se escribe para esta serie y esta
+    transformación (BUG-0257). La regla es de `fue.scale`, una para la suite:
+
+    - el del fichero base (`base`), si deja la serie estacionaria en la banda
+      en que trabaja el optimizador (dispersión entre 0.1 y 1000);
+    - si no, 100, la convención: con logaritmos cae siempre dentro;
+    - si tampoco, otra potencia de 10 que el formato aguante.
+
+    Cuando ninguna vale —o lo que falla es la razón nivel/dispersión, que
+    ningún factor arregla— se queda en el de costumbre: el aviso lo da la
+    ecuación (`describe.aviso_de_escala`), que es donde el analista lo lee.
+    """
+    from fue.scale import recommended_refactor
+    import numpy as np
+    try:
+        y = np.asarray(getattr(ts, "data", getattr(ts, "values", None)), float)
+        f = recommended_refactor(y, lam, d, D, int(getattr(ts, "freq", 1) or 1),
+                                 current=base)
+    except Exception:
+        f = None
+    return float(f) if f else float(base or _RESCALE_FACTOR)
+
+
 def _mu_seed(ts, lam, d, D, estimate_mu, refactor=_RESCALE_FACTOR):
     """Pre-estimate of mu for the .inp: the sample mean of the *transformed,
     differenced* series, in the ``refactor``-rescaled space the model estimates in.
@@ -956,9 +992,12 @@ def _mu_seed(ts, lam, d, D, estimate_mu, refactor=_RESCALE_FACTOR):
         return 0.0
     import numpy as np
     try:
+        from fue.scale import boxcox as _boxcox_de_fue
         yv = np.asarray(getattr(ts, "data", getattr(ts, "values", None)), float)
-        yv = np.log(yv) if abs(lam) < 1e-8 else np.sign(yv) * np.abs(yv) ** lam
-        w = yv
+        # BUG-0259: la Box-Cox de fue, no una propia. `sign(y)|y|^λ` coincide
+        # con ella solo para λ en {0, 1}; con otro λ la semilla caía en otro
+        # espacio y fue acababa en el óptimo degenerado de BUG-0001.
+        w = np.asarray(_boxcox_de_fue(yv, lam), float)
         freq = int(getattr(ts, "freq", 1) or 1)
         for _ in range(int(d or 0)):
             w = np.diff(w)
@@ -1397,9 +1436,9 @@ def _make_model(ts, lam: float, d: int, D: int,
     _n_harm   = tope_de_armonicos(n_harmonics, freq, avisa=True)
     resid_ref = None
     try:
+        from fue.scale import boxcox as _boxcox_de_fue
         yv = np.asarray(getattr(ts, "data", getattr(ts, "values", None)), float)
-        yv = np.log(yv) if abs(lam) < 1e-8 else np.sign(yv) * np.abs(yv) ** lam
-        w = yv
+        w = np.asarray(_boxcox_de_fue(yv, lam), float)     # BUG-0259
         for _ in range(int(d)):
             w = np.diff(w)
         for _ in range(int(D)):
@@ -1525,6 +1564,8 @@ def _make_model(ts, lam: float, d: int, D: int,
     ar_ff = [fue.FixedFreqFactor(freq=int(k), coef=-0.5, free=True)
              for k in (ar_f_freqs or [])]
 
+    _factor = factor_de_reescala(ts, lam, d, D)
+
     return fue.Model(
         ts,
         d=d, D=D, boxlam=lam,
@@ -1535,8 +1576,8 @@ def _make_model(ts, lam: float, d: int, D: int,
         ar_f=ar_ff or None,
         interventions=itvs,
         ifadf=[0] * (freq // 2 + 1),
-        mu=_mu_seed(ts, lam, d, D, estimate_mu, _RESCALE_FACTOR), estimate_mu=estimate_mu,
-        refactor=_RESCALE_FACTOR,
+        mu=_mu_seed(ts, lam, d, D, estimate_mu, _factor), estimate_mu=estimate_mu,
+        refactor=_factor,
     )
 
 

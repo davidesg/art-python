@@ -59,13 +59,25 @@ def test_el_easter_aparece(ajustado):
     assert "Easter" in _texto(ts, m)
 
 
+def _presentado(p, m):
+    """(valor, s.e.) como los presenta la ecuación. El `.out` va en la escala
+    del motor; la ecuación lleva los deterministas y la media a las unidades
+    de σ̂ₐ (BUG-0253, BUG-0258): el modelo es en niveles con factor 100. El AR
+    no depende de la escala."""
+    from art.interventions import escala_omega
+    s = (escala_omega(m) if ("eterministic" in (p.bloque or "")
+                             or "Mean" in (p.bloque or "")) else 1.0)
+    return p.valor / s, p.se / s
+
+
 def test_cada_coeficiente_con_SU_error_tipico(ajustado):
     """Ésta es la prueba de fondo: los tres valores del `.out`, en su sitio."""
     ts, m, o = ajustado
     txt = _texto(ts, m)
     for p in (o.parametros or []):
-        assert f"{abs(p.valor):.4f}" in txt, f"falta el valor {p.valor}"
-        assert f"{p.se:.4f}" in txt, f"falta el error típico {p.se}"
+        v, se = _presentado(p, m)
+        assert f"{abs(v):.4f}" in txt, f"falta el valor {v}"
+        assert f"{se:.4f}" in txt, f"falta el error típico {se}"
 
 
 def test_el_omega_del_easter_no_se_imprime_como_AR(ajustado):
@@ -74,13 +86,13 @@ def test_el_omega_del_easter_no_se_imprime_como_AR(ajustado):
     txt = _texto(ts, m)
     om = next(p for p in o.parametros if "eterministic" in (p.bloque or ""))
     linea_easter = next(l for l in txt.splitlines() if "Easter" in l)
-    assert f"{abs(om.valor):.4f}" in linea_easter
+    assert f"{abs(_presentado(om, m)[0]):.4f}" in linea_easter
 
 
 def test_la_media_no_desaparece(ajustado):
     ts, m, o = ajustado
     mu = next(p for p in o.parametros if "Mean" in (p.bloque or ""))
-    assert f"{abs(mu.valor):.4f}" in _texto(ts, m)
+    assert f"{abs(_presentado(mu, m)[0]):.4f}" in _texto(ts, m)
 
 
 # ── la clase, cerrada ─────────────────────────────────────────────────

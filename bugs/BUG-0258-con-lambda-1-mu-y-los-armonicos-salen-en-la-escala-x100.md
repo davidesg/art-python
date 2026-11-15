@@ -1,11 +1,11 @@
 ---
 id: BUG-0258
 title: Con λ=1 μ, los coeficientes de los armónicos y la media residual salen en la escala ×100 de fue, al lado de un σ̂ₐ ya devuelto a las unidades de la serie
-status: open
+status: fixed
 severity: medium
 component: describe
 found_in: 0.2.4
-fixed_in:
+fixed_in: 0.2.5 (unreleased)
 reported: 2026-11-15
 reporter: David / Claude — revisión de incoherencias entre componentes antes de mtram
 tags:
@@ -75,15 +75,16 @@ residuos de fue, que están en la escala ×100.
 
 ## Fix
 
-La regla de `escala_omega` no se extiende: se sustituye. Hoy cada sitio decide
-por la magnitud del factor (`refactor >= 10`, `refac == 100.0`,
-`sigma_raw < 0.5`), y da rótulos o valores equivocados con 1, 10 o 1000. La
-presentación pasa por una sola función (en fue), con la regla que ya usan las
-GUI de atsw-gui: μ, los ω y los armónicos divididos por el factor; σ̂ₐ por
-100/factor y en % solo con λ = 0; con λ ∉ {0, 1}, en unidades de la
-transformada y dicho así. Al PRESENTAR: el `.pre` y el motor siguen en su
-escala.
+La regla es `fue.scale.display_scale`, y la ecuación entera pasa por ella:
+`interventions.escala_omega` devuelve su divisor (ya no mira la magnitud del
+factor) y se aplica a los ω de las intervenciones, a los armónicos y `alter`,
+a `easter` y `trend`, a μ, a σ̂ₐ y a la media residual de la diagnosis. Con
+λ = 0 todo va en tanto por ciento (lo que art ya enseñaba con factor 100: no
+cambia nada de lo que se leía); con otro λ, en las unidades de la serie
+transformada. Al PRESENTAR: el `.pre` y el motor siguen en su escala.
 
 ## Validation
 
-Pendiente.
+El repro sale 0 (μ = 99.591, coseno 2.0927, σ̂ₐ = 0.877). Con factores 1, 10,
+100 y 1000 la ecuación da las mismas cifras, en logaritmos y en niveles
+(`tests/test_bug_0257_0258_0259_escala.py`).

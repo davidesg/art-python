@@ -68,7 +68,9 @@ def test_mean_does_not_collapse_untransformed():
     mf = _fit_or_skip(ts, lam=1.0, d=0, D=0, p=2, q=0,
                       n_harmonics=0, estimate_mu=True)
     data = np.asarray(ts.data, float)
-    mu_orig = mf._result.params[-1] / _RESCALE_FACTOR
+    # el factor es el del MODELO: 100 salvo que deje la serie fuera de la
+    # banda del optimizador (BUG-0257)
+    mu_orig = mf._result.params[-1] / mf.refactor
     assert mu_orig == pytest.approx(data.mean(), rel=0.05)   # near mean, not ~0
     phi = mf.ar[0]
     assert abs(sum(phi)) < 0.9      # no spurious near-unit AR root
