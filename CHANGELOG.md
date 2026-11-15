@@ -4,7 +4,7 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
-## atsw 2.1.1 — unreleased
+## atsw 2.1.1 — 2026-11-15
 
 **Los motores en todo Mac desde macOS 11, Apple silicon e Intel, y los arreglos
 de art, sima y pyfug.** Hasta ahora la única rueda de macOS de fue, drvarma y
