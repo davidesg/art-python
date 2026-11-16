@@ -5,7 +5,7 @@ status: fixed
 severity: medium
 component: describe
 found_in: 0.2.4
-fixed_in: 0.2.5 (unreleased)
+fixed_in: 0.2.5
 reported: 2026-11-15
 reporter: David / Claude — revisión de incoherencias entre componentes antes de mtram
 tags:

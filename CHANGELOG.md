@@ -4,7 +4,7 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
-## art-tseries 0.2.5 — unreleased
+## art-tseries 0.2.5 — 2026-11-16
 
 **El factor de reescala, con la regla única de la suite (`fue.scale`; fue ≥ 0.1.22).**
 Del estudio de la escala y la auditoría de la escalera completa (atsw-gui,
