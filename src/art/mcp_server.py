@@ -820,8 +820,9 @@ Se usan para mirar algo concreto. Ninguno sustituye a un nodo del protocolo.
              de lo que se publicó, con la línea que dice qué hessiano dio sus
              errores típicos (regla 1 del convenio). En AUTÓNOMO, resumen=True
              (≈ 2 KB: parámetros, σ̂ₐ, AIC/BIC, raíces, Q, JB, anómalos)
-  COMPARAR   compare_versions (avisa y suprime el Δ si no son comparables:
-             distinto operador de diferenciación o distinta escala)
+  COMPARAR   compare_versions (entre λ o factores distintos compara en
+             unidades de la serie; entre operadores de diferenciación
+             distintos avisa y suprime el Δ)
   ESTRUCTURA ar_factorization · overparameterization_analysis ·
              seasonal_param_analysis · test_seasonal_simplification
   ESTACIONAL meg_frequency (una frecuencia) · meg_reformulate (aplica ifadf[f]=1)
@@ -8315,6 +8316,15 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                     lines.append(f"   · {etq}: " + ", ".join(f"v{v}" for v in vs))
                 lines.append("   El orden de integración lo deciden los "
                              "contrastes formales (`formal_tests`), no el AIC.")
+                # BUG-0260: entre grupos que sólo difieren en λ, las cifras de
+                # esta columna no se restan, pero compare_versions sí las
+                # compara, en unidades de la serie.
+                _sin_lam = {e.split(", ", 1)[1] if ", " in e else e for e in grupos}
+                if len(_sin_lam) < len(grupos):
+                    lines.append("   Los grupos que sólo difieren en λ SÍ se "
+                                 "comparan con `compare_versions`, que pone "
+                                 "ℓ, AIC y BIC en unidades de la serie "
+                                 "(ℓ + n·ln(factor) + (λ − 1)·Σ ln y).")
         except Exception as e:
             _warn("no se pudo comprobar el operador de cada entrada", e)
 
@@ -8369,12 +8379,15 @@ def guion_map(guion_path: str, version: int = 0, detalle: bool = False) -> list:
                 lines += ["", "⚠ **No todo está en la misma ESCALA.** Factores "
                           "de reescala presentes: "
                           + ", ".join(f"`{x:g}`" for x in escalas) + ".",
-                          "   ℓ, AIC y BIC difieren en n·ln(factor) entre "
-                          "escalas: son el mismo ajuste en otras unidades. "
-                          "**No restes entradas de escalas distintas** — ni "
-                          "por AIC ni por LR. La convención de la suite es "
-                          f"`{_RESCALE_FACTOR:g}`, que es la que hace que σ̂ₐ "
-                          "se lea en tanto por ciento."]
+                          "   ℓ, AIC y BIC de esta columna difieren en "
+                          "n·ln(factor) entre escalas: el mismo ajuste en otras "
+                          "unidades. **No restes aquí entradas de escalas "
+                          "distintas** — ni por AIC ni por LR. `compare_versions` "
+                          "sí las compara: pone las dos en unidades de la serie "
+                          "(BUG-0260). La convención de la suite es "
+                          f"`{_RESCALE_FACTOR:g}`; otro factor sólo se elige "
+                          "cuando con él la serie estacionaria sale de la banda "
+                          "que el optimizador necesita (BUG-0257)."]
             elif sin_esc:
                 lines += ["", "*Escala no registrada en v"
                           + ", v".join(str(v) for v in sin_esc)
@@ -9204,8 +9217,14 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
         la, aic_a, bic_a, npar_a, _reg_a = _criterios(ma, inp_path_a)
         lb, aic_b, bic_b, npar_b, _reg_b = _criterios(mb, inp_path_b)
         import math
-        sa = math.sqrt(ma._result.sigma2) if ma._result.sigma2 > 0 else 0.0
-        sb = math.sqrt(mb._result.sigma2) if mb._result.sigma2 > 0 else 0.0
+        # σ̂ₐ como la presenta la ecuación (BUG-0258): en % con logaritmos, en
+        # las unidades de la serie transformada si no — no en las del motor,
+        # que con factores distintos no se comparan.
+        from fue.scale import display_scale as _display_scale
+        _ka = _display_scale(getattr(ma, "boxlam", lam_a), getattr(ma, "refactor", 1.0) or 1.0).k
+        _kb = _display_scale(getattr(mb, "boxlam", lam_b), getattr(mb, "refactor", 1.0) or 1.0).k
+        sa = _ka * math.sqrt(ma._result.sigma2) if ma._result.sigma2 > 0 else 0.0
+        sb = _kb * math.sqrt(mb._result.sigma2) if mb._result.sigma2 > 0 else 0.0
 
         name_a = os.path.basename(inp_path_a)
         name_b = os.path.basename(inp_path_b)
@@ -9217,23 +9236,36 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
         # ── ¿Están las dos verosimilitudes en la MISMA escala? ─────────────
         # BUG-0051. loglik, AIC y BIC sólo se comparan entre modelos que
         # explican la MISMA variable dependiente. Si el operador de
-        # diferenciación difiere --d, D, ifadf o el Box-Cox-- cada uno explica
-        # una transformación distinta de la serie, con distinto número efectivo
-        # de observaciones, y su Δ no significa nada. Imprimir el número igual es
+        # diferenciación difiere --d, D o ifadf-- cada uno explica una
+        # transformación distinta de la serie, con distinto número efectivo de
+        # observaciones, y su Δ no significa nada. Imprimir el número igual es
         # peor que no imprimirlo: se lee, y manda adoptar el modelo peor.
-        _op = lambda sp: (sp.get("lam"), sp.get("d"), sp.get("D"),
-                          tuple(sp.get("ifadf") or []))
+        #
+        # El λ y el factor de reescala NO son de esa clase (BUG-0260): cambian
+        # las unidades de la variable, no la variable. Con el mismo operador y
+        # la misma muestra, la verosimilitud en unidades de y,
+        #     ℓ_y = ℓ + n·ln(factor) + (λ − 1)·Σ ln y_t      (fue.scale.loglik_y)
+        # —el jacobiano de factor·BoxCox_λ— es la de la serie observada, y se
+        # compara. Antes se suprimía el Δ, y entre factores se decía «es el
+        # mismo modelo mal anotado: reestímalo»; desde 0.2.5 un factor distinto
+        # de 100 puede ser el correcto (BUG-0257), y entre λ distintos esta es
+        # justamente la comparación que la literatura hace.
+        _op = lambda sp: (sp.get("d"), sp.get("D"), tuple(sp.get("ifadf") or []))
         comparables = _op(spec_a) == _op(spec_b)
+        _lam_a = float(getattr(ma, "boxlam", lam_a))
+        _lam_b = float(getattr(mb, "boxlam", lam_b))
+        _ra = float(getattr(ma, "refactor", None) or 1.0)
+        _rb = float(getattr(mb, "refactor", None) or 1.0)
         aviso_escala = []
         if not comparables:
             aviso_escala = [
                 "",
                 "> ⚠ **loglik, AIC y BIC NO son comparables entre estos dos "
                 "modelos.** El operador de diferenciación difiere "
-                f"(`λ={spec_a.get('lam')}, d={spec_a.get('d')}, "
-                f"D={spec_a.get('D')}, ifadf={list(spec_a.get('ifadf') or [])}` "
-                f"frente a `λ={spec_b.get('lam')}, d={spec_b.get('d')}, "
-                f"D={spec_b.get('D')}, ifadf={list(spec_b.get('ifadf') or [])}`), "
+                f"(`d={spec_a.get('d')}, D={spec_a.get('D')}, "
+                f"ifadf={list(spec_a.get('ifadf') or [])}` "
+                f"frente a `d={spec_b.get('d')}, D={spec_b.get('D')}, "
+                f"ifadf={list(spec_b.get('ifadf') or [])}`), "
                 "así que cada uno explica una variable dependiente distinta, con "
                 "distinto número efectivo de observaciones. Sus verosimilitudes "
                 "no están en la misma escala y su Δ se ha suprimido.",
@@ -9244,33 +9276,44 @@ def compare_versions(inp_path_a: str, inp_path_b: str,
                 "el orden de integración, ése es el trabajo de los contrastes "
                 "formales (`formal_tests`), no del AIC.",
             ]
-
-        # El operador no es lo único que rompe la comparabilidad: el FACTOR DE
-        # REESCALA también. La suite estima sobre 100·log(y) y `fue.Model` trae
-        # 1.0 por defecto, así que un modelo construido a mano tiene una ℓ que
-        # difiere en n·ln(100) — mismo ajuste, otras unidades (BUG-0085). Aquí
-        # el remedio es distinto del de BUG-0051: no son modelos distintos, es
-        # el MISMO modelo mal anotado, y se arregla reestimando en la
-        # convención.
-        _ra = float(getattr(ma, "refactor", None) or 1.0)
-        _rb = float(getattr(mb, "refactor", None) or 1.0)
-        if abs(_ra - _rb) > 1e-9:
-            comparables = False
-            import math as _math
-            _n = min(len(ma._result.residuals), len(mb._result.residuals))
-            aviso_escala += [
-                "",
-                "> ⚠ **Los dos modelos están en ESCALAS distintas** "
-                f"(factor de reescala `{_ra:g}` frente a `{_rb:g}`). ℓ, AIC y "
-                f"BIC difieren en n·ln(factor) ≈ **{abs(_n * _math.log(_rb / _ra)):.0f}** "
-                "puntos de ℓ que son puro cambio de unidades, no de ajuste. Su "
-                "Δ se ha suprimido.",
-                ">",
-                "> Esto no son dos modelos distintos: es el mismo mal anotado. "
-                f"La convención de la suite es `{_RESCALE_FACTOR:g}` (hace que "
-                "σ̂ₐ se lea en tanto por ciento). Reestima el que se salga y "
-                "vuelve a compararlos.",
-            ]
+        elif abs(_lam_a - _lam_b) > 1e-12 or abs(_ra - _rb) > 1e-9:
+            from fue.scale import loglik_y as _loglik_y
+            _ya = np.asarray(ma.series.data, dtype=float)
+            _yb = np.asarray(mb.series.data, dtype=float)
+            _na = int(np.size(ma._result.residuals))
+            _nb = int(np.size(mb._result.residuals))
+            _misma = (_na == _nb and len(_ya) == len(_yb)
+                      and np.allclose(_ya, _yb, rtol=0, atol=0))
+            _que = []
+            if abs(_lam_a - _lam_b) > 1e-12:
+                _que.append(f"λ `{_lam_a:g}` frente a `{_lam_b:g}`")
+            if abs(_ra - _rb) > 1e-9:
+                _que.append(f"factor de reescala `{_ra:g}` frente a `{_rb:g}`")
+            if not _misma:
+                comparables = False
+                aviso_escala = [
+                    "",
+                    f"> ⚠ **loglik, AIC y BIC NO son comparables:** los dos "
+                    f"modelos difieren en {' y '.join(_que)}, y además no "
+                    "estiman sobre la misma muestra. Con la misma muestra se "
+                    "compararían en unidades de la serie; así, su Δ se ha "
+                    "suprimido.",
+                ]
+            else:
+                la = _loglik_y(la, _ya, _lam_a, _ra, n=_na)
+                lb = _loglik_y(lb, _yb, _lam_b, _rb, n=_nb)
+                aic_a, aic_b = -2 * la + 2 * npar_a, -2 * lb + 2 * npar_b
+                bic_a = -2 * la + npar_a * math.log(_na)
+                bic_b = -2 * lb + npar_b * math.log(_nb)
+                aviso_escala = [
+                    "",
+                    f"> Los dos modelos difieren en {' y '.join(_que)}. "
+                    "loglik, AIC y BIC van **en unidades de la serie**: "
+                    "ℓ_y = ℓ + n·ln(factor) + (λ − 1)·Σ ln yₜ, el jacobiano "
+                    "de la transformación, sobre las mismas observaciones. Así "
+                    "sí se comparan, y su Δ y el LR miden ajuste, no unidades "
+                    "(no son las ℓ del `.out`, que están en las del motor).",
+                ]
 
         # ── Nested LR test ─────────────────────────────────────────────────
         nested = _nested_relation(spec_a, spec_b, npar_a, npar_b)
