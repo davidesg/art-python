@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "2.1.1"
+version         = "2.1.2"
 description     = "ATSW — A Time Series Workshop: the Box-Jenkins-Treadway suite (univariate exact-ML estimation, graphics, model building, transfer functions, multivariate VARMA and cointegrated VEC) with three MCP assistants for LLM-driven analysis"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -83,7 +83,13 @@ dependencies = [
     # >=0.1.20 desde atsw 2.1.1: las ruedas de macOS 11 para arm64 e Intel
     # (hasta 0.1.19 sólo macosx_14_0_arm64: un Mac Intel, o anterior a macOS
     # 14, recibía la rueda pura y fue corría sin su motor C).
-    "fue>=0.1.20",            # univariate estimation engine + FUF forecasting
+    # >=0.1.22 desde atsw 2.1.2: `fue.scale`, la regla única del factor de
+    # reescala —la presentación en las unidades de cada serie, la banda que el
+    # optimizador necesita, la verosimilitud que no depende del factor— que
+    # art, drtran y sima usan; y el factor se escribe sin perderlo (BUG-0003
+    # del C). La página de la previsión ya no multiplica por 100 en niveles
+    # (BUG-0028).
+    "fue>=0.1.22",            # univariate estimation engine + FUF forecasting
     # >=2.0.1 desde atsw 1.5.0: la 2.0.0 rompe con toda serie anual
     # (pyfug/BUG-0002).
     # >=2.0.2 desde atsw 2.0.0: `percent=` y `density=` (pyfug/BUG-0008), que
@@ -131,7 +137,12 @@ dependencies = [
     # >=0.2.4 desde atsw 2.1.1: con λ = 1 los ω de las intervenciones salían
     # cien veces mayores que σ̂ₐ en la misma ecuación (BUG-0253) —la clase de
     # la cota de 0.1.12: contestaba mal—.
-    "art-tseries>=0.2.4",     # model building + MCP server (art-mcp)
+    # >=0.2.5 desde atsw 2.1.2: el factor de reescala con la regla de la suite
+    # (BUG-0257, 0258, 0259): con λ = 1 ya no se aplica el 100, las medias y
+    # los deterministas salen en las unidades de la serie junto a su σ̂ₐ, y la
+    # semilla de μ usa la Box-Cox de fue —la clase de la cota de 0.1.12:
+    # contestaba mal—.
+    "art-tseries>=0.2.5",     # model building + MCP server (art-mcp)
     # >=0.2.0 is NOT housekeeping. Up to 0.1.1 drtran related each series
     # differenced by ITS OWN operator, so whenever the output and the input
     # carried different differencing the fitted transfer was nu(B)*Delta(B) and
@@ -146,7 +157,12 @@ dependencies = [
     # >=0.2.6 desde atsw 2.0.0: la Ljung-Box por serie descuenta lo que
     # descuenta el C (BUG-57), `mtram --help` contesta y sale, y la búsqueda
     # lineal de drvarma 0.2.0 (drvarma BUG-0016), que drtran usa.
-    "drtran[mcp]>=0.2.6",     # transfer functions and networks + MCP server (mtram)
+    # >=0.2.7 desde atsw 2.1.2: la comprobación de escala de mtram ya no está
+    # al revés (avisaba con logaritmos y factor 100, callaba con factor 1:
+    # BUG-68), el R² con la Box-Cox de fue (BUG-69), y la ganancia y los
+    # errores de la previsión en las unidades de cada serie (BUG-70); avisa de
+    # factores distintos en una red.
+    "drtran[mcp]>=0.2.7",     # transfer functions and networks + MCP server (mtram)
     # >=0.1.7 desde atsw 1.6.1: en la 0.1.6 el optimizador —el de drvarma y el
     # de drtran, que usa el mismo `_qnewt`— se colgaba para siempre con un
     # objetivo NaN o infinito (drvarma BUG-0006). Con la cota vieja, quien ya
@@ -163,7 +179,10 @@ dependencies = [
     # Johansen de drvec da los bits de su C en toda plataforma.
     # >=0.3.2 desde atsw 2.1.1: las ruedas de macOS 11 para arm64 e Intel,
     # como fue 0.1.20.
-    "drvarma>=0.3.2",         # multivariate VARMA engine
+    # >=0.3.3 desde atsw 2.1.2: la tabla de previsión de la escalera
+    # multiplicaba por 100 sea cual fuera λ (BUG-0025, homologado con el C,
+    # atsw-gui drvarma BUG-0005), y avisa de factores distintos.
+    "drvarma>=0.3.3",         # multivariate VARMA engine
     # Nuevo en atsw 2.1.0: el motor del VEC, el porte de drvec. sima-tseries ya
     # lo arrastra, pero va explícito como fue y drvarma: es un motor con su
     # propia rueda binaria (el C de drvec, para los bootstraps), y la lista de
@@ -172,7 +191,10 @@ dependencies = [
     # >=0.1.1 desde atsw 2.1.1: las ruedas de macOS 11 para arm64 e Intel, con
     # el C de drvec dentro (hasta 0.1.0 los bootstraps corrían en Python en un
     # Mac Intel).
-    "drvec>=0.1.1",           # cointegrated VEC engine
+    # >=0.1.2 desde atsw 2.1.2: avisa, como su C, cuando los .pre no
+    # comparten factor de reescala (β y sus contrastes salen en unidades del
+    # motor).
+    "drvec>=0.1.2",           # cointegrated VEC engine
     # El asistente sima, su propio paquete. [raw] trae art para la entrada
     # desde la tabla cruda (load_data, characterize, rutas U y V).
     # >=0.2.0 desde atsw 2.1.0: los sistemas cointegrados (el nodo N1c, el
@@ -182,7 +204,12 @@ dependencies = [
     # >=0.2.2 desde atsw 2.1.1: un MA(1) propio parado en el pliegue ya no se
     # da por convergido (BUG-0008), los .pre de la ruta U vuelven a fue
     # (BUG-0007), y las cachés de los ejemplos casan con los motores de 2.1.1.
-    "sima-tseries[raw]>=0.2.2",  # simultaneous VARMA and VEC + MCP server (sima)
+    # >=0.2.3 desde atsw 2.1.2: una búsqueda que no arranca ya no se presenta
+    # como ajuste (BUG-0011), los coeficientes entre series y las
+    # restricciones en las unidades de cada serie (BUG-0012), el rótulo del
+    # hessiano (BUG-0013); y las cachés de los ejemplos, rehechas con estos
+    # motores (las de 0.2.2 llevaban la clave de fue 0.1.20 y no se servían).
+    "sima-tseries[raw]>=0.2.3",  # simultaneous VARMA and VEC + MCP server (sima)
 ]
 
 # One console script, and deliberately nothing else. The umbrella INSTALLS; it

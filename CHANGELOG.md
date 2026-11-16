@@ -4,6 +4,28 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## atsw 2.1.2 — 2026-11-16
+
+**El factor de reescala, con una sola regla en toda la suite.** Del estudio de
+la escala y la auditoría de la escalera completa (atsw-gui,
+`docs/ESTUDIO-escala.md`): 100 sigue siendo la convención; lo que se lee va en
+las unidades de cada serie, por la regla de los GUI de atsw-gui; cada asistente
+comprueba la banda que el optimizador necesita y avisa de factores distintos en
+un sistema. Los motores no cambian: mismas estimaciones, misma verosimilitud.
+
+**Las cotas:**
+
+| paquete | antes | ahora | por qué |
+|---|---|---|---|
+| `fue` | >=0.1.20 | **>=0.1.22** | `fue.scale`, la regla común; el factor se escribe sin perderlo; la página de previsión sin ×100 en niveles (BUG-0028) |
+| `art-tseries` | >=0.2.4 | **>=0.2.5** | el factor y su presentación (BUG-0257, 0258, 0259) |
+| `drtran[mcp]` | >=0.2.6 | **>=0.2.7** | la comprobación de escala al derecho (BUG-68), el R² (BUG-69), la presentación en unidades de cada serie (BUG-70) |
+| `drvarma` | >=0.3.2 | **>=0.3.3** | la tabla de previsión de la escalera (BUG-0025, con el C) |
+| `drvec` | >=0.1.1 | **>=0.1.2** | el aviso de factores distintos, como el C |
+| `sima-tseries[raw]` | >=0.2.2 | **>=0.2.3** | la búsqueda que no arranca (BUG-0011), unidades de cada serie (BUG-0012), el rótulo del hessiano (BUG-0013), y las cachés de los ejemplos para estos motores |
+
+pyfug no cambia.
+
 ## art-tseries 0.2.5 — 2026-11-16
 
 **El factor de reescala, con la regla única de la suite (`fue.scale`; fue ≥ 0.1.22).**
