@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "art-tseries"
-version         = "0.2.4"
+version         = "0.2.5"
 description     = "ART — A Real-Time Time-Series Analysis toolkit (Box-Jenkins-Treadway methodology) + MCP server (uses fue and pyfug)"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -56,7 +56,7 @@ dependencies = [
     # sello del guion (fue/BUG-0024). Con la 0.1.16 art funciona pero degrada:
     # las defensas siguen activas y el sello no dice el motor. Y con la cota
     # vieja `pip install -U art-tseries` no traería la 0.1.17.
-    "fue[report]>=0.1.17",
+    "fue[report]>=0.1.22",
     # >=2.0.1: la 2.0.0 lanza UnboundLocalError en `plot_combined` con TODA
     # serie anual (pyfug/BUG-0002), que es la figura de identificación y la de
     # residuos de art: con una serie anual, art se quedaba sin figuras.

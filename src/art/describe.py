@@ -1476,6 +1476,7 @@ def model_equation(ts, model, errores_tipicos: "bool | list" = True) -> str:
                 v, se = pi.pop()
             else:
                 v, se = (om[0] if om else 0.0), 0.0
+            v, se = v / s_om, se / s_om                         # BUG-0258
             harm_buf.setdefault(h, {})[t] = (v, se, om_f[0])
 
         elif t in ("easter", "trend"):
@@ -1486,6 +1487,7 @@ def model_equation(ts, model, errores_tipicos: "bool | list" = True) -> str:
             tl = _TwoLine()
             for i, (v0, free) in enumerate(zip(om, om_f)):
                 v, se = (pi.pop() if free else (v0, 0.0))
+                v, se = v / s_om, se / s_om                     # BUG-0258
                 tl.add(f"  {_sign_det(v)} " if i == 0
                        else f"  {_sign_omega_lag(v)} ")
                 tl.add(_fv(abs(v)), _fse(se) if free else "", align_dot=True)
@@ -1552,6 +1554,7 @@ def model_equation(ts, model, errores_tipicos: "bool | list" = True) -> str:
             tl = _TwoLine()
             for i, (v0, free) in enumerate(zip(om, om_f)):
                 v, se = (pi.pop() if free else (v0, 0.0))
+                v, se = v / s_om, se / s_om                     # BUG-0258
                 tl.add(f"  {_sign_det(v)} " if i == 0
                        else f"  {_sign_omega_lag(v)} ")
                 tl.add(_fv(abs(v)), _fse(se) if free else "", align_dot=True)
@@ -1707,6 +1710,7 @@ def model_equation(ts, model, errores_tipicos: "bool | list" = True) -> str:
     mu_sign    = ""
     if model.estimate_mu:
         v_mu, se_mu = pi.pop()
+        v_mu, se_mu = v_mu / s_om, se_mu / s_om                 # BUG-0258
         mu_sign    = "−" if v_mu >= 0 else "+"
         mu_val_str = _fv(abs(v_mu))
         mu_se_str  = _fse(se_mu)
@@ -1857,14 +1861,13 @@ def model_equation(ts, model, errores_tipicos: "bool | list" = True) -> str:
         # exactamente lo mismo que el modelo en logs (7.87%). El defecto hacía
         # parecer que dos modelos con la misma innovación diferían en dos órdenes
         # de magnitud, y eso invalida cualquier comparación entre carriles.
-        if refactor >= 10 and lam == 0.0:
-            sigma_disp = f"{sigma_raw:.4f}%"
-        elif refactor >= 10:
-            sigma_disp = f"{sigma_raw / refactor:.5f}"     # unidades de la serie
-        elif lam == 0.0 and sigma_raw < 0.5:
-            sigma_disp = f"{sigma_raw:.5f}  ({sigma_raw*100:.3f}%)"
-        else:
-            sigma_disp = f"{sigma_raw:.5f}"
+        # BUG-0258: la regla es de `fue.scale`, no de la magnitud del factor
+        # (`refactor >= 10`, `sigma_raw < 0.5` daban 0.1106% y 11.06% para una
+        # innovación del 1.1 % con factores 10 y 1000).
+        from fue.scale import display_scale
+        _ds = display_scale(lam, refactor)
+        sigma_disp = (f"{sigma_raw * _ds.k:.4f}%" if _ds.percent
+                      else f"{sigma_raw * _ds.k:.5f}")
 
         stat_line = (f"  σ̂ₐ = {sigma_disp}"
                      f"   |   ℓ = {loglik:.2f}"
@@ -1925,6 +1928,7 @@ def model_equation(ts, model, errores_tipicos: "bool | list" = True) -> str:
                   "render (art/bugs/BUG-0097)."]
 
     lines += ["", stat_line]
+    lines += aviso_de_escala(model)
 
     # BUG-0062. Un operador cuyas raíces caen DENTRO del círculo unidad invalida
     # la lectura del modelo --un AR así no es estacionario, un MA así no es
@@ -2034,6 +2038,48 @@ def _two_cos(f_idx: int, freq: int) -> tuple[float, str]:
 # Diagnosis
 # ---------------------------------------------------------------------------
 
+def aviso_de_escala(model) -> list:
+    """Líneas de aviso si el optimizador no puede trabajar bien con la serie
+    tal como la trae el fichero (BUG-0257); vacío si puede.
+
+    Dos condiciones, medidas en fue, drtran y drvarma (`fue.scale`): la
+    dispersión de la serie estacionaria entre 0.1 y 1000, y, con d = D = 0,
+    su nivel a menos de un millón de veces esa dispersión. La primera se
+    arregla con el factor de reescala; la segunda no.
+    """
+    try:
+        import numpy as _np
+        from fue.scale import check_scale
+        ts = model.series
+        c = check_scale(_np.asarray(ts.data, float), float(model.boxlam),
+                        int(model.d), int(model.D), int(getattr(ts, "freq", 1) or 1),
+                        float(getattr(model, "refactor", None) or 1.0))
+    except Exception:
+        return []
+    if c.ok:
+        return []
+    out = [""]
+    for clase, _ in c.problems:
+        if clase == "spread":
+            que = ("pequeña" if c.spread < 0.1 else "grande")
+            out.append(f"  ⚠ ESCALA: la serie que recibe el optimizador es demasiado {que} "
+                       f"(d.t. {c.spread:.3g} con factor de reescala {c.refactor:g}; "
+                       "trabaja entre 0.1 y 1000).")
+            out.append("    " + (f"Con factor {c.recommended:g} queda en "
+                                 f"{c.spread / c.refactor * c.recommended:.3g}: reestima con él."
+                                 if c.recommended else
+                                 "Ningún factor que el fichero pueda llevar la deja dentro: "
+                                 "expresa la serie en otras unidades."))
+        else:
+            out.append(f"  ⚠ ESCALA: el nivel de la serie transformada es {c.ratio:.2g} veces "
+                       "su d.t.: la media no se puede resolver, sea cual sea el factor.")
+            out.append("    Diferencia la serie o exprésala en otras unidades (con λ < 0 la "
+                       "transformada vale −1/λ más una variación diminuta).")
+    out.append("    Los errores típicos, el código de parada y un contraste que dé «sin "
+               "efecto» no son de fiar aquí.")
+    return out
+
+
 def _residuos_en_fraccion(model):
     """Los residuos en unidades de FRACCIÓN, que es lo que `pyfug` espera.
 
@@ -2069,6 +2115,8 @@ def describe_diagnosis(model) -> Description:
         raise RuntimeError("Model has not been fitted — call model.fit() first.")
 
     result = diagnose(model)
+    from art.interventions import escala_omega
+    _s_res = escala_omega(model)        # BUG-0258: la media, en la escala de σ̂ₐ
 
     # ── figures via pyfug (primary) or internal fallback ──────────────────
     hist_b64 = None
@@ -2106,7 +2154,7 @@ def describe_diagnosis(model) -> Description:
         f"## Diagnosis — {result.label}",
         f"- Veredicto: {verdict}",
         f"- Media residual: {'✓' if result.centred else '✗'}  "
-        f"media={result.mean:+.4f}, t={result.mean_t:+.2f}",
+        f"media={result.mean / _s_res:+.4f}, t={result.mean_t:+.2f}",
         # QUIÉN DECIDE, DICHO — BUG-0166. El veredicto lo da `3f+3`, la
         # convención del motor; los otros retardos se publican como SALVEDAD.
         # Sin distinguirlos, los cuatro se leían como cuatro veredictos y

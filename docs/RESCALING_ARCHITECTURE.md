@@ -133,10 +133,14 @@ disagree) and passes under the robust design.
 
 ### On the value of `refactor`
 
-Orthogonal to the above. Today it is a fixed `100` (good for log price indices). A more
-robust choice is data-driven — e.g. `refactor ≈ 1/std(∇BoxCox)` so the differenced series
-is `O(1)` for any series — but that is a refinement of P1's *value*, not of the
-architecture. The architecture is about **consistency**, not the specific number.
+Decided on 2026-11-15, after the scale study (atsw-gui, `docs/ESTUDIO-escala.md`):
+**100 stays the convention**, and the factor is not chosen from the data with
+logs — the suite's corpus is always inside the band there, and different
+factors in the series of one system damage the inference. `pipeline.
+factor_de_reescala` (the rule is `fue.scale.recommended_refactor`) departs from
+100 only when it leaves the spread of the stationary series outside
+[0.1, 1000], and inherits the base file's factor while it serves (BUG-0257).
+Presentation goes through `fue.scale.display_scale` (BUG-0258).
 
 ---
 

@@ -1,11 +1,11 @@
 ---
 id: BUG-0259
 title: La semilla de μ transforma con |y|^λ y fue con (y^λ − 1)/λ — con λ fuera de {0, 1} el ajuste cae en el óptimo degenerado de BUG-0001
-status: open
+status: fixed
 severity: high
 component: pipeline
 found_in: 0.2.4
-fixed_in:
+fixed_in: 0.2.5
 reported: 2026-11-15
 reporter: David / Claude — revisión de incoherencias entre componentes antes de mtram
 tags:
@@ -66,8 +66,11 @@ vio.
 
 ## Fix
 
-Usar la transformación de fue — `refactor`·(y^λ − 1)/λ — y no una propia.
+`_mu_seed` usa `fue.scale.boxcox`, la transformación del motor. Lo mismo las
+otras dos copias que había (la referencia de las semillas estacionales,
+`pipeline.py`, y la decisión de la deriva, `policy.py`).
 
 ## Validation
 
-Pendiente.
+El repro sale 0: con λ = −1, φ = 0.5128 y la verosimilitud del modelo bien
+sembrado (antes φ = 1.0000 y 31 puntos menos).

@@ -54,10 +54,14 @@ def main():
     ref = fue.Model(ts, d=0, D=0, boxlam=lam, ar=[[0.1]], ar_free=[[True]],
                     mu=float(w.mean()), estimate_mu=True, refactor=100.0)
     ref.fit()
-    phi, ll = m._result.params[0], m.loglik
-    phi_r, ll_r = ref._result.params[0], ref.loglik
-    print(f"art:          phi = {phi:.4f}  logL = {ll:.3f}")
-    print(f"well seeded:  phi = {phi_r:.4f}  logL = {ll_r:.3f}")
+    # the two may carry different rescaling factors (art chooses its own):
+    # l + n ln(factor) does not depend on it
+    def ly(mod):
+        return mod.loglik + len(mod._result.residuals) * np.log(mod.refactor)
+    phi, ll = m._result.params[0], ly(m)
+    phi_r, ll_r = ref._result.params[0], ly(ref)
+    print(f"art:          phi = {phi:.4f}  logL (factor 1) = {ll:.3f}")
+    print(f"well seeded:  phi = {phi_r:.4f}  logL (factor 1) = {ll_r:.3f}")
     abierto = ll < ll_r - 1.0
     print("art lands in the degenerate optimum" if abierto else "art reaches the optimum")
     return 1 if abierto else 0

@@ -811,7 +811,8 @@ def decide_mu(ts, lam: float, d: int, D: int) -> bool:
     import numpy as np
 
     yv = np.asarray(getattr(ts, "data", ts), float)
-    w = np.log(yv) if abs(float(lam)) < 1e-8 else np.sign(yv) * np.abs(yv) ** float(lam)
+    from fue.scale import boxcox as _boxcox_de_fue
+    w = np.asarray(_boxcox_de_fue(yv, float(lam)), float)      # BUG-0259
     freq = int(getattr(ts, "freq", 1) or 1)
     for _ in range(int(d or 0)):
         w = np.diff(w)

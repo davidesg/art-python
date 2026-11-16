@@ -445,22 +445,25 @@ class InterventionTestResult:
 
 
 def escala_omega(model) -> float:
-    """El divisor que lleva los ω del motor a las unidades en que se presentan.
+    """El divisor que lleva un número del motor a las unidades en que se presenta.
 
-    BUG-0253. fue estima sobre `refactor`·y(λ). Con λ=0 y refactor=100 eso es
-    tanto por ciento y los ω se leen tal cual. Con cualquier otro λ (en
-    particular λ=1, los niveles) los ω salen en las unidades de la serie
-    transformada MULTIPLICADAS por `refactor`: un salto de 0.82 puntos se
-    imprimía como 81.71 al lado de un σ̂ₐ = 0.22 ya devuelto a las unidades de
-    la serie (BUG-0033). Es la misma regla que la de σ̂ₐ: se divide al
-    PRESENTAR; el `.pre` y el motor siguen en su escala. Los contrastes (t,
-    Wald) no cambian: son cocientes.
+    fue estima sobre `refactor`·BoxCox_λ(y). La regla es la de `fue.scale`
+    (`display_scale`), una para toda la suite: con λ = 0 lo que se presenta es
+    un tanto por ciento (100/refactor: el divisor es 1 con el factor 100 de
+    costumbre) y con cualquier otro λ las unidades de la serie transformada
+    (1/refactor), que con λ = 1 son las de la serie. Vale para los ω, para μ,
+    para los armónicos y para σ̂ₐ: una ecuación, una escala.
+
+    BUG-0253 lo introdujo para los ω con una regla que miraba la MAGNITUD del
+    factor (`refactor >= 10`), y fallaba con ficheros que no vienen a 100
+    —la GUI de atsw-gui escribe 1—: BUG-0258. Se divide al PRESENTAR; el
+    `.pre` y el motor siguen en su escala. Los contrastes (t, Wald) no
+    cambian: son cocientes.
     """
+    from fue.scale import display_scale
     rf = float(getattr(model, "refactor", None) or 1.0)
     lam = getattr(model, "boxlam", None)
-    if rf >= 10 and not (lam is not None and float(lam) == 0.0):
-        return rf
-    return 1.0
+    return 1.0 / display_scale(1.0 if lam is None else float(lam), rf).k
 
 
 def _intervention_param_start(model, itv_idx: int) -> int:
