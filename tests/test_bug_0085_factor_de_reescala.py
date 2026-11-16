@@ -180,17 +180,23 @@ def test_el_mapa_calla_cuando_la_escala_es_una(tmp_path):
 
 # ───────────────── compare_versions ─────────────────
 
-def test_compare_versions_suprime_el_delta_entre_escalas(tmp_path):
+def test_compare_versions_compara_entre_escalas_en_unidades_de_y(tmp_path):
+    """BUG-0260 (antes se suprimía el Δ): el mismo modelo con factor 100 y con
+    factor 1 tiene la MISMA ℓ en unidades de la serie."""
+    import re
     import art.mcp_server as srv
     ts, ma = _base(refactor=_RESCALE_FACTOR)
     _, mb = _base(refactor=1.0)
+    ma.fit(); mb.fit()
     fa, fb = str(tmp_path / "a.inp"), str(tmp_path / "b.inp")
     _write_inp(ts, ma, fa, refactor=_RESCALE_FACTOR)
     _write_inp(ts, mb, fb, refactor=1.0)
     fn = getattr(srv.compare_versions, "fn", srv.compare_versions)
     txt = "\n".join(getattr(c, "text", "") for c in fn(fa, fb))
-    assert "ESCALAS distintas" in txt
-    assert "no comp." in txt
+    assert "no comp." not in txt
+    assert "en unidades de la serie" in txt
+    d = re.search(r"\| loglik\s*\|[^|]*\|[^|]*\|\s*([^|]+?)\s*\|", txt).group(1)
+    assert abs(float(d)) < 1e-2
 
 
 def test_compare_versions_no_lanza_un_LR_entre_escalas(tmp_path):

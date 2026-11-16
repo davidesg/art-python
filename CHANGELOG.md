@@ -4,6 +4,21 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries 0.2.6 — 2026-11-16
+
+**compare_versions compares models of different lambda or rescaling factor,
+in the units of the series (BUG-0260).** Neither changes the dependent
+variable, only its units: with the same differencing operator and the same
+sample, the log-likelihood in the units of y,
+`l + n·ln(factor) + (lambda − 1)·Σ ln y` (`fue.scale.loglik_y`, the Jacobian of
+`factor·BoxCox_lambda`), compares them, and so do AIC, BIC and the LR built on
+it. Until now the Delta was suppressed, and between factors the analyst was
+told to re-estimate "the same model badly labelled" — since 0.2.5 a factor
+other than 100 can be the right one (BUG-0257). Between different `d`, `D` or
+`ifadf` the Delta is still suppressed (BUG-0051). σ̂ₐ is shown as the equation
+shows it (BUG-0258). The guion map keeps its columns (they are the stored,
+engine-unit figures) and now says which groups `compare_versions` can compare.
+
 ## atsw 2.1.2 — 2026-11-16
 
 **El factor de reescala, con una sola regla en toda la suite.** Del estudio de
