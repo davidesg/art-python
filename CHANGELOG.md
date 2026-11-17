@@ -4,6 +4,18 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## atsw 2.1.3 — 2026-11-17
+
+**Lo que quedaba de la regla de escala.**
+
+| paquete | antes | ahora | por qué |
+|---|---|---|---|
+| `art-tseries` | >=0.2.5 | **>=0.2.6** | `compare_versions` compara λ y factores distintos en unidades de la serie (BUG-0260) |
+| `drvarma` | >=0.3.3 | **>=0.3.4** | la página HTML de previsión, sin ×100 en niveles (BUG-0026) |
+| `sima-tseries[raw]` | >=0.2.3 | **>=0.2.4** | α y su restricción en unidades de cada serie (BUG-0014); las cachés de los ejemplos para drvarma 0.3.4 |
+
+fue, drvec, drtran y pyfug no cambian.
+
 ## art-tseries 0.2.6 — 2026-11-16
 
 **compare_versions compares models of different lambda or rescaling factor,
