@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "atsw"
-version         = "2.1.2"
+version         = "2.1.3"
 description     = "ATSW — A Time Series Workshop: the Box-Jenkins-Treadway suite (univariate exact-ML estimation, graphics, model building, transfer functions, multivariate VARMA and cointegrated VEC) with three MCP assistants for LLM-driven analysis"
 readme          = "README.md"
 license         = { text = "GPL-2.0-or-later" }
@@ -142,7 +142,10 @@ dependencies = [
     # los deterministas salen en las unidades de la serie junto a su σ̂ₐ, y la
     # semilla de μ usa la Box-Cox de fue —la clase de la cota de 0.1.12:
     # contestaba mal—.
-    "art-tseries>=0.2.5",     # model building + MCP server (art-mcp)
+    # >=0.2.6 desde atsw 2.1.3: compare_versions compara modelos de λ o
+    # factor distintos en unidades de la serie en vez de suprimir el Δ
+    # (BUG-0260) —la elección entre logaritmos y niveles—.
+    "art-tseries>=0.2.6",     # model building + MCP server (art-mcp)
     # >=0.2.0 is NOT housekeeping. Up to 0.1.1 drtran related each series
     # differenced by ITS OWN operator, so whenever the output and the input
     # carried different differencing the fitted transfer was nu(B)*Delta(B) and
@@ -182,7 +185,10 @@ dependencies = [
     # >=0.3.3 desde atsw 2.1.2: la tabla de previsión de la escalera
     # multiplicaba por 100 sea cual fuera λ (BUG-0025, homologado con el C,
     # atsw-gui drvarma BUG-0005), y avisa de factores distintos.
-    "drvarma>=0.3.3",         # multivariate VARMA engine
+    # >=0.3.4 desde atsw 2.1.3: la página HTML de previsión decía cien veces el
+    # cambio en niveles, rotulado «(%)» (BUG-0026); y es la versión con la que
+    # están hechas las cachés de los ejemplos de sima 0.2.4.
+    "drvarma>=0.3.4",         # multivariate VARMA engine
     # Nuevo en atsw 2.1.0: el motor del VEC, el porte de drvec. sima-tseries ya
     # lo arrastra, pero va explícito como fue y drvarma: es un motor con su
     # propia rueda binaria (el C de drvec, para los bootstraps), y la lista de
@@ -209,7 +215,10 @@ dependencies = [
     # restricciones en las unidades de cada serie (BUG-0012), el rótulo del
     # hessiano (BUG-0013); y las cachés de los ejemplos, rehechas con estos
     # motores (las de 0.2.2 llevaban la clave de fue 0.1.20 y no se servían).
-    "sima-tseries[raw]>=0.2.3",  # simultaneous VARMA and VEC + MCP server (sima)
+    # >=0.2.4 desde atsw 2.1.3: α y su restricción en unidades de cada serie
+    # con factores distintos (BUG-0014: una α = Aψ cierta se rechazaba con
+    # p = 0.0072), y las cachés de los ejemplos para drvarma 0.3.4.
+    "sima-tseries[raw]>=0.2.4",  # simultaneous VARMA and VEC + MCP server (sima)
 ]
 
 # One console script, and deliberately nothing else. The umbrella INSTALLS; it
