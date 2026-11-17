@@ -129,7 +129,19 @@ si se quiere que la suite arrastre los arreglos hay que:
    drvarma y drvec) y las puras, instala atsw en limpio en cada sistema y Python,
    y corre `atsw-suite/preflight/pruebas.py`,
 4. etiquetar `atsw-v*`,
-5. y repetir el preflight con `origen = pypi`: es la prueba de lo publicado.
+5. repetir el preflight con `origen = pypi` y `suites` marcado: es la prueba de
+   lo publicado, y con `suites` corre además las siete suites completas en
+   macOS (arm64 e Intel) y Windows contra lo que pip instaló (1-2 h). Un job
+   que GitHub cancela sin llegar a correrlo («not acquired by Runner… capacity
+   constraints», falta de Macs) no es un fallo: se relanza con
+   `gh run rerun <id> --failed` hasta que corra,
+6. y la prueba en distribuciones Linux, en esta máquina, con podman:
+   `atsw-suite/preflight/distros.sh X.Y.Z`. Instala atsw de PyPI en diez
+   imágenes —glibc de 2.28 (AlmaLinux 8) a la última (Arch), y musl
+   (Alpine)— con el Python de cada una, y corre el mismo `pruebas.py`. Cubre
+   lo que GitHub no tiene: libc antiguas y los Python que trae cada
+   distribución. Así salieron BUG-0254 de art y BUG-0009 de sima con atsw
+   2.1.0.
 
 Los motores compilados son tres desde atsw 2.1.0. drvec se pide explícito
 aunque sima-tseries ya lo arrastre, como fue y drvarma: es un motor con su
@@ -182,3 +194,5 @@ Lo que falle aquí y no en desarrollo es exactamente lo que verá un usuario.
       construyendo, no leyendo).
 - [ ] `workflow_dispatch` del workflow correspondiente, en verde.
 - [ ] Y sólo entonces, la etiqueta.
+- [ ] Para `atsw`, después de su etiqueta: el preflight con `origen = pypi` y
+      `suites`, y `distros.sh` (§4, pasos 5 y 6).
