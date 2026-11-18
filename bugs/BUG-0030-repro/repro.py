@@ -98,7 +98,7 @@ else:
 # --- y lo que lo hace silencioso --------------------------------------------
 print("\n--- por que no salta: por AJUSTE son indistinguibles ---")
 import fue
-for etiqueta, a0 in (("mal colocada (at_0=%d)" % at_0, at_0),
+for etiqueta, a0 in (("mal colocada (at_0=%d)" % sin, sin),
                      ("bien colocada (at_0=%d)" % OBJETIVO, OBJETIVO)):
     mm = fue.Model(ts, d=1, ifadf=[0, 0, 0],
                    mu=0.0, estimate_mu=False,

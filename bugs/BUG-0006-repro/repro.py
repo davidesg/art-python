@@ -30,12 +30,13 @@ Dos defectos DEL PROPIO REPRO, corregidos aquí (BUG-0118):
 import copy
 import sys
 
+import os
 import numpy as np
 
 import fue
 from art.pipeline import _make_model
 
-ld = fue.load("US_CPI.pre")
+ld = fue.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "US_CPI.pre"))
 ts = ld[0] if isinstance(ld, tuple) else ld.series
 SPEC = dict(lam=0.0, d=1, D=0, p=2, q=0, n_harmonics=5, P=2, Q=0,
             estimate_mu=True)

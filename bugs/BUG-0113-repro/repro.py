@@ -1,157 +1,50 @@
-"""BUG-0113 — el carril guiado descarta la ruta de la figura.
+"""BUG-0113 — el carril guiado descartaba la ruta que devuelve _show_fig.
 
-`_show_fig` DEVUELVE la ruta del `.png` que acaba de escribir: es la mitad del
-arreglo del BUG-0078 —«quien llama puede decirla, y cuando el visor no aparece
-el analista tiene el fichero»—. La nota se compone en `_nota_figura` y la
-inserta `_result()`.
+`_show_fig` escribía la figura y devolvía su ruta; cinco puntos del carril
+guiado la descartaban, así que el analista se quedaba sin figura y sin ruta
+cuando el visor no se abría.
 
-Pero `guided_identification` no pasa por `_result()`: compone su texto a mano y
-llama a `_show_fig` en cinco puntos **tirando el valor devuelto**. Resultado: su
-salida no cita ninguna ruta. Si el visor no abre (o el cliente no renderiza la
-imagen), el analista se queda sin figura y sin fichero al que ir.
+Cómo quedó: tras BUG-0122 y BUG-0147 hay un solo embudo. Toda figura pasa por
+`_imagen`, que la escribe SIEMPRE (con `_show_fig`, cuyo retorno ahí sobra), y
+`_cita_figuras` hace que el texto de la respuesta diga dónde quedó cada una, por
+su contenido. La ruta ya no la tiene que recoger cada herramienta: no se puede
+olvidar, que era el defecto.
 
-    python repro.py
-
-Contrasta una herramienta que SÍ pasa por `_result()` con el carril guiado, y
-cuenta los puntos de llamada que descartan el retorno. No estima nada: usa los
-nodos baratos del guiado (Box-Cox y nivel d=0).
+Antes este repro contaba llamadas a `_show_fig` dentro de guided_identification
+—hoy no hay ninguna— y salía 1 con el bug cerrado. Ahora comprueba la
+propiedad: una figura que sale de una herramienta va CITADA en el texto, con
+una ruta que existe. Exit 1 = bug presente; exit 0 = corregido.
 """
-from __future__ import annotations
-
-import ast
-import inspect
+import base64
+import io
 import os
 import re
 import sys
-import tempfile
 
+os.environ.setdefault("ART_NO_VIEWER", "1")
+os.environ.setdefault("MPLBACKEND", "Agg")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "src"))
 
-def desenvuelve(obj):
-    for a in ("fn", "func", "__wrapped__"):
-        if hasattr(obj, a):
-            return getattr(obj, a)
-    return obj
+import matplotlib.pyplot as plt                         # noqa: E402
+from mcp.types import TextContent                       # noqa: E402
 
+from art import mcp_server as M                         # noqa: E402
 
-def texto_de(salida) -> str:
-    if isinstance(salida, str):
-        return salida
-    trozos = []
-    for c in salida:
-        t = getattr(c, "text", None)
-        if isinstance(t, str):
-            trozos.append(t)
-    return "\n".join(trozos)
+fig = plt.figure()
+plt.plot([1, 3, 2])
+buf = io.BytesIO()
+fig.savefig(buf, format="png")
+b64 = base64.b64encode(buf.getvalue()).decode()
 
-
-# ── Parte 1 — analisis estatico: quien tira el retorno de _show_fig ──────────
-
-def censo_llamadas() -> tuple[int, int]:
-    """(descartadas, usadas) llamadas a _show_fig dentro de guided_identification."""
-    from art import mcp_server as M
-
-    fuente = inspect.getsource(desenvuelve(M.guided_identification))
-    arbol = ast.parse(textwrap_dedent(fuente))
-
-    descartadas = usadas = 0
-    for nodo in ast.walk(arbol):
-        # Expr => el valor de la llamada se descarta
-        if isinstance(nodo, ast.Expr) and isinstance(nodo.value, ast.Call):
-            f = nodo.value.func
-            if getattr(f, "id", None) == "_show_fig" or getattr(f, "attr", None) == "_show_fig":
-                descartadas += 1
-        elif isinstance(nodo, (ast.Assign, ast.Return)):
-            for sub in ast.walk(nodo):
-                if isinstance(sub, ast.Call):
-                    f = sub.func
-                    if getattr(f, "id", None) == "_show_fig" or getattr(f, "attr", None) == "_show_fig":
-                        usadas += 1
-    return descartadas, usadas
-
-
-def textwrap_dedent(s: str) -> str:
-    import textwrap
-    return textwrap.dedent(s)
-
-
-def main() -> int:
-    os.environ["ART_NO_VIEWER"] = "1"          # sin ventanas; no altera lo medido
-    tmp = tempfile.mkdtemp(prefix="bug0113-")
-    os.environ["ART_FIG_DIR"] = tmp
-
-    from art import mcp_server as M
-
-    print("=" * 72)
-    print("1 · Llamadas a _show_fig en guided_identification")
-    print("=" * 72)
-    descartadas, usadas = censo_llamadas()
-    print(f"  con el retorno DESCARTADO : {descartadas}")
-    print(f"  con el retorno USADO      : {usadas}")
-    print("  -> _show_fig devuelve la ruta; nadie la recoge.\n")
-
-    print("=" * 72)
-    print("2 · _nota_figura se llama desde…")
-    print("=" * 72)
-    fuente_mod = inspect.getsource(M)
-    for m in re.finditer(r"^(.*_nota_figura\(.*)$", fuente_mod, re.M):
-        linea = m.group(1).strip()
-        if linea.startswith("def "):
-            continue
-        print(f"  {linea[:90]}")
-    print("  -> sólo desde _result(), por donde el carril guiado no pasa.\n")
-
-    # ── Parte 3 — contraste sobre una serie de verdad ────────────────────────
-    datos = [100.0 * (1.002 ** t) for t in range(120)]
-    inp = os.path.join(tmp, "SER.inp")
-    print(desenvuelve(M.create_inp)(data=datos, output_path=inp, name="SER",
-                                    freq=12, start_year=2010, start_period=1)
-          .splitlines()[0])
-    print()
-
-    print("=" * 72)
-    print("3 · Contraste: quien cita la ruta y quien no")
-    print("=" * 72)
-
-    casos = [
-        ("boxcox_analysis  (pasa por _result)",
-         lambda: desenvuelve(M.boxcox_analysis)(inp)),
-        ("guided_identification  nodo Box-Cox",
-         lambda: desenvuelve(M.guided_identification)(inp)),
-        ("guided_identification  nodo d=0",
-         lambda: desenvuelve(M.guided_identification)(inp, lam=0.0)),
-    ]
-
-    resultados = []
-    for etiqueta, fn in casos:
-        salida = texto_de(fn())
-        cita = "*Figura:" in salida or "Figura: `" in salida
-        tiene_img = "Figura" in salida
-        resultados.append((etiqueta, cita))
-        print(f"  {etiqueta:42s} cita la ruta: {'SI' if cita else 'NO'}")
-    print()
-
-    # ¿se escribieron los .png? Si no, no habria nada que citar y el contraste
-    # no significaria nada.
-    pngs = sorted(f for f in os.listdir(tmp) if f.endswith(".png"))
-    print(f"  .png realmente escritos en ART_FIG_DIR: {len(pngs)}")
-    for f in pngs:
-        print(f"      {f}")
-    print()
-
-    print("=" * 72)
-    print("VEREDICTO")
-    print("=" * 72)
-    ok_result = resultados[0][1]
-    fallan_guiado = not resultados[1][1] and not resultados[2][1]
-    print("  Las figuras se escriben en los dos casos.")
-    print(f"  boxcox_analysis cita la ruta        : {'SI' if ok_result else 'NO'}")
-    print(f"  el carril guiado NO la cita         : {'SI' if fallan_guiado else 'NO'}")
-    print()
-    print("  Con el visor roto o un cliente que no renderice, el analista")
-    print("  se queda sin figura y sin ruta — en el carril donde las figuras")
-    print("  son la mitad del trabajo.")
-    return 0 if (ok_result and fallan_guiado and descartadas >= 1) else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+items = M._cita_figuras([TextContent(type="text", text="informe"),
+                         M._imagen(b64, "repro0113")])
+texto = "\n".join(i.text for i in items if getattr(i, "type", "") == "text")
+rutas = re.findall(r"`([^`]+\.png)`", texto)
+print("texto de la respuesta:", texto.replace("\n", " | "))
+ok = bool(rutas) and all(os.path.exists(r) for r in rutas)
+print("=" * 70)
+if not ok:
+    print("FALLA (bug presente): la figura no va citada en el texto, o su ruta no existe")
+    sys.exit(1)
+print("OK: la figura va citada en el texto, con una ruta que existe.")

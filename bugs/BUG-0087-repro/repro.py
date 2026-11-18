@@ -65,7 +65,8 @@ import pathlib
 literales = []
 for f in ("src/art/interventions.py", "src/art/escalera.py",
           "src/art/configuracion.py", "src/art/mcp_server.py"):
-    t = pathlib.Path(f).read_text()
+    # relativo al repositorio, no a la carpeta desde la que se lanza
+    t = (pathlib.Path(__file__).resolve().parents[2] / f).read_text()
     for pat in ("umbral_vecino: float = 3.0", "umbral_vecino: float = 2.5",
                 "umbral_vecino=3.0", "umbral_vecino=2.5"):
         if pat in t:

@@ -27,28 +27,32 @@ def main() -> int:
     m.fit()
 
     diag = diagnose(m, z_threshold=2.0)
-    # el pico positivo del escalón (obs serie 36) vive en el residuo 36 - (d + D*s)
-    resid_start = m.d + m.D * ts.freq
-    peaks = [(abs(z), o) for o, z in diag.extreme]
-    peaks.sort(reverse=True)
-    z_big, obs_1based = peaks[0]
+    peaks = sorted(((abs(z), o) for o, z in diag.extreme), reverse=True)
+    z_big, obs = peaks[0]
+    # Desde el arreglo, `diagnose` da los extremos en coordenadas de la SERIE
+    # (y su fecha en `extreme_dates`). Antes este repro tomaba `obs` como índice
+    # de residuo, le sumaba a mano el desfase y comparaba con su propia fórmula
+    # —nunca llamaba a art—, así que salía 1 siempre que d + D·s > 0.
+    desfase = m.d + m.D * ts.freq
 
-    at_0 = obs_1based - 1                 # lo que hace el auto-select hoy
-    correct_at = at_0 + resid_start       # lo que debería hacer
+    def fecha(at0):                                     # 0-based en la SERIE
+        return f"{at0 % 12 + 1:02d}/{2000 + at0 // 12}"
 
-    def fecha(at: int) -> str:
-        return f"{at % 12 + 1:02d}/{2000 + at // 12}"
-
-    roto = False
-    print(f"desfase d + D·s = {resid_start}")
-    print(f"residuo más extremo: obs(1-based)={obs_1based}  z={z_big:+.2f}")
-    print(f"fecha auto-select (bug): {fecha(at_0)}    (índice residuo {at_0})")
-    print(f"fecha correcta          : {fecha(correct_at)}    (índice serie {correct_at})")
-    if fecha(at_0) != fecha(correct_at):
-        print("FALLO: la fecha sale sin el desfase de la diferencia  ← el bug")
-        roto = True
-    else:
-        print("OK: fecha correcta")
+    # El invariante de BUG-0067: la fecha de un extremo es la de su
+    # observación en la SERIE, es decir el índice de residuo MÁS d + D·s. (El
+    # mayor |z| no tiene por qué caer en el escalón: con d = D = 1 la doble
+    # diferencia de un escalón deja dos picos, en él y doce meses después.)
+    print(f"desfase d + D·s = {desfase}")
+    malas = []
+    for o, z in diag.extreme:
+        esperada = fecha(o - 1 + desfase)
+        dada = diag.extreme_dates.get(int(o), "")
+        print(f"  residuo {o:3d}  z={z:+.2f}  art dice {dada:8s}  serie {esperada}")
+        if dada != esperada:
+            malas.append(o)
+    roto = bool(malas) or not diag.extreme
+    print("FALLO: la fecha no aplica el desfase de la diferencia  ← el bug" if roto
+          else "OK: todas las fechas aplican el desfase")
     print("BUG PRESENTE" if roto else "ARREGLADO")
     return 1 if roto else 0
 
