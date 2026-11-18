@@ -51,12 +51,14 @@ for l in cab.splitlines():
         print("   |", l.strip())
 
 # --- el convenio, y donde vive ----------------------------------------------
-DRTRAN = "/home/david/Dropbox/SRC/drtran-python/src/drtran/mcp_server.py"
+_SRC = os.environ.get("ATSW_SRC") or os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))     # the folder of the suite's checkouts
+DRTRAN = os.path.join(_SRC, "drtran-python", "src", "drtran", "mcp_server.py")
 print("\nEl convenio SI esta escrito. Vive en:")
 if os.path.exists(DRTRAN):
     t = open(DRTRAN, encoding="utf-8").read()
     i = t.find("EL CONVENIO DE FICHEROS")
-    print("   %s (linea %d)" % (os.path.relpath(DRTRAN, "/home/david/Dropbox/SRC"),
+    print("   %s (linea %d)" % (os.path.relpath(DRTRAN, _SRC),
                                 t[:i].count("\n") + 1))
     for l in t[i:i + 900].splitlines()[:13]:
         print("   |", l)

@@ -199,7 +199,7 @@
     {
       "version": 6,
       "name": "m01 IMA(1)12",
-      "inp_path": "/home/david/Dropbox/Econometria Aplicada GD/02-practicas/P04-art-identificacion/ejemplo_ES/ES_CPI_m01.inp",
+      "inp_path": "/srv/aula/ejemplo_ES/ES_CPI_m01.inp",
       "timestamp": "2026-10-06T14:12:40",
       "spec": {
         "lam": 0.0,
@@ -276,7 +276,7 @@
       "next_version": "",
       "figure_b64": null,
       "figure_path": "figs/ES_CPI_v6__373a248ca5ca.png",
-      "out_path": "/home/david/Dropbox/Econometria Aplicada GD/02-practicas/P04-art-identificacion/ejemplo_ES/ES_CPI_m01.out",
+      "out_path": "/srv/aula/ejemplo_ES/ES_CPI_m01.out",
       "hist_path": "figs/ES_CPI_v6_hist__c5853878fd16.png",
       "kind": "model",
       "node": null,
@@ -337,7 +337,7 @@
     {
       "version": 8,
       "name": "m02 AR(1) + MA(1)12",
-      "inp_path": "/home/david/Dropbox/Econometria Aplicada GD/02-practicas/P04-art-identificacion/ejemplo_ES/ES_CPI_m02.inp",
+      "inp_path": "/srv/aula/ejemplo_ES/ES_CPI_m02.inp",
       "timestamp": "2026-10-06T14:14:44",
       "spec": {
         "lam": 0.0,
@@ -408,7 +408,7 @@
       "next_version": "",
       "figure_b64": null,
       "figure_path": "figs/ES_CPI_v8__623f175ddfc7.png",
-      "out_path": "/home/david/Dropbox/Econometria Aplicada GD/02-practicas/P04-art-identificacion/ejemplo_ES/ES_CPI_m02.out",
+      "out_path": "/srv/aula/ejemplo_ES/ES_CPI_m02.out",
       "hist_path": "figs/ES_CPI_v8_hist__b2cd14e9df30.png",
       "kind": "model",
       "node": null,
@@ -430,7 +430,7 @@
     {
       "version": 9,
       "name": "m03 sobreparam. +MA(1)",
-      "inp_path": "/home/david/Dropbox/Econometria Aplicada GD/02-practicas/P04-art-identificacion/ejemplo_ES/ES_CPI_m03.inp",
+      "inp_path": "/srv/aula/ejemplo_ES/ES_CPI_m03.inp",
       "timestamp": "2026-10-06T14:17:24",
       "spec": {
         "lam": 0.0,
@@ -505,7 +505,7 @@
       "next_version": "",
       "figure_b64": null,
       "figure_path": "figs/ES_CPI_v9__0286c9c4b482.png",
-      "out_path": "/home/david/Dropbox/Econometria Aplicada GD/02-practicas/P04-art-identificacion/ejemplo_ES/ES_CPI_m03.out",
+      "out_path": "/srv/aula/ejemplo_ES/ES_CPI_m03.out",
       "hist_path": "figs/ES_CPI_v9_hist__37d799f8b854.png",
       "kind": "model",
       "node": null,
@@ -527,7 +527,7 @@
     {
       "version": 10,
       "name": "m04 sobreparam. +AR(1)12",
-      "inp_path": "/home/david/Dropbox/Econometria Aplicada GD/02-practicas/P04-art-identificacion/ejemplo_ES/ES_CPI_m04.inp",
+      "inp_path": "/srv/aula/ejemplo_ES/ES_CPI_m04.inp",
       "timestamp": "2026-10-06T14:17:26",
       "spec": {
         "lam": 0.0,
@@ -602,7 +602,7 @@
       "next_version": "",
       "figure_b64": null,
       "figure_path": "figs/ES_CPI_v10__d747d2b1effb.png",
-      "out_path": "/home/david/Dropbox/Econometria Aplicada GD/02-practicas/P04-art-identificacion/ejemplo_ES/ES_CPI_m04.out",
+      "out_path": "/srv/aula/ejemplo_ES/ES_CPI_m04.out",
       "hist_path": "figs/ES_CPI_v10_hist__808123caf576.png",
       "kind": "model",
       "node": null,
@@ -624,7 +624,7 @@
     {
       "version": 11,
       "name": "m02 ADOPTADO (ruta B2)",
-      "inp_path": "/home/david/Dropbox/Econometria Aplicada GD/02-practicas/P04-art-identificacion/ejemplo_ES/ES_CPI_m02.pre",
+      "inp_path": "/srv/aula/ejemplo_ES/ES_CPI_m02.pre",
       "timestamp": "2026-10-06T14:18:27",
       "spec": {
         "lam": 0.0,
@@ -694,7 +694,7 @@
       "next_version": "SPS desde 12/2019; actualizarlo con 2020-2021 (seguimiento); después la ruta B1.",
       "figure_b64": null,
       "figure_path": "figs/ES_CPI_v11__623f175ddfc7.png",
-      "out_path": "/home/david/Dropbox/Econometria Aplicada GD/02-practicas/P04-art-identificacion/ejemplo_ES/ES_CPI_m02.out",
+      "out_path": "/srv/aula/ejemplo_ES/ES_CPI_m02.out",
       "hist_path": null,
       "kind": "model",
       "node": null,
@@ -707,7 +707,7 @@
       "iteracion": 5,
       "parent_origen": "declarado",
       "nodo": "ordenes",
-      "base_pre_path": "/home/david/Dropbox/Econometria Aplicada GD/02-practicas/P04-art-identificacion/ejemplo_ES/ES_CPI_m02.pre",
+      "base_pre_path": "/srv/aula/ejemplo_ES/ES_CPI_m02.pre",
       "base_pre_sha": "dd34304273366cae4ebf7c550f01b2cb7bc2a0c729fbce0df4787720b2895c37",
       "pre_sha": "dd34304273366cae4ebf7c550f01b2cb7bc2a0c729fbce0df4787720b2895c37",
       "re_registro_de": null,

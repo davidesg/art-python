@@ -1,7 +1,7 @@
 # Casos de estudio — IPC mensual 8 países (2002-2019)
 
 Series utilizadas en la tesis de Guerrero (2023) para modelización univariante de la
-inflación mensual. Fuente: `/home/david/Dropbox/Inflation Volatility/Analisis/`.
+inflación mensual. Fuente: datos del autor, fuera del repositorio.
 
 ---
 
@@ -214,6 +214,7 @@ J.5 elimina el step en la muestra pero el forecast J.2 lo conserva.
 Todos los `.pre` son cargables con `fue.load(path)` que devuelve `(TimeSeries, Model)`.
 
 ```python
+import os
 import fue
 import art
 
@@ -268,7 +269,7 @@ MODELS = {
                 dict(d=1, D=0, lam=0.0, n_harmonics=5, ar_lags=[1])),
 }
 
-BASE = pathlib.Path("/home/david/Dropbox/Inflation Volatility/Analisis")
+BASE = pathlib.Path(os.environ["ART_CASE_STUDIES"])   # los datos del autor, fuera del repositorio
 
 @pytest.mark.parametrize("country,path,expected", [
     (c, BASE / p, e) for c, (p, e) in MODELS.items()

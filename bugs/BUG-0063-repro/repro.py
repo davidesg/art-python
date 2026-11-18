@@ -21,7 +21,17 @@ warnings.filterwarnings("ignore")
 
 import numpy as np
 
-R = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/run3/"
+import os as _os
+import sys as _sys
+# The replica's tree is private data, outside the repository: its path comes in
+# ART_REPLICA (and ART_REPLICA_DS); without it this repro cannot run (exit 2).
+_REPLICA = _os.environ.get("ART_REPLICA", "").rstrip("/")
+_REPLICA_DS = _os.environ.get("ART_REPLICA_DS", "").rstrip("/")
+if not _REPLICA:
+    print("needs ART_REPLICA (the replica's tree; private data, not in the repository)")
+    _sys.exit(2)
+
+R = _REPLICA + "/run3/"
 CASOS = [("PGAS_m03",  R + "PGAS/PGAS_m03.pre"),
          ("ITCER_m02", R + "ITCER/ITCER_m02.pre")]
 

@@ -167,7 +167,7 @@
     {
       "version": 5,
       "name": "m00",
-      "inp_path": "/home/david/Dropbox/dolarization/revision-suite/Python/art_drvec/DEFL/GAPGDPD_G/GAPGDPD_m00.inp",
+      "inp_path": "/srv/datos/GAPGDPD_G/GAPGDPD_m00.inp",
       "timestamp": "2026-10-09T15:48:06",
       "spec": {
         "lam": 0.0,
@@ -235,7 +235,7 @@
       "next_version": "",
       "figure_b64": null,
       "figure_path": "figs/GAPGDPD_v5__1cb94152b8ac.png",
-      "out_path": "/home/david/Dropbox/dolarization/revision-suite/Python/art_drvec/DEFL/GAPGDPD_G/GAPGDPD_m00.out",
+      "out_path": "/srv/datos/GAPGDPD_G/GAPGDPD_m00.out",
       "hist_path": "figs/GAPGDPD_v5_hist__8e46f2b6288b.png",
       "kind": "model",
       "node": null,
@@ -258,7 +258,7 @@
     {
       "version": 6,
       "name": "m01_s0804",
-      "inp_path": "/home/david/Dropbox/dolarization/revision-suite/Python/art_drvec/DEFL/GAPGDPD_G/GAPGDPD_m01_s0804.inp",
+      "inp_path": "/srv/datos/GAPGDPD_G/GAPGDPD_m01_s0804.inp",
       "timestamp": "2026-10-09T15:51:40",
       "spec": {
         "lam": 0.0,
@@ -325,7 +325,7 @@
       "next_version": "",
       "figure_b64": null,
       "figure_path": "figs/GAPGDPD_v6__1464a1c66082.png",
-      "out_path": "/home/david/Dropbox/dolarization/revision-suite/Python/art_drvec/DEFL/GAPGDPD_G/GAPGDPD_m01_s0804.out",
+      "out_path": "/srv/datos/GAPGDPD_G/GAPGDPD_m01_s0804.out",
       "hist_path": "figs/GAPGDPD_v6_hist__256d5aa12a61.png",
       "kind": "model",
       "node": null,
@@ -339,7 +339,7 @@
       "iteracion": 2,
       "parent_origen": "declarado",
       "nodo": "estacionalidad",
-      "base_pre_path": "/home/david/Dropbox/dolarization/revision-suite/Python/art_drvec/DEFL/GAPGDPD_G/GAPGDPD_m00.pre",
+      "base_pre_path": "/srv/datos/GAPGDPD_G/GAPGDPD_m00.pre",
       "base_pre_sha": "52d0acf051f17461600be08f24facc983e498912a3469e4f460e0cedb7632f63",
       "pre_sha": "90bcbaff48884e136eb1f24bd592678b855df9b546d67329dddb0f04ae72fc98",
       "re_registro_de": null,
@@ -452,7 +452,7 @@
     {
       "version": 9,
       "name": "m02_ar2",
-      "inp_path": "/home/david/Dropbox/dolarization/revision-suite/Python/art_drvec/DEFL/GAPGDPD_G/GAPGDPD_m02_ar2.inp",
+      "inp_path": "/srv/datos/GAPGDPD_G/GAPGDPD_m02_ar2.inp",
       "timestamp": "2026-10-09T15:53:13",
       "spec": {
         "lam": 0.0,
@@ -520,7 +520,7 @@
       "next_version": "",
       "figure_b64": null,
       "figure_path": "figs/GAPGDPD_v9__31e166c894a8.png",
-      "out_path": "/home/david/Dropbox/dolarization/revision-suite/Python/art_drvec/DEFL/GAPGDPD_G/GAPGDPD_m02_ar2.out",
+      "out_path": "/srv/datos/GAPGDPD_G/GAPGDPD_m02_ar2.out",
       "hist_path": "figs/GAPGDPD_v9_hist__92ddf65ad1a0.png",
       "kind": "model",
       "node": null,
@@ -534,7 +534,7 @@
       "iteracion": 3,
       "parent_origen": "declarado",
       "nodo": "ordenes",
-      "base_pre_path": "/home/david/Dropbox/dolarization/revision-suite/Python/art_drvec/DEFL/GAPGDPD_G/GAPGDPD_m01_s0804.pre",
+      "base_pre_path": "/srv/datos/GAPGDPD_G/GAPGDPD_m01_s0804.pre",
       "base_pre_sha": "90bcbaff48884e136eb1f24bd592678b855df9b546d67329dddb0f04ae72fc98",
       "pre_sha": "c423606ed4de5f298dd7143087b6f6dd0e37467b435bc55e80fb337f7326ff7b",
       "re_registro_de": null,
@@ -543,7 +543,7 @@
     {
       "version": 10,
       "name": "m03_x2_ar2",
-      "inp_path": "/home/david/Dropbox/dolarization/revision-suite/Python/art_drvec/DEFL/GAPGDPD_G/GAPGDPD_m03_x2_ar2.inp",
+      "inp_path": "/srv/datos/GAPGDPD_G/GAPGDPD_m03_x2_ar2.inp",
       "timestamp": "2026-10-09T16:49:28",
       "spec": {
         "lam": 0.0,
@@ -611,7 +611,7 @@
       "next_version": "",
       "figure_b64": null,
       "figure_path": "figs/GAPGDPD_v10__4f387e94d4ed.png",
-      "out_path": "/home/david/Dropbox/dolarization/revision-suite/Python/art_drvec/DEFL/GAPGDPD_G/GAPGDPD_m03_x2_ar2.out",
+      "out_path": "/srv/datos/GAPGDPD_G/GAPGDPD_m03_x2_ar2.out",
       "hist_path": "figs/GAPGDPD_v10_hist__846064c315b1.png",
       "kind": "model",
       "node": null,
@@ -625,7 +625,7 @@
       "iteracion": 4,
       "parent_origen": "declarado",
       "nodo": "ordenes",
-      "base_pre_path": "/home/david/Dropbox/dolarization/revision-suite/Python/art_drvec/DEFL/GAPGDPD_G/GAPGDPD_m02_ar2.pre",
+      "base_pre_path": "/srv/datos/GAPGDPD_G/GAPGDPD_m02_ar2.pre",
       "base_pre_sha": "c423606ed4de5f298dd7143087b6f6dd0e37467b435bc55e80fb337f7326ff7b",
       "pre_sha": "90c3c2d447657be4aa1239905fc4c0d25dad1978afd138b44b1b37e685afb631",
       "re_registro_de": null,

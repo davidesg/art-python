@@ -40,6 +40,17 @@ def serie(n=120, Phi=0.65, seed=11):
                           freq=4, start=(2000, 1), name="PD0")
 
 
+import os as _os
+import sys as _sys
+# The replica's tree is private data, outside the repository: its path comes in
+# ART_REPLICA (and ART_REPLICA_DS); without it this repro cannot run (exit 2).
+_REPLICA = _os.environ.get("ART_REPLICA", "").rstrip("/")
+_REPLICA_DS = _os.environ.get("ART_REPLICA_DS", "").rstrip("/")
+if not _REPLICA:
+    print("needs ART_REPLICA (the replica's tree; private data, not in the repository)")
+    _sys.exit(2)
+
+
 def main():
     import art.mcp_server as M
     doc = (getattr(M.confirm_and_estimate, "fn", M.confirm_and_estimate).__doc__) or ""
@@ -51,8 +62,9 @@ def main():
     print(f"   «D=1 only» presente: {falso}"
           f"{'   ← la afirmación falsa' if falso else '   ← corregida'}")
 
+
     print("\n2) ¿Existe P=1 con D=0 en el propio proyecto?")
-    R = "/home/david/Dropbox/TFM_UCM/Tesis_Michael/replica/"
+    R = _REPLICA + "/"
     for f in ("guiado/RATIO/RATIO_m31.pre", "run2/RATIO/RATIO_m03.pre"):
         p = R + f
         if not os.path.exists(p):
