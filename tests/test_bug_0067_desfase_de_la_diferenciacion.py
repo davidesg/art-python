@@ -62,9 +62,15 @@ def test_la_intervencion_queda_en_la_observacion_correcta(tmp_path):
             if i.type not in ("cos", "sin", "alter")]
     assert len(itvs) == 1
     sy, sp = m.series.start
-    off = (sp - 1) + itvs[0].at
-    anio, trim = sy + off // 4, off % 4 + 1
-    assert (anio, trim) == (2008, 4), f"la intervención cayó en Q{trim}/{anio}"
+    # Desde BUG-0201 la forma de episodio (peldaño 2) se ancla en el ARRANQUE
+    # del mecanismo, que puede preceder al suceso; lo que no puede pasar es que
+    # el suceso quede fuera del tramo que la intervención aplica.
+    q4_2008 = (2008 - sy) * 4 + (4 - sp)          # 0-based en la serie
+    ini = itvs[0].at
+    fin = ini + max(len(itvs[0].omega or [0.0]), 1) - 1
+    assert ini <= q4_2008 <= fin, (
+        f"el suceso (Q4/2008, obs {q4_2008}) queda fuera de la intervención "
+        f"(obs {ini}..{fin})")
 
 
 @requiere_replica
