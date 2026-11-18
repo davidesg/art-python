@@ -16,7 +16,7 @@ tags:
 references:
   - src/art/identification.py:290 (consensus verdict)
   - src/art/identification.py:345 (recommended_d)
-  - /home/david/Dropbox/Cycles/bugs_art_fue.md (BUG #2)
+  - the analyst's notes, bugs_art_fue.md (BUG #2); not in the repository
 ---
 
 ## Summary

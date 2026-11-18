@@ -62,7 +62,7 @@ p < 0.0001).
 `python3 bugs/BUG-0223-repro/repro.py` — con la columna BXE copiada en
 `BXE.csv`; sale con 1 mientras el bug siga abierto.
 
-Datos: `/home/david/Dropbox/dolarization/Python/art_drvec/EXT/ext_q.csv`,
+Datos: un fichero del analista (no está en el repositorio),
 columna `BXE` (cociente exportaciones/importaciones de bienes y servicios,
 Ecuador, trimestral 2003T1–2019T4, n = 68). Ecuador: X sin estacionalidad, M con
 estacionalidad determinista fuerte (f=1 y f=2, t de 3.8 a 6.7), así que X/M la

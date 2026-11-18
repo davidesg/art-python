@@ -4,6 +4,17 @@ This monorepo ships **art-tseries** (Box-Jenkins-Treadway toolkit + MCP server, 
 the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 `bugs/` for the full reports. Release tags: `art-v*` (art-tseries), `atsw-v*` (atsw).
 
+## art-tseries — unreleased
+
+**No personal paths in what ships.** The 0.2.6 wheel carries the bug register
+(`art/material/bugs`, which the MCP serves), and eight of its reports named
+folders of the author's machine, some of them private; so did `guion.py`,
+two tests and the LTF harness. The reports now say "the analyst's notes /
+files, not in the repository"; the pass-through test reads its data from
+`ART_PASSTHROUGH_CSV` and skips without it. `tests/test_sin_rutas_personales.py`
+keeps `/home/`, `/Users/` and `C:\Users` out of everything that ships.
+Nothing a user runs changes.
+
 ## atsw 2.1.3 — 2026-11-17
 
 **Lo que quedaba de la regla de escala.**

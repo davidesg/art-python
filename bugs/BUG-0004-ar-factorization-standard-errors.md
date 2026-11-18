@@ -14,9 +14,8 @@ tags:
   - standard-errors
 references:
   - src/art/roots.py (Factorization; damping r, period)
-  - /home/david/Dropbox/Cycles/caracterizar_operadores.py
-  - /home/david/Dropbox/Cycles/ABTreadway-Dperar2.xls
-  - /home/david/Dropbox/Cycles/bugs_art_fue.md (ENH #5)
+  - the analyst's working files, caracterizar_operadores.py and ABTreadway-Dperar2.xls; not in the repository
+  - the analyst's notes, bugs_art_fue.md (ENH #5); not in the repository
 ---
 
 ## Summary

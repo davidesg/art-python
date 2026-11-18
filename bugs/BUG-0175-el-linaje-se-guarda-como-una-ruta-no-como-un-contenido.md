@@ -24,7 +24,7 @@ references:
 
 Cerrado el run 3, el analista dio por cerrados todos los chats. No lo estaban:
 un fork reanudado seguía vivo **16 h 27 min** después, en
-`/home/david/Dropbox/SF_MEG/empirical` —el directorio de trabajo del run— con
+el directorio de trabajo del run, en la máquina del analista, con
 `--reply-on-resume --permission-mode auto`, consumiendo CPU (5 ticks en una
 ventana de 5 s) y sosteniendo dos `art-mcp`.
 

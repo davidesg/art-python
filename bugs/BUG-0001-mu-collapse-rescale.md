@@ -18,7 +18,7 @@ references:
   - src/art/pipeline.py:274-275 (.inp writer, "0 100.00" rescaling)
   - src/art/pipeline.py:439 (mu=0.0, estimate_mu=...)
   - src/art/pipeline.py:534 (mu=0.0, estimate_mu=...)
-  - /home/david/Dropbox/Cycles/bugs_art_fue.md (BUG #1)
+  - the analyst's notes, bugs_art_fue.md (BUG #1); not in the repository
 ---
 
 ## Summary

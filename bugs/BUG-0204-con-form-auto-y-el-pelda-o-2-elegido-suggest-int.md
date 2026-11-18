@@ -60,8 +60,7 @@ warnings.simplefilter("ignore")
 import fue
 import art.mcp_server as A
 
-CSV = ("/home/david/Dropbox/Nivel de Precios y Energia/passthrough_multiart"
-       "/data/levels_2002_2019.csv")
+CSV = os.environ["ART_PASSTHROUGH_CSV"]   # levels_2002_2019.csv, datos del analista
 d = tempfile.mkdtemp()
 f = lambda n: os.path.join(d, n)
 fn = lambda t: getattr(t, "fn", t)

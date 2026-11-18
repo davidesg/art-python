@@ -1227,7 +1227,7 @@ def _resuelve_ruta(ruta: str, base: str) -> str:
     #
     # Aquí había un `os.path.isabs(ruta)` que cortocircuitaba, y estaba mal en
     # el caso que más importa: **el mismo Dropbox abierto en otro sistema**.
-    # `ntpath.isabs("/home/david/…")` es True en Windows, así que un guion
+    # `ntpath.isabs("/ruta/posix/…")` es True en Windows, así que un guion
     # escrito en Linux —y desde BUG-0098 sus caminos son absolutos— llegaba
     # aquí, se declaraba «absoluto», se devolvía tal cual y quedaba muerto: el
     # rescate no llegaba a probarse.
