@@ -38,6 +38,7 @@ def main():
     from art.diagnosis import bfgs_seed_var
 
     roto = False
+    vivos = 0
     for etq, p, esperados in CASOS:
         if not os.path.exists(p):
             print(f"{etq}: datos no disponibles"); continue
@@ -52,6 +53,10 @@ def main():
         print(f"=== {etq}   niter={getattr(r,'niter','?')}  npar={r.npar}")
         print(f"    semilla √(2/n) = {semilla:.4f}")
         print(f"    errores que SON la semilla: {n_semilla}   marcados en el bloque: {marcados}")
+        if n_semilla == 0:
+            print("    ya no es un testigo: ningún error típico en la semilla (fdhess)")
+            continue
+        vivos += 1
         ok = (marcados == n_semilla == esperados)
         print(f"    {'OK' if ok else 'FALLO'}  (esperados {esperados})")
         if n_semilla and "NO VÁLIDO" not in eq:
@@ -59,6 +64,12 @@ def main():
         roto |= not ok
         print()
 
+    if not vivos:
+        # Con fue >= 0.1.17 los errores típicos son del hessiano por diferencias
+        # y no hay semilla: los testigos no miden nada. La lógica la guardan las
+        # pruebas sintéticas de tests/test_bug_0060_errores_tipicos_marcados.py.
+        print("ningún testigo de la réplica tiene ya errores en la semilla: no mide nada")
+        return 2
     # El error tipico honesto de mu, cuando no hay ARMA libre
     p = R + "run3/ITCER/ITCER_m00mu.pre"
     if os.path.exists(p):

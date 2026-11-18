@@ -193,6 +193,14 @@ def test_el_export_sobrevive_a_un_nodo():
     assert len(export_guion_html(_guion_con_nodo())) > 0
 
 
+def test_el_export_sobrevive_a_un_nodo_del_formato_viejo():
+    """Los guiones de septiembre de 2026 guardaban los nodos con "spec": null; el
+    bloque de detalle por versión reventaba al leer su tabla de especificación."""
+    g = _guion_con_nodo()
+    g.entries[0].spec = None
+    assert len(export_guion_html(g)) > 0
+
+
 def test_el_nodo_no_se_omite_sino_que_se_dibuja():
     """Omitirlo sería peor: los nodos son la mitad que explica POR QUÉ."""
     h = export_guion_html(_guion_con_nodo())

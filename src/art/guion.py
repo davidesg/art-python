@@ -1855,8 +1855,10 @@ def export_guion_html(guion: Guion) -> str:
                 f"<div class='eq'>{e.equation}</div>",
             ]
 
-            # Spec table
-            sp = e.spec
+            # Spec table. `or {}`: los guiones de septiembre de 2026 guardaban
+            # los nodos con "spec": null, y este bloque reventaba al exportarlos
+            # (BUG-0107; los nodos de hoy llevan {}).
+            sp = e.spec or {}
             lines += [
                 "<table style='width:auto;margin:8px 0'>",
                 "<tr><th>λ</th><th>d</th><th>D</th><th>p</th><th>q</th>"

@@ -39,9 +39,9 @@ print("   identidad (1-thB)(1+thB+...+th^5B^5) = 1 - Theta B^6 : OK")
 raices = np.roots([-Theta, 0, 0, 0, 0, 0, 1.0])
 mods = np.abs(raices)
 angs = np.sort(np.abs(np.degrees(np.angle(raices))))
-print("   modulos: min=%.6f max=%.6f  dispersion=%.2e" % (mods.min(), mods.max(), mods.ptp()))
+print("   modulos: min=%.6f max=%.6f  dispersion=%.2e" % (mods.min(), mods.max(), np.ptp(mods)))
 print("   angulos: %s" % np.round(angs, 3))
-if mods.ptp() > 1e-9:
+if np.ptp(mods) > 1e-9:
     FALLOS.append("los modulos deberian ser identicos por construccion")
 print("   -> 1 parametro frente a los 6 del AR(6) libre = 5 RESTRICCIONES")
 print("      (un amortiguamiento comun a las 4 frecuencias + las 4 frecuencias fijadas)")
@@ -75,7 +75,12 @@ print("   confirm_and_estimate: p=%s (escalar)  factores expuestos=%s  ar_f expu
 
 if "ar" not in sig_model.parameters or "ar_f" not in sig_model.parameters:
     FALLOS.append("el motor deberia admitir factores y ar_f")
-if any(k in sig_ce.parameters for k in ("ar", "ar_orders", "ar_factors", "ar_f")):
+# El cierre (07-09-2026) lo expuso con otros nombres: `p` acepta una LISTA de
+# órdenes por factor, `ar_f_freqs` los AR(2) de frecuencia fija y `ar_seeds` las
+# semillas de ar_factorization. Antes este repro buscaba nombres que nunca se
+# usaron y salía 1 con el bug cerrado.
+if any(k in sig_ce.parameters for k in ("ar", "ar_orders", "ar_factors", "ar_f",
+                                        "ar_f_freqs", "ar_seeds")):
     print("   (la superficie YA expone factores: bug corregido)")
 else:
     FALLOS.append(
@@ -86,7 +91,7 @@ else:
 otras = [n for n, f in vars(mcp_server).items()
          if callable(f) and not n.startswith("_")
          and any(k in inspect.signature(f).parameters
-                 for k in ("ar_orders", "ar_factors", "ar_f"))
+                 for k in ("ar_orders", "ar_factors", "ar_f", "ar_f_freqs", "ar_seeds"))
          if inspect.isfunction(f)]
 print("   herramientas MCP que exponen factores/ar_f: %s" % (otras or "NINGUNA"))
 if not otras:

@@ -45,7 +45,8 @@ def main():
         print(f"rondas que dio el bucle: {len(res.rounds)}")
         for rd in res.rounds:
             n_ext = len(rd.diag.extreme) if rd.diag else 0
-            add = ", ".join(f"{f.upper()} obs {at+1}" for at, f in (rd.added or []))
+            # `added` lleva (at_0, forma[, más]): hoy una tupla de tres
+            add = ", ".join(f"{a[1].upper()} obs {a[0]+1}" for a in (rd.added or []))
             print(f"  ronda {rd.round_num}: extremos={n_ext}  "
                   f"añade=[{add or '—'}]  motivo_parada={rd.stop_reason or '—'}")
 

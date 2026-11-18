@@ -13,7 +13,10 @@ patron = os.path.join(TMP, "art_*.png")
 antes = set(glob.glob(patron))
 r = subprocess.run([sys.executable, "-m", "pytest", "-q",
                     "tests/test_bug_0078_show_fig.py"],
-                   capture_output=True, text=True)
+                   capture_output=True, text=True,
+                   # relativo al repositorio, no a la carpeta desde la que se lanza
+                   cwd=os.path.dirname(os.path.dirname(os.path.dirname(
+                       os.path.abspath(__file__)))))
 print(r.stdout.strip().split("\n")[-1] if r.stdout else r.stderr[-200:])
 despues = set(glob.glob(patron))
 

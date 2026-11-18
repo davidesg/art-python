@@ -13,6 +13,7 @@ deterministic baseline (5 harmonic pairs + Nyquist + AR(1)_12 + mu), horizon 24,
 the repro is self-contained. NEW is the realised 2020:01-2021:12, i.e. exactly what an
 `update_and_forecast(fuf, new_values=NEW)` call appends.
 """
+import os
 import numpy as np
 import fue
 
@@ -23,7 +24,7 @@ NEW = [103.94, 103.93, 103.85, 103.81, 103.95, 104.04, 104.44, 104.34, 103.80,
 # realised 2022:01 - 2023:12, for reference only (what the updated forecast aims at)
 ACTUAL = {1: 107.30, 12: 113.42, 24: 117.50}
 
-ts_old, m_old = fue.load_fuf("FR_CPI.fuf.inp")
+ts_old, m_old = fue.load_fuf(os.path.join(os.path.dirname(os.path.abspath(__file__)), "FR_CPI.fuf.inp"))
 import inspect
 print("Model.__init__ refactor default =",
       inspect.signature(fue.Model.__init__).parameters["refactor"].default)

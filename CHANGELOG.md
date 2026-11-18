@@ -6,6 +6,24 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+**A guion saved in September 2026 exports again (BUG-0107).** Decision nodes
+were then stored with `"spec": null`, and the per-version section of
+`export_guion_html` read their spec table without checking: the export died
+with `AttributeError`. It now reads it as empty; nodes written today carry
+`{}` and were not affected. A regression test fixes the old format.
+
+**The repros say what they should.** The audit of the 121 repros of `bugs/`
+(each run from outside its folder, with the private data present) found 16
+that did not match their report: stale repros that checked the original
+proposal instead of the fix that was made (0094, 0103, 0105, 0108, 0113,
+0207), broken repro code (0030, 0032, 0103 on numpy 2), witnesses that no
+longer show the defect (0054, 0060: exit 2), an invariant tested the wrong way
+(0067, 0090 under fdhess), files read relative to the current folder (0006,
+0007, 0082, 0087), and two bugs without `repro.py` (0206, 0241). All match
+now: 112 fixed bugs exit 0, the open ones 1.
+
+## art-tseries — unreleased
+
 **No personal paths in what ships.** The 0.2.6 wheel carries the bug register
 (`art/material/bugs`, which the MCP serves), and eight of its reports named
 folders of the author's machine, some of them private; so did `guion.py`,

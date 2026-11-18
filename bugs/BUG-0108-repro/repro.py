@@ -1,53 +1,76 @@
-"""BUG-0108 — el padre que registra estimate_and_diagnose es falso, y la cascada de
-guion_abandon lo convierte en destructivo.
+"""BUG-0108 — estimate_and_diagnose registraba como padre la versión anterior, y
+guion_abandon en cascada se creía ese padre inventado.
 
-confirm_and_estimate tiene `base_pre_path`: sabe de que modelo encadena y puede
-registrar el linaje bien. estimate_and_diagnose NO tiene ningun parametro
-equivalente, asi que registra como padre la ULTIMA entrada del guion, que no
-tiene por que ser el modelo del que sale el .inp.
+Caso real (cases/UEM_HCPI_0226): v12 se construyó a mano desde v10, pero quedó
+registrada como hija de v11; marcar v11 como callejón —correcto— se llevaba en
+cascada v12, v14 y v15, la rama viva.
 
-Eso importa porque hay .inp que SOLO se pueden construir a mano -- los AR
-factorizados y los AR(2) de frecuencia fija, que la superficie MCP no expone
-(BUG-0103). Cada uno de esos modelos entra en el guion con un padre inventado.
+Cómo se cerró (07-09-2026), en dos mitades:
+1. `estimate_and_diagnose` acepta `base_pre_path`, como `confirm_and_estimate`:
+   el linaje se puede DECLARAR.
+2. Cada entrada guarda CÓMO se supo su padre (`parent_origen`: «declarado» o
+   «inferido»), y `guion_abandon` avisa, antes de tocar nada, cuando la cascada
+   se apoya en un parentesco inferido.
 
-Y el linaje falso hace destructivo un abandono correcto: guion_abandon arrastra
-a los descendientes por diseno --una decision contaminada contamina lo que
-viene despues-- de modo que marcar un callejon puede barrer la rama viva.
+El cierre dice también lo que NO hace: no arregla los guiones ya escritos (sus
+entradas no llevan `parent_origen`), así que el caso real de arriba seguirá
+como estaba. Antes este repro miraba ese guion viejo y salía 1 con el bug
+cerrado; ahora comprueba las dos mitades del arreglo.
+Exit 1 = bug presente; exit 0 = corregido.
 """
 import inspect
+import os
 import sys
+import tempfile
+import warnings
 
-sys.path.insert(0, "src")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "src"))
+warnings.filterwarnings("ignore")
 
-from art import mcp_server
+from art import mcp_server as M
+from art.guion import Guion, GuionEntry, GuionStats, save_guion
 
 FALLOS = []
 
-sig_ce = inspect.signature(mcp_server.confirm_and_estimate)
-sig_ed = inspect.signature(mcp_server.estimate_and_diagnose)
+ead = getattr(M.estimate_and_diagnose, "fn", M.estimate_and_diagnose)
+declara = "base_pre_path" in inspect.signature(ead).parameters
+print(f"== 1. estimate_and_diagnose acepta base_pre_path : {declara}")
+if not declara:
+    FALLOS.append("estimate_and_diagnose no deja declarar el linaje")
 
-print("== Parametros de linaje")
-print("   confirm_and_estimate  : base_pre_path=%s" % ("base_pre_path" in sig_ce.parameters))
-print("   estimate_and_diagnose : base_pre_path=%s  parent=%s  guion_parent=%s"
-      % ("base_pre_path" in sig_ed.parameters,
-         "parent" in sig_ed.parameters,
-         "guion_parent" in sig_ed.parameters))
 
-if not any(k in sig_ed.parameters for k in ("base_pre_path", "parent", "guion_parent")):
-    FALLOS.append("estimate_and_diagnose no puede declarar de que modelo desciende")
+def guion(origen_v3):
+    def E(v, n, padre, origen):
+        return GuionEntry(
+            version=v, name=n, inp_path="", timestamp="t", spec={},
+            stats=GuionStats(loglik=-1.0, aic=1.0, bic=2.0, sigma_a=0.1,
+                             q_pass=True, jb_pass=True, n_extreme=0),
+            equation="", decision="", rationale="", problems_found="",
+            next_version="", parent=padre, parent_origen=origen)
+    g = Guion(series="S", analyst="", created="2026-01-01")
+    g.entries += [E(1, "m00", None, "declarado"), E(2, "m01", 1, "declarado"),
+                  E(3, "m02", 2, origen_v3), E(4, "m03", 3, "declarado")]
+    fd, p = tempfile.mkstemp(suffix="_guion.json")
+    os.close(fd)
+    save_guion(g, p)
+    return p
 
-print("\n== Caso real: cases/UEM_HCPI_0226 (guion de 15 entradas)")
-print("   v10 e07_fact   <- v9   (correcto)")
-print("   v11 e08_noarf4 <- v10  (correcto)")
-print("   v12 e09_ffix4  <- v11  (FALSO: se construyo a mano desde v10, e07_fact)")
-print("   v14 e11_meg2   <- v12 ; v15 e12_ffix2 <- v14")
-print("   -> v11 es un callejon (LR=9.78, 2 g.l., p=0.0075) y hay que marcarlo,")
-print("      pero guion_abandon(11) EN CASCADA se lleva v12, v14 y v15,")
-print("      que son la rama viva y no descienden de el.")
-FALLOS.append("un abandono correcto con cascada barre la rama viva por un padre falso")
 
-print("\n== RESULTADO")
-for f in FALLOS:
-    print("   FALLO: %s" % f)
-print("   %d fallo(s)" % len(FALLOS))
-sys.exit(1 if FALLOS else 0)
+ga = getattr(M.guion_abandon, "fn", M.guion_abandon)
+t_inf = ga(guion("inferido"), 2, why="LR rechaza")[0].text
+t_dec = ga(guion("declarado"), 2, why="LR rechaza")[0].text
+avisa = "parentesco INFERIDO" in t_inf and "v3 (m02)" in t_inf and "cascade=False" in t_inf
+calla = "parentesco INFERIDO" not in t_dec
+print(f"== 2. la cascada avisa sobre un padre inferido      : {avisa}")
+print(f"      y calla cuando todo el linaje es declarado      : {calla}")
+if not avisa:
+    FALLOS.append("guion_abandon cascadea sobre un padre inferido sin avisar")
+if not calla:
+    FALLOS.append("guion_abandon avisa también sobre un linaje declarado")
+
+print("\n" + "=" * 70)
+if FALLOS:
+    print("FALLA (bug presente):", "; ".join(FALLOS))
+    sys.exit(1)
+print("OK: el linaje se puede declarar, y la cascada avisa cuando se apoya en uno inferido.")

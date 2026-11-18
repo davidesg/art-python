@@ -14,7 +14,8 @@ import sys
 import tempfile
 import warnings
 
-sys.path.insert(0, "src")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "src"))
 
 import numpy as np
 
@@ -64,7 +65,28 @@ print(f"  peor desviación de las SE: {100 * peor:.1f}%   ← y la curvatura NO"
 if peor < 0.02:
     print("  (este modelo no separa las dos vías; el defecto sigue siendo real)")
 
-# ── B. la guarda ──
+# ── Desde fue 0.1.17 (fue BUG-0015) ──
+# Con el hessiano por diferencias (se_method == "fdhess") la covarianza es la
+# curvatura EN el óptimo, que un `.pre` reproduce igual que el `.inp`: el
+# defecto deja de existir y el aviso, con razón, no sale (pipeline.
+# aviso_se_no_fiable mira se_del_hessiano). Lo que se comprueba entonces es eso:
+# las SE de las dos vías coinciden y no se avisa. El aviso sólo se exige cuando
+# fue cae al BFGS.
+from art.diagnosis import se_del_hessiano
+if se_del_hessiano(m_pre._result) and se_del_hessiano(m_inp._result):
+    print("\n== B. fdhess: el .pre da la curvatura en el óptimo")
+    if peor >= 1e-3:
+        FALLOS.append(f"con fdhess las SE del .pre difieren un {100 * peor:.2f}% de las del .inp")
+    if aviso_se_no_fiable(m_pre) or aviso_se_no_fiable(m_inp):
+        FALLOS.append("avisa con fdhess, donde las SE del .pre son buenas")
+    print("\n" + "=" * 70)
+    if FALLOS:
+        print("FALLA:", ", ".join(FALLOS))
+        sys.exit(1)
+    print("OK: con fdhess las SE del .pre son las del .inp y no hace falta avisar.")
+    sys.exit(0)
+
+# ── B. la guarda (fue cayó al BFGS) ──
 print("\n== B. La guarda avisa donde toca")
 print(f"  desde .inp: RuntimeWarning={len(avisos_inp)}  sello={viene_de_pre(m_inp)}")
 print(f"  desde .pre: RuntimeWarning={len(avisos_pre)}  sello={viene_de_pre(m_pre)}")

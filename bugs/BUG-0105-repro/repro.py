@@ -12,12 +12,14 @@ B) CONTRADICCION. `_conclusiones_desde` mete n_extreme en la lista de FALLOS sin
    observacion de la cola como prueba de inadecuacion contradice el veredicto que
    acaba de emitirse tres lineas mas arriba.
 """
+import os
 import sys
 
 import numpy as np
 from scipy.stats import norm
 
-sys.path.insert(0, "src")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "src"))
 
 FALLOS = []
 
@@ -32,6 +34,19 @@ print("   n=215 : maximo |z| simulado -> mediana=%.2f  p90=%.2f  P(max>3.08)=%.3
 if np.median(m) < 3.0:
     print("   -> la MEDIANA del maximo (%.2f) esta por debajo del umbral 3.0:" % np.median(m))
     print("      el umbral marca a mas de la mitad de los modelos bien especificados")
+# Lo anterior es la aritmética de la normal: el defecto era usar el 3 fijo. El
+# arreglo (cierre del 07-09-2026) es un umbral calibrado por n, el cuantil 90
+# del máximo: art.mcp_server.umbral_extremo. Se comprueba que existe y que
+# coincide con la simulación.
+try:
+    from art.mcp_server import umbral_extremo
+    c = umbral_extremo(215)
+    print("   umbral calibrado de art con n=215: %.2f  (p90 simulado %.2f)"
+          % (c, np.percentile(m, 90)))
+    if abs(c - np.percentile(m, 90)) > 0.05:
+        FALLOS.append("umbral_extremo(215)=%.2f no es el p90 del maximo (%.2f)"
+                      % (c, np.percentile(m, 90)))
+except ImportError:
     FALLOS.append("umbral |z|>3 no calibrado por n: falso positivo del 44%% con n=215")
 
 print("\n== B) Contradiccion en el mismo informe")

@@ -64,6 +64,12 @@ def main():
     print("toco en ningun momento.")
     print("\n¿La alarma de m03 avisa de que no es leible?  "
           f"{'si' if avisado else 'NO'}")
+    if avisado is None:
+        # Ya no es un testigo: m03 no levanta hoy la alarma (fue >= 0.1.17 estima
+        # mejor). La lógica la guardan las pruebas sintéticas de
+        # tests/test_bug_0054_0055_avisos_legibles.py.
+        print("\nel testigo de la réplica ya no levanta la alarma: no mide nada")
+        return 2
     print("\n" + ("ARREGLADO" if avisado else "BUG PRESENTE"))
     return 0 if avisado else 1
 
