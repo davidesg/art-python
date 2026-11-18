@@ -44,7 +44,7 @@ expectativas se declaran sobre el **proceso en niveles**, no sobre «AR o MA».
 ## 1. El problema, medido
 
 **Recuento sobre los guiones** de `SF_MEG/empirical/` y de la réplica del TFM
-(`Tesis_Michael{,_DS}/replica/`), sin duplicados, 28 ago – 12 sep 2026:
+(las dos réplicas de un TFM, fuera del repositorio), sin duplicados, 28 ago – 12 sep 2026:
 
 | | n |
 |---|---|

@@ -10,8 +10,13 @@ import tempfile
 
 from art import mcp_server as A
 
-CSV = ("/home/david/Dropbox/Nivel de Precios y Energia/passthrough_multiart"
-       "/data/levels_2002_2019.csv")
+import os as _os
+import sys as _sys
+# Private data: the path comes in ART_PASSTHROUGH_CSV (exit 2 without it).
+CSV = _os.environ.get("ART_PASSTHROUGH_CSV", "")
+if not CSV:
+    print("needs ART_PASSTHROUGH_CSV (levels_2002_2019.csv; private data)")
+    _sys.exit(2)
 if not os.path.exists(CSV):
     raise SystemExit(f"the level series are missing: {CSV}")
 

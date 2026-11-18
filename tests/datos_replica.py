@@ -4,13 +4,11 @@ Varios tests de regresión fijan un comportamiento sobre un caso REAL —el que 
 destapó— además de sobre datos sintéticos. Ese caso vive fuera del repositorio,
 en el árbol de trabajo de la réplica, y no se distribuye.
 
-La ruta se lee de `ART_TEST_DATA`. Sin esa variable los tests que dependen de
-ella hacen `skip`, que es lo correcto: no se puede comprobar lo que no está.
+Las rutas se leen de `ART_REPLICA` (el árbol de la réplica) y, para unos pocos,
+`ART_REPLICA_DS` (el de su segunda versión). Sin ellas los tests que dependen de
+ellas hacen `skip`, que es lo correcto: no se puede comprobar lo que no está.
 
-    export ART_TEST_DATA=/ruta/al/arbol
-
-Se espera que esa raíz contenga `Tesis_Michael/replica/` y, para unos pocos,
-`Tesis_Michael_DS/replica/`.
+    export ART_REPLICA=/ruta/a/la/replica  ART_REPLICA_DS=/ruta/a/la/replica_ds
 
 Antes esto era una ruta absoluta escrita en dieciséis ficheros. Además de no
 funcionar en ninguna otra máquina, esos ficheros viajan en el sdist de PyPI, o
@@ -21,18 +19,20 @@ import os
 
 import pytest
 
-RAIZ = os.environ.get("ART_TEST_DATA", "").strip()
+def _dir(var):
+    p = os.environ.get(var, "").strip()
+    return os.path.join(p, "") if p else ""
 
-REPLICA = os.path.join(RAIZ, "Tesis_Michael", "replica") + os.sep if RAIZ else ""
-REPLICA_DS = (os.path.join(RAIZ, "Tesis_Michael_DS", "replica") + os.sep
-              if RAIZ else "")
 
-HAY_DATOS = bool(RAIZ) and os.path.isdir(REPLICA)
+REPLICA = _dir("ART_REPLICA")
+REPLICA_DS = _dir("ART_REPLICA_DS")
+
+HAY_DATOS = bool(REPLICA) and os.path.isdir(REPLICA)
 
 #: Decorador para el archivo o el test entero.
 requiere_replica = pytest.mark.skipif(
     not HAY_DATOS,
-    reason="datos de la réplica no disponibles (define ART_TEST_DATA)")
+    reason="datos de la réplica no disponibles (define ART_REPLICA)")
 
 
 def ruta(*partes: str) -> str:
