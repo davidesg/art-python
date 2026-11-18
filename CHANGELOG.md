@@ -12,7 +12,7 @@ folders of the author's machine, some of them private; so did `guion.py`,
 two tests and the LTF harness. The reports now say "the analyst's notes /
 files, not in the repository"; the pass-through test reads its data from
 `ART_PASSTHROUGH_CSV` and skips without it. `tests/test_sin_rutas_personales.py`
-keeps `/home/`, `/Users/` and `C:\Users` out of everything that ships.
+keeps the paths of personal folders out of everything that ships.
 Nothing a user runs changes.
 
 ## atsw 2.1.3 — 2026-11-17
