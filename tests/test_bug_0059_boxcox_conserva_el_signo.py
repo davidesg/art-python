@@ -73,8 +73,11 @@ def test_la_lectura_del_signo_es_la_correcta():
     assert len(lineas) == 2
     l1 = next(l for l in lineas if "λ=1" in l)
     l0 = next(l for l in lineas if "λ=0" in l)
-    assert "se queda corta" in l1     # +0.150
-    assert "se pasa" in l0            # −0.173
+    # corr > 0: la dispersión crece con el nivel y la escala se queda corta;
+    # corr < 0: cae, y la escala transforma de más. Desde BUG-0225 se dice qué
+    # se queda corto o se pasa, no sólo «se queda corta» / «se pasa».
+    assert "CRECE" in l1 and "no la estabiliza" in l1     # +0.150
+    assert "CAE" in l0 and "de más" in l0                 # −0.173
 
 
 def test_un_caso_sintetico_sin_dependencia_no_se_lee_como_nada():

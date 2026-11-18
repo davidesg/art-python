@@ -111,9 +111,43 @@ def test_marginal_joint_seasonality_says_so_instead_of_an_empty_field():
         pytest.skip("el testigo de la réplica no está en esta máquina")
     _ts, m = fue.load(ruta)
     m.fit()
+    from art.diagnosis import diagnose
+    s = diagnose(m).seasonal
+    if not (s and s.seasonal_detected
+            and not any(fr.p_value < 0.05 for fr in (s.freq_results or []))):
+        # Ya no es un testigo: este ajuste pasa hoy la diagnosis (fue >= 0.1.17
+        # estima mejor). La lógica la guarda el caso sintético de abajo.
+        pytest.skip("el testigo de la réplica ya no tiene una estacionalidad "
+                    "conjunta marginal: no mide nada (la guarda el caso sintético)")
     rec = describe_diagnosis(m).recommendation
     assert "freq=" not in rec or "freq= " not in rec
     assert "NINGUNA frecuencia" in rec or "freq=" in rec
+
+
+def test_marginal_joint_seasonality_synthetic(tmp_path, monkeypatch):
+    """El caso del testigo, construido: el contraste CONJUNTO rechaza (p=0.0492)
+    y ninguna frecuencia es significativa por separado. La recomendación lo dice
+    en vez de imprimir «freq=» a secas (BUG-0043)."""
+    import art.describe as D
+    from art.diagnosis import diagnose
+    from art.seasonal_detection import FreqResult, SeasonalDetectionResult
+    rng = np.random.default_rng(5)
+    y = 100.0 + np.cumsum(rng.standard_normal(120))
+    ts = fue.TimeSeries(y.tolist(), freq=4, start=(2000, 1), name="S")
+    m = _fit(ts, tmp_path, "s", boxlam=1.0, d=1, mu=0.0, estimate_mu=False)
+    r = diagnose(m)
+    r.seasonal = SeasonalDetectionResult(
+        name="residuals", freq=4, d=0, lam=1.0, seasonal_detected=True,
+        f_stat=2.7, p_value=0.0492, dummies=np.zeros(4), dummy_se=np.ones(4),
+        harmonic_coeffs=np.zeros(3),
+        freq_results=[FreqResult(1, 2, 4.1, 0.13, False),
+                      FreqResult(2, 1, 3.2, 0.074, False)],
+        n_obs=119, message="")
+    assert not r.clean
+    monkeypatch.setattr(D, "diagnose", lambda model: r)
+    rec = D.describe_diagnosis(m).recommendation
+    assert "NINGUNA frecuencia" in rec and "p=0.0492" in rec
+    assert "freq=" not in rec
 
 
 @requiere_replica

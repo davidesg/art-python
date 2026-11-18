@@ -202,5 +202,12 @@ def test_the_report_bounds_the_order_from_both_sides():
     _ts, m = fue.load(ruta)
     m.fit()
     txt = describe_formal_tests(m).summary
+    if "Sin par confirmatorio" in txt and "raíz AR" in txt:
+        # Desde BUG-0224/0232 el lado de abajo exige una raíz AR REAL; el
+        # testigo tiene hoy un par conjugado, y el informe lo dice en vez de
+        # callar. Eso es lo que la frase de BUG-0044 pedía: no afirmar lo que
+        # no se ha contrastado.
+        assert "par conjugado" in txt
+        return
     assert "sub-diferenciación" in txt
     assert "acotado por ABAJO" in txt or "por ABAJO no cierra" in txt

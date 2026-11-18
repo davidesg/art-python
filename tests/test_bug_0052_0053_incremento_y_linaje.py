@@ -45,11 +45,17 @@ def test_la_sugerencia_es_el_orden_TOTAL(salida_pgas):
     q_base = len(m.ma[0]) if m.ma else 0
     assert q_base == 1, "el caso cambió; ya no mide lo que dice medir"
 
-    mo = re.search(r"\(Sugerencia: p=(\d+), q=(\d+)", salida_pgas)
+    mo = re.search(r"\(Sugerencia: p=(\d+), q=(\d+) — incremento (\d+),(\d+) "
+                   r"sobre la base (\d+),(\d+)\)", salida_pgas)
     assert mo, "no se encontró la línea de sugerencia"
-    q_sug = int(mo.group(2))
-    assert q_sug > q_base, (
-        f"sugiere q={q_sug} sobre una base que ya lleva q={q_base}: "
+    p_sug, q_sug, dp, dq, p_b, q_b = map(int, mo.groups())
+    p_base = len(m.ar[0]) if m.ar else 0
+    assert (p_b, q_b) == (p_base, q_base)
+    # El total es base + incremento, crezca por donde crezca (los residuos de
+    # este caso piden hoy un AR, no un MA), y nunca la misma base.
+    assert (p_sug, q_sug) == (p_b + dp, q_b + dq)
+    assert p_sug + q_sug > p_base + q_base, (
+        f"sugiere p={p_sug}, q={q_sug} sobre una base p={p_base}, q={q_base}: "
         "reestimaría el mismo modelo")
 
 
