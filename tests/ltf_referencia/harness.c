@@ -1,7 +1,7 @@
 /* Arnés de referencia para el puerto de LTF a Python.
  *
  * El bloque numérico está COPIADO VERBATIM de
- * /home/david/Dropbox/SRC/LTF/LTF-1.0.2/ltf.c (generate_plots, pasos 1-4),
+ * LTF-1.0.2/ltf.c, el programa LTF en C (generate_plots, pasos 1-4),
  * quitando sólo el trazado por gnuplot. Copiado y no reescrito a propósito:
  * si el puerto de Python diverge, la divergencia es del puerto y no de una
  * re-derivación mía de lo que el C "quería decir".

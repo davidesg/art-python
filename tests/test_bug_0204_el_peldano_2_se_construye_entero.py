@@ -84,11 +84,12 @@ def test_un_n_omega_EXPLICITO_sigue_mandando(tres_tramos):
     assert len(step.omega) == 1
 
 
-CSV = ("/home/david/Dropbox/Nivel de Precios y Energia/passthrough_multiart"
-       "/data/levels_2002_2019.csv")
+# Datos del analista: su ruta va en ART_PASSTHROUGH_CSV, nunca escrita aquí.
+CSV = os.environ.get("ART_PASSTHROUGH_CSV", "")
 
 
-@pytest.mark.skipif(not os.path.exists(CSV), reason="CSV del pass-through")
+@pytest.mark.skipif(not (CSV and os.path.exists(CSV)),
+                    reason="ART_PASSTHROUGH_CSV (el CSV del pass-through) no dado")
 def test_el_caso_del_informe_WTI_2014():
     d = tempfile.mkdtemp()
     f = lambda n: os.path.join(d, n)  # noqa: E731

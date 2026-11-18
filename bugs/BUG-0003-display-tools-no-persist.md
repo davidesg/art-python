@@ -18,7 +18,7 @@ references:
   - src/art/mcp_server.py:3544 (get_out_report)
   - src/art/mcp_server.py:915 (ar_factorization)
   - src/art/mcp_server.py:1875 (confirm_and_estimate)
-  - /home/david/Dropbox/Cycles/bugs_art_fue.md (ISSUE #4)
+  - the analyst's notes, bugs_art_fue.md (ISSUE #4); not in the repository
 ---
 
 ## Summary

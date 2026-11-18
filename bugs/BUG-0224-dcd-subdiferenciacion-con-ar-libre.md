@@ -43,10 +43,9 @@ NO invertible (θ→+1)» con θ̂ = −0.06.
 
 ## Reproduction
 
-Datos: `/home/david/Dropbox/dolarization/Python/art_drvec/EXT/bop_components_q.csv`,
+Datos: un fichero del analista (no está en el repositorio),
 columna `Rc` (renta + transferencias recibidas, Ecuador, trimestral 2003T1–2019T4,
-n = 68). Modelos copiados en
-`/home/david/Dropbox/dolarization/Python/art_drvec/EXT/Rc/`:
+n = 68). Los modelos, en la carpeta del analista:
 
 - `Rc_m00`: ln Rc, d = 1, armónicos f = 1, 2, μ, sin ARMA.
 - `Rc_m01_ar1`: lo mismo + AR(1) libre (φ̂ = 0.167, t = 1.4, no significativo).

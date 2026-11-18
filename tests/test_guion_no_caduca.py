@@ -179,17 +179,17 @@ def test_los_defectos_estan_documentados():
 def test_un_camino_absoluto_de_OTRO_sistema_se_resuelve(tmp_path, monkeypatch):
     """El caso que importa de verdad: el mismo Dropbox abierto en Windows y en
     Linux. Los guiones guardan caminos ABSOLUTOS (BUG-0098) y el punto de
-    montaje cambia — `/home/david/Dropbox/…` frente a `C:\\Users\\…\\Dropbox\\…`.
+    montaje cambia — `/ruta/posix/Dropbox/…` frente a `C:\\…\\Dropbox\\…`.
 
     Aquí había un cortocircuito `os.path.isabs(ruta)` que lo rompía, porque
-    `ntpath.isabs("/home/david/…")` es **True** en Windows: el camino se
+    `ntpath.isabs("/ruta/posix/…")` es **True** en Windows: el camino se
     declaraba absoluto, se devolvía tal cual y quedaba muerto sin llegar a
     probar el rescate. Lo que decide es si EXISTE, no si lo parece."""
     (tmp_path / "work").mkdir()
     (tmp_path / "work" / "S_m00.inp").write_text("x")
     for ajena in ("/otra/maquina/work/S_m00.inp",
-                  r"C:\Users\david\Dropbox\work\S_m00.inp",
-                  "/home/david/Dropbox/borrado/S_m00.inp"):
+                  r"C:\Datos\Dropbox\work\S_m00.inp",
+                  "/srv/dropbox/borrado/S_m00.inp"):
         gp = tmp_path / "work" / "S_guion.json"
         gp.write_text(json.dumps({
             "series": "S", "analyst": "", "created": "2025-01-01", "entries": [
