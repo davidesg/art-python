@@ -1,11 +1,11 @@
 ---
 id: BUG-0262
 title: guided_identification no tiene `modo` — en el carril autónomo sus figuras viajan como imagen en cada llamada
-status: open
+status: fixed
 severity: medium
 component: mcp
 found_in: 0.2.6
-fixed_in:
+fixed_in: 0.2.7
 reported: 2026-11-22
 reporter: David / Claude — medición del coste de un univariante autónomo para la ruta V de sima (IPC y WTI de EE. UU.)
 tags:
@@ -45,8 +45,12 @@ mayor coste por llamada.
 herramienta no acepte `modo`, o mientras en autónomo devuelva imágenes o no
 las guarde junto al modelo; con 2 si el carril guiado deja de enseñarlas.
 
-## Fix propuesto
+## Fix
 
 `modo` y `con_figuras` en la firma, y el decorador `_figuras_por_carril` que
 ya llevan las otras. Aquí el carril solo decide si las figuras viajan: la
 herramienta no cambia nada más.
+
+## Validation
+
+El repro sale con 0. `tests/test_carril_autonomo_minimo.py`.

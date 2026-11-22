@@ -1,11 +1,11 @@
 ---
 id: BUG-0263
 title: El protocolo del carril autónomo no llega a un cliente que trunca las instrucciones del servidor, y ninguna herramienta lo sirve
-status: open
+status: fixed
 severity: high
 component: mcp
 found_in: 0.2.6
-fixed_in:
+fixed_in: 0.2.7
 reported: 2026-11-22
 reporter: David / Claude — medición del coste de un univariante autónomo para la ruta V de sima (IPC y WTI de EE. UU.)
 tags:
@@ -42,9 +42,13 @@ código fuente del servidor, que puede no ser el instalado.
 allá de lo que el cliente entrega y no haya una herramienta que la sirva y
 que se nombre al principio de las instrucciones.
 
-## Fix propuesto
+## Fix
 
 Mínimo, sin tocar la arquitectura de las instrucciones (su reforma está
 pendiente): una herramienta `protocolo_autonomo()` que devuelve esa sección
 tal cual, y una línea al principio de las instrucciones, junto a la pregunta
 inicial, que manda llamarla si no se ve la sección.
+
+## Validation
+
+El repro sale con 0. `tests/test_carril_autonomo_minimo.py`.
