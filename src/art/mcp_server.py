@@ -64,7 +64,9 @@ Al iniciar cualquier análisis, SIEMPRE pregunta primero al usuario:
 Si elige GUIADO → sigue el protocolo guiado.
 Si elige AUTÓNOMO → sigue «EL CARRIL AUTÓNOMO — TÚ ERES EL ANALISTA», más
 abajo. Recorres los MISMOS nodos que en guiado; lo único que cambia es quién
-ocupa la silla del analista.
+ocupa la silla del analista. SI NO VES ESA SECCIÓN (hay clientes que cortan
+estas instrucciones), llama a protocolo_autonomo() antes de empezar: la
+devuelve entera.
 
 AUTÓNOMO NO ES build_model. build_model es un atajo heurístico de una llamada
 —un auto-ARIMA con las reglas de la escuela—: no sobreparametriza, no mira
@@ -431,7 +433,8 @@ exista el residuo que podría corregirlas. En el estudio bastó escribir esta
 regla para que los nodos en lote cayeran de 8 a 0.
 
 EL CARRIL SE DECLARA EN CADA LLAMADA: modo="autonomo" en confirm_and_estimate,
-estimate_and_diagnose y build_model. Sin él la salida es la del guiado y
+estimate_and_diagnose, build_model y guided_identification (en esta solo hace
+que sus figuras se guarden junto al modelo en vez de viajar: BUG-0262). Sin él la salida es la del guiado y
 termina en ⏸. Si en autónomo te llega un ⏸ es que te lo dejaste: NO preguntes
 al usuario —no hay nadie esperando—; repite la llamada con modo="autonomo".
 
@@ -5462,6 +5465,35 @@ def _auto_scan_section(ts, m, lam: float, d: int, D: int,
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+def protocolo_autonomo() -> str:
+    """
+    EL PROTOCOLO DEL CARRIL AUTÓNOMO, entero — llámala ANTES de empezar un
+    análisis autónomo si no tienes a la vista la sección «EL CARRIL AUTÓNOMO —
+    TÚ ERES EL ANALISTA» de las instrucciones del servidor.
+
+    Las instrucciones son largas y hay clientes que solo entregan su
+    principio (BUG-0263): la pregunta inicial llega, y el protocolo del
+    autónomo —los nodos en orden, `modo="autonomo"`, el guion, las reglas—
+    no. Esta herramienta devuelve esa sección tal cual, sin calcular nada.
+    """
+    return _seccion_autonomo()
+
+
+def _seccion_autonomo() -> str:
+    """La sección del carril autónomo de `_INSTRUCTIONS`, de su título al
+    siguiente. Se corta del texto, no se copia: una sola fuente."""
+    titulo = "EL CARRIL AUTÓNOMO — TÚ ERES EL ANALISTA\n═"
+    i = _INSTRUCTIONS.find(titulo)
+    if i < 0:
+        return ("La sección «EL CARRIL AUTÓNOMO — TÚ ERES EL ANALISTA» no está en "
+                "las instrucciones de este servidor.")
+    m = re.search(r"\n═{10,}\n[^\n]+\n═{10,}\n", _INSTRUCTIONS[i + len(titulo):])
+    fin = i + len(titulo) + m.start() if m else len(_INSTRUCTIONS)
+    return _INSTRUCTIONS[i:fin].strip()
+
+
+@mcp.tool()
+@_figuras_por_carril
 def guided_identification(inp_path: str, lam: float = -1.0,
                            d: int = -1, D: int = -1,
                            pre_path: str = "",
@@ -5469,9 +5501,16 @@ def guided_identification(inp_path: str, lam: float = -1.0,
                            domain: str = "",
                            guion_path: str = "",
                            expectativas: str = "",
-                           razon: str = "") -> list:
+                           razon: str = "",
+                           con_figuras: bool = False,
+                           modo: _Modo = "guiado") -> list:
     """
     Sequential identification — ONE decision node per call.
+
+    `modo="autonomo"`: the figures are SAVED next to the model
+    (`<stem>__<huella>.png`) and not returned as images; the text says where
+    in one line (BUG-0262). Here the lane decides only that: nothing else in
+    this tool changes with it. `con_figuras=True` returns them anyway.
 
     With `guion_path`, EACH CALL WRITES ITS NODE in the guion (BUG-0207): the
     node it shows (λ, d, estacionalidad, ordenes) is left PENDING with the

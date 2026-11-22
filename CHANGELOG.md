@@ -6,6 +6,17 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+**The autonomous lane, lighter and with its protocol in reach (BUG-0262,
+BUG-0263).** `guided_identification` takes `modo="autonomo"`: its figures are
+saved next to the model and not returned as images, as the estimation and
+intervention tools already did; nothing else in the tool changes with the
+lane. A new tool, `protocolo_autonomo()`, returns the autonomous lane's
+section of the server instructions, and the first lines of the instructions
+name it: a client that delivers only the beginning of the instructions left
+the model without the protocol. Found measuring an autonomous univariate for
+sima's route V; the rest of what that run found is in
+`docs/ESTUDIO-carril-autonomo-para-sima.md`.
+
 **A guion saved in September 2026 exports again (BUG-0107).** Decision nodes
 were then stored with `"spec": null`, and the per-version section of
 `export_guion_html` read their spec table without checking: the export died

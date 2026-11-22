@@ -4,7 +4,7 @@ In-repo bug tracker for **ART (art-tseries)**.  One Markdown file per bug (`BUG-
 
 New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  A fix commit references the id, e.g. `fix(pipeline): BUG-0001 …`.
 
-**256 report(s), 4 open.**
+**259 report(s), 4 open.**
 
 | id | status | sev | component | title | fixed in |
 |----|--------|-----|-----------|-------|----------|
@@ -259,7 +259,9 @@ New report: `art-bug new` (or copy `TEMPLATE.md`).  Validate: `art-bug check`.  
 | [BUG-0257](BUG-0257-el-factor-de-reescala-es-100-sea-cual-sea-lambda.md) | fixed | high | pipeline | El factor de reescala es 100 sea cual sea λ y el tamaño de la serie — nadie comprueba que lo que el optimizador recibe esté en la banda en que trabaja | 0.2.5 |
 | [BUG-0258](BUG-0258-con-lambda-1-mu-y-los-armonicos-salen-en-la-escala-x100.md) | fixed | medium | describe | Con λ=1 μ, los coeficientes de los armónicos y la media residual salen en la escala ×100 de fue, al lado de un σ̂ₐ ya devuelto a las unidades de la serie | 0.2.5 |
 | [BUG-0259](BUG-0259-la-semilla-de-mu-usa-otra-box-cox-que-fue.md) | fixed | high | pipeline | La semilla de μ transforma con |y|^λ y fue con (y^λ − 1)/λ — con λ fuera de {0, 1} el ajuste cae en el óptimo degenerado de BUG-0001 | 0.2.5 |
-| [BUG-0260](BUG-0260-compare-versions-suprime-la-comparacion-entre-lambdas-o-factores.md) | fixed | medium | mcp_server | compare_versions suprime la comparación entre modelos que sólo difieren en λ o en el factor de reescala — se comparan en unidades de la serie | 0.2.6 |
+| [BUG-0260](BUG-0260-compare-versions-suprime-la-comparacion-entre-lambdas-o-factores.md) | fixed | medium | mcp_server | compare_versions suppresses the comparison between models that differ only in lambda or in the rescaling factor | 0.2.6 |
+| [BUG-0262](BUG-0262-guided-identification-no-tiene-modo-y-sus-figuras-viajan-en-autonomo.md) | fixed | medium | mcp | guided_identification no tiene `modo` — en el carril autónomo sus figuras viajan como imagen en cada llamada | 0.2.7 |
+| [BUG-0263](BUG-0263-el-protocolo-del-carril-autonomo-no-llega-a-un-cliente-que-trunca-las-instrucciones.md) | fixed | high | mcp | El protocolo del carril autónomo no llega a un cliente que trunca las instrucciones del servidor, y ninguna herramienta lo sirve | 0.2.7 |
 | [BUG-0020](BUG-0020-the-boxcox-lambda-for-IPC_ES-flipped-from-1-to-0.md) | wontfix | low | identification | art now picks lambda=0 for IPC_ES where on 2026-08-07 it picked lambda=1 — the first rung of the identification moved | — |
 | [BUG-0089](BUG-0089-la-regla-de-treadway-es-exacta-antes-del-arma-y-conservadora-despues.md) | wontfix | low | interventions | FALENCIA (no defecto): la regla de Treadway es EXACTA antes de especificar el ARMA y conservadora después — lo que resulta ser una justificación medida del orden del protocolo, «lo más obvio primero» | — |
 | [BUG-0205](BUG-0205-el-intervalo-de-prevision-sale-simetrico-en-nivel.md) | wontfix | low | mcp-tools | El intervalo al 95 % de la tabla de previsión sale simétrico en nivel en modelos en logaritmos — es la aproximación del método delta, no exp(ŷ ± 1,96 s); a 24 meses del airline, [383, 668] frente a [401, 689] | — |

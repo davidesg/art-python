@@ -2,7 +2,7 @@
 
 *Generated from the docstrings by `tools/gen_tools_md.py`. Do not edit by hand — edit the docstring.*
 
-**50 tools.** In an MCP server the docstring is what the model reads, so this page and the instruction the model receives are the same text by construction.
+**51 tools.** In an MCP server the docstring is what the model reads, so this page and the instruction the model receives are the same text by construction.
 
 ---
 
@@ -44,6 +44,7 @@
 | [`overparameterization_analysis`](#overparameterization-analysis) | Check for over-parameterization by inspecting parameter correlation matrix. |
 | [`preliminary_outlier_scan`](#preliminary-outlier-scan) | **Instrumento suelto del nodo de intervención.** La secuencia completa |
 | [`preview_data`](#preview-data) | Preview the contents of an Excel or CSV file before loading. |
+| [`protocolo_autonomo`](#protocolo-autonomo) | EL PROTOCOLO DEL CARRIL AUTÓNOMO, entero — llámala ANTES de empezar un |
 | [`record_version`](#record-version) | Load, fit and record a model version in guion.json. |
 | [`residual_episodes`](#residual-episodes) | **Instrumento suelto del nodo de intervención.** La secuencia completa |
 | [`residual_outlier_scan`](#residual-outlier-scan) | **Instrumento suelto del nodo de intervención.** La secuencia completa |
@@ -895,8 +896,15 @@ resumen  : True → sólo las cifras que deciden un nodo (ver arriba).
 | `guion_path` | string | no | `` |
 | `expectativas` | string | no | `` |
 | `razon` | string | no | `` |
+| `con_figuras` | boolean | no | `False` |
+| `modo` | string | no | `guiado` |
 
 Sequential identification — ONE decision node per call.
+
+`modo="autonomo"`: the figures are SAVED next to the model
+(`<stem>__<huella>.png`) and not returned as images; the text says where
+in one line (BUG-0262). Here the lane decides only that: nothing else in
+this tool changes with it. `con_figuras=True` returns them anyway.
 
 With `guion_path`, EACH CALL WRITES ITS NODE in the guion (BUG-0207): the
 node it shows (λ, d, estacionalidad, ordenes) is left PENDING with the
@@ -1959,6 +1967,19 @@ Parameters
 ----------
 source_path : path to .xlsx, .xls, or .csv file
 sheet       : sheet name (Excel only; default = first sheet)
+
+---
+
+## `protocolo_autonomo`
+
+EL PROTOCOLO DEL CARRIL AUTÓNOMO, entero — llámala ANTES de empezar un
+análisis autónomo si no tienes a la vista la sección «EL CARRIL AUTÓNOMO —
+TÚ ERES EL ANALISTA» de las instrucciones del servidor.
+
+Las instrucciones son largas y hay clientes que solo entregan su
+principio (BUG-0263): la pregunta inicial llega, y el protocolo del
+autónomo —los nodos en orden, `modo="autonomo"`, el guion, las reglas—
+no. Esta herramienta devuelve esa sección tal cual, sin calcular nada.
 
 ---
 
