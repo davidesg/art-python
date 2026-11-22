@@ -61,7 +61,35 @@ queda escrito en la salida de art ni se aplica igual cada vez.
   19.000). Ahora hay `protocolo_autonomo()` y el principio de las
   instrucciones la nombra.
 
-No se ha medido todavía cuánto baja el coste con los dos arreglos.
+### La medición repetida, con los dos arreglos
+
+Las mismas dos series y las mismas instrucciones, más `protocolo_autonomo()`
+y `modo="autonomo"` en todas las herramientas. Una corrida de cada.
+
+| serie | | tiempo | tokens | llamadas a art | estimaciones | tokens por llamada |
+|---|---|---|---|---|---|---|
+| IPC | antes | 3 min 12 s | 131.000 | 21 | 6 | 6.200 |
+| IPC | después | 3 min 54 s | 144.000 | 36 | 10 | 4.000 |
+| WTI | antes | 2 min 16 s | 111.000 | 19 | 4 | 5.800 |
+| WTI | después | 2 min 10 s | 105.000 | 18 | 4 | 5.900 |
+
+- Ninguna llamada devolvió una imagen, y `protocolo_autonomo()` bastó: ningún
+  agente leyó código fuente.
+- **El coste total apenas cambia.** En el WTI, con el mismo recorrido, baja un
+  5 %. En el IPC sube un 10 % porque el agente hizo más: estimó los tres
+  candidatos del empate y volvió a comparar los órdenes tras las
+  intervenciones. No es una comparación limpia: el recorrido varía de una
+  corrida a otra.
+- **Los modelos finales son los mismos** en las dos corridas, coeficiente a
+  coeficiente, en las dos series.
+- El coste está ahora en la carga de los esquemas de las herramientas y en la
+  longitud de las salidas (`confirm_and_estimate`; `guided_intervention`
+  imprime el bloque del modelo dos veces). Eso es la reforma pendiente, no un
+  arreglo mínimo.
+
+En el IPC, con las dos intervenciones puestas, el MA(1) gana al AR(2) por 2,5
+puntos de AIC con la misma Q: el sesgo hacia AR ya no resuelve un empate,
+contradice a los datos, y el agente lo dejó escrito.
 
 ## Apuntado y sin arreglar
 
@@ -100,6 +128,25 @@ parte. Los marcados con (2) aparecieron en las dos corridas.
 10. **`domain` hay que repetirlo en cada llamada.**
 11. **No existe un modo que no dibuje.** En autónomo las figuras se dibujan y
     se guardan aunque nadie las mire: es tiempo, no tokens.
+
+12. **«rechazan: lag 12, lag 24, lag 36» en la diagnosis** se lee como picos
+    estacionales y es la Q acumulada hasta esos retardos; costó una
+    reformulación inútil (un AR estacional). La diagnosis en texto no da los
+    valores de la ACF residual.
+13. **El guion dice «el analista la tomó» (2)** al cerrar el nodo de órdenes
+    con un modelo distinto del propuesto.
+14. **La media se hereda al encadenar.** El modelo base lleva μ aunque no sea
+    significativa, y la cadena sugerida (`base_pre_path`) la arrastra; para
+    quitarla hubo que reconstruir desde el fichero de datos. El nodo de la
+    media va antes del modelo base, que es donde se ve su t.
+15. **Un bloque «PUNTO DE DECISIÓN (analista)… decide el analista»** salió en
+    autónomo en una salida del escaneo latente.
+16. **El protocolo nombra `suggest_intervention_form`** para el guion donde la
+    documentación de las herramientas dice que la puerta es
+    `guided_intervention`.
+17. **El protocolo no dice qué hacer si la diagnosis no se limpia nunca**, ni
+    si el agente puede aportar información de fuera de la muestra de su
+    propio conocimiento.
 
 ## Lo que queda fuera
 
