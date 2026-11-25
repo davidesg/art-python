@@ -6,6 +6,14 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+**The autonomous lane asks art for an intervention's form (BUG-0264).** Node 7
+of the autonomous protocol now says the form comes from
+`suggest_intervention_form`, which specifies in LEVELS (a spike in the
+differences is a step in the level, not an impulse), and that the agent may
+depart from it only with its reason written in the guion, never without
+asking for it. Text only. Found in sima's autonomous trial run, where an agent
+fixed a step by hand.
+
 **The autonomous lane, lighter and with its protocol in reach (BUG-0262,
 BUG-0263).** `guided_identification` takes `modo="autonomo"`: its figures are
 saved next to the model and not returned as images, as the estimation and
