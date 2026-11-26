@@ -6,6 +6,16 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+**The autonomous lane holds for the whole series (BUG-0265).** Only six tools
+take `modo`; the others that draw (intervention_analysis,
+incident_configurations, ar_factorization, ...) returned their figures and
+opened them on the desktop in the middle of an autonomous run, and even the
+six opened the viewer before their images were taken out. The lane is now
+remembered per series folder: a tool with `modo` sets it (also "guiado", its
+default, so the guided lane resets the folder at once); a tool without `modo`
+follows it. In the autonomous lane no window opens and the figures are saved
+next to the model; in the guided lane nothing changes.
+
 **The autonomous lane asks art for an intervention's form (BUG-0264).** Node 7
 of the autonomous protocol now says the form comes from
 `suggest_intervention_form`, which specifies in LEVELS (a spike in the

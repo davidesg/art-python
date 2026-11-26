@@ -1297,6 +1297,94 @@ def _figuras_del_carril(items: list, modo: str, con_figuras: bool,
     return out
 
 
+import contextvars as _contextvars
+
+#: BUG-0265. The lane of each series' FOLDER, as the last tool with `modo`
+#: called on it declared it ("autonomo" or "guiado"). A tool with `modo` sets
+#: it -- also when `modo` is left at its default, "guiado", so the guided lane
+#: resets a folder at its first guided_identification or confirm_and_estimate.
+#: A tool without `modo` follows its folder's lane. In-memory: one server.
+_CARRIL_CARPETA: dict = {}
+
+#: True during a call made in the autonomous lane: `_show_fig` opens no window.
+_VISOR_CALLADO = _contextvars.ContextVar("art_visor_callado", default=False)
+
+#: the arguments that name a series' files
+_ARGS_RUTA = ("inp_path", "pre_path", "output_path", "guion_path", "output_inp",
+              "source_path", "base_pre", "pre_paths", "inp_paths")
+
+
+def _carpetas(params: dict) -> list:
+    """The folders of the series files named in a call's arguments."""
+    out = []
+    for k in _ARGS_RUTA:
+        v = params.get(k)
+        for x in (v if isinstance(v, (list, tuple)) else [v]):
+            if isinstance(x, str) and x.strip() and k != "source_path":
+                d = os.path.dirname(os.path.abspath(os.path.expanduser(x)))
+                if d not in out:
+                    out.append(d)
+    return out
+
+
+def _carril_por_carpeta(fn):
+    """BUG-0265: the autonomous lane holds for the whole series, not only for
+    the six tools that take `modo`. Wraps EVERY registered tool (see
+    `_aplica_carril_por_carpeta`). If the call takes `modo`, its value is the
+    lane of the folders it names; otherwise the lane is theirs, as recorded.
+    In the autonomous lane the call opens no window and its figures are saved
+    next to the model instead of travelling (as `_figuras_del_carril`); in the
+    guided lane nothing changes. `con_figuras=True` returns them as before."""
+    import functools
+    import inspect
+    sig = inspect.signature(fn)
+    tiene_modo = "modo" in sig.parameters
+
+    @functools.wraps(fn)
+    def envoltura(*args, **kwargs):
+        try:
+            a = sig.bind_partial(*args, **kwargs)
+            a.apply_defaults()
+            p = dict(a.arguments)
+        except Exception:                                    # noqa: BLE001
+            return fn(*args, **kwargs)
+        carpetas = _carpetas(p)
+        if tiene_modo:
+            modo = "guiado" if es_guiado(p.get("modo", "guiado")) else "autonomo"
+            for c in carpetas:
+                _CARRIL_CARPETA[c] = modo
+        else:
+            modo = ("autonomo" if any(_CARRIL_CARPETA.get(c) == "autonomo"
+                                      for c in carpetas) else "guiado")
+        if modo == "guiado" or p.get("con_figuras"):
+            return fn(*args, **kwargs)
+        tok = _VISOR_CALLADO.set(True)
+        try:
+            res = fn(*args, **kwargs)
+        finally:
+            _VISOR_CALLADO.reset(tok)
+        try:
+            return _figuras_del_carril(
+                res, "autonomo", False,
+                p.get("output_path") or p.get("pre_path") or p.get("inp_path")
+                or p.get("guion_path") or "")
+        except Exception as e:                               # noqa: BLE001
+            _warn("figuras del carril autónomo", e)
+            return res
+    return envoltura
+
+
+def _aplica_carril_por_carpeta():
+    """Wrap every registered tool with `_carril_por_carpeta` (BUG-0265). Done
+    once, after every tool is registered; FastMCP keeps the argument schema it
+    took from the original signature, which the wrapper preserves."""
+    for t in mcp._tool_manager.list_tools():
+        if not getattr(t.fn, "_carril_por_carpeta", False):
+            w = _carril_por_carpeta(t.fn)
+            w._carril_por_carpeta = True
+            t.fn = w
+
+
 def _figuras_por_carril(fn):
     """Aplica `_figuras_del_carril` a la salida de una herramienta con `modo`.
 
@@ -1855,6 +1943,8 @@ def _show_fig(b64: str | None, label: str = "art") -> str:
     global _ULTIMO_VISOR_ERROR
     _ULTIMO_VISOR_ERROR = ""
     import sys
+    if _VISOR_CALLADO.get():           # an autonomous call: no window (BUG-0265)
+        return path
     if not _visor_procede(_BAJO_SERVIDOR, os.name, os.environ,
                           "pytest" in sys.modules):
         return path
@@ -12613,6 +12703,9 @@ def _cli_flags():
             v = "unknown"
         print(f"art-mcp (art-tseries) {v}")
         sys.exit(0)
+
+
+_aplica_carril_por_carpeta()
 
 
 def main():
