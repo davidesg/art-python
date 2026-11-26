@@ -2529,13 +2529,22 @@ def _alternativas_desde(diag, model=None, ts=None, inp_path: str = "",
     if pistas:
         pista = max(pistas, key=lambda h: abs(float(h.get("z") or 0)))
         f = _fecha(pista.get("obs"))
+        # BUG-0267: no form here (the diagnosis read it from the residuals,
+        # backwards with differences); the ladder decides it. And the call is
+        # complete: without output_path it failed when copied as written.
+        if inp_path:
+            _b, _ = os.path.splitext(inp_path)
+            _sal = f'"{_b}_itv{re.sub(r"[^0-9A-Za-z]+", "", str(f))}.inp"'
+        else:
+            _sal = "<próxima_versión.inp>"
         alts.append(
-            f"**Intervenir {f}** (|z| = {abs(float(pista.get('z') or 0)):.2f}"
-            + (f", forma sugerida: {pista['form']}" if pista.get("form") else "")
-            + f"). Un anómalo sin tratar contamina la estimación de todo lo "
-              f"demás, y por eso va primero.\n"
-              f"   `suggest_intervention_form(inp_path={ruta}, date=\"{f}\")` "
-              f"→ y luego `guided_intervention(...)`")
+            f"**Intervenir {f}** (|z| = {abs(float(pista.get('z') or 0)):.2f}). "
+            f"Un anómalo sin tratar contamina la estimación de todo lo demás, y "
+            f"por eso va primero. La FORMA la decide la escalera, en niveles; no "
+            f"se lee del residuo.\n"
+            f"   `suggest_intervention_form(inp_path={ruta}, output_path={_sal}, "
+            f"date=\"{f}\")`  (o antes la Llamada 2: "
+            f"`guided_intervention(inp_path={ruta}, date=\"{f}\")`)")
 
     # 2 · dónde falla dice qué falta — y DÓNDE lo dicen las barras, no la Q.
     #
@@ -9691,6 +9700,19 @@ def _orden_y_anomalos(m, cal0, ordenes: "dict[str, int]") -> "tuple[list, list]"
 # Tool: guided_intervention — la PUERTA del nodo de intervención
 # ---------------------------------------------------------------------------
 
+#: BUG-0267. The (model, date) pairs whose form art has proposed in this
+#: server: guided_intervention's Call 2 or suggest_intervention_form's ladder
+#: (form="auto"). A Call 3 outside them says so before estimating.
+_FORMA_DE_ART: set = set()
+
+
+def _clave_forma(inp_path: str, date: str) -> tuple:
+    """The model (its path without extension: the .inp and its .pre are one)
+    and the date."""
+    p = os.path.splitext(os.path.abspath(os.path.expanduser(inp_path or "")))[0]
+    return (p, (date or "").strip())
+
+
 @mcp.tool()
 @_figuras_por_carril
 def guided_intervention(inp_path: str,
@@ -9906,8 +9928,20 @@ def guided_intervention(inp_path: str,
             _ti = getattr(test_interventions, "fn", test_interventions)
             ver = _ti(output_path)
             from mcp.types import TextContent
+            # BUG-0267: a form art did not propose for this model and date
+            sin_escalera = _clave_forma(inp_path, date) not in _FORMA_DE_ART
+            aviso = (
+                f"⚠ **Forma sin pasar por la escalera** — `{form}` en {date} no "
+                "viene de la Llamada 2 ni de `suggest_intervention_form` para este "
+                "modelo (BUG-0267). La forma la decide la escalera, en NIVELES: un "
+                "extremo aislado en los residuos de un modelo con diferencias es un "
+                "ESCALÓN en el nivel, no un impulso. Si es la decisión del analista "
+                "por un suceso conocido, sigue; si viene de leer el residuo, pide "
+                f"antes `guided_intervention(inp_path=\"{inp_path}\", "
+                f"date=\"{date}\")`.\n\n") if sin_escalera else ""
             cab = TextContent(type="text", text=(
                 "## Llamada 3 — la forma construida, estimada y verificada\n\n"
+                + aviso +
                 f"Se construye **{form}** de **{max(1, int(n_omega))} "
                 f"escalón(es) en el nivel** "
                 f"(ω de orden {max(1, int(n_omega)) - 1}) en **{date}** "
@@ -9948,6 +9982,7 @@ def guided_intervention(inp_path: str,
                     f"{cerca}. Si el suceso que buscas tiene el arranque por "
                     "debajo del umbral, baja `threshold`.")
 
+            _FORMA_DE_ART.add(_clave_forma(inp_path, date))      # BUG-0267
             L = [f"## Llamada 2 — qué forma admite el dato en {date}", ""]
 
             # ── el episodio ──
@@ -10597,6 +10632,7 @@ def suggest_intervention_form(inp_path: str, output_path: str,
         escalera_txt = ""
         escalera_alt = ""
         if form == "auto":
+            _FORMA_DE_ART.add(_clave_forma(inp_path, date))      # BUG-0267
             # LA ESCALERA DE OCKHAM (F3), no la vieja comprobación de adyacencia.
             # `decide_form` devolvía "step" o "pulse" mirando si un vecino era
             # extremo — dos formas elegidas por una regla, sin estimar ninguna

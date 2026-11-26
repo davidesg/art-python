@@ -2242,33 +2242,23 @@ def describe_diagnosis(model) -> Description:
                         for o, z in result.extreme[:5])
         )
 
-    # Intervention form hints from extreme residuals
+    # The dates to intervene, WITHOUT a form (BUG-0267). The form used to be
+    # read here from the residuals (isolated extreme -> pulse, consecutive ->
+    # step), the old adjacency rule the intervention tools replaced with the
+    # Ockham ladder (F3). Read from the residuals of a differenced model it is
+    # backwards: a step in the level is a pulse in the differences, ONE
+    # isolated extreme. The form is the ladder's, estimated in levels.
     intervention_hints = []
     if result.extreme:
-        # Look for consecutive extreme obs (potential step) vs isolated (pulse)
-        extreme_obs = sorted(o for o, _ in result.extreme)
-        consecutive_pairs = [
-            (extreme_obs[i], extreme_obs[i+1])
-            for i in range(len(extreme_obs)-1)
-            if extreme_obs[i+1] - extreme_obs[i] == 1
-        ]
         for obs, z in result.extreme:
-            # Check if this obs is part of a consecutive pair
-            is_consec = any(obs in pair for pair in consecutive_pairs)
-            if is_consec:
-                hint = "step o par de pulses (observaciones consecutivas)"
-            else:
-                hint = "pulse (observación aislada)"
-            intervention_hints.append((obs, z, hint))
+            intervention_hints.append((obs, z, None))
         lines.append("")
-        lines.append("**Intervenciones sugeridas:**")
-        for obs, z, hint in intervention_hints:
-            lines.append(f"  - {result.etiqueta_extremo(obs, z)}: {hint}")
-        if any("step" in h for _, _, h in intervention_hints):
-            lines.append(
-                "  ℹ Un step indica un cambio de nivel permanente; "
-                "un pulse es un shock transitorio de un solo período."
-            )
+        lines.append("**Fechas para intervenir** — la FORMA no se lee del residuo: la "
+                     "estima la escalera (`suggest_intervention_form`, o la Llamada 2 "
+                     "de `guided_intervention`), en niveles. Con diferencias, un "
+                     "escalón en el nivel deja UN extremo aislado (BUG-0267).")
+        for obs, z, _h in intervention_hints:
+            lines.append(f"  - {result.etiqueta_extremo(obs, z)}")
 
     # Over-parametrization warning (Bloque I)
     # Known false-positive cases where high correlation is structural (not a flaw):
