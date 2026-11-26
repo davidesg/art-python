@@ -421,7 +421,12 @@ LOS NODOS — los mismos que en guiado, en el mismo orden, UNO POR VEZ:
   6. modelo base    confirm_and_estimate(..., modo="autonomo") sin ARMA. Mira
                     el escaneo de anómalos que viene en la salida.
   7. intervenciones si los anómalos distorsionan la identificación, ANTES de
-                    (p,q). Una cada vez.
+                    (p,q). Una cada vez. La FORMA la propone
+                    suggest_intervention_form, que especifica en NIVELES: no
+                    traduzcas tú la forma del residuo (un pico aislado en las
+                    diferencias es un escalón en el nivel, no un impulso).
+                    Puedes apartarte de su propuesta con tu razón escrita en
+                    el guion, nunca sin haberla pedido (BUG-0264).
   8. ordenes        guided_identification(..., pre_path=<último .pre>)
   9. contrastes     formal_tests(...), SÓLO con la diagnosis limpia.
  10. reformulación  si un contraste manda cambiar algo, vuelve al nodo que
