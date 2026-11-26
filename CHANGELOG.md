@@ -6,6 +6,17 @@ the repo root) and **atsw** (the umbrella meta-package, in `atsw-suite/`). See
 
 ## art-tseries — unreleased
 
+**The form of an intervention has one source, the ladder (BUG-0267).** The
+diagnosis named a form from the residuals (isolated extreme → pulse), the old
+adjacency rule the intervention tools had replaced with the Ockham ladder, and
+backwards with differences: a step in the level leaves ONE isolated extreme.
+Option A repeated it as «forma sugerida», and its `suggest_intervention_form`
+call had no `output_path`, so it failed as written. Now the diagnosis gives the
+dates without a form, option A's call is complete, and a Call 3 of
+`guided_intervention` whose form did not come from Call 2 or the ladder says so
+before estimating. Found in a guided session (silver production of New Spain,
+1803: art's ladder gave a step; the agent built the suggested pulse).
+
 **The autonomous lane holds for the whole series (BUG-0265).** Only six tools
 take `modo`; the others that draw (intervention_analysis,
 incident_configurations, ar_factorization, ...) returned their figures and
